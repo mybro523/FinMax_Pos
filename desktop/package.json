@@ -1,0 +1,39 @@
+{
+  "name": "apteka-desktop",
+  "productName": "Apteka",
+  "version": "1.0.2",
+  "description": "Аптека — касса и склад. Программа для Windows",
+  "private": true,
+  "author": "Apteka",
+  "type": "module",
+  "main": "src/main.mjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "electron:dev": "node scripts/dev.mjs",
+    "electron:build": "node scripts/build.mjs",
+    "start": "node scripts/start.mjs",
+    "lint": "eslint .",
+    "test": "node --test && eslint .",
+    "test:app": "playwright test",
+    "test:parity": "node --test test-live/parity.live.mjs",
+    "test:sync": "node --test test-live/sync.live.mjs",
+    "electron:publish": "node scripts/build.mjs --publish",
+    "test:update": "node scripts/check-update.mjs",
+    "test:release": "node scripts/check-release.mjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "decimal.js": "10.4.3",
+    "electron-updater": "^6.8.9",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "electron": "44.5.1",
+    "electron-builder": "^26.15.3",
+    "eslint": "^9.39.5",
+    "globals": "^17.11.0"
+  }
+}

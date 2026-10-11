@@ -1,0 +1,766 @@
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
+import { LuPlus, LuTrash2, LuScanLine, LuPackagePlus, LuPencil } from 'react-icons/lu'
+import Layout from '../components/Layout'
+import { Modal, useToast, useDialog } from '../components/ui'
+import { Pagination, usePagination } from '../components/Pagination'
+import { JournalFilter, JournalCount, useJournalFilter } from '../components/JournalFilter'
+import { useCollection, money, db } from '../db/store'
+import { receiveArrival, findByBarcode, getArrival, updateArrival, deleteArrival } from '../db/ops'
+import { useAuth } from '../db/auth'
+import { fmtDateTime } from '../lib/time'
+import { useT, translate as tr } from '../lib/i18n'
+import { needsExpiry, useCategories, categoryNames } from '../lib/categories'
+import { normalizeScan } from '../lib/scan'
+import { beepOk, beepError } from '../lib/sound'
+import NumberInput from '../components/NumberInput'
+
+export default function Arrivals() {
+  const arrivals = useCollection('arrivals')
+  const products = useCollection('products')
+  const suppliers = useCollection('suppliers')
+  const t = useT()
+  const toast = useToast()
+  const dialog = useDialog()
+  const [open, setOpen] = useState(false)
+  const [view, setView] = useState(null)
+  const [edit, setEdit] = useState(null) // приход, загруженный для правки
+  const [busy, setBusy] = useState(false)
+
+  // Оформить приход может и кассир, а переписать или стереть уже оформленный —
+  // только владелец: иначе недостачу легко спрятать, поправив вчерашний приход
+  const isFounder = useAuth()?.role === 'founder'
+
+  // Для правки нужен не тот приход, что лежит в списке, а подробный: с ним
+  // приходит, сколько от каждой строки уже продано и ниже чего нельзя опускать
+  async function openEdit(a) {
+    setBusy(true)
+    try {
+      setEdit(await getArrival(a.id))
+      setView(null)
+    } catch (e) {
+      toast(e.message, 'err')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function askDelete(a) {
+    const позиций = a.items?.length || 0
+    const ok = await dialog.confirm({
+      title: t('Удалить приход?'),
+      message:
+        `${t('Поставщик')}: ${a.supplier} · ${money(a.total)} · ${позиций} ${t('поз.')}
+` +
+        t('Со склада снимется всё, что от этого прихода ещё не продано, а закупочная цена товаров пересчитается по оставшимся партиям. Проданное останется в чеках как есть.'),
+      danger: true,
+      confirmText: t('Удалить'),
+    })
+    if (!ok) return
+    setView(null)
+    try {
+      await deleteArrival(a.id)
+      toast(t('Приход удалён, склад пересчитан'))
+    } catch (e) {
+      toast(e.message, 'err')
+    }
+  }
+
+  // Поиск и период по журналу поставок: «когда приходил вот этот товар»
+  // раньше выяснялось только перелистыванием
+  const journal = useJournalFilter('arrivals', {
+    textOf: (a) => (a.supplier || '') + ' ' + (a.items || []).map((i) => i.name).join(' '),
+  })
+
+  const pg = usePagination(journal.rows, 10, journal.controls.period + journal.controls.q)
+
+  return (
+    <Layout
+      title={t('Приход товара')}
+      subtitle={`${arrivals.length} ${t('поставок')}`}
+      actions={<button className="btn" data-tour="arr.new" onClick={() => setOpen(true)}><span className="ic"><LuPlus size={16} /></span> {t('Новый приход')}</button>}
+    >
+      <div className="panel" style={{ padding: 0 }}>
+        <div data-tour="arr.filter" style={{ padding: '16px 16px 0' }}>
+          <JournalFilter controls={journal.controls} placeholder={t('Поиск по поставщику или товару…')} />
+          <JournalCount rows={journal.rows.length} loading={journal.loading} />
+        </div>
+        <table>
+          <thead>
+            <tr><th>{t('Дата')}</th><th>{t('Поставщик')}</th><th className="num">{t('Позиций')}</th><th className="num">{t('Сумма')}</th><th></th></tr>
+          </thead>
+          <tbody>
+            {pg.slice.map((a) => (
+              <tr key={a.id}>
+                <td>{fmtDateTime(a.date)}</td>
+                <td>
+                  <b>{a.supplier}</b>
+                  {Number(a.debt) > 0 && <div className="tag-cat" style={{ color: 'var(--danger)' }}>{t('в долг')} {money(a.debt)}</div>}
+                </td>
+                <td className="num">{a.items.length}</td>
+                <td className="num"><b>{money(a.total)}</b></td>
+                <td className="num"><button className="btn ghost sm" data-tour="arr.details" onClick={() => setView(a)}>{t('Подробно')}</button></td>
+              </tr>
+            ))}
+            {journal.rows.length === 0 && !journal.loading && (
+              <tr><td colSpan="5" className="empty">{arrivals.length ? t('За выбранный период ничего не найдено') : t('Приходов пока нет. Нажмите «Новый приход».')}</td></tr>
+            )}
+          </tbody>
+        </table>
+        <Pagination {...pg} />
+      </div>
+
+      {open && (
+        <ArrivalForm
+          products={products}
+          suppliers={suppliers}
+          toast={toast}
+          onClose={() => setOpen(false)}
+          onSave={(data) => {
+            try {
+              // мгновенно: склад пополняется сразу; при ошибке сети — откат и тост
+              receiveArrival(data).catch((e) => toast(e.message, 'err'))
+              toast(t('Приход оприходован, склад пополнен'))
+              setOpen(false)
+            } catch (e) {
+              toast(e.message, 'err')
+            }
+          }}
+        />
+      )}
+
+      {view && (
+        <Modal title={t('Приход · детали')} onClose={() => setView(null)}>
+          <div className="tag-cat" style={{ marginBottom: 12 }}>
+            {view.supplier} · {fmtDateTime(view.date)}
+          </div>
+          <table>
+            <thead><tr><th>{t('Товар')}</th><th className="num">{t('Кол-во')}</th><th className="num">{t('Закуп.')}</th><th className="num">{t('Сумма')}</th></tr></thead>
+            <tbody>
+              {view.items.map((i, n) => (
+                <tr key={n}><td>{i.name}</td><td className="num">{i.qty}</td><td className="num">{money(i.cost)}</td><td className="num">{money(i.cost * i.qty)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="total-row big"><span>{t('Итого')}</span><span>{money(view.total)}</span></div>
+          {Number(view.debt) > 0 && (
+            <>
+              <div className="total-row"><span>{t('Оплачено при получении')}</span><span>{money(Number(view.total) - Number(view.debt))}</span></div>
+              <div className="total-row"><span>{t('В долг поставщику')}</span><span style={{ color: 'var(--danger)' }}>{money(view.debt)}</span></div>
+            </>
+          )}
+
+          {/* Кассиру этих кнопок не видно, и запрос от него сервер тоже отклонит */}
+          {isFounder && (
+            <div className="modal-actions" style={{ justifyContent: 'space-between' }}>
+              <button className="btn ghost" style={{ color: 'var(--danger)' }} onClick={() => askDelete(view)} disabled={busy}>
+                <span className="ic"><LuTrash2 size={16} /></span> {t('Удалить')}
+              </button>
+              <button className="btn" onClick={() => openEdit(view)} disabled={busy}>
+                <span className="ic"><LuPencil size={16} /></span> {t('Изменить')}
+              </button>
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {edit && (
+        <EditArrival
+          arrival={edit}
+          suppliers={suppliers}
+          t={t}
+          onClose={() => setEdit(null)}
+          onSave={async (data) => {
+            try {
+              await updateArrival(edit.id, data)
+              toast(t('Приход изменён, склад пересчитан'))
+              setEdit(null)
+            } catch (e) {
+              toast(e.message, 'err')
+            }
+          }}
+        />
+      )}
+    </Layout>
+  )
+}
+
+// Приёмка идёт коробка за коробкой, поэтому работает как касса: сканер стреляет
+// в одно поле, товар сам встаёт строкой, а незнакомый штрихкод заводится на месте.
+function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
+  const categories = useCategories()
+  const dialog = useDialog()
+  const [supplierId, setSupplierId] = useState('')
+  // Приход в долг: оплачено не всё, остальное становится долгом перед поставщиком
+  const [credit, setCredit] = useState(false)
+  const [paid, setPaid] = useState('')
+  const [lines, setLines] = useState([])
+  const [pick, setPick] = useState('')
+  const [code, setCode] = useState('')
+  const [newProduct, setNewProduct] = useState(null) // незнакомый штрихкод — заводим карточку
+  const [flash, setFlash] = useState(null) // подсветить строку, которая уже в приходе
+  const [focusId, setFocusId] = useState(null) // куда поставить курсор после добавления
+
+  const scanRef = useRef(null)
+  const qtyRefs = useRef({})
+  const focusScanner = useCallback(() => scanRef.current?.focus(), [])
+
+  // После добавления курсор уходит в «Кол-во»: набрал число — и стреляй дальше
+  useEffect(() => {
+    if (!focusId) return
+    const el = qtyRefs.current[focusId]
+    if (el) {
+      el.focus()
+      el.select()
+    }
+    setFocusId(null)
+  }, [focusId, lines.length])
+
+  useEffect(() => {
+    if (!flash) return
+    const id = setTimeout(() => setFlash(null), 1400)
+    return () => clearTimeout(id)
+  }, [flash])
+
+  const matches = (v) => {
+    const q = String(v || '').trim().toLowerCase()
+    if (!q) return []
+    return products.filter((p) => p.name.toLowerCase().includes(q) || p.barcode.includes(q)).slice(0, 6)
+  }
+
+  // Считаем от текущего списка товаров, а не запоминаем в момент набора: иначе
+  // подсказки, набранные до прихода данных, так и остались бы пустыми
+  const suggest = useMemo(() => matches(code), [code, products]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Возвращает true, если товар реально добавлен новой строкой
+  function addProduct(p) {
+    if (lines.some((l) => l.productId === p.id)) {
+      // Не задваиваем: показываем, где эта позиция, и ставим курсор в её количество
+      toast(`«${p.name}» ${tr('уже в этом приходе')}`, 'err')
+      beepError()
+      setFlash(p.id)
+      setFocusId(p.id)
+      return false
+    }
+    setLines((ls) => [...ls, { productId: p.id, name: p.name, qty: 1, cost: p.cost, expiryDate: '', category: p.category }])
+    setFocusId(p.id)
+    beepOk()
+    return true
+  }
+
+  // Разбирает то, что пришло из сканера или было набрано руками
+  function addByCode(raw) {
+    const val = String(raw || '').trim()
+    if (!val) return
+    setCode('')
+
+    const p = findByBarcode(val) // понимает и обычный штрихкод, и DataMatrix/QR маркировки
+    if (p) return void addProduct(p)
+
+    // Набрали название, а не код — берём первую подсказку
+    const list = matches(val)
+    if (list.length && val.replace(/\D/g, '').length < 6) return void addProduct(list[0])
+
+    beepError()
+    setNewProduct({ barcode: normalizeScan(val) })
+  }
+
+  function addLine() {
+    if (!pick) {
+      toast(tr('Сначала выберите товар из списка'), 'err')
+      return
+    }
+    const p = products.find((x) => x.id === pick)
+    if (p) addProduct(p)
+    setPick('')
+  }
+
+  const upd = (id, k, v) => setLines((ls) => ls.map((l) => (l.productId === id ? { ...l, [k]: v } : l)))
+  const rm = (id) => setLines((ls) => ls.filter((l) => l.productId !== id))
+
+  // В поле количества мог «выстрелить» сканер: для количества и цены таких чисел не бывает.
+  // Значение не подменяем, а возвращаем фокус сканеру — иначе штрихкод уехал бы в приход.
+  const looksLikeScan = (v) => String(v).replace(/\D/g, '').length >= 8
+  function updNum(id, key, v) {
+    if (looksLikeScan(v)) {
+      beepError()
+      toast(tr('Это похоже на штрихкод — сканируйте ещё раз'), 'err')
+      focusScanner()
+      return
+    }
+    upd(id, key, v)
+  }
+  function onCellKey(e) {
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault()
+      focusScanner()
+    }
+  }
+
+  // Товара нет в базе: заводим карточку и сразу ставим строкой в этот же приход.
+  // Остаток и закупочную здесь не спрашиваем — их даст сама строка прихода,
+  // иначе количество учлось бы дважды: и в карточке, и приходом.
+  async function saveNewProduct(form) {
+    if (!form.name.trim()) return toast(tr('Введите название'), 'err')
+    if (!form.category.trim()) return toast(tr('Выберите категорию'), 'err')
+    try {
+      const created = await db.push('products', {
+        name: form.name.trim(),
+        barcode: normalizeScan(form.barcode),
+        category: form.category.trim(),
+        cost: 0,
+        price: Number(form.price) || 0,
+        stock: 0,
+        looseUnits: 0,
+        minStock: Number(form.minStock) || 5,
+        unit: form.unit || 'уп',
+        unitsPerPack: Math.max(1, Number(form.unitsPerPack) || 1),
+      })
+      setNewProduct(null)
+      addProduct(created)
+      toast(`«${created.name}» ${tr('заведён и добавлен в приход')}`)
+    } catch (e) {
+      toast(e.message, 'err')
+    }
+  }
+
+  const total = lines.reduce((s, l) => s + (Number(l.cost) || 0) * (Number(l.qty) || 0), 0)
+
+  function submit() {
+    // Валидация: целое кол-во >= 1, цена >= 0
+    for (const l of lines) {
+      const qty = Number(l.qty)
+      if (!Number.isInteger(qty) || qty < 1) {
+        toast(`«${l.name}»: ${tr('количество должно быть целым числом ≥ 1')}`, 'err')
+        return
+      }
+      if (Number(l.cost) < 0 || Number.isNaN(Number(l.cost))) {
+        toast(`«${l.name}»: ${tr('некорректная закупочная цена')}`, 'err')
+        return
+      }
+      // У лекарств срок годности обязателен — иначе контроль сроков будет дырявым
+      if (!l.expiryDate && needsExpiry(l.category, categories)) {
+        toast(`«${l.name}»: ${tr('укажите срок годности')}`, 'err')
+        return
+      }
+    }
+    const sup = suppliers.find((s) => s.id === supplierId)
+    if (credit && !sup) {
+      toast(tr('Для прихода в долг выберите поставщика'), 'err')
+      return
+    }
+    const debt = credit ? Math.max(0, total - Math.max(0, Number(paid) || 0)) : 0
+    onSave({ supplier: sup?.name || '', supplierId: sup?.id || '', debt, items: lines })
+  }
+
+  return (
+    <Modal wide title={tr('Новый приход товара')} onClose={onClose}>
+      <SupplierPick suppliers={suppliers} value={supplierId} onChange={setSupplierId} dialog={dialog} toast={toast} tour="af.supplier" />
+
+      <div className="field" data-tour="af.scan">
+        <label>{tr('Отсканируйте штрихкод или введите название')}</label>
+        <input
+          ref={scanRef}
+          className="scan-input"
+          value={code}
+          autoFocus
+          onChange={(e) => {
+            setCode(e.target.value)
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return
+            e.preventDefault()
+            addByCode(code)
+          }}
+          placeholder={tr('Наведите сканер на товар…')}
+        />
+        <div className="scan-hint">
+          <span className="ic"><LuScanLine size={15} /></span>
+          {tr('USB-сканер работает как клавиатура. Незнакомый штрихкод — заведём карточку прямо здесь')}
+        </div>
+        {suggest.length > 0 && (
+          <table style={{ marginTop: 10 }}>
+            <tbody>
+              {suggest.map((p) => (
+                <tr
+                  key={p.id}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => {
+                    addProduct(p)
+                    setCode('')
+                  }}
+                >
+                  <td>
+                    {p.name}
+                    <div className="tag-cat">{p.barcode}</div>
+                  </td>
+                  <td className="num tag-cat">{tr('остаток')} {p.stock}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="field" data-tour="af.pick">
+        <label>{tr('Или выберите из списка')}</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <select value={pick} onChange={(e) => setPick(e.target.value)}>
+            <option value="">{tr('— выберите товар —')}</option>
+            {products.map((p) => <option key={p.id} value={p.id}>{p.name} ({tr('остаток')} {p.stock})</option>)}
+          </select>
+          <button className="btn icon" onClick={addLine}><LuPlus size={17} /></button>
+        </div>
+      </div>
+
+      {lines.length > 0 && (
+        <div className="arr-lines" data-tour="af.line">
+          {lines.map((l) => (
+            <div className={'arr-line' + (flash === l.productId ? ' arr-flash' : '')} key={l.productId}>
+              <div className="arr-line-top">
+                <span className="arr-line-name">{l.name}</span>
+                <button className="btn ghost sm icon" onClick={() => rm(l.productId)} title={tr('Убрать из прихода')}>
+                  <LuTrash2 size={15} />
+                </button>
+              </div>
+              <div className="arr-fields">
+                <label className="arr-f">
+                  <span>{tr('Кол-во')}</span>
+                  {/* Именно NumberInput, а не обычное поле: в остальной программе
+                      минус и буквы в числа не попадают физически, а здесь стояло
+                      обычное поле с нерабочим признаком integer — браузер такой
+                      признак не понимает и просто ругался в консоли */}
+                  <NumberInput
+                    ref={(el) => { qtyRefs.current[l.productId] = el }}
+                    className="arr-qty"
+                    integer
+                    value={l.qty}
+                    onChange={(e) => updNum(l.productId, 'qty', e.target.value)}
+                    onKeyDown={onCellKey}
+                  />
+                </label>
+                <label className="arr-f">
+                  <span>{tr('Закуп. цена')}</span>
+                  <NumberInput
+                    className="arr-cost"
+                    value={l.cost}
+                    onChange={(e) => updNum(l.productId, 'cost', e.target.value)}
+                    onKeyDown={onCellKey}
+                  />
+                </label>
+                <label className="arr-f">
+                  <span>{tr('Срок годности')}</span>
+                  {needsExpiry(l.category, categories) ? (
+                    <input
+                      className="arr-exp" type="date"
+                      value={l.expiryDate || ''}
+                      onChange={(e) => upd(l.productId, 'expiryDate', e.target.value)}
+                    />
+                  ) : (
+                    <span className="arr-none">{tr('не требуется')}</span>
+                  )}
+                </label>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="total-row big" data-tour="af.total"><span>{tr('Итого')}</span><span>{money(total)}</span></div>
+      <CreditBlock credit={credit} setCredit={setCredit} paid={paid} setPaid={setPaid} total={total} tour="af.credit" />
+      <div className="modal-actions">
+        <button className="btn ghost" onClick={onClose}>{tr('Отмена')}</button>
+        <button className="btn" data-tour="af.submit" disabled={!lines.length} onClick={submit}>{tr('Оприходовать')}</button>
+      </div>
+
+      {newProduct && (
+        <NewProductForm
+          barcode={newProduct.barcode}
+          onSave={saveNewProduct}
+          onClose={() => {
+            setNewProduct(null)
+            focusScanner()
+          }}
+        />
+      )}
+    </Modal>
+  )
+}
+
+// ── Незнакомый штрихкод при приёмке ──
+// Заводим карточку прямо здесь, чтобы не бросать приёмку на полпути.
+// Количество и закупочную цену не спрашиваем: они у строки прихода, а остаток
+// добавит сам приход — иначе товар посчитался бы дважды.
+function NewProductForm({ barcode, onSave, onClose }) {
+  const categories = categoryNames(useCategories())
+  const [f, setF] = useState({ name: '', barcode, category: '', price: '', unitsPerPack: '1', unit: 'уп', minStock: '5' })
+  const [saving, setSaving] = useState(false)
+  const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
+
+  async function submit() {
+    if (saving) return
+    setSaving(true)
+    try {
+      await onSave(f)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={<><span className="ic"><LuPackagePlus size={18} /></span>{tr('Новый товар по штрихкоду')}</>} onClose={onClose}>
+      <div className="note info" style={{ marginBottom: 14 }}>
+        {tr('Штрихкод')}: <b>{barcode}</b> — {tr('такого товара в базе нет. Заполните карточку — товар заведётся и сразу встанет в этот приход. Количество и закупочную цену введёте в строке прихода.')}
+      </div>
+      <div className="field">
+        <label>{tr('Название')}</label>
+        <input value={f.name} onChange={(e) => set('name', e.target.value)} placeholder="Напр. Индометацин 25мг №30" autoFocus />
+      </div>
+      <div className="row">
+        <div className="field" style={{ flex: 1 }}>
+          <label>{tr('Штрихкод')}</label>
+          <input value={f.barcode} onChange={(e) => set('barcode', e.target.value)} />
+        </div>
+        <div className="field" style={{ flex: 1 }}>
+          <label>{tr('Категория')}</label>
+          <select value={f.category} onChange={(e) => set('category', e.target.value)}>
+            <option value="">{tr('— выберите категорию —')}</option>
+            {categories.map((c) => <option key={c} value={c}>{tr(c)}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="row">
+        <div className="field" style={{ flex: 1 }}>
+          <label>{tr('Цена продажи')}</label>
+          <NumberInput value={f.price} onChange={(e) => set('price', e.target.value)} />
+        </div>
+        <div className="field" style={{ flex: 1 }}>
+          <label>{tr('Штук в упаковке')}</label>
+          <NumberInput integer value={f.unitsPerPack} onChange={(e) => set('unitsPerPack', e.target.value)} title="Для деления на таблетки. 1 = только целиком" />
+        </div>
+      </div>
+      <div className="row">
+        <div className="field" style={{ flex: 1 }}>
+          <label>{tr('Мин. остаток')}</label>
+          <NumberInput integer value={f.minStock} onChange={(e) => set('minStock', e.target.value)} title="Ниже этого остатка товар попадёт в Авто-заявку" />
+        </div>
+        <div className="field" style={{ width: 110 }}>
+          <label>{tr('Ед.')}</label>
+          <input value={f.unit} onChange={(e) => set('unit', e.target.value)} />
+        </div>
+      </div>
+      <div className="modal-actions">
+        <button className="btn ghost" onClick={onClose} disabled={saving}>{tr('Отмена')}</button>
+        <button className="btn" onClick={submit} disabled={saving}>{saving ? tr('Сохранение…') : tr('Завести и добавить в приход')}</button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── Правка прихода ──
+//
+// Тут важно не то, что можно поменять, а то, чего поменять уже нельзя. Приход
+// не запись в журнале: он положил товар на полку, и часть этого товара мог
+// забрать покупатель. Ниже проданного количество не опустить — упаковок нет
+// физически. Поэтому у каждой строки написано, сколько от неё уже ушло.
+//
+// Цену и срок годности править можно всегда: они на остаток не влияют.
+// ── Поставщик прихода ──
+// Из справочника, а не свободным текстом: только так приход в долг ляжет на нужного
+// поставщика. Нового заводят тут же — приёмку не бросают ради справочника
+function SupplierPick({ suppliers, value, onChange, dialog, toast, tour }) {
+  async function add() {
+    const r = await dialog.prompt({
+      title: tr('Новый поставщик'),
+      fields: [
+        { name: 'name', label: tr('Название'), placeholder: tr('Напр. Фарм-опт') },
+        { name: 'phone', label: tr('Телефон') },
+      ],
+      confirmText: tr('Добавить'),
+    })
+    const name = (r?.name || '').trim()
+    if (!r || !name) return
+    const same = suppliers.find((s) => s.name.toLowerCase() === name.toLowerCase())
+    if (same) return onChange(same.id)
+    try {
+      const created = await db.push('suppliers', { name, phone: (r.phone || '').trim() })
+      onChange(created.id)
+      toast(tr('Поставщик добавлен'))
+    } catch (e) {
+      toast(tr(e.message), 'err')
+    }
+  }
+  return (
+    <div className="field" data-tour={tour}>
+      <label>{tr('Поставщик')}</label>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <select value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="">{tr('— без поставщика —')}</option>
+          {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <button className="btn ghost icon" onClick={add} title={tr('Новый поставщик')} aria-label={tr('Новый поставщик')}><LuPlus size={17} /></button>
+      </div>
+    </div>
+  )
+}
+
+// Оплачено ли сразу. Не всё — остаток становится долгом перед поставщиком
+function CreditBlock({ credit, setCredit, paid, setPaid, total, tour }) {
+  const debt = Math.max(0, total - Math.max(0, Number(paid) || 0))
+  return (
+    <div data-tour={tour} style={{ margin: '10px 0 4px' }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+        <input type="checkbox" checked={credit} onChange={(e) => setCredit(e.target.checked)} style={{ width: 17, height: 17 }} />
+        {tr('В долг (оплачено не полностью)')}
+      </label>
+      {credit && (
+        <div className="row" style={{ alignItems: 'flex-end', marginTop: 8 }}>
+          <div className="field" style={{ maxWidth: 220, marginBottom: 0 }}>
+            <label>{tr('Оплачено сейчас (сомони)')}</label>
+            <NumberInput value={paid} placeholder="0" onChange={(e) => setPaid(e.target.value)} />
+          </div>
+          <div className="total-row" style={{ flex: 1, margin: '0 0 6px' }}>
+            <span>{tr('В долг поставщику')}</span>
+            <span style={{ color: 'var(--danger)' }}>{money(debt)}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EditArrival({ arrival, suppliers, t, onClose, onSave }) {
+  const dialog = useDialog()
+  const toast = useToast()
+  const [supplierId, setSupplierId] = useState(arrival.supplierId || '')
+  const [credit, setCredit] = useState(Number(arrival.debt) > 0)
+  const [paid, setPaid] = useState(String(Math.max(0, Number(arrival.total) - Number(arrival.debt || 0))))
+  const [lines, setLines] = useState(() =>
+    arrival.items.map((i) => ({
+      id: i.id,
+      name: i.name,
+      qty: String(i.qty),
+      cost: String(i.cost),
+      expiryDate: i.expiryDate || '',
+      soldUnits: i.soldUnits || 0,
+      minQty: i.minQty || 0,
+      unitsPerPack: i.unitsPerPack || 1,
+      exists: i.exists !== false,
+    })),
+  )
+  const [saving, setSaving] = useState(false)
+
+  const set = (n, k, v) => setLines(lines.map((l, i) => (i === n ? { ...l, [k]: v } : l)))
+  const total = lines.reduce((s, l) => s + (Number(l.cost) || 0) * (Number(l.qty) || 0), 0)
+
+  // Проданное вернуть нельзя — эту строку сервер отвергнет, поэтому
+  // не даём даже нажать и объясняем почему
+  const плохо = lines.find((l) => (Number(l.qty) || 0) < l.minQty)
+  const пусто = !lines.some((l) => (Number(l.qty) || 0) > 0)
+
+  async function save() {
+    setSaving(true)
+    try {
+      const sup = suppliers.find((s) => s.id === supplierId)
+      if (credit && !sup) {
+        toast(t('Для прихода в долг выберите поставщика'), 'err')
+        return
+      }
+      await onSave({
+        supplier: sup?.name || '',
+        supplierId: sup?.id || '',
+        debt: credit ? Math.max(0, total - Math.max(0, Number(paid) || 0)) : 0,
+        items: lines.map((l) => ({
+          id: l.id,
+          qty: Math.max(0, Number(l.qty) || 0),
+          cost: Number(l.cost) || 0,
+          ...(l.expiryDate ? { expiryDate: l.expiryDate } : {}),
+        })),
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={t('Изменить приход')} onClose={onClose} wide>
+      <div className="note info" style={{ marginBottom: 14 }}>
+        {t('Склад и закупочная цена пересчитаются сразу. Прибыль по уже пробитым чекам не изменится: каждый чек хранит себестоимость на момент продажи, иначе вчерашние отчёты менялись бы задним числом.')}
+      </div>
+
+      <SupplierPick suppliers={suppliers} value={supplierId} onChange={setSupplierId} dialog={dialog} toast={toast} />
+
+      <table>
+        <thead>
+          <tr>
+            <th>{t('Товар')}</th>
+            <th className="num">{t('Кол-во')}</th>
+            <th className="num">{t('Закуп.')}</th>
+            <th>{t('Срок годности')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((l, n) => (
+            <tr key={l.id}>
+              <td>
+                <b>{l.name}</b>
+                {l.soldUnits > 0 && (
+                  <div className="tag-cat">
+                    {t('уже продано')}: {l.soldUnits} {t('шт')}
+                    {l.minQty > 0 ? ` · ${t('меньше')} ${l.minQty} ${t('уп')} ${t('нельзя')}` : ''}
+                  </div>
+                )}
+                {!l.exists && <div className="tag-cat" style={{ color: 'var(--danger)' }}>{t('товар удалён из базы')}</div>}
+                {(Number(l.qty) || 0) === 0 && <div className="tag-cat" style={{ color: 'var(--warn)' }}>{t('строка будет убрана')}</div>}
+              </td>
+              <td className="num" style={{ width: 92 }}>
+                <NumberInput
+                  integer
+                  className="disc-input"
+                  value={l.qty}
+                  onChange={(e) => set(n, 'qty', e.target.value)}
+                />
+              </td>
+              <td className="num" style={{ width: 104 }}>
+                <NumberInput
+                  className="disc-input"
+                  value={l.cost}
+                  onChange={(e) => set(n, 'cost', e.target.value)}
+                />
+              </td>
+              <td style={{ width: 168 }}>
+                <input
+                  type="date"
+                  style={{ width: '100%' }}
+                  value={l.expiryDate}
+                  onChange={(e) => set(n, 'expiryDate', e.target.value)}
+                  title={t('Пусто — срок останется прежним')}
+                />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div className="total-row big"><span>{t('Итого')}</span><span>{money(total)}</span></div>
+      <CreditBlock credit={credit} setCredit={setCredit} paid={paid} setPaid={setPaid} total={total} />
+
+      {плохо && (
+        <div className="note err" style={{ marginTop: 10 }}>
+          «{плохо.name}»: {t('уже продано')} {плохо.soldUnits} {t('шт')} — {t('меньше')} {плохо.minQty} {t('уп')} {t('поставить нельзя')}
+        </div>
+      )}
+      {пусто && (
+        <div className="note err" style={{ marginTop: 10 }}>
+          {t('В приходе не осталось ни одной позиции. Чтобы убрать его целиком, удалите приход.')}
+        </div>
+      )}
+
+      <div className="modal-actions">
+        <button className="btn ghost" onClick={onClose} disabled={saving}>{t('Отмена')}</button>
+        <button className="btn" onClick={save} disabled={saving || !!плохо || пусто}>
+          {saving ? t('Сохранение…') : t('Сохранить')}
+        </button>
+      </div>
+    </Modal>
+  )
+}

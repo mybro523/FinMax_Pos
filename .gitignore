@@ -1,0 +1,14 @@
+node_modules
+dist
+.env
+*.local
+.DS_Store
+
+# Временные сценарии показа вживую — не часть проекта
+client/proverka*.mjs
+client/pokaz*.mjs
+
+# Мои проверочные скриншоты и одноразовые скрипты в репозиторий не нужны
+/*.png
+client/*.mjs
+!client/playwright.config.mjs

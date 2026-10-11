@@ -1,0 +1,584 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id           String        @id @default(cuid())
+  name         String
+  barcode      String        @unique
+  category     String        @default("Прочее")
+  cost         Decimal       @default(0) @db.Decimal(12, 2) // закупочная цена (средневзвешенная)
+  price        Decimal       @default(0) @db.Decimal(12, 2) // цена продажи
+  stock        Int           @default(0) // целые (невскрытые) упаковки
+  minStock     Int           @default(5)
+  unit         String        @default("уп")
+  unitsPerPack Int           @default(1) // штук в одной упаковке (для поштучной продажи)
+  looseUnits   Int           @default(0) // штук во вскрытой упаковке (остаток)
+  dosage       String        @default("") // дозировка, напр. «500 мг»
+  expiryDate   DateTime? // ближайший срок годности среди партий (дата окончания)
+  // Сколько штук уже просрочено. Продавать их нельзя, поэтому касса вычитает это
+  // число из остатка и показывает кассиру, сколько товара реально можно продать.
+  // Пересчитывается при каждом движении товара и раз в сутки — партия «портится»
+  // сама по себе, без единой операции на складе.
+  expiredUnits Int           @default(0)
+  analogIds    String[]      @default([]) // id взаимозаменяемых товаров (аналоги)
+  createdAt    DateTime      @default(now())
+  saleItems    SaleItem[]
+  arrivalItems ArrivalItem[]
+  batches      Batch[]
+  returnItems  SaleReturnItem[]
+  writeOffItems WriteOffItem[]
+  inventoryItems InventoryItem[]
+  stockEdits   StockEdit[]
+}
+
+// ── Категория товара ──
+// Раньше список был зашит в код, и добавить свою категорию можно было только
+// через разработчика. Теперь им управляет владелец из Настроек. У товара
+// категория хранится названием — так история и отчёты не ломаются, даже если
+// категорию потом переименуют или удалят.
+model Category {
+  id         String   @id @default(cuid())
+  name       String   @unique
+  // У бинтов, ваты и приборов срока годности нет — при приёмке его не спрашиваем
+  noExpiry   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+
+// ── Партия товара ──
+// Один и тот же товар приходит партиями с разными сроками годности. Партия хранит
+// остаток В ШТУКАХ (так проще и точнее, чем упаковки + вскрытая). Продажа списывает
+// из партии с ближайшим сроком (FEFO), поэтому кассиру ничего выбирать не нужно.
+model Batch {
+  id         String    @id @default(cuid())
+  productId  String
+  product    Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  expiryDate DateTime? // null — срок не указан (бинты, приборы)
+  units      Int       @default(0) // остаток штук в этой партии
+  cost       Decimal   @default(0) @db.Decimal(12, 2) // закупочная цена упаковки в партии
+  arrivalId  String? // приход, которым партия заведена
+  note       String    @default("")
+  createdAt  DateTime  @default(now())
+
+  @@index([productId, expiryDate])
+  @@index([arrivalId])
+}
+
+model Sale {
+  id         String     @id @default(cuid())
+  // Ключ от кассы: если ответ потерялся и запрос повторился, чек не задваивается —
+  // сервер вернёт уже созданную продажу вместо создания второй
+  clientId   String?    @unique
+  date       DateTime   @default(now())
+  total      Decimal    @db.Decimal(12, 2)
+  cost       Decimal    @db.Decimal(12, 2)
+  profit     Decimal    @db.Decimal(12, 2)
+  payment    String // cash | card | debt | transfer
+  // Через какой сервис пришёл перевод (Alif, DC…). Только у оплаты переводом. Хранится
+  // названием, как категория у товара: убрали сервис из списка — прежние чеки остаются
+  payVia     String?
+  customerId String?
+  customer   Customer?  @relation(fields: [customerId], references: [id])
+  shiftId    String? // смена, в которую пробит чек (для Z-отчёта)
+  shift      Shift?     @relation(fields: [shiftId], references: [id])
+  userId     String? // кассир, оформивший продажу
+  user       User?      @relation(fields: [userId], references: [id])
+  items      SaleItem[]
+  returns    SaleReturn[]
+
+  @@index([date])
+  @@index([customerId])
+  @@index([shiftId])
+  @@index([userId])
+}
+
+model SaleItem {
+  id           String   @id @default(cuid())
+  saleId       String
+  sale         Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId    String?
+  product      Product? @relation(fields: [productId], references: [id])
+  name         String
+  qty          Int // упаковок
+  pieces       Int      @default(0) // штук (из вскрытой упаковки)
+  unitsPerPack Int      @default(1) // штук в упаковке на момент продажи (снимок)
+  price        Decimal  @db.Decimal(12, 2) // цена за упаковку (снимок)
+  cost         Decimal  @db.Decimal(12, 2) // себестоимость за упаковку (снимок)
+  discount     Decimal  @default(0) @db.Decimal(12, 2) // скидка на позицию, сомони
+
+  @@index([saleId])
+  @@index([productId])
+}
+
+model Arrival {
+  id       String        @id @default(cuid())
+  date     DateTime      @default(now())
+  supplier String        @default("—") // название поставщика — снимком, для истории
+  total    Decimal       @db.Decimal(12, 2)
+  // Поставщик из справочника и неоплаченная при получении часть. Ноль — оплачен
+  // полностью, как и все приходы, оформленные до появления долгов поставщикам
+  supplierId  String?
+  supplierRef Supplier?  @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  debt     Decimal       @default(0) @db.Decimal(12, 2)
+  userId   String? // кто принял — для истории движения товара
+  user     User?         @relation(fields: [userId], references: [id])
+  items    ArrivalItem[]
+
+  // Журнал приходов теперь запрашивают за период — без индекса это перебор всей таблицы
+  @@index([date])
+  @@index([supplierId])
+}
+
+// ── Поставщики ──
+// Аптеки берут товар у дистрибьюторов в долг. Приход записывался, а кому и сколько
+// аптека должна — нигде. Долг ведётся готовой суммой, как у клиента: начальный +
+// неоплаченная часть приходов − оплаты. Удалить поставщика можно только без долга и
+// без истории оплат: история денег не стирается по кнопке
+model Supplier {
+  id          String            @id @default(cuid())
+  name        String            @unique
+  phone       String            @default("")
+  note        String            @default("")
+  openingDebt Decimal           @default(0) @db.Decimal(12, 2) // долг до появления раздела
+  debt        Decimal           @default(0) @db.Decimal(12, 2)
+  createdAt   DateTime          @default(now())
+  arrivals    Arrival[]
+  payments    SupplierPayment[]
+}
+
+// Оплата поставщику. С отметкой «из кассы» привязана к открытой смене и уменьшает
+// наличные, которые в ней ждут, — как расход из кассы. На чистую прибыль не влияет:
+// товар уже учтён при продаже по закупочной цене
+model SupplierPayment {
+  id         String   @id @default(cuid())
+  clientId   String?  @unique // защита от задвоения при повторе запроса
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  amount     Decimal  @db.Decimal(12, 2)
+  date       DateTime @default(now())
+  note       String   @default("")
+  fromCash   Boolean  @default(false)
+  shiftId    String? // смена, из кассы которой взяты деньги
+  userId     String? // кто оплатил
+  user       User?    @relation(fields: [userId], references: [id])
+  createdAt  DateTime @default(now())
+
+  @@index([supplierId])
+  @@index([date])
+  @@index([shiftId])
+}
+
+// ── Внесение и изъятие наличных ──
+// Кассир положил размен в ящик или владелец забрал выручку днём. Это не продажа и не
+// расход — деньги просто вошли в ящик или вышли из него, и смена обязана это знать
+model CashMove {
+  id        String   @id @default(cuid())
+  clientId  String?  @unique
+  shiftId   String // смена, в ящик которой внесли или из которого изъяли
+  kind      String // in — внесение, out — изъятие
+  amount    Decimal  @db.Decimal(12, 2)
+  note      String   @default("")
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  date      DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([shiftId])
+  @@index([date])
+}
+
+// ── Сервисы перевода ──
+// Через что покупатели переводят деньги: Alif, DC, Эсхата… Готовый список заводит
+// миграция, свои владелец добавляет в настройках. Чек хранит сервис названием
+model PayService {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  ord       Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+// ── Правка остатка в карточке ──
+// Владелец поправил число на полке руками. Раньше это не оставляло следа, и история
+// движения товара не сходилась: между приходом и продажами остаток менялся «сам»
+model StockEdit {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  fromUnits Int // штук было
+  toUnits   Int // штук стало
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  date      DateTime @default(now())
+
+  @@index([productId])
+}
+
+model ArrivalItem {
+  id        String   @id @default(cuid())
+  arrivalId String
+  arrival   Arrival  @relation(fields: [arrivalId], references: [id], onDelete: Cascade)
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id])
+  name      String
+  qty       Int
+  cost      Decimal  @db.Decimal(12, 2)
+
+  @@index([arrivalId])
+  @@index([productId])
+}
+
+model Customer {
+  id        String        @id @default(cuid())
+  name      String
+  phone     String        @default("")
+  debt      Decimal       @default(0) @db.Decimal(12, 2)
+  createdAt DateTime      @default(now())
+  sales     Sale[]
+  payments  DebtPayment[]
+}
+
+// Журнал погашений долга — для аудита и учёта наличных в смене
+model DebtPayment {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  amount     Decimal  @db.Decimal(12, 2)
+  shiftId    String? // смена, в которую внесены деньги (наличные в кассу)
+  createdAt  DateTime @default(now())
+
+  @@index([customerId])
+  @@index([shiftId])
+}
+
+// Отложенные штрихкоды — отсканированы на кассе, но товар ещё не заведён
+model DeferredBarcode {
+  id        String   @id @default(cuid())
+  barcode   String   @unique
+  createdAt DateTime @default(now())
+}
+
+// Смена кассы — открытие/закрытие + сверка наличных (Z-отчёт)
+model Shift {
+  id           String    @id @default(cuid())
+  openedAt     DateTime  @default(now())
+  closedAt     DateTime?
+  openingCash  Decimal   @default(0) @db.Decimal(12, 2) // наличные в кассе на начало
+  countedCash  Decimal?  @db.Decimal(12, 2) // фактически пересчитано при закрытии
+  totalSales   Decimal   @default(0) @db.Decimal(12, 2)
+  salesCash    Decimal   @default(0) @db.Decimal(12, 2)
+  salesCard    Decimal   @default(0) @db.Decimal(12, 2)
+  salesDebt    Decimal   @default(0) @db.Decimal(12, 2)
+  debtPaid     Decimal   @default(0) @db.Decimal(12, 2) // погашение долгов наличными за смену
+  refundCash   Decimal   @default(0) @db.Decimal(12, 2) // возвращено покупателям наличными — уходит ИЗ кассы
+  refundTotal  Decimal   @default(0) @db.Decimal(12, 2) // возвращено всего (наличные + карта + списание долга)
+  refundCost   Decimal   @default(0) @db.Decimal(12, 2) // себестоимость товара, вернувшегося на полку: он снова в продаже, поэтому прибыль на неё не уменьшается
+  // Расходы, оплаченные наличными из этой кассы за смену. Сумма ведётся и у открытой
+  // смены (её обновляет каждый такой расход): страница смены показывает её кассиру,
+  // которому сам раздел расходов закрыт, и с ней же смена уходит на кассы с программой
+  expenseCash  Decimal   @default(0) @db.Decimal(12, 2)
+  // Внесено в ящик (размен) и изъято из него (выручка забрана) за смену
+  cashIn       Decimal   @default(0) @db.Decimal(12, 2)
+  cashOut      Decimal   @default(0) @db.Decimal(12, 2)
+  // Оплачено поставщикам наличными из этой кассы
+  supplierCash Decimal   @default(0) @db.Decimal(12, 2)
+  // Оплачено переводом (в ящик не попадает) и то же по сервисам: { "Alif": 120 }
+  salesTransfer Decimal  @default(0) @db.Decimal(12, 2)
+  transferBy   Json?
+  profit       Decimal   @default(0) @db.Decimal(12, 2)
+  discount     Decimal   @default(0) @db.Decimal(12, 2)
+  count        Int       @default(0) // число чеков
+  expectedCash Decimal   @default(0) @db.Decimal(12, 2) // openingCash + наличные продажи + погашения долга + внесено − возвраты наличными − расходы из кассы − оплаты поставщикам из кассы − изъято
+  difference   Decimal   @default(0) @db.Decimal(12, 2) // counted - expected
+  userId       String? // кассир, открывший смену
+  user         User?     @relation(fields: [userId], references: [id])
+  // На какой кассе открыта смена. Пусто — на сайте (одна на аптеку, как раньше).
+  // У программы для Windows смена своя на каждой кассе: без связи касса не может
+  // знать, открыта ли смена на соседней.
+  //
+  // Запрет на вторую открытую смену — два частичных уникальных индекса (один на
+  // сайт, по одному на кассу). Prisma их описать не умеет, они заведены миграцией.
+  deviceId     String?
+  sales        Sale[]
+
+  @@index([closedAt])
+  @@index([userId])
+}
+
+// ── Сотрудники аптеки ──
+// Здесь остались только имя и роль: на эту запись ссылаются чеки, смены, возвраты
+// и списания, и история обязана помнить, кто их оформил.
+//
+// Пароля здесь нет намеренно. Вход общий на весь сервис — логин, пароль, блокировка
+// и время смены пароля живут в панели управления (Account). Оставить копию пароля
+// тут значило бы завести вторую правду о доступе: однажды кто-то стал бы проверять
+// её вместо настоящей, и заблокированный сотрудник продолжил бы входить.
+model User {
+  id        String   @id @default(cuid())
+  name      String   @unique // имя сотрудника, оно же логин в панели
+  role      String   @default("cashier") // founder | cashier
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  shifts       Shift[]
+  sales        Sale[]
+  returns      SaleReturn[]
+  writeOffs    WriteOff[]
+  inventories  Inventory[]
+  expenses     Expense[]
+  arrivals     Arrival[]
+  supplierPayments SupplierPayment[]
+  cashMoves    CashMove[]
+  stockEdits   StockEdit[]
+}
+
+// ── Возврат товара ──
+// Оформляется на кассе по чеку. Деньги возвращаются тем же способом, что и оплата,
+// а по каждой позиции указано, вернулась ли она в продажу или сразу списана.
+model SaleReturn {
+  id       String           @id @default(cuid())
+  clientId String?          @unique // защита от задвоения при повторе запроса
+  date     DateTime         @default(now())
+  saleId   String? // исходный чек
+  sale     Sale?            @relation(fields: [saleId], references: [id])
+  userId   String? // кто оформил возврат
+  user     User?            @relation(fields: [userId], references: [id])
+  shiftId  String? // смена, в которую оформлен возврат
+  refund   String           @default("cash") // cash | card | debt (уменьшение долга) | transfer
+  refundVia String? // сервис перевода, если деньги вернули переводом
+  total    Decimal          @db.Decimal(12, 2) // сколько денег возвращено
+  note     String           @default("")
+  items    SaleReturnItem[]
+
+  @@index([date])
+  @@index([saleId])
+  @@index([shiftId])
+}
+
+model SaleReturnItem {
+  id           String     @id @default(cuid())
+  returnId     String
+  ret          SaleReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  productId    String?
+  product      Product?   @relation(fields: [productId], references: [id])
+  name         String
+  units        Int // сколько штук возвращено
+  unitsPerPack Int        @default(1)
+  price        Decimal    @db.Decimal(12, 2) // цена упаковки (снимок)
+  cost         Decimal    @default(0) @db.Decimal(12, 2)
+  amount       Decimal    @db.Decimal(12, 2) // возвращено денег за позицию
+  restock      Boolean    @default(true) // true — обратно в продажу, false — списано
+
+  @@index([returnId])
+  @@index([productId])
+}
+
+// ── Расходы аптеки ──
+// Всё, на что аптека тратит деньги помимо закупки товара: аренда, зарплата, свет,
+// налоги. Отчёты вычитают их из прибыли от продаж и показывают чистую прибыль.
+model Expense {
+  id        String   @id @default(cuid())
+  clientId  String?  @unique // защита от задвоения при повторе запроса
+  date      DateTime @default(now())
+  // Статья — названием, как категория у товара: убрали статью из списка — прежние
+  // расходы остаются с её названием, история задним числом не меняется
+  category  String
+  amount    Decimal  @db.Decimal(12, 2)
+  note      String   @default("")
+  // Оплачен наличными из кассы: денег в ящике нет, поэтому расход привязан к смене и
+  // уменьшает наличные, которые в ней ждут при закрытии
+  fromCash  Boolean  @default(false)
+  shiftId   String? // смена, из кассы которой взяты деньги
+  userId    String? // кто внёс
+  user      User?    @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([date])
+  @@index([shiftId])
+}
+
+// Статьи расходов. Готовый список заводит миграция, свои владелец добавляет в настройках
+model ExpenseCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+}
+
+// ── Списание ──
+// Просрочка, брак, порча, недостача. Уменьшает остаток и фиксирует убыток.
+model WriteOff {
+  id        String         @id @default(cuid())
+  date      DateTime       @default(now())
+  userId    String?
+  user      User?          @relation(fields: [userId], references: [id])
+  reason    String         @default("expired") // expired | damaged | lost | other
+  note      String         @default("")
+  totalCost Decimal        @db.Decimal(12, 2) // сумма списания по себестоимости
+  source    String         @default("manual") // manual | return | inventory — откуда возникло
+  items     WriteOffItem[]
+
+  @@index([date])
+}
+
+model WriteOffItem {
+  id         String   @id @default(cuid())
+  writeOffId String
+  writeOff   WriteOff @relation(fields: [writeOffId], references: [id], onDelete: Cascade)
+  productId  String?
+  product    Product? @relation(fields: [productId], references: [id])
+  name       String
+  units      Int // списано штук
+  cost       Decimal  @default(0) @db.Decimal(12, 2) // себестоимость упаковки (снимок)
+  expiryDate DateTime? // срок партии, из которой списали
+
+  @@index([writeOffId])
+  @@index([productId])
+}
+
+// ── Инвентаризация (пересчёт остатков) ──
+model Inventory {
+  id        String          @id @default(cuid())
+  date      DateTime        @default(now())
+  userId    String?
+  user      User?           @relation(fields: [userId], references: [id])
+  status    String          @default("draft") // draft | applied
+  scope     String          @default("all") // all | категория
+  note      String          @default("")
+  appliedAt DateTime?
+  items     InventoryItem[]
+
+  @@index([date])
+}
+
+model InventoryItem {
+  id            String    @id @default(cuid())
+  inventoryId   String
+  inventory     Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  productId     String?
+  product       Product?  @relation(fields: [productId], references: [id])
+  name          String
+  expectedUnits Int // сколько должно быть по системе
+  actualUnits   Int? // сколько насчитали по факту (null — ещё не считали)
+  cost          Decimal   @default(0) @db.Decimal(12, 2)
+
+  @@index([inventoryId])
+  @@index([productId])
+}
+
+// ── Кассы, которые работают без интернета ──
+// Программа для Windows продаёт и без связи, а на сервер присылает сделанное позже.
+// Всё ниже — то, что нужно серверу, чтобы это принять и ничего не задвоить.
+
+// Касса: компьютер, на котором стоит программа. Номер создаётся на самой кассе.
+model Device {
+  id         String   @id
+  name       String // «Касса 1» — чтобы владелец отличал их не по номеру из 36 знаков
+  appVersion String   @default("")
+  lastLogin  String   @default("") // кто последним работал
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+}
+
+// Принятая операция. Номер создаётся на кассе: пришла второй раз — сервер видит
+// номер и отвечает тем же, чем в первый. Ни второго чека, ни второго списания.
+model SyncOp {
+  id          String   @id
+  type        String
+  deviceId    String
+  accountId   String? // кто сделал
+  submittedBy String? // чьим входом доставлено
+  docId       String?
+  status      String // ok | rejected
+  error       String   @default("")
+  createdAt   DateTime // когда случилось на кассе
+  appliedAt   DateTime @default(now())
+
+  @@index([deviceId, appliedAt])
+}
+
+// ── Расхождения ──
+// Операция кассы уже случилась: товар отдан, деньги взяты. Сервер её не «разрешает»,
+// а записывает. Но если записанное не сходится с тем, что знает он сам, владелец
+// должен это увидеть:
+//   sale     — продано больше, чем было (две кассы без связи продали одну и ту же
+//              последнюю упаковку);
+//   writeoff — списано больше, чем числилось;
+//   price    — цена в чеке не та, что была в базе в момент продажи (цену сменили,
+//              пока касса была без связи, — или кассир продал не по той цене);
+//   return   — по чеку вернули больше, чем по нему продали.
+model Discrepancy {
+  id         String    @id @default(cuid())
+  kind       String
+  productId  String?
+  name       String
+  units      Int       @default(0) // сколько штук не сошлось
+  // Только для price: цена упаковки в чеке и цена, которая была в базе
+  checkPrice Decimal?  @db.Decimal(12, 2)
+  basePrice  Decimal?  @db.Decimal(12, 2)
+  docId      String?
+  deviceId   String?
+  userId     String?
+  date       DateTime // когда это случилось на кассе
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime? // владелец разобрался
+
+  @@index([resolvedAt, date])
+}
+
+// ── Журнал движений товара ──
+// Каждое изменение количества в партии. Пишет его сама база (триггер на Batch),
+// поэтому мимо не проходит ничего: сумма движений товара всегда равна его остатку.
+//
+// Время в журналах ставит сама база, и оно всемирное — как во всех остальных
+// таблицах. Обычное «сейчас» дало бы местное время сервера базы.
+model StockMove {
+  seq       BigInt   @id @default(autoincrement())
+  productId String
+  batchId   String
+  delta     Int // плюс — пришло, минус — ушло
+  units     Int // сколько стало в партии
+  at        DateTime @default(dbgenerated("(now() AT TIME ZONE 'UTC'::text)"))
+
+  @@index([productId, seq])
+}
+
+// ── Журнал изменений ──
+// Что и в какой записи менялось — тоже пишет база. Касса спрашивает «что изменилось
+// с прошлого раза» и получает только это. txid — номер транзакции: по нему изменения
+// отдаются строго по порядку завершения, и ни одно не теряется, даже когда две
+// операции шли одновременно.
+model ChangeLog {
+  seq   BigInt   @id @default(autoincrement())
+  txid  BigInt   @default(dbgenerated("txid_current()"))
+  tbl   String
+  rowId String
+  op    String // I | U | D
+  at    DateTime @default(dbgenerated("(now() AT TIME ZONE 'UTC'::text)"))
+
+  @@index([txid])
+  @@index([at])
+}
+
+// ── История цен ──
+// Касса без интернета продаёт по цене, которую знала в момент продажи, а чек
+// присылает позже. Чтобы его проверить, серверу мало нынешней цены: её могли
+// сменить уже после продажи. Поэтому каждая смена цены записывается (триггер на
+// Product) — и по чеку видно, была ли у товара в тот момент такая цена.
+model PriceLog {
+  seq          BigInt   @id @default(autoincrement())
+  productId    String
+  price        Decimal  @db.Decimal(12, 2) // цена упаковки
+  unitsPerPack Int
+  at           DateTime @default(dbgenerated("(now() AT TIME ZONE 'UTC'::text)")) // с какого момента действует
+
+  @@index([productId, at])
+}
+
+// Служебные отметки синхронизации
+model SyncMeta {
+  key   String @id
+  value String
+}

@@ -1,0 +1,77 @@
+# ── Упаковка программы для Windows ──
+# Запускается сценарием scripts/build.mjs («npm run electron:build»).
+
+appId: tj.apteka.desktop
+# Имя латиницей: оно становится именем папки установки и исполняемого файла, а русские
+# буквы в путях до сих пор ломают часть системных средств. Человек видит «Аптека» —
+# так называются ярлыки (см. shortcutName ниже) и само окно.
+productName: Apteka
+copyright: Apteka
+
+directories:
+  output: release
+  buildResources: assets
+
+# Что попадает внутрь программы. Перечислено поимённо: всё, чего здесь нет
+# (сценарии сборки, проверки, настройки с адресами), в установщик не уходит.
+files:
+  - src/**/*
+  - renderer/**/*
+  - assets/fonts/**/*
+  - assets/icon.png
+  - build-config.json
+  - package.json
+  # Локальная база (SQLite) приходит готовыми файлами под все системы сразу.
+  # Программе нужен один — для 64-разрядной Windows; исходники и чужие сборки
+  # только раздували бы установщик
+  - "!node_modules/better-sqlite3/{deps,src}/**"
+  - "!node_modules/better-sqlite3/binding.gyp"
+  - "!node_modules/better-sqlite3/prebuilds/{darwin,linux,linuxmusl}*"
+  - "!node_modules/better-sqlite3/prebuilds/win32-arm64.node"
+
+asar: true
+# Файл базы данных — настоящая библиотека Windows: загрузить её изнутри архива
+# система не может, поэтому он лежит рядом с архивом
+asarUnpack:
+  - node_modules/better-sqlite3/prebuilds/*.node
+# Библиотеку базы не пересобираем: готовый файл подходит и Node, и Electron любой
+# версии. Пересборка потребовала бы на компьютере сборки компилятор C++
+npmRebuild: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: assets/icon.ico
+  executableName: Apteka
+
+nsis:
+  # Установка в один шаг и только для текущего пользователя Windows: права
+  # администратора не нужны, а в аптеке их у кассира обычно и нет
+  oneClick: true
+  perMachine: false
+  artifactName: Apteka-Setup-${version}.${ext}
+  shortcutName: Аптека
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  runAfterFinish: true
+  # Удаление программы НЕ стирает её данные. Там ключ входа, а дальше будет и
+  # локальная база с непереданными чеками: потерять её вместе с программой нельзя.
+  deleteAppDataOnUninstall: false
+  installerLanguages: [ru_RU]
+  language: "1049"
+
+# ── Замки на самом исполняемом файле ──
+# Без них готовую программу можно запустить «как голый Node» или с отладчиком и
+# выполнить в ней свой код с доступом ко всему, что есть у программы, — включая
+# ключ входа. Замки вшиваются в файл при сборке и снаружи не снимаются.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableCookieEncryption: true
+  # Программа открывается только из своего архива, и архив проверяется на подмену
+  onlyLoadAppFromAsar: true
+  enableEmbeddedAsarIntegrityValidation: true
+  # Адрес file:// программе не нужен — у неё свой (app://)
+  grantFileProtocolExtraPrivileges: false

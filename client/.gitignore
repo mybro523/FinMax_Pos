@@ -1,0 +1,10 @@
+node_modules
+dist
+*.local
+.DS_Store
+
+# Артефакты браузерных проверок: снимки экрана и записи неудачных прогонов
+test-results
+playwright-report
+blob-report
+.playwright
