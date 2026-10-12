@@ -1,4 +1,4 @@
-# 💊 Аптека — POS-система
+# FinMax POS — касса и склад аптеки
 
 Автоматизация продаж аптеки: продажа по сканеру штрихкода (USB и камера телефона),
 учёт остатков, приход товара (в том числе в долг поставщику), оплата (наличные / карта /
@@ -38,7 +38,7 @@ cd desktop
 npm install
 cp .env.example .env        # адрес сервера: APTEKA_API_URL=https://…/api
 npm run electron:dev        # программа с живой подменой кода интерфейса
-npm run electron:build      # установщик → desktop/release/Apteka-Setup-<версия>.exe
+npm run electron:build      # установщик → desktop/release/FinMax-POS-Setup-<версия>.exe
 ```
 Интерфейс у программы тот же, что у сайта: он собирается из `client/` в режиме
 `desktop` (адреса разделов после решётки, пути от самой страницы, свой шрифт).

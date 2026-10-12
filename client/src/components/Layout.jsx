@@ -2,9 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   LuLayoutDashboard, LuShoppingCart, LuPill, LuPackagePlus,
-  LuClipboardList, LuReceipt, LuTrendingUp, LuSettings, LuMenu, LuX, LuPlus, LuClock, LuTag, LuCalculator, LuWifiOff,
+  LuClipboardList, LuReceipt, LuTrendingUp, LuSettings, LuMenu, LuX, LuClock, LuTag, LuCalculator, LuWifiOff,
   LuUsers, LuLogOut, LuCalendarClock, LuUndo2, LuTrash2, LuClipboardCheck, LuTriangleAlert,
-  LuGraduationCap, LuCircleHelp, LuHandCoins, LuTruck,
+  LuGraduationCap, LuCircleHelp, LuHandCoins, LuTruck, LuSun, LuMoon,
 } from 'react-icons/lu'
 import { useCollection, useConnection } from '../db/store'
 import { useAuth, logout, leavePharmacy } from '../db/auth'
@@ -13,6 +13,9 @@ import { useT } from '../lib/i18n'
 import { startTour } from '../lib/tur'
 import { isDesktop } from '../lib/desktop'
 import SyncBadge from './SyncBadge'
+import { BrandWord } from './ui'
+import { useTheme, toggleTheme } from '../lib/theme'
+import emblem from '../assets/brand/emblem-64.png'
 
 export const NAV = [
   { section: 'Продажи' },
@@ -77,6 +80,7 @@ export default function Layout({ title, subtitle, actions, fill, children }) {
   const conn = useConnection()
   const user = useAuth()
   const t = useT()
+  const theme = useTheme()
   const location = useLocation()
   const isFounder = user?.role === 'founder'
   const expiringCount = expiringProducts(products).length
@@ -131,10 +135,11 @@ export default function Layout({ title, subtitle, actions, fill, children }) {
 
       <aside className={'sidebar' + (open ? ' open' : '')}>
         <div className="brand">
-          <span className="logo"><LuPlus size={20} strokeWidth={3} /></span>
+          <span className="logo"><img src={emblem} alt="" width="26" height="26" /></span>
           <span className="brand-name">
-            Аптека
-            <small>POS система</small>
+            <BrandWord />
+            {/* Под именем системы — имя аптеки: в какой из них сейчас работают */}
+            <small title={user?.pharmacy?.name || ''}>{user?.pharmacy?.name || t('Касса и склад')}</small>
           </span>
           <button className="nav-close" onClick={() => setOpen(false)} aria-label="Закрыть меню">
             <LuX size={16} />
@@ -163,7 +168,7 @@ export default function Layout({ title, subtitle, actions, fill, children }) {
                 <span className="ic"><n.Icon size={18} /></span>
                 {t(n.label)}
                 {n.badge && deferred.length > 0 && <span className="nav-badge">{deferred.length}</span>}
-                {n.expiryBadge && expiringCount > 0 && <span className="nav-badge" style={{ background: 'var(--warn)' }}>{expiringCount}</span>}
+                {n.expiryBadge && expiringCount > 0 && <span className="nav-badge warn">{expiringCount}</span>}
               </NavLink>
             ),
           )}
@@ -173,6 +178,14 @@ export default function Layout({ title, subtitle, actions, fill, children }) {
             <div className="su-name">{user?.name || '—'}</div>
             <div className="su-role">{isFounder ? t('Основатель') : t('Кассир')}</div>
           </div>
+          <button
+            className="su-btn"
+            onClick={toggleTheme}
+            title={theme === 'dark' ? t('Светлая тема') : t('Тёмная тема')}
+            aria-label={theme === 'dark' ? t('Светлая тема') : t('Тёмная тема')}
+          >
+            {theme === 'dark' ? <LuSun size={16} /> : <LuMoon size={16} />}
+          </button>
           <button className="su-logout" onClick={logout} title={t('Выйти')} aria-label={t('Выйти')}><LuLogOut size={16} /></button>
         </div>
       </aside>

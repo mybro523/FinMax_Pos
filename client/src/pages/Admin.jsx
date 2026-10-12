@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  LuBuilding2, LuPlus, LuLogOut, LuRefreshCw, LuTriangleAlert, LuKeyRound,
+  LuPlus, LuLogOut, LuRefreshCw, LuTriangleAlert, LuKeyRound,
   LuBanknote, LuPause, LuPlay, LuLogIn, LuScrollText, LuTrash2, LuPencil, LuCheck,
   LuPhone, LuSettings, LuSun, LuMoon,
 } from 'react-icons/lu'
@@ -13,6 +13,7 @@ import { onService, onlineCodes } from '../db/realtime'
 import { fmtDate, fmtDateTime, tjMoment, tjDate, tjTime, serverNow } from '../lib/time'
 import { useT, useLang, setLang, LANGS } from '../lib/i18n'
 import { useTheme, setTheme } from '../lib/theme'
+import emblem from '../assets/brand/emblem-64.png'
 
 // Библиотека диаграмм весит около 370 КБ — грузим её после того, как показаны
 // числа и список аптек
@@ -344,7 +345,7 @@ export default function Admin() {
       <div className="main" style={{ marginLeft: 0 }}>
         <header className="topbar">
           <div className="topbar-left">
-            <span className="logo" style={{ marginRight: 12 }}><LuBuilding2 size={18} /></span>
+            <img src={emblem} alt="" width="34" height="34" className="admin-emblem" />
             <div>
               <h1>{t('Аптеки')}</h1>
               <div className="sub">{list.length} {t('в обслуживании')} · {me?.name}</div>

@@ -31,10 +31,10 @@ const USER = env.APP_USER || ''
 const PASS = env.APP_PASS || ''
 const REPO = env.APTEKA_UPDATE_REPO || ''
 // Имена папок — как у настоящей программы (electron-builder.yml)
-const userData = join(env.APPDATA || '', 'Apteka')
+const userData = join(env.APPDATA || '', 'FinMax POS')
 const updaterCache = join(env.LOCALAPPDATA || '', 'apteka-desktop-updater')
-const installDir = join(env.LOCALAPPDATA || '', 'Programs', 'apteka-desktop')
-const exe = join(installDir, 'Apteka.exe')
+const installDir = join(env.LOCALAPPDATA || '', 'Programs', 'finmax-pos-desktop')
+const exe = join(installDir, 'FinMaxPOS.exe')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const say = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)

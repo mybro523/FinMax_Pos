@@ -458,9 +458,9 @@ export default function Dashboard() {
             ? `${stats.stockUnits} ${t('уп')} · ${stats.lowList.length} ${t('заканчивается')}`
             : `${stats.stockUnits} ${t('уп')} · ${t('по цене продажи')}`}
           warn={stats.lowList.length > 0} onClick={() => setModal({ type: 'stock' })} />
-        <Metric tour="dash.debts" label={t('Долги клиентов')} value={money(stats.debtTotal)} Icon={LuReceipt} tint="danger"
+        <Metric tour="dash.debts" label={t('Долги клиентов')} value={money(stats.debtTotal)} Icon={LuReceipt} tint={stats.debtTotal > 0 ? 'danger' : 'accent'}
           sub={stats.debtors.length ? `${stats.debtors.length} ${t('клиент(ов) с долгом')}` : t('долгов нет')} onClick={() => setModal({ type: 'debts' })} />
-        <Metric tour="dash.suppliers" label={t('Долги поставщикам')} value={money(stats.supplierDebt)} Icon={LuTruck} tint="danger"
+        <Metric tour="dash.suppliers" label={t('Долги поставщикам')} value={money(stats.supplierDebt)} Icon={LuTruck} tint={stats.supplierDebt > 0 ? 'danger' : 'accent'}
           sub={stats.creditors.length ? `${stats.creditors.length} ${t('поставщик(ов) с долгом')}` : t('долгов нет')} onClick={() => setModal({ type: 'suppliers' })} />
       </div>
 

@@ -1,12 +1,12 @@
 # ── Упаковка программы для Windows ──
 # Запускается сценарием scripts/build.mjs («npm run electron:build»).
 
-appId: tj.apteka.desktop
-# Имя латиницей: оно становится именем папки установки и исполняемого файла, а русские
-# буквы в путях до сих пор ломают часть системных средств. Человек видит «Аптека» —
-# так называются ярлыки (см. shortcutName ниже) и само окно.
-productName: Apteka
-copyright: Apteka
+appId: tj.finmax.pos
+# Имя латиницей: оно становится именем папки установки, а русские буквы в путях
+# до сих пор ломают часть системных средств. Так же называются ярлыки
+# (см. shortcutName ниже) и само окно.
+productName: FinMax POS
+copyright: FinMax
 
 directories:
   output: release
@@ -43,15 +43,15 @@ win:
     - target: nsis
       arch: [x64]
   icon: assets/icon.ico
-  executableName: Apteka
+  executableName: FinMaxPOS
 
 nsis:
   # Установка в один шаг и только для текущего пользователя Windows: права
   # администратора не нужны, а в аптеке их у кассира обычно и нет
   oneClick: true
   perMachine: false
-  artifactName: Apteka-Setup-${version}.${ext}
-  shortcutName: Аптека
+  artifactName: FinMax-POS-Setup-${version}.${ext}
+  shortcutName: FinMax POS
   createDesktopShortcut: always
   createStartMenuShortcut: true
   runAfterFinish: true

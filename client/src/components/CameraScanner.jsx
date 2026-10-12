@@ -189,7 +189,7 @@ export default function CameraScanner({ onDetect, onClose }) {
             <div style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', background: '#000' }}>
               <video ref={videoRef} style={{ width: '100%', display: 'block', maxHeight: 360 }} muted playsInline />
               <div style={{ position: 'absolute', left: '6%', right: '6%', top: '50%', height: 2, background: 'rgba(255,60,60,0.95)', boxShadow: '0 0 8px red' }} />
-              <div style={{ position: 'absolute', inset: '20% 8%', border: '3px solid #18a999', borderRadius: 12 }} />
+              <div style={{ position: 'absolute', inset: '20% 8%', border: '3px solid #efbd24', borderRadius: 12 }} />
             </div>
             {(zoom || torch !== null) && (
               <div className="cam-tools">

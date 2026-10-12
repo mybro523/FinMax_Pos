@@ -226,7 +226,7 @@ export default function Shift() {
             <label htmlFor="openCash">{t('Наличные в кассе на начало (сомони)')}</label>
             <NumberInput id="openCash" value={openCash} onChange={(e) => setOpenCash(e.target.value)} placeholder="0" autoFocus />
           </div>
-          <button className="btn block" onClick={doOpen}><span className="ic"><LuClock size={16} /></span> {t('Открыть смену')}</button>
+          <button className="btn gold block" onClick={doOpen}><span className="ic"><LuClock size={16} /></span> {t('Открыть смену')}</button>
         </div>
       )}
 

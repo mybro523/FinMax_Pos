@@ -42,6 +42,18 @@ export function PasswordInput({ value, onChange, ...props }) {
   )
 }
 
+// ── Имя бренда ──
+// Набирается текстом, а не картинкой: на синем фоне синяя половина логотипа
+// пропала бы. «Fin» золотом, «Max» цветом текста — как в шапке сайта FinMax.
+export function BrandWord({ className }) {
+  return (
+    <span className={'brand-word' + (className ? ' ' + className : '')}>
+      <span><span className="fin">Fin</span>Max</span>
+      <span className="brand-pos">POS</span>
+    </span>
+  )
+}
+
 // ── Способы оплаты (единые иконки/подписи) ──
 export const PAYMENTS = {
   cash: { label: 'Наличные', Icon: LuBanknote },

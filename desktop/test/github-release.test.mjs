@@ -151,5 +151,5 @@ test('связь моргнула на последнем шаге — выкл�
 })
 
 test('в выпуске ждём ровно те три файла, по которым программа обновляется', () => {
-  assert.deepEqual(expectedAssets('1.0.0'), ['Apteka-Setup-1.0.0.exe', 'Apteka-Setup-1.0.0.exe.blockmap', 'latest.yml'])
+  assert.deepEqual(expectedAssets('1.0.0'), ['FinMax-POS-Setup-1.0.0.exe', 'FinMax-POS-Setup-1.0.0.exe.blockmap', 'latest.yml'])
 })

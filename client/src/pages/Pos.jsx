@@ -1021,20 +1021,23 @@ export default function Pos() {
               <div className="scan-line">
                 {/* Одно поле и для сканера, и для поиска. Два поля — это кассир,
                     который рано или поздно сканирует не в то */}
-                <input
-                  ref={inputRef}
-                  className="scan-input"
-                  data-tour="pos.scan"
-                  value={code}
-                  onChange={(e) => {
-                    if (performance.now() < muteUntil.current) return
-                    setCode(e.target.value)
-                  }}
-                  onKeyDown={onScanKey}
-                  placeholder={t('Наведите сканер на товар…')}
-                  autoFocus
-                />
-                <button className="btn" data-tour="pos.camera" title={t('Камера')} aria-label={t('Камера')} onClick={() => { unlockAudio(); setCamera(true) }}>
+                <div className="scan-wrap">
+                  <span className="scan-ic" aria-hidden="true"><LuScanLine size={18} /></span>
+                  <input
+                    ref={inputRef}
+                    className="scan-input"
+                    data-tour="pos.scan"
+                    value={code}
+                    onChange={(e) => {
+                      if (performance.now() < muteUntil.current) return
+                      setCode(e.target.value)
+                    }}
+                    onKeyDown={onScanKey}
+                    placeholder={t('Наведите сканер на товар…')}
+                    autoFocus
+                  />
+                </div>
+                <button className="btn ghost" data-tour="pos.camera" title={t('Камера')} aria-label={t('Камера')} onClick={() => { unlockAudio(); setCamera(true) }}>
                   <span className="ic"><LuCamera size={17} /></span> <span className="cam-text">{t('Камера')}</span>
                 </button>
               </div>
@@ -1317,7 +1320,7 @@ export default function Pos() {
 
             <div className="kassa-deystviya">
               <button
-                className="btn kassa-pay"
+                className="btn gold kassa-pay"
                 data-tour="pos.pay"
                 disabled={!cart.length || paying || !canSell || sd.state === 'short'}
                 onClick={pay}
@@ -1503,7 +1506,7 @@ function Receipt({ sale, onClose }) {
   return (
     <Modal className="printable" title={<><span className="ic"><LuPrinter size={18} /></span>{tr('Чек продажи')}</>} onClose={onClose}>
       <div style={{ borderBottom: '1px dashed var(--border-strong)', paddingBottom: 12, marginBottom: 12 }}>
-        <div className="tag-cat">{tr('Аптека')} · {fmtDateTime(sale.date)}</div>
+        <div className="tag-cat">{auth?.pharmacy?.name || 'FinMax POS'} · {fmtDateTime(sale.date)}</div>
       </div>
       <table>
         <tbody>

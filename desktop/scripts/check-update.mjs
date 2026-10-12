@@ -39,8 +39,8 @@ const FEED = `http://127.0.0.1:${FEED_PORT}`
 const userData = join(env.APPDATA || '', NAME)
 const updaterCache = join(env.LOCALAPPDATA || '', 'apteka-desktop-updater')
 // Папка установки называется по имени пакета, а не по названию программы
-const installDir = join(env.LOCALAPPDATA || '', 'Programs', 'apteka-desktop')
-const exe = join(installDir, 'Apteka.exe')
+const installDir = join(env.LOCALAPPDATA || '', 'Programs', 'finmax-pos-desktop')
+const exe = join(installDir, 'FinMaxPOS.exe')
 const configFile = join(DESKTOP, 'build-config.json')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -84,7 +84,7 @@ function buildInstallers(out) {
         ],
         { cwd: DESKTOP, env: buildEnv, stdio: 'ignore' },
       )
-      if (r.status !== 0 || !existsSync(join(out, version, `Apteka-Setup-${version}.exe`))) throw new Error(`установщик ${version} не собрался`)
+      if (r.status !== 0 || !existsSync(join(out, version, `FinMax-POS-Setup-${version}.exe`))) throw new Error(`установщик ${version} не собрался`)
     }
   } finally {
     writeFileSync(configFile, before, 'utf8')
@@ -140,7 +140,7 @@ try {
   // ── Установка 1.0.0 ──
   say('ставлю 1.0.0…')
   installed = true
-  const r = spawnSync(join(out, '1.0.0', 'Apteka-Setup-1.0.0.exe'), ['/S'], { stdio: 'ignore' })
+  const r = spawnSync(join(out, '1.0.0', 'FinMax-POS-Setup-1.0.0.exe'), ['/S'], { stdio: 'ignore' })
   if (r.status !== 0) throw new Error('установщик вернул ' + r.status)
   for (let i = 0; i < 120 && !existsSync(exe); i++) await sleep(500)
   if (!existsSync(exe)) throw new Error('программа не установилась')

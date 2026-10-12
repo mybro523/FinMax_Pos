@@ -8,7 +8,7 @@ import { translate as tr } from '../lib/i18n'
 // Графики вынесены в отдельный файл: библиотека диаграмм весит ~370 КБ и грузится
 // уже после того, как показаны карточки и таблицы — панель открывается мгновенно.
 
-const COLORS = ['#0f766e', '#2f8a80', '#4f9d94', '#74b2aa', '#9cc8c2', '#c6ddd9']
+const COLORS = ['#00359f', '#2a58bf', '#5a7fd3', '#8aa5e3', '#b5c5ee', '#d8e1f6']
 const TOOLTIP = {
   borderRadius: 10, border: '1px solid var(--border)',
   background: 'var(--card)', color: 'var(--text)', fontSize: 13,
@@ -29,15 +29,18 @@ export default function DashboardCharts({ chart, topProducts, onDay, onProduct }
           >
             <defs>
               <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#0f766e" stopOpacity={0.2} />
-                <stop offset="100%" stopColor="#0f766e" stopOpacity={0} />
+                <stop offset="0%" stopColor="#00359f" stopOpacity={0.18} />
+                <stop offset="100%" stopColor="#00359f" stopOpacity={0} />
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--track)" vertical={false} />
             <XAxis dataKey="day" tick={{ fontSize: 12, fill: 'var(--muted)' }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fontSize: 12, fill: 'var(--muted)' }} axisLine={false} tickLine={false} width={50} />
             <Tooltip formatter={(v) => money(v)} contentStyle={TOOLTIP} />
-            <Area type="monotone" dataKey="sum" stroke="#0f766e" strokeWidth={2.5} fill="url(#g)" />
+            <Area
+              type="monotone" dataKey="sum" stroke="#00359f" strokeWidth={2.5} fill="url(#g)"
+              activeDot={{ r: 5, fill: '#efbd24', stroke: '#fff', strokeWidth: 2 }}
+            />
           </AreaChart>
         </ResponsiveContainer>
       </div>

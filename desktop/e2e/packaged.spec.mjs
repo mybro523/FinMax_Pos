@@ -19,7 +19,7 @@ import { freshUserData, goTo, PASS, signIn, USER } from './app.mjs'
 
 // По умолчанию — распакованная сборка. APTEKA_EXE указывает на другой файл: так
 // проверяют программу, уже поставленную установщиком
-const EXE = process.env.APTEKA_EXE || join(DESKTOP, 'release', 'win-unpacked', 'Apteka.exe')
+const EXE = process.env.APTEKA_EXE || join(DESKTOP, 'release', 'win-unpacked', 'FinMaxPOS.exe')
 
 const freePort = () =>
   new Promise((resolve, reject) => {
@@ -54,7 +54,7 @@ const built = (() => {
 })()
 const feedUrl = built.update?.provider === 'generic' && /^http:\/\/127\.0\.0\.1:\d+$/.test(built.update.url) ? new URL(built.update.url) : null
 const NEW_VERSION = '9.9.9'
-const INSTALLER = `Apteka-Setup-${NEW_VERSION}.exe`
+const INSTALLER = `FinMax-POS-Setup-${NEW_VERSION}.exe`
 const UPDATER_CACHE = join(process.env.LOCALAPPDATA || '', 'apteka-desktop-updater')
 let feed = null
 const feedHits = []

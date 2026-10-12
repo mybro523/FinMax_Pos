@@ -76,7 +76,7 @@ export default function RevenueChart({ data }) {
             />
             <Bar dataKey="amount" radius={[6, 6, 0, 0]}>
               {rows.map((r, i) => (
-                <Cell key={r.month} fill={i === last ? '#4f9d94' : '#0f766e'} />
+                <Cell key={r.month} fill={i === last ? '#8aa5e3' : '#00359f'} />
               ))}
             </Bar>
           </BarChart>

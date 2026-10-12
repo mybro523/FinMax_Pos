@@ -1,10 +1,10 @@
 {
-  "name": "apteka-desktop",
-  "productName": "Apteka",
+  "name": "finmax-pos-desktop",
+  "productName": "FinMax POS",
   "version": "1.0.2",
-  "description": "Аптека — касса и склад. Программа для Windows",
+  "description": "FinMax POS — касса и склад аптеки. Программа для Windows",
   "private": true,
-  "author": "Apteka",
+  "author": "FinMax",
   "type": "module",
   "main": "src/main.mjs",
   "engines": {

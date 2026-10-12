@@ -51,7 +51,7 @@ export default function Expiry() {
           <div className="value" style={{ color: rows.expired ? 'var(--danger)' : undefined }}>{rows.expired}</div>
         </div>
         <div className="metric">
-          <div className="metric-head"><div className="label">{t('Истекает (≤')}{EXPIRY_WARN_DAYS}{t(' дн.)')}</div><div className="ic-box" style={{ background: '#fdf0dc', color: 'var(--warn)' }}><LuCalendarClock size={19} /></div></div>
+          <div className="metric-head"><div className="label">{t('Истекает (≤')}{EXPIRY_WARN_DAYS}{t(' дн.)')}</div><div className="ic-box" style={{ background: 'var(--warn-soft)', color: 'var(--warn)' }}><LuCalendarClock size={19} /></div></div>
           <div className="value" style={{ color: rows.soon ? 'var(--warn)' : undefined }}>{rows.soon}</div>
         </div>
         <div className="metric">

@@ -25,6 +25,8 @@ test('страница и её файлы находятся', () => {
     html: false,
   })
   assert.equal(at(ORIGIN + '/assets/index-x.css').type, 'text/css; charset=utf-8')
+  // Логотип на экране входа — WebP: без этого типа программа показывала бы битую картинку
+  assert.equal(at(ORIGIN + '/assets/logo-320-x.webp').type, 'image/webp')
 })
 
 test('хвост адреса (раздел после решётки, параметры) на файл не влияет', () => {

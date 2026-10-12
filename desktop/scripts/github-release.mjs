@@ -26,7 +26,7 @@ export const tagOf = (version) => 'v' + version
 
 // Без чего программа в аптеке не обновится: установщик, его «карта» для докачки
 // изменившихся кусков и описание версии, по которому программа узнаёт о ней
-export const expectedAssets = (version) => [`Apteka-Setup-${version}.exe`, `Apteka-Setup-${version}.exe.blockmap`, 'latest.yml']
+export const expectedAssets = (version) => [`FinMax-POS-Setup-${version}.exe`, `FinMax-POS-Setup-${version}.exe.blockmap`, 'latest.yml']
 
 export function createReleases({ owner, repo, token, fetchImpl = fetch, pause = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
   const where = `${owner}/${repo}`

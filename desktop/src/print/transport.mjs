@@ -102,7 +102,7 @@ public class AptekaRawPrint {
     if (!OpenPrinter(printer, out h, IntPtr.Zero)) return "open:" + Marshal.GetLastWin32Error();
     try {
       DOCINFO info = new DOCINFO();
-      info.pDocName = "Apteka";
+      info.pDocName = "FinMax POS";
       info.pDataType = "RAW";
       if (StartDocPrinter(h, 1, info) == 0) return "doc:" + Marshal.GetLastWin32Error();
       try {

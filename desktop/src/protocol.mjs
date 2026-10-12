@@ -24,6 +24,8 @@ const TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  // Логотип FinMax на экране входа лежит в WebP: он втрое легче PNG
+  '.webp': 'image/webp',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.ico': 'image/x-icon',

@@ -60,7 +60,7 @@ registerScheme(protocol)
 Menu.setApplicationMenu(null)
 
 // Под этим именем Windows знает программу: значок на панели задач, уведомления
-app.setAppUserModelId('tj.apteka.desktop')
+app.setAppUserModelId('tj.finmax.pos')
 
 let win = null
 let log = { info() {}, warn() {}, error() {} }
@@ -91,7 +91,7 @@ if (!app.requestSingleInstanceLock()) {
   })
   app.whenReady().then(start).catch((e) => {
     log.error('запуск не удался', e)
-    dialog.showErrorBox('Аптека', 'Программа не смогла запуститься.\n\n' + (e?.message || e))
+    dialog.showErrorBox('FinMax POS', 'Программа не смогла запуститься.\n\n' + (e?.message || e))
     app.quit()
   })
 }
@@ -491,7 +491,7 @@ async function start() {
   ipcMain.handle('print:test', (event) =>
     trusted(event) && founder()
       ? printTicket({
-          head: ['Аптека', 'Пробная печать'],
+          head: ['FinMax POS', 'Пробная печать'],
           rows: [{ name: 'Проверка русских букв: АБВГД абвгд ЁЖЗ', sub: '1 шт × 1', value: '1 сомони' }],
           totals: [{ label: 'Итого', value: '1 сомони', big: true }],
           tail: ['Если этот текст читается — принтер настроен верно'],
@@ -578,8 +578,8 @@ function createWindow(ses, userData) {
     minWidth: MIN_SIZE.width,
     minHeight: MIN_SIZE.height,
     show: false, // показываем готовым: пустой белый прямоугольник при запуске ни к чему
-    backgroundColor: '#f4f6f8',
-    title: 'Аптека',
+    backgroundColor: '#f3f5fa',
+    title: 'FinMax POS',
     icon: fs.existsSync(ICON) ? ICON : undefined,
     webPreferences: {
       session: ses,
