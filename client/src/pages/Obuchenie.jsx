@@ -28,9 +28,10 @@ const menuInfo = (to) => NAV.find((n) => n.to === to) || {}
 export default function Obuchenie() {
   const t = useT()
   const lang = useLang()
-  const isFounder = useAuth()?.role === 'founder'
+  const user = useAuth()
+
   const done = useToursDone()
-  const uroki = useMemo(() => urokiFor(isFounder), [isFounder])
+  const uroki = useMemo(() => urokiFor(user), [user])
   const [openTo, setOpenTo] = useState(uroki[0]?.to || '/pos')
   const [q, setQ] = useState('')
 
@@ -46,13 +47,13 @@ export default function Obuchenie() {
     return uroki.filter((u) => {
       const строки = [
         menuInfo(u.to).label || '', u.zachem,
-        ...ekranFor(u, isFounder).flatMap(([a, b]) => [a, b]),
+        ...ekranFor(u, user).flatMap(([a, b]) => [a, b]),
         ...u.shagi, ...u.oshibki,
       ]
       const всё = строки.flatMap((x) => [x, OBUCHENIE_TG[x] ?? t(x)]).join(' ').toLowerCase()
       return всё.includes(s)
     })
-  }, [q, uroki, t, isFounder])
+  }, [q, uroki, t, user])
 
   const urok = найдено.find((u) => u.to === openTo) || найдено[0] || null
   const info = urok ? menuInfo(urok.to) : {}
@@ -133,7 +134,7 @@ export default function Obuchenie() {
               <span className="ic"><LuCircleHelp size={15} /></span> {t('Что на экране')}
             </h3>
             <dl className="uch-dl">
-              {ekranFor(urok, isFounder).map(([что, зачем]) => (
+              {ekranFor(urok, user).map(([что, зачем]) => (
                 <div key={что + зачем}>
                   <dt>{tu(что)}</dt>
                   <dd>{tu(зачем)}</dd>

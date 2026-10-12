@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LuCalendarClock, LuTriangleAlert, LuCircleCheck, LuTrash2 } from 'react-icons/lu'
 import Layout from '../components/Layout'
-import { useAuth } from '../db/auth'
+import { useCan } from '../db/auth'
 import { Pagination, usePagination } from '../components/Pagination'
 import { useCollection, stockText } from '../db/store'
 import { expiredUnits, sellableUnits, hasExpired } from '../lib/units'
@@ -16,8 +16,8 @@ export default function Expiry() {
   const products = useCollection('products')
   const t = useT()
   const nav = useNavigate()
-  const user = useAuth()
-  const isFounder = user?.role === 'founder'
+  const can = useCan()
+  const isFounder = can('writeoffs.create')
   const [mode, setMode] = useState('warn') // warn | all
 
   // Списание доступно только основателю — переносим товар на страницу списания

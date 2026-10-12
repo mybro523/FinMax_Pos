@@ -20,6 +20,8 @@ globalThis.localStorage = {
     return store.size
   },
 }
+// Ключ входа живёт в хранилище вкладки — в проверках оно устроено так же
+globalThis.sessionStorage = globalThis.localStorage
 
 // Подставной мост. Обычного fetch здесь быть не должно вовсе: окно программы
 // в сеть не ходит
@@ -119,7 +121,7 @@ test('чтение при обрыве связи тихо повторяетс�
 test('недействительная сессия выводит на вход — но не при самом входе', async () => {
   let kicked = 0
   setAuthErrorHandler(() => kicked++)
-  localStorage.setItem('apteka_token', DESKTOP_TOKEN)
+  sessionStorage.setItem('apteka_token', DESKTOP_TOKEN)
 
   answer = () => ({ status: 401, date: null, data: { message: 'Сессия недействительна' } })
   await assert.rejects(() => api.post('/sales', {}), (e) => e.status === 401)
@@ -130,7 +132,7 @@ test('недействительная сессия выводит на вход
   assert.equal(kicked, 1)
 
   // Входа и не было — выводить некуда
-  localStorage.removeItem('apteka_token')
+  sessionStorage.removeItem('apteka_token')
   await assert.rejects(() => api.post('/sales', {}), (e) => e.status === 401)
   assert.equal(kicked, 1)
   setAuthErrorHandler(() => {})

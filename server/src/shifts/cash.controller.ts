@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common'
 import { CashService } from './cash.service'
-import { CurrentUser, Roles } from '../auth/decorators'
+import { CurrentUser, Perm } from '../auth/decorators'
+import { hasPerm } from '../auth/permissions'
 import { PeriodQuery } from '../common/period'
 import { CashMoveDto } from './dto'
 
@@ -11,13 +12,14 @@ export class CashController {
   constructor(private readonly cash: CashService) {}
 
   @Post('cash')
+  @Perm('shift.cash')
   create(@Body() dto: CashMoveDto, @CurrentUser() u: any) {
     return this.cash.create(dto, u)
   }
 
   @Get('cash-sources')
   sources(@CurrentUser() u: any) {
-    return this.cash.sources(u?.role === 'founder')
+    return this.cash.sources(hasPerm(u, 'shift.others'))
   }
 }
 
@@ -32,7 +34,7 @@ export class CashMovesController {
 
   // Отменить ошибочную запись — только владелец и только пока смена открыта
   @Delete(':id')
-  @Roles('founder')
+  @Perm('shift.others')
   remove(@Param('id') id: string) {
     return this.cash.remove(id)
   }

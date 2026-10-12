@@ -6,7 +6,7 @@ import { Pagination, usePagination } from '../components/Pagination'
 import { JournalFilter, JournalCount, useJournalFilter } from '../components/JournalFilter'
 import { useCollection, money, db } from '../db/store'
 import { receiveArrival, findByBarcode, getArrival, updateArrival, deleteArrival } from '../db/ops'
-import { useAuth } from '../db/auth'
+import { useCan } from '../db/auth'
 import { fmtDateTime } from '../lib/time'
 import { useT, translate as tr } from '../lib/i18n'
 import { needsExpiry, useCategories, categoryNames } from '../lib/categories'
@@ -28,7 +28,7 @@ export default function Arrivals() {
 
   // Оформить приход может и кассир, а переписать или стереть уже оформленный —
   // только владелец: иначе недостачу легко спрятать, поправив вчерашний приход
-  const isFounder = useAuth()?.role === 'founder'
+  const can = useCan()
 
   // Для правки нужен не тот приход, что лежит в списке, а подробный: с ним
   // приходит, сколько от каждой строки уже продано и ниже чего нельзя опускать
@@ -77,7 +77,7 @@ export default function Arrivals() {
     <Layout
       title={t('Приход товара')}
       subtitle={`${arrivals.length} ${t('поставок')}`}
-      actions={<button className="btn" data-tour="arr.new" onClick={() => setOpen(true)}><span className="ic"><LuPlus size={16} /></span> {t('Новый приход')}</button>}
+      actions={can('arrivals.create') && <button className="btn" data-tour="arr.new" onClick={() => setOpen(true)}><span className="ic"><LuPlus size={16} /></span> {t('Новый приход')}</button>}
     >
       <div className="panel" style={{ padding: 0 }}>
         <div data-tour="arr.filter" style={{ padding: '16px 16px 0' }}>
@@ -150,7 +150,7 @@ export default function Arrivals() {
           )}
 
           {/* Кассиру этих кнопок не видно, и запрос от него сервер тоже отклонит */}
-          {isFounder && (
+          {can('arrivals.edit') && (
             <div className="modal-actions" style={{ justifyContent: 'space-between' }}>
               <button className="btn ghost" style={{ color: 'var(--danger)' }} onClick={() => askDelete(view)} disabled={busy}>
                 <span className="ic"><LuTrash2 size={16} /></span> {t('Удалить')}
@@ -187,6 +187,7 @@ export default function Arrivals() {
 // Приёмка идёт коробка за коробкой, поэтому работает как касса: сканер стреляет
 // в одно поле, товар сам встаёт строкой, а незнакомый штрихкод заводится на месте.
 function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
+  const can = useCan()
   const categories = useCategories()
   const dialog = useDialog()
   const [supplierId, setSupplierId] = useState('')
@@ -466,7 +467,7 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
       )}
 
       <div className="total-row big" data-tour="af.total"><span>{tr('Итого')}</span><span>{money(total)}</span></div>
-      <CreditBlock credit={credit} setCredit={setCredit} paid={paid} setPaid={setPaid} total={total} tour="af.credit" />
+      {can('arrivals.debt') && <CreditBlock credit={credit} setCredit={setCredit} paid={paid} setPaid={setPaid} total={total} tour="af.credit" />}
       <div className="modal-actions">
         <button className="btn ghost" onClick={onClose}>{tr('Отмена')}</button>
         <button className="btn" data-tour="af.submit" disabled={!lines.length} onClick={submit}>{tr('Оприходовать')}</button>

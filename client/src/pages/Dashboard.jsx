@@ -18,6 +18,7 @@ import { expiringProducts } from '../lib/expiry'
 import { periodFinance } from '../lib/finance'
 import { LuTriangleAlert } from 'react-icons/lu'
 import { useT, translate as tr } from '../lib/i18n'
+import { useCan } from '../db/auth'
 
 // Формулы упаковок и штук — общие, из lib/units
 const unitsOf = stockUnits
@@ -89,6 +90,7 @@ export default function Dashboard() {
   const returns = useCollection('returns')
   const writeOffs = useCollection('writeoffs')
   const t = useT()
+  const can = useCan()
   const [modal, setModal] = useState(null)
   const close = () => setModal(null)
 
@@ -422,7 +424,7 @@ export default function Dashboard() {
 
   return (
     <Layout title={t('Панель управления')} subtitle={t('Обзор аптеки (время таджикское, UTC+5)')}
-      actions={<Link to="/pos" className="btn" data-tour="dash.open-pos"><span className="ic"><LuShoppingCart size={16} /></span> {t('Открыть кассу')}</Link>}>
+      actions={can('pos.sell') && <Link to="/pos" className="btn" data-tour="dash.open-pos"><span className="ic"><LuShoppingCart size={16} /></span> {t('Открыть кассу')}</Link>}>
 
       {stats.expiring > 0 && (
         <Link to="/expiry" className="note err" data-tour="dash.expiring" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, textDecoration: 'none' }}>

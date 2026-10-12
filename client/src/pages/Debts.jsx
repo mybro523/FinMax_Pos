@@ -4,7 +4,7 @@ import Layout from '../components/Layout'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { useCollection, money, db } from '../db/store'
-import { useAuth } from '../db/auth'
+import { useCan } from '../db/auth'
 import { payDebt } from '../db/ops'
 import { fmtDateTime } from '../lib/time'
 import { useT, translate as tr } from '../lib/i18n'
@@ -18,7 +18,8 @@ export default function Debts() {
   const t = useT()
   const [detail, setDetail] = useState(null) // клиент, чью историю смотрим
   // Удалять клиента вместе с его долгом и историей платежей может только владелец
-  const isFounder = useAuth()?.role === 'founder'
+  const can = useCan()
+  const isFounder = can('customers.delete')
   const totalDebt = customers.reduce((s, c) => s + (c.debt || 0), 0)
   const pg = usePagination(customers, 10)
 
@@ -74,7 +75,7 @@ export default function Debts() {
     <Layout
       title={t('Долги клиентов')}
       subtitle={`${t('Общая задолженность')}: ${money(totalDebt)}`}
-      actions={<button className="btn" data-tour="debt.add" onClick={add}><span className="ic"><LuUserPlus size={16} /></span> {t('Добавить клиента')}</button>}
+      actions={can('customers.create') && <button className="btn" data-tour="debt.add" onClick={add}><span className="ic"><LuUserPlus size={16} /></span> {t('Добавить клиента')}</button>}
     >
       <div className="panel" data-tour="debt.list" style={{ padding: 0 }}>
         <table>
@@ -90,7 +91,7 @@ export default function Debts() {
                     : <span className="badge ok">{t('нет долга')}</span>}
                 </td>
                 <td className="num" onClick={(e) => e.stopPropagation()}>
-                  {c.debt > 0 && <button className="btn ghost sm" data-tour="debt.pay" onClick={() => pay(c)}>{t('Погасить')}</button>}{' '}
+                  {c.debt > 0 && can('debts.pay') && <button className="btn ghost sm" data-tour="debt.pay" onClick={() => pay(c)}>{t('Погасить')}</button>}{' '}
                   {isFounder && <button className="btn ghost sm icon" onClick={() => remove(c)}><LuTrash2 size={15} /></button>}
                 </td>
               </tr>

@@ -271,4 +271,10 @@ export const CORE_SCHEMA = [
     sealed TEXT NOT NULL
   );
   `,
+  `
+  -- Права из роли и её имя: по ним программа проверяет действия и без связи.
+  -- Кассир прежней версии (пустой список) получает права кассира по умолчанию
+  ALTER TABLE accounts ADD COLUMN permissions TEXT NOT NULL DEFAULT '';
+  ALTER TABLE accounts ADD COLUMN roleName TEXT NOT NULL DEFAULT '';
+  `,
 ]

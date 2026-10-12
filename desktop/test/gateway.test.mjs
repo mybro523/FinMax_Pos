@@ -22,10 +22,11 @@ import { API, fakeSeal, fakeServer, manualTimers, memorySession } from '../test-
 
 const PASS = 'sekret-1'
 
-function setup({ role = 'founder' } = {}) {
+// permissions — права роли сотрудника; без них кассир получает минимум (см. CASHIER_DEFAULT)
+function setup({ role = 'founder', permissions } = {}) {
   const time = { now: NOW }
   const srv = fakeServer({ now: () => time.now })
-  srv.addUser('kassir', PASS, role)
+  srv.addUser('kassir', PASS, role, undefined, permissions ? { permissions } : {})
   srv.state.data.categories = CATEGORIES
   srv.state.data.expenseCategories = EXPENSE_CATEGORIES
   srv.state.data.suppliers = SUPPLIERS.map((s) => ({ ...s }))
@@ -1993,8 +1994,19 @@ test('приход в долг без связи: долг поставщика 
   assert.deepEqual([closed.data.supplierCash, closed.data.expectedCash, closed.data.difference], [100, 200, 0])
 })
 
-test('кассир: поставщики без долгов, оплаты поставщикам и история товара закрыты, как на сервере; приход в долг оформить может', async (tt) => {
+test('кассир по умолчанию: приход закрыт — у минимальной роли нет такого права', async (tt) => {
   const t = await loggedIn({ role: 'cashier' })
+  tt.after(() => t.gw.close())
+  t.srv.state.online = false
+  const r = await t.req('POST', '/arrivals', { supplierId: 'sup-1', items: [{ productId: 'nur', qty: 1, cost: 100, expiryDate: '2028-01-31' }] })
+  assert.equal(r.status, 403)
+  assert.equal(r.data.message, 'Недостаточно прав')
+  assert.equal((await t.req('GET', '/arrivals')).status, 403)
+})
+
+test('кассир с правом прихода: поставщики без долгов, оплаты поставщикам и история товара закрыты, как на сервере; приход в долг оформить может', async (tt) => {
+  // Владелец выдал кассиру приход и приход в долг, но не поставщиков — долги и оплаты остаются закрытыми
+  const t = await loggedIn({ role: 'cashier', permissions: ['pos.sell', 'shift.open', 'arrivals.view', 'arrivals.create', 'arrivals.debt'] })
   tt.after(() => t.gw.close())
   const sup = (await t.req('GET', '/suppliers')).data.find((s) => s.id === 'sup-1')
   assert.ok(sup && !('debt' in sup), 'кассиру долг поставщика не показывают')

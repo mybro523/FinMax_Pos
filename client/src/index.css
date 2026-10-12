@@ -125,86 +125,28 @@ input, select { font-family: inherit; }
 svg { display: block; }
 .ic-svg { display: inline-block; vertical-align: -0.15em; }
 
-/* ───────── Раскладка с закреплённым сайдбаром ───────── */
+/* ───────── Раскладка ─────────
+   Бокового меню нет: разделы открываются с главного экрана (плитки) и занимают
+   весь экран. В шапке слева — кнопка «Меню», она возвращает к плиткам. */
 .app { min-height: 100vh; }
 
-.sidebar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: var(--sidebar-w);
-  height: 100vh;
-  background: var(--sidebar);
-  color: var(--sidebar-text);
-  display: flex;
-  flex-direction: column;
-  z-index: 60;
-  border-right: 1px solid var(--sidebar-line);
+/* Кнопка «Меню» в шапке: синяя плашка со значком плиток */
+.menu-btn {
+  display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;
+  height: 40px; padding: 0 14px 0 12px; border-radius: 9px;
+  background: var(--sidebar); color: #fff; text-decoration: none;
+  font-size: 13.5px; font-weight: 600; transition: background 0.13s;
 }
-.sidebar .brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 17px 18px 15px;
-  color: #fff;
-  border-bottom: 1px solid var(--sidebar-line);
-}
-/* Эмблема на белом круге — как в шапке сайта FinMax: на синем фоне синяя
-   половина эмблемы иначе пропала бы */
-.sidebar .brand .logo {
-  width: 38px; height: 38px; flex-shrink: 0;
-  background: #fff; border-radius: 50%;
-  display: grid; place-items: center;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 2px 6px rgba(0, 0, 0, 0.28);
-}
-.sidebar .brand .logo img { width: 26px; height: 26px; display: block; }
-.sidebar .brand .brand-name { display: flex; flex-direction: column; gap: 2px; line-height: 1.15; min-width: 0; }
-.sidebar .brand .brand-name small {
-  font-size: 11.5px; font-weight: 500; color: var(--sidebar-muted);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-/* Имя бренда набирается текстом, как на сайте: «Fin» золотом, «Max» белым */
-.brand-word { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; color: #fff; display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; line-height: 1.1; }
-.brand-word .fin { color: var(--gold); }
-.brand-word .brand-pos {
-  font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: var(--gold);
-  border: 1px solid rgba(239, 189, 36, 0.5); border-radius: 4px; padding: 1px 4px 0; line-height: 1.3;
-  position: relative; top: -2px;
-}
+.menu-btn:hover { background: var(--sidebar-2); }
+.menu-btn svg { color: var(--gold); }
+/* Имя системы на главном экране вместо кнопки */
+.brand-mini { display: inline-flex; align-items: center; gap: 9px; flex-shrink: 0; }
+.brand-mini img { width: 30px; height: 30px; }
+.brand-mini .brand-word { color: var(--text); font-size: 17px; }
+.brand-mini .brand-word .brand-pos { color: var(--accent); border-color: var(--accent); }
+.topbar-title { min-width: 0; }
 
-.sidebar nav { display: flex; flex-direction: column; padding: 10px 12px 12px; gap: 1px; flex: 1; overflow-y: auto; }
-.sidebar nav .nav-section { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--sidebar-muted); padding: 16px 12px 6px; }
-.sidebar nav a {
-  position: relative;
-  display: flex; align-items: center; gap: 11px;
-  padding: 9px 12px 9px 14px;
-  color: var(--sidebar-text);
-  text-decoration: none;
-  border-radius: 8px;
-  font-size: 13.5px;
-  font-weight: 500;
-  transition: background 0.13s, color 0.13s;
-}
-.sidebar nav a .ic { display: inline-flex; color: var(--sidebar-icon); transition: color 0.13s; }
-.sidebar nav a:hover { background: rgba(255, 255, 255, 0.05); color: #fff; }
-.sidebar nav a:hover .ic { color: #dfe6f7; }
-.sidebar nav a.active { background: var(--sidebar-active); color: #fff; font-weight: 600; }
-.sidebar nav a.active .ic { color: var(--gold); }
-/* Золотая метка у открытого раздела — единственное золото в меню */
-.sidebar nav a.active::before {
-  content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px;
-  border-radius: 0 3px 3px 0; background: var(--gold);
-}
-.sidebar nav a .nav-badge {
-  margin-left: auto; background: rgba(255, 255, 255, 0.12); color: #fff;
-  font-size: 11px; font-weight: 700; min-width: 20px; height: 20px; font-variant-numeric: tabular-nums;
-  border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; padding: 0 6px;
-}
-/* Срок годности: число, на которое надо посмотреть сегодня */
-.sidebar nav a .nav-badge.warn { background: var(--gold); color: var(--on-gold); }
-.sidebar .foot { padding: 14px 20px; font-size: 11.5px; color: var(--sidebar-muted); border-top: 1px solid var(--sidebar-line); }
-
-.main { margin-left: var(--sidebar-w); display: flex; flex-direction: column; min-height: 100vh; min-width: 0; }
+.main { display: flex; flex-direction: column; min-height: 100vh; min-width: 0; }
 .topbar {
   background: var(--card);
   border-bottom: 1px solid var(--border);
@@ -248,16 +190,6 @@ svg { display: block; }
 /* Панель владельца сервиса: эмблема вместо бокового меню */
 .admin-emblem { width: 34px; height: 34px; margin-right: 12px; flex-shrink: 0; display: block; }
 
-.burger, .nav-close { display: none; }
-.burger {
-  background: var(--soft); color: var(--accent-dark); border: 1px solid var(--border);
-  width: 40px; height: 40px; border-radius: 9px; align-items: center; justify-content: center; flex-shrink: 0;
-}
-.nav-close {
-  margin-left: auto; background: rgba(255, 255, 255, 0.08); color: #fff;
-  border: none; width: 30px; height: 30px; border-radius: 8px; place-items: center;
-}
-.nav-backdrop { position: fixed; inset: 0; background: rgba(10, 24, 26, 0.5); z-index: 55; }
 
 /* ───────── Карточки-метрики ───────── */
 /* Пять ячеек в ряд: к четырём прежним добавилась «Вложено в товар».
@@ -506,7 +438,7 @@ input::placeholder { color: var(--muted-2); }
    съедала место у самих плашек, а в чеке и каталоге смотрелась чужеродно.
    Тонкая полоса без стрелок делает то же самое и не мешает. */
 .kc-cats, .kc-list, .kassa-table-wrap { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
-.sidebar nav { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.18) transparent; }
+
 
 /* ── Открытые чеки ── */
 .cheki { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -853,19 +785,14 @@ input::placeholder { color: var(--muted-2); }
 
 /* ═════════ Адаптив ═════════ */
 @media (max-width: 860px) {
-  /* Тень — только у открытого меню: у спрятанного она выглядывала тёмной
-     полосой вдоль левого края экрана */
-  .sidebar { transform: translateX(-100%); transition: transform 0.25s ease; }
-  .sidebar.open { transform: translateX(0); box-shadow: 0 0 40px rgba(0, 0, 0, 0.35); }
-  .nav-close { display: grid; }
-  .burger { display: inline-flex; }
-  .main { margin-left: 0; }
   .grid-2 { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 600px) {
   .topbar { padding: 12px 14px; }
   .topbar h1 { font-size: 16px; }
+  .menu-btn { padding: 0 10px; }
+  .menu-btn-text { display: none; }
   .topbar .sub { font-size: 11.5px; }
   .topbar-actions .btn { padding: 9px 12px; font-size: 13px; }
   .content { padding: 14px; }
@@ -1251,16 +1178,6 @@ input, select { transition: border 0.14s, box-shadow 0.14s, background 0.14s; }
 .login-card .field { text-align: left; }
 .login-hint { font-size: 12px; color: var(--muted-2); margin-top: 14px; }
 
-/* Кто вошёл, тема и выход — низ меню */
-.side-user { padding: 12px 14px 12px 16px; border-top: 1px solid var(--sidebar-line); display: flex; align-items: center; gap: 6px; }
-.side-user .su-info { min-width: 0; flex: 1; margin-right: 4px; }
-.side-user .su-name { font-size: 13px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.side-user .su-role { font-size: 11.5px; color: var(--sidebar-muted); }
-.side-user .su-btn, .side-user .su-logout {
-  background: rgba(255, 255, 255, 0.07); color: #dfe6f7; border: none; width: 32px; height: 32px; border-radius: 8px;
-  display: grid; place-items: center; flex-shrink: 0; transition: background 0.13s, color 0.13s;
-}
-.side-user .su-btn:hover, .side-user .su-logout:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
 
 /* ───────── Пагинация таблиц ───────── */
 .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; flex-wrap: wrap; border-top: 1px solid var(--border); }
@@ -1354,6 +1271,43 @@ tbody tr.clickable { cursor: pointer; }
   }
 }
 
+
+/* ═════════ Чек (TicketView): экран, предпросмотр, печать — один вид ═════════ */
+.ticket { font-size: 14px; color: var(--text); }
+.ticket-emblem { display: block; margin: 0 auto 8px; }
+.ticket-head { text-align: center; line-height: 1.55; }
+.ticket-head .ticket-title { font-weight: 700; font-size: 16px; letter-spacing: 0.2px; }
+.ticket-head div:not(.ticket-title) { font-size: 13px; color: var(--muted); }
+.ticket-rule { border-top: 1px dashed var(--border-strong); margin: 10px 0; }
+.ticket-item + .ticket-item { margin-top: 8px; }
+.ticket-name { font-weight: 500; }
+.ticket-sub { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13px; color: var(--muted); }
+.ticket-sub b { color: var(--text); font-size: 14px; white-space: nowrap; }
+.ticket-tail { text-align: center; font-size: 13px; color: var(--muted); line-height: 1.6; }
+.ticket-tail .ticket-brand { font-weight: 600; letter-spacing: 0.4px; color: var(--text); margin-top: 2px; }
+
+/* ── Свой экран печати (программа для Windows) ── */
+.print-dlg-body { display: flex; gap: 20px; align-items: flex-start; }
+/* Бумага всегда белая, даже в тёмной теме: предпросмотр показывает будущий лист */
+.print-paper {
+  --text: #1c2130; --muted: #5b6578; --border-strong: #b9c0cf;
+  background: #fff; color: var(--text); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px 14px; margin: 0 auto;
+  max-height: 62vh; overflow: auto; flex: none;
+}
+.print-paper.p58 { width: 252px; }
+.print-paper.p80 { width: 332px; }
+.print-paper.pa4 { width: 420px; padding: 26px 24px; border-radius: 6px; }
+.print-side { flex: 1; min-width: 220px; }
+.print-hint { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 2px 0 10px; }
+.print-side-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.print-side-actions .btn { width: 100%; justify-content: center; }
+@media (max-width: 720px) {
+  .print-dlg-body { flex-direction: column; }
+  .print-paper { max-width: 100%; }
+  .print-side { width: 100%; }
+}
+
 /* ═════════ Печать: только чек / Z-отчёт, без интерфейса ═════════ */
 @media print {
   body { background: #fff; }
@@ -1361,14 +1315,28 @@ tbody tr.clickable { cursor: pointer; }
   body * { visibility: hidden !important; }
   .printable, .printable * { visibility: visible !important; }
   .printable {
-    position: fixed; inset: 0; display: block !important;
+    position: absolute; left: 0; top: 0; width: 100%; display: block !important;
     background: #fff; padding: 0 !important; overflow: visible; animation: none !important;
+    /* На бумаге всегда тёмным по белому — даже если на экране тёмная тема */
+    --text: #111623; --muted: #434b5e; --border-strong: #9aa1b1; --border: #c7ccd8;
+    color: var(--text);
   }
+  /* Заголовок окна («Чек продажи») — часть интерфейса, на бумагу не идёт */
+  .printable .modal > h3 { display: none !important; }
+  /* Чек на листе — узкой колонкой по центру, как бумажный чек, а не во всю страницу */
+  .printable .ticket { max-width: 400px; margin: 0 auto; }
   .printable .modal {
     box-shadow: none !important; max-width: 100% !important; max-height: none !important;
     border-radius: 0 !important; padding: 4mm 2mm !important; animation: none !important; overflow: visible !important;
   }
   .printable .modal-actions, .no-print { display: none !important; }
+  /* Открыт свой экран печати — печатается его предпросмотр, а не чек под ним */
+  body[data-print-dlg] .printable:not(.print-dlg) { display: none !important; }
+  .print-dlg .print-dlg-body { display: block; }
+  .print-dlg .print-paper {
+    width: 100% !important; max-height: none !important; overflow: visible !important;
+    border: none !important; border-radius: 0 !important; padding: 0 !important; margin: 0 !important;
+  }
   .toast, .conn-banner { display: none !important; }
   /* Этикетки: печатаем без рамок предпросмотра и без ограничения высоты */
   .label-print .label-sheet { max-height: none !important; overflow: visible !important; padding: 0 !important; }
@@ -1461,4 +1429,90 @@ tbody tr.clickable { cursor: pointer; }
 
 @media (prefers-reduced-motion: reduce) {
   .tur-spot, .tur-card { transition: none; }
+}
+
+/* ═════════ Главный экран: плитки разделов ═════════
+   Как на кассовом аппарате: крупные плитки по группам. Касса золотая — главное
+   действие. Серая плитка — раздел закрыт для этой роли: он виден, но не нажимается. */
+.hub { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 26px; }
+.hub-group { display: flex; flex-direction: column; gap: 12px; }
+.hub-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); padding-left: 2px; }
+.hub-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(188px, 1fr)); gap: 12px; }
+.hub-tile {
+  position: relative; display: flex; flex-direction: column; justify-content: space-between; gap: 18px;
+  min-height: 112px; padding: 16px 16px 14px; border-radius: 14px;
+  background: var(--sidebar); color: #fff; text-decoration: none;
+  border: 1px solid var(--sidebar-line); box-shadow: var(--shadow-sm);
+  transition: background 0.14s, transform 0.1s, box-shadow 0.14s;
+}
+.hub-tile:hover { background: var(--sidebar-2); box-shadow: var(--shadow); }
+.hub-tile:active { transform: scale(0.985); }
+.hub-tile .hub-ic { display: inline-flex; color: var(--gold); }
+.hub-tile .hub-name { font-size: 15px; font-weight: 600; line-height: 1.25; letter-spacing: -0.005em; }
+.hub-tile.gold { background: var(--gold); border-color: var(--gold); color: var(--on-gold); }
+.hub-tile.gold:hover { background: var(--gold-dark); }
+.hub-tile.gold .hub-ic { color: var(--on-gold); }
+.hub-tile.off { background: var(--track); border-color: var(--border); color: var(--muted-2); box-shadow: none; cursor: not-allowed; }
+.hub-tile.off .hub-ic { color: var(--muted-2); }
+.hub-tile.off:hover { background: var(--track); box-shadow: none; }
+.hub-badge {
+  position: absolute; top: 12px; right: 12px; min-width: 22px; height: 22px; padding: 0 7px;
+  border-radius: 11px; background: rgba(255, 255, 255, 0.16); color: #fff;
+  font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums;
+}
+.hub-badge.warn { background: var(--gold); color: var(--on-gold); }
+.hub-lock { position: absolute; top: 14px; right: 14px; display: inline-flex; color: var(--muted-2); }
+/* Кто вошёл, тема, выход */
+.hub-user {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  padding: 14px 18px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-sm);
+}
+.hub-user-name { font-size: 15px; font-weight: 600; }
+.hub-user-role { font-size: 12.5px; color: var(--muted); }
+.hub-user-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.hub-user-actions .btn .ic { display: inline-flex; }
+@media (max-width: 600px) {
+  .hub { gap: 20px; }
+  .hub-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .hub-tile { min-height: 96px; padding: 13px 12px 12px; gap: 12px; border-radius: 12px; }
+  .hub-tile .hub-name { font-size: 14px; }
+  .hub-user { padding: 12px 14px; }
+  .hub-user-actions { width: 100%; }
+  .hub-user-actions .btn { flex: 1 1 auto; justify-content: center; }
+}
+
+/* ═════════ Роли и права ═════════ */
+.roles { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; align-items: start; }
+.roles-list { padding: 14px; display: flex; flex-direction: column; gap: 4px; }
+.roles-list h2 { margin-bottom: 8px; padding: 0 6px; }
+.role-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: left;
+  padding: 10px 12px; border: 1px solid transparent; border-radius: 10px; background: none; color: var(--text); font: inherit;
+  transition: background 0.12s, border-color 0.12s;
+}
+.role-item:hover { background: var(--hover); }
+.role-item.active { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.role-item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.role-item-main b { font-size: 14px; }
+.role-lock { display: inline-flex; color: var(--muted-2); flex-shrink: 0; }
+.roles-editor { padding: 18px 20px; }
+.roles-editor-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.roles-editor-head h2 { margin-bottom: 2px; }
+.roles-editor-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.perm-group { padding: 12px 0; border-top: 1px solid var(--border); }
+.perm-group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.perm-group-head h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); }
+.perm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 16px; }
+.perm { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; font-size: 14px; cursor: pointer; transition: background 0.12s; }
+.perm:hover { background: var(--hover); }
+.perm input { width: 17px; height: 17px; flex-shrink: 0; accent-color: var(--accent); margin: 0; }
+.perm.on { color: var(--text); }
+.perm:not(.on) { color: var(--muted); }
+.perm.locked { cursor: default; }
+.role-select { width: auto; min-width: 150px; padding: 6px 28px 6px 10px; font-size: 13.5px; }
+@media (max-width: 860px) {
+  .roles { grid-template-columns: 1fr; }
+  .roles-list { flex-direction: row; flex-wrap: wrap; }
+  .role-item { width: auto; flex: 1 1 160px; }
+  .roles-list h2 { width: 100%; }
 }

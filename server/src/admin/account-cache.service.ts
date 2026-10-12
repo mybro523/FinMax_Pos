@@ -40,6 +40,7 @@ const SHAPE = {
         offlineDays: true,
       },
     },
+    roleRef: { select: { id: true, name: true, permissions: true } },
   },
 } as const
 
@@ -54,6 +55,7 @@ type Account = NonNullable<Awaited<ReturnType<AdminDbService['account']['findUni
     trial: boolean
     offlineDays: number
   } | null
+  roleRef: { id: string; name: string; permissions: string[] } | null
 }
 
 @Injectable()

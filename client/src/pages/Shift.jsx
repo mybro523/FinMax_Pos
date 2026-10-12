@@ -9,14 +9,16 @@ import Metric from '../components/Metric'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { useCollection, money } from '../db/store'
-import { useAuth } from '../db/auth'
+import { useAuth, useCan } from '../db/auth'
 import { openShift, closeShift, cashMove, removeCashMove } from '../db/ops'
 import { fmtDateTime, fmtShort, fmtTime, dayKey } from '../lib/time'
 import { useT, translate as tr } from '../lib/i18n'
 import { restockedCost, shiftTotals } from '../lib/finance'
 import NumberInput from '../components/NumberInput'
 import { shiftTicket } from '../lib/ticket'
-import { printTicket } from '../lib/print'
+import TicketView from '../components/TicketView'
+import { usePechat } from '../components/PrintDialog'
+import { getRekvizity } from '../lib/rekvizity'
 
 export default function Shift() {
   const shifts = useCollection('shifts')
@@ -32,7 +34,9 @@ export default function Shift() {
   const [view, setView] = useState(null)
 
   const user = useAuth()
-  const isFounder = user?.role === 'founder'
+  const can = useCan()
+  // Смены других кассиров и чужие внесения — по праву, а не по должности
+  const isFounder = can('shift.others')
   const current = shifts.find((s) => !s.closedAt)
   const history = shifts.filter((s) => s.closedAt)
   const pg = usePagination(history, 10)
@@ -211,15 +215,24 @@ export default function Shift() {
       actions={current
         ? (
           <>
-            <button className="btn ghost" data-tour="shift.cash-in" onClick={() => doCash('in')}><span className="ic"><LuArrowDownToLine size={16} /></span> {t('Внести')}</button>
-            <button className="btn ghost" data-tour="shift.cash-out" onClick={() => doCash('out')}><span className="ic"><LuArrowUpFromLine size={16} /></span> {t('Изъять')}</button>
-            <button className="btn danger" data-tour="shift.close" onClick={doClose}><span className="ic"><LuClock size={16} /></span> {t('Закрыть смену')}</button>
+            {can('shift.cash') && (
+              <>
+                <button className="btn ghost" data-tour="shift.cash-in" onClick={() => doCash('in')}><span className="ic"><LuArrowDownToLine size={16} /></span> {t('Внести')}</button>
+                <button className="btn ghost" data-tour="shift.cash-out" onClick={() => doCash('out')}><span className="ic"><LuArrowUpFromLine size={16} /></span> {t('Изъять')}</button>
+              </>
+            )}
+            {can('shift.open') && (
+              <button className="btn danger" data-tour="shift.close" onClick={doClose}><span className="ic"><LuClock size={16} /></span> {t('Закрыть смену')}</button>
+            )}
           </>
         )
         : null}
     >
       {/* ── Открытие смены ── */}
-      {!current && (
+      {!current && !can('shift.open') && (
+        <div className="note info" style={{ maxWidth: 460, marginBottom: 16 }}>{t('Открыть смену может сотрудник с правом «Смена кассы: открыть и закрыть»')}</div>
+      )}
+      {!current && can('shift.open') && (
         <div className="panel" data-tour="shift.open" style={{ maxWidth: 460 }}>
           <h2><span className="h2-title"><span className="ic"><LuClock size={17} /></span>{t('Открыть смену')}</span></h2>
           <div className="field">
@@ -399,77 +412,41 @@ export default function Shift() {
   )
 }
 
+// Z-отчёт собирается в общий вид чека (lib/ticket.js): экран, лента и PDF
+// печатают одно и то же. Зелёная или красная пометка — только на экране
 function ZReport({ shift, onClose }) {
-  const toast = useToast()
   const auth = useAuth()
+  const { print, dialog } = usePechat()
   const ok = Math.abs(shift.difference) < 0.01
   // Чистые числа считаем из сохранённых полей смены: у смен, закрытых до учёта
   // возвратов, они нулевые — и чистые значения совпадают с валовыми
   const totals = shiftTotals(shift)
-  const row = (label, value, strong) => (
-    <div className={'total-row' + (strong ? ' big' : '')}><span>{label}</span><span>{value}</span></div>
-  )
+  const ticket = shiftTicket(shift, totals, {
+    t: tr,
+    money,
+    when: fmtDateTime,
+    pharmacy: auth?.pharmacy?.name,
+    rekvizity: getRekvizity(auth?.pharmacy?.code),
+  })
   return (
     <Modal className="printable" title={<><span className="ic"><LuCalculator size={18} /></span>{tr('Z-отчёт смены')}</>} onClose={onClose}>
-      <div className="tag-cat" style={{ marginBottom: 12 }}>
-        {fmtDateTime(shift.openedAt)} — {shift.closedAt && fmtDateTime(shift.closedAt)}
-        {shift.deviceName ? ` · ${shift.deviceName}` : ''}
-      </div>
       {shift.pending && (
         <div className="note info no-print" style={{ marginBottom: 12 }}>
           {tr('Цифры предварительные — сверяются с сервером…')}
         </div>
       )}
-      {row(tr('Чеков'), shift.count)}
-      {row(tr('Наличными'), money(shift.salesCash))}
-      {row(tr('Картой'), money(shift.salesCard))}
-      {row(tr('В долг'), money(shift.salesDebt))}
-      {(shift.salesTransfer || 0) > 0 && row(tr('Переводом'), money(shift.salesTransfer))}
-      {(shift.salesTransfer || 0) > 0 &&
-        Object.entries(shift.transferBy || {}).map(([via, sum]) => (
-          <div className="total-row" key={via} style={{ fontSize: 13, color: 'var(--muted)' }}><span style={{ paddingLeft: 14 }}>{via}</span><span>{money(sum)}</span></div>
-        ))}
-      {(shift.debtPaid || 0) > 0 && row(tr('Погашено долгов (нал.)'), money(shift.debtPaid))}
-      {row(tr('Скидки'), '−' + money(shift.discount))}
-      {totals.refunds > 0 && (
-        <>
-          <div style={{ borderTop: '1px dashed var(--border-strong)', margin: '12px 0' }} />
-          {row(tr('Продано за смену'), money(totals.gross))}
-          {row(tr('Возвраты покупателям'), '−' + money(totals.refunds))}
-        </>
-      )}
-      {row(tr('Выручка'), money(totals.netSales), true)}
-      {row(tr('Прибыль'), money(totals.netProfit))}
-      <div style={{ borderTop: '1px dashed var(--border-strong)', margin: '12px 0' }} />
-      {row(tr('Касса на старте'), money(shift.openingCash))}
-      {(shift.cashIn || 0) > 0 && row(tr('Внесено в кассу'), '+' + money(shift.cashIn))}
-      {(shift.refundCash || 0) > 0 && row(tr('Выдано за возвраты (нал.)'), '−' + money(shift.refundCash))}
-      {(shift.expenseCash || 0) > 0 && row(tr('Расходы из кассы'), '−' + money(shift.expenseCash))}
-      {(shift.supplierCash || 0) > 0 && row(tr('Оплачено поставщикам (нал.)'), '−' + money(shift.supplierCash))}
-      {(shift.cashOut || 0) > 0 && row(tr('Изъято из кассы'), '−' + money(shift.cashOut))}
-      {row(tr('Ожидалось в кассе'), money(shift.expectedCash))}
-      {row(tr('Пересчитано (факт)'), money(shift.countedCash || 0))}
-      <div className="total-row big">
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          {ok ? <LuCircleCheck size={18} style={{ color: 'var(--green)' }} /> : <LuTriangleAlert size={18} style={{ color: 'var(--danger)' }} />}
-          {tr('Расхождение')}
-        </span>
-        <span style={{ color: ok ? 'var(--green)' : 'var(--danger)' }}>
-          {shift.difference > 0 ? '+' : ''}{money(shift.difference)}
-        </span>
+      <div className={'note no-print ' + (ok ? 'info' : 'err')} style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+        {ok ? <LuCircleCheck size={16} style={{ color: 'var(--green)' }} /> : <LuTriangleAlert size={16} style={{ color: 'var(--danger)' }} />}
+        <span>{ok ? tr('Касса сошлась.') : tr('Есть расхождение — пересчитайте наличные.')}</span>
       </div>
+      <TicketView ticket={ticket} />
       <div className="modal-actions">
-        <button
-          className="btn ghost"
-          onClick={() =>
-            // На чековом принтере Z-отчёт печатается строками, как чек; иначе — окно печати
-            printTicket(shiftTicket(shift, totals, { t: tr, money, when: fmtDateTime, pharmacy: auth?.pharmacy?.name })).catch((e) => toast(tr(e.message), 'err'))
-          }
-        >
+        <button className="btn ghost" onClick={() => print(ticket)}>
           <span className="ic"><LuReceipt size={16} /></span> {tr('Печать')}
         </button>
         <button className="btn" onClick={onClose}>{tr('Готово')}</button>
       </div>
+      {dialog}
     </Modal>
   )
 }

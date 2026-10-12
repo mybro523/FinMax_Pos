@@ -60,6 +60,9 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
     id: u.id,
     name: u.name,
     role: u.role,
+    roleId: u.roleId ?? null,
+    roleName: u.roleName ?? null,
+    ...(Array.isArray(u.permissions) ? { permissions: u.permissions } : {}),
     pharmacy: u.role === 'superadmin' ? null : { code: s.pharmacy.code, name: s.pharmacy.name },
     subscription:
       u.role === 'superadmin'
@@ -78,8 +81,9 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
   })
 
   // id — когда сотрудника «удалили и завели заново»: имя то же, учётная запись другая
-  function addUser(name, password, role = 'founder', id = 'acc-' + name) {
-    const u = { id, name, password, role, active: true, tenantUserId: 'tenant-' + name }
+  // extra — права роли (permissions, roleId, roleName), как их отдаёт настоящий сервер
+  function addUser(name, password, role = 'founder', id = 'acc-' + name, extra = {}) {
+    const u = { id, name, password, role, active: true, tenantUserId: 'tenant-' + name, ...extra }
     s.users.set(name, u)
     return u
   }

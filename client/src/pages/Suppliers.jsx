@@ -10,6 +10,7 @@ import { api } from '../db/api'
 import { paySupplier, removeSupplierPayment } from '../db/ops'
 import { fmtDate, fmtDateTime } from '../lib/time'
 import { useT } from '../lib/i18n'
+import { useCan } from '../db/auth'
 import { isDesktop } from '../lib/desktop'
 
 // ── Поставщики и долги перед ними ──
@@ -25,6 +26,7 @@ const sourceName = (s, t) => (s.deviceId ? s.deviceName || t('Касса') : t('
 const defaultSource = (list) => (list.find((s) => !s.deviceId) || list[0])?.shiftId || ''
 
 export default function Suppliers() {
+  const can = useCan()
   const t = useT()
   const toast = useToast()
   const dialog = useDialog()
@@ -73,7 +75,7 @@ export default function Suppliers() {
       title={t('Поставщики')}
       subtitle={t('Кому и сколько должна аптека')}
       actions={
-        <button className="btn" data-tour="sup.add" onClick={() => setForm({ name: '', phone: '', note: '', openingDebt: '' })}>
+        can('suppliers.edit') && <button className="btn" data-tour="sup.add" onClick={() => setForm({ name: '', phone: '', note: '', openingDebt: '' })}>
           <span className="ic"><LuPlus size={16} /></span> {t('Добавить поставщика')}
         </button>
       }
@@ -119,8 +121,12 @@ export default function Suppliers() {
                     <button className="btn ghost sm" data-tour="sup.card" onClick={() => setCardId(s.id)}>
                       <span className="ic"><LuHandCoins size={15} /></span> {t('Долг и оплата')}
                     </button>{' '}
-                    <button className="btn ghost sm icon" onClick={() => setForm({ id: s.id, name: s.name, phone: s.phone || '', note: s.note || '' })} title={t('Изменить')} aria-label={`${t('Изменить')}: ${s.name}`}><LuPencil size={15} /></button>{' '}
-                    <button className="btn ghost sm icon" onClick={() => remove(s)} title={t('Удалить')} aria-label={`${t('Удалить')}: ${s.name}`}><LuTrash2 size={15} /></button>
+                    {can('suppliers.edit') && (
+                      <><button className="btn ghost sm icon" onClick={() => setForm({ id: s.id, name: s.name, phone: s.phone || '', note: s.note || '' })} title={t('Изменить')} aria-label={`${t('Изменить')}: ${s.name}`}><LuPencil size={15} /></button>{' '}</>
+                    )}
+                    {can('suppliers.delete') && (
+                      <button className="btn ghost sm icon" onClick={() => remove(s)} title={t('Удалить')} aria-label={`${t('Удалить')}: ${s.name}`}><LuTrash2 size={15} /></button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -174,6 +180,7 @@ export default function Suppliers() {
 
 // ── Карточка поставщика: долг, откуда он взялся, оплата ──
 function SupplierCard({ id, supplier, onClose }) {
+  const can = useCan()
   const t = useT()
   const toast = useToast()
   const dialog = useDialog()
@@ -312,9 +319,9 @@ function SupplierCard({ id, supplier, onClose }) {
           <div className="tag-cat" style={{ marginTop: 6 }}>{t('Касса')}: <b>{sourceName(tills[0], t)}</b></div>
         )}
         <div className="modal-actions" style={{ justifyContent: 'flex-start', marginTop: 12 }}>
-          <button className="btn" onClick={pay} disabled={saving || debt <= 0}>
+          {can('suppliers.pay') && <button className="btn" onClick={pay} disabled={saving || debt <= 0}>
             <span className="ic"><LuBanknote size={16} /></span> {saving ? t('Сохраняем…') : t('Записать оплату')}
-          </button>
+          </button>}
           {debt <= 0 && <span className="tag-cat">{t('Долга нет — платить нечего')}</span>}
         </div>
       </div>
@@ -337,7 +344,7 @@ function SupplierCard({ id, supplier, onClose }) {
                   {locked(p) ? (
                     <span className="tag-cat" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><LuLock size={14} /> {t('в отчёте смены')}</span>
                   ) : (
-                    <button className="btn ghost sm icon" onClick={() => removePayment(p)} title={t('Отменить оплату')} aria-label={`${t('Отменить оплату')} ${money(p.amount)}`}><LuTrash2 size={15} /></button>
+                    can('suppliers.pay') && <button className="btn ghost sm icon" onClick={() => removePayment(p)} title={t('Отменить оплату')} aria-label={`${t('Отменить оплату')} ${money(p.amount)}`}><LuTrash2 size={15} /></button>
                   )}
                 </td>
               </tr>

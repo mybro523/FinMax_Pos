@@ -10,6 +10,7 @@ import { stockUnits, stockValue, stockCost, lineUnits } from '../lib/units'
 import { startOfDay, startOfDaysAgo, fmtShort, fmtDateTime, dayKey } from '../lib/time'
 import { useT, translate as tr } from '../lib/i18n'
 import { periodFinance } from '../lib/finance'
+import { useCan } from '../db/auth'
 
 const PERIODS = [
   { key: 'today', label: 'Сегодня', days: 0 },
@@ -49,6 +50,7 @@ function SalesTable({ list }) {
 }
 
 export default function Reports() {
+  const can = useCan()
   const sales = useCollection('sales')
   const products = useCollection('products')
   // Возвраты и списания — это деньги и товар, ушедшие обратно. Без них
@@ -257,7 +259,7 @@ export default function Reports() {
 
   return (
     <Layout title={t('Отчёты')} subtitle={t('Продажи, прибыль, выручка и склад')}
-      actions={<button className="btn ghost" data-tour="rep.export" onClick={exportCsv}><span className="ic"><LuDownload size={16} /></span> {t('Экспорт CSV')}</button>}>
+      actions={can('reports.export') && <button className="btn ghost" data-tour="rep.export" onClick={exportCsv}><span className="ic"><LuDownload size={16} /></span> {t('Экспорт CSV')}</button>}>
 
       <div className="chips" data-tour="rep.period" style={{ marginBottom: 12 }}>
         {PERIODS.map((p) => (

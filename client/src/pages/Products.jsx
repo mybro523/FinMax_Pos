@@ -9,7 +9,7 @@ import { normalizeScan, canonBarcode } from '../lib/scan'
 import { expiryStatus, expiryLabel } from '../lib/expiry'
 import { fmtDate } from '../lib/time'
 import { useT } from '../lib/i18n'
-import { useAuth } from '../db/auth'
+import { useCan } from '../db/auth'
 import { useCategories, categoryNames } from '../lib/categories'
 import { sellsBelowCost } from '../lib/pricing'
 import ProductForm, { emptyProduct, productPayload } from '../components/ProductForm'
@@ -35,7 +35,7 @@ export default function Products() {
   // продать и вернуть обратно, а удаление стирает товар вместе со следами недостачи.
   // Сервер такие запросы всё равно отклонит — кнопки убраны, чтобы кассир не упирался
   // в отказ там, где кнопка выглядит рабочей.
-  const isFounder = useAuth()?.role === 'founder'
+  const can = useCan()
   const [q, setQ] = useState('')
   const [cat, setCat] = useState('Все')
   const [edit, setEdit] = useState(null) // объект формы или null
@@ -119,7 +119,7 @@ export default function Products() {
     <Layout
       title={t('Товары')}
       subtitle={`${products.length} ${t('наименований · склад на')} ${money(totalValue)}`}
-      actions={isFounder && <button className="btn" data-tour="prod.add" onClick={() => setEdit({ ...empty })}><span className="ic"><LuPlus size={16} /></span> {t('Добавить товар')}</button>}
+      actions={can('products.create') && <button className="btn" data-tour="prod.add" onClick={() => setEdit({ ...empty })}><span className="ic"><LuPlus size={16} /></span> {t('Добавить товар')}</button>}
     >
       <div className="toolbar">
         <input className="search" data-tour="prod.search" placeholder={t('Поиск по названию или штрихкоду…')} value={q} onChange={(e) => setQ(e.target.value)} />
@@ -159,13 +159,17 @@ export default function Products() {
                     ) : <span className="tag-cat">—</span>}
                   </td>
                   <td className="num" style={{ whiteSpace: 'nowrap' }}>
-                    <button className="btn ghost sm icon" data-tour="prod.label" onClick={() => setLabelFor(p)} title={t('Печать этикетки')}><LuTag size={15} /></button>{' '}
-                    {isFounder && (
-                      <>
-                        <button className="btn ghost sm icon" data-tour="prod.history" onClick={() => setHistoryFor(p)} title={t('Движение товара')} aria-label={`${t('Движение товара')}: ${p.name}`}><LuHistory size={15} /></button>{' '}
-                        <button className="btn ghost sm icon" data-tour="prod.row-actions" onClick={() => openEdit(p)}><LuPencil size={15} /></button>{' '}
-                        <button className="btn ghost sm icon" data-tour="prod.row-actions" onClick={() => del(p)}><LuTrash2 size={15} /></button>
-                      </>
+                    {can('products.labels') && (
+                      <><button className="btn ghost sm icon" data-tour="prod.label" onClick={() => setLabelFor(p)} title={t('Печать этикетки')}><LuTag size={15} /></button>{' '}</>
+                    )}
+                    {can('products.history') && (
+                      <><button className="btn ghost sm icon" data-tour="prod.history" onClick={() => setHistoryFor(p)} title={t('Движение товара')} aria-label={`${t('Движение товара')}: ${p.name}`}><LuHistory size={15} /></button>{' '}</>
+                    )}
+                    {can('products.edit') && (
+                      <><button className="btn ghost sm icon" data-tour="prod.row-actions" onClick={() => openEdit(p)} title={t('Изменить')} aria-label={`${t('Изменить')}: ${p.name}`}><LuPencil size={15} /></button>{' '}</>
+                    )}
+                    {can('products.delete') && (
+                      <button className="btn ghost sm icon" data-tour="prod.row-actions" onClick={() => del(p)} title={t('Удалить')} aria-label={`${t('Удалить')}: ${p.name}`}><LuTrash2 size={15} /></button>
                     )}
                   </td>
                 </tr>

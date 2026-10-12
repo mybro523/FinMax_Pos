@@ -36,7 +36,7 @@ let socketToken = ''
 
 function readToken() {
   try {
-    return localStorage.getItem(TOKEN_KEY) || ''
+    return sessionStorage.getItem(TOKEN_KEY) || '' // токен живёт во вкладке, как и в auth.js
   } catch {
     return '' // приватный режим
   }

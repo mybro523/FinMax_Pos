@@ -110,13 +110,14 @@ export default function TurRunner({ id, index }) {
   const t = useT()
   const lang = useLang()
   const narrow = useNarrow()
-  const isFounder = useAuth()?.role === 'founder'
+  const user = useAuth()
+
   const navigate = useNavigate()
   const location = useLocation()
 
   // Устройство определяем один раз, на старте тура: если мерить на каждом шаге,
   // поворот телефона посреди тура сдвинул бы шаги под ногами у человека
-  const steps = useMemo(() => stepsFor(id, isFounder, sredaTura()), [id, isFounder])
+  const steps = useMemo(() => stepsFor(id, user, sredaTura()), [id, user])
   const step = steps[index]
   const last = index === steps.length - 1
 

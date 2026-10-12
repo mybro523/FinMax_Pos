@@ -4,13 +4,13 @@ import {
   LuTriangleAlert, LuX,
 } from 'react-icons/lu'
 import Layout from '../components/Layout'
-import { Modal, useToast, useDialog, PAYMENTS, PayBadge } from '../components/ui'
+import { Modal, useToast, useDialog, PAYMENTS } from '../components/ui'
 // Сканер камеры тянет за собой тяжёлую библиотеку распознавания (~400 КБ).
 // Грузим её только при нажатии «Камера», иначе она замедляла открытие Кассы каждый раз.
 const CameraScanner = lazy(() => import('../components/CameraScanner'))
 import KassaCatalog, { LIMIT } from '../components/KassaCatalog'
 import { useCollection, useFirstLoading, money, db, stockText, realId } from '../db/store'
-import { useAuth } from '../db/auth'
+import { useAuth, useCan } from '../db/auth'
 import {
   uppOf, isDivisible as isDiv, lineUnits, lineGross, lineNet,
   sellableUnits, expiredUnits, hasExpired, stockUnits,
@@ -23,13 +23,16 @@ import {
 import { findByBarcode, checkout } from '../db/ops'
 import ProductForm, { emptyProduct, productPayload } from '../components/ProductForm'
 import { beepOk, beepError, unlockAudio } from '../lib/sound'
-import { fmtDateTime } from '../lib/time'
+import { fmtDateTime, chekNomer } from '../lib/time'
 import { normalizeScan } from '../lib/scan'
 import { useT, translate as tr } from '../lib/i18n'
 import { blockUpdate } from '../lib/version'
 import { sellsBelowCost } from '../lib/pricing'
-import { qtyPriceText, saleTicket } from '../lib/ticket'
-import { autoPrint, printTicket } from '../lib/print'
+import { saleTicket } from '../lib/ticket'
+import { autoPrint } from '../lib/print'
+import TicketView from '../components/TicketView'
+import { usePechat } from '../components/PrintDialog'
+import { getRekvizity } from '../lib/rekvizity'
 import { useCategories, categoryNames } from '../lib/categories'
 import NumberInput from '../components/NumberInput'
 
@@ -46,7 +49,6 @@ const availUnits = (p) => sellableUnits(p)
 //
 // Поэтому показываем то, что перемножается: целые упаковки — по цене упаковки,
 // всё остальное — в штуках по цене штуки.
-const qtyPrice = (i) => qtyPriceText(i, tr, money)
 
 // «Все категории» — отдельное значение, а не слово «Все»: иначе категория,
 // которую владелец сам назвал «Все», стала бы неотличима от сброса фильтра
@@ -68,7 +70,9 @@ export default function Pos() {
   // Кассир у прилавка откладывает незнакомый штрихкод — покупателя это не задерживает,
   // а товар оформляется потом, спокойно и с накладной в руках.
   const auth = useAuth()
-  const isFounder = auth?.role === 'founder'
+  const can = useCan()
+  // Карточку с кассы заводит тот, кому разрешено заводить товары; остальные откладывают штрихкод
+  const isFounder = can('products.create')
   // Подписка кончилась и отсрочка вышла: сервер продажу не примет. Показать это
   // до нажатия честнее, чем дать набрать корзину и отказать на оплате — кассир
   // решил бы, что программа сломалась, а покупатель уже стоит у прилавка.
@@ -1192,18 +1196,22 @@ export default function Pos() {
                           )}
                         </td>
                         <td className="kt-disc" data-label={t('Скидка')} data-tour="pos.discount">
-                          <NumberInput
-                            className="disc-input inp-discount"
-                            integer
-                            value={i.discount || ''}
-                            onChange={(e) => setDiscount(i.productId, e.target.value)}
-                            onKeyDown={(e) => onCellKey(e, i.productId)}
-                            onFocus={() => snapLine(i.productId)}
-                            onBlur={stopIdle}
-                            placeholder="0"
-                            title={t('Скидка на позицию, сомони')}
-                            aria-label={t('Скидка')}
-                          />
+                          {can('pos.discount') ? (
+                            <NumberInput
+                              className="disc-input inp-discount"
+                              integer
+                              value={i.discount || ''}
+                              onChange={(e) => setDiscount(i.productId, e.target.value)}
+                              onKeyDown={(e) => onCellKey(e, i.productId)}
+                              onFocus={() => snapLine(i.productId)}
+                              onBlur={stopIdle}
+                              placeholder="0"
+                              title={t('Скидка на позицию, сомони')}
+                              aria-label={t('Скидка')}
+                            />
+                          ) : (
+                            <span className="tag-cat">—</span>
+                          )}
                         </td>
                         <td className="num kt-sum">
                           {i.discount > 0 && <div className="tag-cat" style={{ textDecoration: 'line-through' }}>{money(lineGross(i))}</div>}
@@ -1242,7 +1250,7 @@ export default function Pos() {
 
             <div className="kassa-oplata">
               <div className="pay-methods" data-tour="pos.pay-methods">
-                {Object.entries(PAYMENTS).map(([key, m]) => (
+                {Object.entries(PAYMENTS).filter(([key]) => key !== 'debt' || can('pos.debt')).map(([key, m]) => (
                   <button key={key} className={payment === key ? 'active' : ''} onClick={() => { setPayment(key); focusScanner() }}>
                     <span className="ic"><m.Icon size={19} /></span>{t(m.label)}
                   </button>
@@ -1281,7 +1289,7 @@ export default function Pos() {
                         <option key={c.id} value={c.id}>{c.name} {c.debt ? `(${t('долг')} ${money(c.debt)})` : ''}</option>
                       ))}
                     </select>
-                    <button className="btn ghost icon" onClick={addCustomer} aria-label={t('Новый клиент')}><LuPlus size={17} /></button>
+                    {can('customers.create') && <button className="btn ghost icon" onClick={addCustomer} aria-label={t('Новый клиент')}><LuPlus size={17} /></button>}
                   </div>
                 </div>
               )}
@@ -1393,13 +1401,13 @@ export default function Pos() {
           <QuickAdd
             barcode={newProduct.barcode}
             onSave={saveNewProduct}
-            onDefer={() => deferBarcode(newProduct.barcode)}
+            onDefer={can('pos.defer', 'deferred.manage') ? () => deferBarcode(newProduct.barcode) : null}
             onClose={() => setNewProduct(null)}
           />
         ) : (
           <UnknownBarcode
             barcode={newProduct.barcode}
-            onDefer={() => deferBarcode(newProduct.barcode)}
+            onDefer={can('pos.defer', 'deferred.manage') ? () => deferBarcode(newProduct.barcode) : null}
             onClose={() => setNewProduct(null)}
           />
         ))}
@@ -1420,11 +1428,14 @@ function UnknownBarcode({ barcode, onDefer, onClose }) {
       <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7, marginBottom: 18 }}>
         {tr('Отложите штрихкод — он попадёт в «Отложенные», и владелец заведёт карточку с ценой. Продать этот товар можно будет после этого.')}
       </p>
+      {!onDefer && <div className="note err" style={{ marginBottom: 14 }}>{tr('Нет права откладывать штрихкоды — обратитесь к владельцу')}</div>}
       <div className="modal-actions">
         <button className="btn ghost" onClick={onClose}>{tr('Закрыть')}</button>
-        <button className="btn" onClick={onDefer}>
-          <span className="ic"><LuClock size={16} /></span> {tr('Отложить штрихкод')}
-        </button>
+        {onDefer && (
+          <button className="btn" onClick={onDefer}>
+            <span className="ic"><LuClock size={16} /></span> {tr('Отложить штрихкод')}
+          </button>
+        )}
       </div>
     </Modal>
   )
@@ -1468,9 +1479,11 @@ function QuickAdd({ barcode, onSave, onDefer, onClose }) {
           в корзину: кассиру пришлось бы сканировать заново, а покупатель ждёт.
           И отложить незнакомый штрихкод было бы нечем. */}
       <div className="modal-actions" style={{ justifyContent: 'space-between' }}>
-        <button className="btn ghost" onClick={onDefer} disabled={saving} title={tr('Отложить штрихкод')}>
-          <span className="ic"><LuClock size={16} /></span> {tr('Добавить позже')}
-        </button>
+        {onDefer ? (
+          <button className="btn ghost" onClick={onDefer} disabled={saving} title={tr('Отложить штрихкод')}>
+            <span className="ic"><LuClock size={16} /></span> {tr('Добавить позже')}
+          </button>
+        ) : <span />}
         <div style={{ display: 'flex', gap: 10 }}>
           <button className="btn ghost" onClick={onClose} disabled={saving}>{tr('Отмена')}</button>
           <button className="btn" onClick={submit} disabled={saving}>{saving ? tr('Сохранение…') : tr('Добавить и в корзину')}</button>
@@ -1480,23 +1493,30 @@ function QuickAdd({ barcode, onSave, onDefer, onClose }) {
   )
 }
 
-// Суммарная скидка по чеку
-const saleDiscount = (sale) => sale.items.reduce((s, i) => s + (i.discount || 0), 0)
 
 // ── Чек ──
+// Собирается один раз в общий вид (lib/ticket.js): то, что на экране, без изменений
+// уходит на ленту, в окно печати и в PDF
 function Receipt({ sale, onClose }) {
-  const toast = useToast()
   const auth = useAuth()
-  // Чековый принтер (программа для Windows) получает чек строками; если он не
-  // настроен или это сайт — печатается то, что на экране, через окно печати
-  const print = () =>
-    printTicket(saleTicket(sale, { t: tr, money, when: fmtDateTime, pharmacy: auth?.pharmacy?.name, cashier: auth?.name })).catch((e) =>
-      toast(tr(e.message), 'err'),
-    )
+  const customers = useCollection('customers')
+  const { print, dialog } = usePechat()
+  // После продажи в долг покупатель видит в чеке, сколько он теперь должен аптеке
+  const dolg = sale.payment === 'debt' ? (customers.find((c) => c.id === (sale.customer?.id || sale.customerId))?.debt ?? null) : null
+  const ticket = saleTicket(sale, {
+    t: tr,
+    money,
+    when: fmtDateTime,
+    pharmacy: auth?.pharmacy?.name,
+    cashier: auth?.name,
+    rekvizity: getRekvizity(auth?.pharmacy?.code),
+    nomer: chekNomer(sale.date),
+    customerDebt: dolg,
+  })
   // «Печатать чек сразу после продажи» — настройка чекового принтера
   useEffect(() => {
     let alive = true
-    autoPrint().then((on) => on && alive && print())
+    autoPrint().then((on) => on && alive && print(ticket))
     return () => {
       alive = false
     }
@@ -1505,39 +1525,12 @@ function Receipt({ sale, onClose }) {
   }, [sale.id])
   return (
     <Modal className="printable" title={<><span className="ic"><LuPrinter size={18} /></span>{tr('Чек продажи')}</>} onClose={onClose}>
-      <div style={{ borderBottom: '1px dashed var(--border-strong)', paddingBottom: 12, marginBottom: 12 }}>
-        <div className="tag-cat">{auth?.pharmacy?.name || 'FinMax POS'} · {fmtDateTime(sale.date)}</div>
-      </div>
-      <table>
-        <tbody>
-          {sale.items.map((i, n) => (
-            <tr key={n}>
-              <td>
-                {i.name}
-                <div className="tag-cat">{qtyPrice(i)}{i.discount > 0 ? ` · ${tr('скидка')} −${money(i.discount)}` : ''}</div>
-              </td>
-              <td className="num"><b>{money(lineNet(i))}</b></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {saleDiscount(sale) > 0 && (
-        <div className="total-row"><span>{tr('Скидка')}</span><span style={{ color: 'var(--danger)' }}>−{money(saleDiscount(sale))}</span></div>
-      )}
-      <div className="total-row big"><span>{tr('Итого')}</span><span>{money(sale.total)}</span></div>
-      <div className="total-row"><span>{tr('Оплата')}</span><PayBadge type={sale.payment} via={sale.payVia} /></div>
-      {/* Покупатель сверяет сдачу по чеку: сколько дал и сколько ему вернули */}
-      {sale.received != null && (
-        <>
-          <div className="total-row"><span>{tr('Получено')}</span><span>{money(sale.received)}</span></div>
-          <div className="total-row"><span>{tr('Сдача')}</span><span>{money(sale.change)}</span></div>
-        </>
-      )}
-      {sale.customer && <div className="total-row"><span>{tr('Клиент')}</span><span>{sale.customer.name}</span></div>}
+      <TicketView ticket={ticket} />
       <div className="modal-actions">
-        <button className="btn ghost" onClick={print}><span className="ic"><LuPrinter size={16} /></span> {tr('Печать')}</button>
+        <button className="btn ghost" onClick={() => print(ticket)}><span className="ic"><LuPrinter size={16} /></span> {tr('Печать')}</button>
         <button className="btn" onClick={onClose}>{tr('Готово')}</button>
       </div>
+      {dialog}
     </Modal>
   )
 }

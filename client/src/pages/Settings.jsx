@@ -10,11 +10,12 @@ import { useToast, useDialog, PasswordInput, Modal } from '../components/ui'
 import { useCollection, refresh, db, resetStore } from '../db/store'
 import { api, LONG_TIMEOUT_MS } from '../db/api'
 import { dayKey, fmtDate, serverNow, tjMoment } from '../lib/time'
-import { useAuth, changePassword as apiChangePassword } from '../db/auth'
+import { useAuth, useCan, changePassword as apiChangePassword } from '../db/auth'
 import { useT, useLang, setLang, LANGS } from '../lib/i18n'
 import { useTheme, setTheme } from '../lib/theme'
 import DevicesPanel from '../components/DevicesPanel'
 import PrintPanel from '../components/PrintPanel'
+import ChekPanel from '../components/ChekPanel'
 import { isDesktop } from '../lib/desktop'
 
 // ── Подписка ──
@@ -79,7 +80,7 @@ export default function Settings() {
   const sales = useCollection('sales')
   const [pw, setPw] = useState({ oldPassword: '', newPassword: '', confirm: '' })
   const [saving, setSaving] = useState(false)
-  const isFounder = user?.role === 'founder'
+  const can = useCan()
 
   // ── Резервная копия ──
   // Файл со всеми данными аптеки скачивается на компьютер владельца. Дата последней
@@ -198,18 +199,21 @@ export default function Settings() {
         <button className="btn" onClick={changePassword} disabled={saving}>{saving ? t('Сохранение…') : t('Изменить пароль')}</button>
       </div>
 
-      {isFounder && <CategoriesPanel />}
+      {can('settings.categories') && <CategoriesPanel />}
 
-      {isFounder && <ExpenseCategoriesPanel />}
+      {can('settings.expenseCategories') && <ExpenseCategoriesPanel />}
 
-      {isFounder && <PayServicesPanel />}
+      {can('settings.payServices') && <PayServicesPanel />}
 
-      {isFounder && <DevicesPanel />}
+      {can('settings.devices') && <DevicesPanel />}
+
+      {/* Что печатается на чеке: адрес, телефон, подпись — на сайте и в программе */}
+      {can('settings.print') && <ChekPanel />}
 
       {/* Чековый принтер настраивается на каждом компьютере отдельно — только в программе */}
-      {isFounder && isDesktop && <PrintPanel />}
+      {can('settings.print') && isDesktop && <PrintPanel />}
 
-      {isFounder && (
+      {can('settings.backup') && (
         <div className="panel mt" data-tour="set.backup" style={{ maxWidth: 640 }}>
           <h2><span className="h2-title"><span className="ic"><LuDatabaseBackup size={17} /></span>{t('Резервная копия')}</span></h2>
           <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7, marginBottom: 12 }}>

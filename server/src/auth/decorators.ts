@@ -16,5 +16,10 @@ export const ServiceWide = () => SetMetadata(SERVICE_WIDE_KEY, true)
 export const ROLES_KEY = 'roles'
 export const Roles = (...roles: string[]) => SetMetadata(ROLES_KEY, roles)
 
+// Право из списка src/auth/permissions.ts. Несколько ключей — достаточно любого.
+// Владелец аптеки проходит всегда
+export const PERM_KEY = 'perms'
+export const Perm = (...keys: string[]) => SetMetadata(PERM_KEY, keys)
+
 // Текущий пользователь из токена: @CurrentUser() u -> { sub, name, role }
 export const CurrentUser = createParamDecorator((_data, ctx: ExecutionContext) => ctx.switchToHttp().getRequest().user)

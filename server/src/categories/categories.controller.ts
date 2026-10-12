@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common'
 import { CategoriesService } from './categories.service'
-import { Roles } from '../auth/decorators'
+import { Perm } from '../auth/decorators'
 import { CreateCategoryDto, UpdateCategoryDto } from './dto'
 
 @Controller('categories')
@@ -15,19 +15,19 @@ export class CategoriesController {
 
   // Менять список — дело владельца: категория задаёт структуру всего склада
   @Post()
-  @Roles('founder')
+  @Perm('settings.categories')
   create(@Body() dto: CreateCategoryDto) {
     return this.categories.create(dto)
   }
 
   @Patch(':id')
-  @Roles('founder')
+  @Perm('settings.categories')
   update(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
     return this.categories.update(id, dto)
   }
 
   @Delete(':id')
-  @Roles('founder')
+  @Perm('settings.categories')
   remove(@Param('id') id: string) {
     return this.categories.remove(id)
   }

@@ -12,6 +12,7 @@ import { ShiftsModule } from './shifts/shifts.module'
 import { SeedModule } from './seed/seed.module'
 import { AuthModule } from './auth/auth.module'
 import { UsersModule } from './users/users.module'
+import { RolesModule } from './roles/roles.module'
 import { ReturnsModule } from './returns/returns.module'
 import { WriteOffsModule } from './writeoffs/writeoffs.module'
 import { InventoryModule } from './inventory/inventory.module'
@@ -38,6 +39,8 @@ import { AppController } from './app.controller'
     AdminModule,
     AuthModule,
     UsersModule,
+    RolesModule,
+
     ProductsModule,
     SalesModule,
     ArrivalsModule,

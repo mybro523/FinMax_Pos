@@ -6,6 +6,7 @@ import { periodFilter, PeriodQuery, MAX_ROWS } from '../common/period'
 import { setCashMoves } from './totals'
 import { cashSources, lockShift, NO_OPEN_SHIFT_CASH, openShiftFor, SHIFT_CLOSED_CASH } from './till'
 import { CashMoveDto } from './dto'
+import { hasPerm } from '../auth/permissions'
 
 // ── Внесение и изъятие наличных ──
 // Кассир положил в ящик размен, владелец забрал выручку днём. Это не продажа и не
@@ -38,7 +39,7 @@ export class CashService {
       const already = await this.prisma.cashMove.findUnique({ where: { clientId }, include: withUser })
       if (already) return already
     }
-    const founder = user?.role === 'founder'
+    const founder = hasPerm(user, 'shift.others')
     const amount = D(dto.amount).toDecimalPlaces(2)
     if (amount.lte(0)) throw new BadRequestException('Укажите сумму')
     return this.prisma

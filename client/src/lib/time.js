@@ -50,6 +50,17 @@ export function lastNDayKeys(n) {
 const opt = (o) => ({ timeZone: TJ_TZ, ...o })
 
 // Полные дата и время
+// Номер чека — из даты и времени продажи по таджикским часам: ММДД-ЧЧММСС.
+// Он всегда уникален в пределах кассы, не требует ни интернета, ни счётчика,
+// и один и тот же при повторной печати — потому что время продажи не меняется
+export function chekNomer(d) {
+  const p = new Intl.DateTimeFormat('ru-RU', {
+    timeZone: TJ_TZ, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).formatToParts(new Date(d))
+  const at = (type) => p.find((x) => x.type === type)?.value || '00'
+  return `${at('month')}${at('day')}-${at('hour')}${at('minute')}${at('second')}`
+}
+
 export function fmtDateTime(d) {
   if (!d) return '—'
   return new Date(d).toLocaleString('ru-RU', opt({}))

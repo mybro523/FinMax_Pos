@@ -145,9 +145,30 @@ export function escpos({ codepage = 'cp866', width = 32 } = {}) {
     // Открыть денежный ящик, подключённый к принтеру
     drawer: () => raw(0x1b, 0x70, 0x00, 0x19, 0xfa),
     raw,
+    // Готовые байты (картинка) — отдельным куском, без перекодировки
+    blob(buf) {
+      chunks.push(buf)
+      return api
+    },
     bytes: () => Buffer.concat(chunks),
   }
   return api
+}
+
+// ── Эмблема ──
+// GS v 0 — растровая картинка: 1 бит = одна точка, строки упакованы по 8 точек
+// в байт (print/logo.mjs). Битый блок не печатаем вовсе: кривая картинка на ленте
+// хуже, чем её отсутствие.
+export function rasterImage(img) {
+  const width = Number(img?.width) || 0
+  const height = Number(img?.height) || 0
+  const bits = Buffer.from(String(img?.data || ''), 'base64')
+  const perRow = Math.ceil(width / 8)
+  if (!perRow || !height || height > 1024 || bits.length !== perRow * height) return Buffer.alloc(0)
+  return Buffer.concat([
+    Buffer.from([0x1d, 0x76, 0x30, 0x00, perRow & 0xff, (perRow >> 8) & 0xff, height & 0xff, (height >> 8) & 0xff]),
+    bits,
+  ])
 }
 
 // ── Что печатаем ──
@@ -170,10 +191,16 @@ export function sanitizeTicket(raw) {
   }
 }
 
-export function renderTicket(ticket, { width = 32, codepage = 'cp866', cut = true, drawer = false } = {}) {
+export function renderTicket(ticket, { width = 32, codepage = 'cp866', cut = true, drawer = false, logo = null } = {}) {
   const t = sanitizeTicket(ticket)
   const p = escpos({ codepage, width }).init()
   if (drawer) p.drawer()
+
+  // Эмблема — первой, по центру ленты
+  if (logo) {
+    const img = rasterImage(logo)
+    if (img.length) p.align('center').blob(img).feed(1)
+  }
 
   // Шапка: первая строка — название, крупно
   p.align('center')

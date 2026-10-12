@@ -14,6 +14,7 @@ import {
   MAX_DIGITS, countOf, shownOf, retype, deltaOf, merged, settle, sameCounts, tally,
   readDraft, writeDraft, dropDraft, closeDraft, pruneDrafts,
 } from '../lib/pereschet'
+import { useCan } from '../db/auth'
 
 // ── Инвентаризация (пересчёт остатков) ──
 // 1) Создаём лист — система записывает, сколько товара должно быть.
@@ -76,6 +77,7 @@ async function sheetState(id, unsure) {
 }
 
 export default function Inventory() {
+  const can = useCan()
   const products = useCollection('products')
   const categories = categoryNames(useCategories())
   const t = useT()
@@ -435,9 +437,9 @@ export default function Inventory() {
                 {categories.map((c) => <option key={c} value={c}>{t(c)}</option>)}
               </select>
             </div>
-            <button className="btn" data-tour="inv.create" onClick={createSheet} disabled={busy}>
+            {can('inventory.count') && <button className="btn" data-tour="inv.create" onClick={createSheet} disabled={busy}>
               <span className="ic"><LuClipboardCheck size={16} /></span> {t('Создать лист')}
-            </button>
+            </button>}
           </div>
 
           <div className="panel mt" data-tour="inv.list" style={{ padding: 0 }}>
@@ -463,8 +465,8 @@ export default function Inventory() {
                       <button className="btn ghost sm" onClick={() => openSheet(inv)}>
                         {inv.status === 'applied' ? t('Посмотреть') : t('Продолжить')}
                       </button>{' '}
-                      {inv.status !== 'applied' && (
-                        <button className="btn ghost sm icon" onClick={() => removeSheet(inv)}><LuTrash2 size={15} /></button>
+                      {inv.status !== 'applied' && can('inventory.count') && (
+                        <button className="btn ghost sm icon" onClick={() => removeSheet(inv)} title={t('Удалить')} aria-label={t('Удалить')}><LuTrash2 size={15} /></button>
                       )}
                     </td>
                   </tr>
@@ -533,10 +535,12 @@ export default function Inventory() {
             <button className="btn ghost" onClick={close} disabled={busy}>{t('Назад к списку')}</button>
             {open.status !== 'applied' && (
               <>
-                <button className="btn ghost" data-tour="inv.draft" onClick={saveDraft}>{t('Сохранить черновик')}</button>
-                <button className="btn danger" data-tour="inv.apply" onClick={apply} disabled={busy || sum.counted === 0}>
-                  <span className="ic"><LuCircleCheck size={16} /></span> {t('Применить пересчёт')}
-                </button>
+                {can('inventory.count') && <button className="btn ghost" data-tour="inv.draft" onClick={saveDraft}>{t('Сохранить черновик')}</button>}
+                {can('inventory.apply') && (
+                  <button className="btn danger" data-tour="inv.apply" onClick={apply} disabled={busy || sum.counted === 0}>
+                    <span className="ic"><LuCircleCheck size={16} /></span> {t('Применить пересчёт')}
+                  </button>
+                )}
               </>
             )}
           </div>

@@ -103,7 +103,7 @@ test.afterAll(async () => {
   if (X) await server(token, 'DELETE', `/products/${X.id}`).catch(() => {})
 })
 
-test('по умолчанию печать обычная — как на сайте, через окно печати', async () => {
+test('по умолчанию — свой экран печати: предпросмотр, бумага, принтеры', async () => {
   await signIn(page)
   await goTo(page, 'Настройки')
   await expect(panel()).toBeVisible()
@@ -111,10 +111,15 @@ test('по умолчанию печать обычная — как на сай
   // Пока чековый принтер не выбран, его настроек на экране нет
   await expect(panel().getByTestId('print-width')).toHaveCount(0)
 
+  // Окно печати Chromium не умеет предпросмотр, поэтому вместо него — свой экран:
+  // чек как он будет напечатан, выбор бумаги (58/80/A4) и принтера, PDF
   const receipt = await sellOne()
   await receipt.getByRole('button', { name: 'Печать' }).click()
-  await expect.poll(() => page.evaluate(() => window.__printed)).toBe(1)
+  await expect(page.locator('.print-dlg .ticket')).toBeVisible()
+  expect(await page.evaluate(() => window.__printed)).toBe(0)
   expect(printer.jobs.length).toBe(0)
+  await page.locator('.print-dlg').getByRole('button', { name: 'Отмена' }).click()
+  await expect(page.locator('.print-dlg')).toHaveCount(0)
   await receipt.getByRole('button', { name: 'Готово' }).click()
 })
 
@@ -124,6 +129,8 @@ test('чековый принтер по сети: пробная печать �
   await panel().getByTestId('print-host').fill('127.0.0.1')
   await panel().getByTestId('print-port').fill(String(printer.port))
   await panel().getByTestId('print-width').selectOption('48')
+  // Эмблема — растровые байты: проверки ниже читают ленту как текст, поэтому без неё
+  await panel().getByTestId('print-logo').uncheck()
   await panel().getByRole('button', { name: 'Пробная печать' }).click()
   await expect(page.locator('.toast')).toContainText('Пробный чек отправлен на принтер', { timeout: 20_000 })
   await jobsCount(1)

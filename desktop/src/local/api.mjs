@@ -10,6 +10,7 @@
 // Остального здесь нет намеренно — заведение и правка товаров, сотрудники,
 // пересчёт остатков, настройки, правка прихода и расхода, оплата поставщику,
 // история движения товара. Такой запрос уходит на сервер.
+import { hasPerm } from './accounts.mjs'
 import { categoriesList, customersList, deferredList, productByBarcode, productsList, productView1 } from './catalog.mjs'
 import { forbidden, q } from './db.mjs'
 import { listDocs, listShifts, WINDOW_DAYS } from './docs.mjs'
@@ -69,9 +70,22 @@ export function pendingInPeriod(db, kind, { from, to }) {
   return rows.map((r) => JSON.parse(r.body))
 }
 
-const founder = (handler) => (ctx) => {
-  if (ctx.user.role !== 'founder') throw forbidden('Недостаточно прав')
+// Право на действие — то же, что на сайте и на сервере. Любое из перечисленных
+const perm = (keys, handler) => (ctx) => {
+  if (!hasPerm(ctx.user, ...keys)) throw forbidden('Недостаточно прав')
   return handler(ctx)
+}
+// Скидка, продажа в долг и приход в долг — отдельные права
+const canSell = (ctx) => {
+  if (ctx.body?.payment === 'debt' && !hasPerm(ctx.user, 'pos.debt')) throw forbidden('Нет права продавать в долг')
+  if ((Array.isArray(ctx.body?.items) ? ctx.body.items : []).some((i) => Number(i?.discount) > 0) && !hasPerm(ctx.user, 'pos.discount')) {
+    throw forbidden('Нет права давать скидку')
+  }
+  return checkout(ctx, ctx.body)
+}
+const canArrive = (ctx) => {
+  if (Number(ctx.body?.debt) > 0 && !hasPerm(ctx.user, 'arrivals.debt')) throw forbidden('Нет права оформлять приход в долг')
+  return createArrival(ctx, ctx.body)
 }
 
 // Что и как отвечаем. Путь — уже без /api и без строки запроса
@@ -91,33 +105,34 @@ const ROUTES = [
   ['GET', /^\/shifts$/, (ctx) => listShifts(ctx.db, ctx.deviceId).map((s) => shiftView(ctx.db, s))],
   ['GET', /^\/sales$/, journal('sale')],
   ['GET', /^\/returns$/, journal('return')],
-  ['GET', /^\/arrivals$/, journal('arrival')],
+  // Журнал приходов — закупочные цены: только с правом на раздел, как на сервере
+  ['GET', /^\/arrivals$/, perm(['arrivals.view'], journal('arrival'))],
   // Списание — это убыток, поэтому журнал видит только владелец
-  ['GET', /^\/writeoffs$/, founder(journal('writeoff'))],
+  ['GET', /^\/writeoffs$/, perm(['writeoffs.view', 'reports.view', 'dashboard.view'], journal('writeoff'))],
   ['GET', /^\/payments$/, journal('payment')],
   // Расходы — деньги аптеки и её чистая прибыль: только владельцу, как и на сервере
-  ['GET', /^\/expenses$/, founder(journal('expense'))],
-  ['GET', /^\/expenses\/cash-sources$/, founder((ctx) => cashSources(ctx.db, ctx.deviceId))],
-  ['GET', /^\/expense-categories$/, founder((ctx) => expenseCategoriesList(ctx.db))],
+  ['GET', /^\/expenses$/, perm(['expenses.view', 'reports.view'], journal('expense'))],
+  ['GET', /^\/expenses\/cash-sources$/, perm(['expenses.create'], (ctx) => cashSources(ctx.db, ctx.deviceId))],
+  ['GET', /^\/expense-categories$/, perm(['expenses.view', 'expenses.create', 'settings.expenseCategories'], (ctx) => expenseCategoriesList(ctx.db))],
   // Поставщики нужны приходу — всем; долги в них видит только владелец
-  ['GET', /^\/suppliers$/, (ctx) => suppliersList(ctx.db, ctx.user.role === 'founder')],
-  ['GET', /^\/supplier-payments$/, founder(journal('supplierpayment'))],
+  ['GET', /^\/suppliers$/, (ctx) => suppliersList(ctx.db, hasPerm(ctx.user, 'suppliers.view'))],
+  ['GET', /^\/supplier-payments$/, perm(['suppliers.view'], journal('supplierpayment'))],
   ['GET', /^\/pay-services$/, (ctx) => payServicesList(ctx.db)],
   ['GET', /^\/cash-moves$/, journal('cashmove')],
   ['GET', /^\/shifts\/cash-sources$/, (ctx) => cashSources(ctx.db, ctx.deviceId)],
 
-  ['POST', /^\/sales$/, (ctx) => checkout(ctx, ctx.body)],
-  ['POST', /^\/returns$/, (ctx) => createReturn(ctx, ctx.body)],
-  ['POST', /^\/arrivals$/, (ctx) => createArrival(ctx, ctx.body)],
-  ['POST', /^\/writeoffs$/, founder((ctx) => createWriteOff(ctx, ctx.body))],
-  ['POST', /^\/expenses$/, founder((ctx) => createExpense(ctx, ctx.body))],
-  ['POST', /^\/shifts\/open$/, (ctx) => openShift(ctx, ctx.body)],
-  ['POST', /^\/shifts\/cash$/, (ctx) => createCashMove(ctx, ctx.body)],
-  ['POST', /^\/shifts\/close$/, (ctx) => closeShift(ctx, ctx.body)],
-  ['POST', /^\/customers$/, (ctx) => createCustomer(ctx, ctx.body)],
-  ['POST', /^\/customers\/([^/]+)\/pay$/, (ctx) => payDebt(ctx, ctx.params[0], ctx.body)],
-  ['POST', /^\/deferred$/, (ctx) => addDeferred(ctx, ctx.body)],
-  ['DELETE', /^\/deferred\/([^/]+)$/, (ctx) => removeDeferred(ctx, ctx.params[0])],
+  ['POST', /^\/sales$/, perm(['pos.sell'], canSell)],
+  ['POST', /^\/returns$/, perm(['returns.create'], (ctx) => createReturn(ctx, ctx.body))],
+  ['POST', /^\/arrivals$/, perm(['arrivals.create'], canArrive)],
+  ['POST', /^\/writeoffs$/, perm(['writeoffs.create'], (ctx) => createWriteOff(ctx, ctx.body))],
+  ['POST', /^\/expenses$/, perm(['expenses.create'], (ctx) => createExpense(ctx, ctx.body))],
+  ['POST', /^\/shifts\/open$/, perm(['shift.open'], (ctx) => openShift(ctx, ctx.body))],
+  ['POST', /^\/shifts\/cash$/, perm(['shift.cash'], (ctx) => createCashMove(ctx, ctx.body))],
+  ['POST', /^\/shifts\/close$/, perm(['shift.open'], (ctx) => closeShift(ctx, ctx.body))],
+  ['POST', /^\/customers$/, perm(['customers.create'], (ctx) => createCustomer(ctx, ctx.body))],
+  ['POST', /^\/customers\/([^/]+)\/pay$/, perm(['debts.pay'], (ctx) => payDebt(ctx, ctx.params[0], ctx.body))],
+  ['POST', /^\/deferred$/, perm(['pos.defer', 'deferred.manage'], (ctx) => addDeferred(ctx, ctx.body))],
+  ['DELETE', /^\/deferred\/([^/]+)$/, perm(['deferred.manage'], (ctx) => removeDeferred(ctx, ctx.params[0]))],
 ]
 
 const decode = (s) => {

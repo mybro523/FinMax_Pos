@@ -10,6 +10,7 @@ import { writeOffGoods } from '../db/ops'
 import { fmtDateTime } from '../lib/time'
 import { useT } from '../lib/i18n'
 import NumberInput from '../components/NumberInput'
+import { useCan } from '../db/auth'
 
 // ── Списание товара ──
 // Товар испортился, разбился, просрочился или не нашёлся при пересчёте — его надо
@@ -23,6 +24,7 @@ export const REASONS = [
 ]
 
 export default function WriteOffs() {
+  const can = useCan()
   const products = useCollection('products')
   const t = useT()
   const toast = useToast()
@@ -128,7 +130,7 @@ export default function WriteOffs() {
         {t('Как это работает: выберите товар, укажите сколько штук убрать со склада и причину. Система спишет партию с ближайшим сроком годности и посчитает убыток.')}
       </div>
 
-      <div className="panel" style={{ maxWidth: 900 }}>
+      {can('writeoffs.create') && <div className="panel" style={{ maxWidth: 900 }}>
         <div className="row" style={{ alignItems: 'flex-end' }}>
           <div className="field" data-tour="wo.pick" style={{ flex: 2 }}>
             <label>{t('Добавить товар')}</label>
@@ -193,6 +195,8 @@ export default function WriteOffs() {
           </>
         )}
       </div>
+
+      }
 
       <div className="panel mt" data-tour="wo.history" style={{ padding: 0 }}>
         <h2 style={{ padding: '16px 16px 0' }}>

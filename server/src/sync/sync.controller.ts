@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common'
 import { SyncService } from './sync.service'
-import { CurrentUser, Roles } from '../auth/decorators'
+import { CurrentUser, Perm } from '../auth/decorators'
 import { CloseDeviceShiftDto, PullQuery, PushDto, RenameDeviceDto } from './dto'
 
 // ── Обмен с кассами, которые работают без интернета ──
@@ -31,27 +31,27 @@ export class SyncController {
 
   // Кассы аптеки: какие есть и когда выходили на связь
   @Get('devices')
-  @Roles('founder')
+  @Perm('settings.devices')
   devices() {
     return this.sync.devices()
   }
 
   @Patch('devices/:id')
-  @Roles('founder')
+  @Perm('settings.devices')
   rename(@Param('id') id: string, @Body() dto: RenameDeviceDto) {
     return this.sync.renameDevice(id, dto.name)
   }
 
   // Смену кассы, которая сама её уже не закроет (компьютер сломался), закрывает владелец
   @Post('devices/:id/close-shift')
-  @Roles('founder')
+  @Perm('settings.devices')
   closeShift(@Param('id') id: string, @Body() dto: CloseDeviceShiftDto) {
     return this.sync.closeDeviceShift(id, dto.countedCash)
   }
 
   // Журнал движений товара: что приходило и уходило и сколько по журналу на полке
   @Get('moves/:productId')
-  @Roles('founder')
+  @Perm('products.history')
   moves(@Param('productId') productId: string) {
     return this.sync.moves(productId)
   }
@@ -62,7 +62,8 @@ export class SyncController {
 // продано больше, чем было; цена в чеке не та, что была в базе; вернули больше,
 // чем продали.
 @Controller('discrepancies')
-@Roles('founder')
+@Perm('dashboard.view')
+
 export class DiscrepancyController {
   constructor(private readonly sync: SyncService) {}
 

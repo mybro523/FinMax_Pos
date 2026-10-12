@@ -11,7 +11,8 @@ import { Reflector } from '@nestjs/core'
 import { AuthService } from './auth.service'
 import { AccountCache } from '../admin/account-cache.service'
 import { subscriptionOf, subscriptionMessage } from '../admin/subscription'
-import { PUBLIC_KEY, ROLES_KEY, SERVICE_WIDE_KEY } from './decorators'
+import { PERM_KEY, PUBLIC_KEY, ROLES_KEY, SERVICE_WIDE_KEY } from './decorators'
+import { hasPerm, permissionsOf } from './permissions'
 
 // Глобальный guard: все эндпоинты требуют валидный токен, кроме помеченных @Public().
 // @Roles('founder') на методе/классе дополнительно ограничивает по роли.
@@ -123,13 +124,20 @@ export class AuthGuard implements CanActivate {
       impersonatedBy: payload.imp || null,
       name: acc.login,
       role: acc.role,
+      // Права из роли (владелец — все). По ним проверяются разделы и действия
+      permissions: permissionsOf(acc),
+      roleId: acc.role === 'founder' ? 'owner' : acc.roleId ?? null,
+      roleName: acc.role === 'founder' ? 'Владелец' : acc.roleRef?.name || 'Кассир',
       pharmacyId: acc.pharmacyId,
       code: acc.pharmacy?.code,
       schema: acc.pharmacy?.schemaName,
     }
-
     if (roles && roles.length && !roles.includes(acc.role)) {
       throw new ForbiddenException('Недостаточно прав')
+    }
+    const perms = this.reflector.getAllAndOverride<string[]>(PERM_KEY, [ctx.getHandler(), ctx.getClass()])
+    if (perms && perms.length && !hasPerm(req.user, ...perms)) {
+      throw new ForbiddenException('Недостаточно прав для этого действия')
     }
     return true
   }

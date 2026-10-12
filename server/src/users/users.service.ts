@@ -7,6 +7,7 @@ import { passwordProblem } from '../auth/password'
 import { EventsGateway } from '../events/events.gateway'
 import { AccountCache } from '../admin/account-cache.service'
 import { CreateUserDto, UpdateUserDto } from './dto'
+import { RolesService } from '../roles/roles.service'
 
 // ── Сотрудники аптеки ──
 // Запись идёт в две базы сразу, и общей транзакции между ними нет. В панели живёт
@@ -20,10 +21,22 @@ import { CreateUserDto, UpdateUserDto } from './dto'
 // Если второй шаг не удался, бронь снимается. Остаться может разве что запись в
 // аптеке без доступа — под ней просто нельзя войти, и владелец увидит это в списке.
 
-const view = (a: { id: string; login: string; role: string; active: boolean; createdAt: Date }) => ({
+type AccountRow = {
+  id: string
+  login: string
+  role: string
+  active: boolean
+  createdAt: Date
+  roleId?: string | null
+  roleRef?: { name: string } | null
+}
+const SELECT = { id: true, login: true, role: true, active: true, createdAt: true, roleId: true, roleRef: { select: { name: true } } } as const
+const view = (a: AccountRow) => ({
   id: a.id,
   name: a.login,
   role: a.role,
+  roleId: a.role === 'founder' ? 'owner' : a.roleId ?? null,
+  roleName: a.role === 'founder' ? 'Владелец' : a.roleRef?.name || 'Кассир',
   active: a.active,
   createdAt: a.createdAt,
 })
@@ -39,16 +52,30 @@ export class UsersService {
     private admin: AdminDbService,
     private events: EventsGateway,
     private accounts: AccountCache,
+    private roles: RolesService,
   ) {}
 
-  findAll(pharmacyId: string) {
-    return this.admin.account
-      .findMany({
-        where: { pharmacyId },
-        orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
-        select: { id: true, login: true, role: true, active: true, createdAt: true },
-      })
-      .then((rows) => rows.map(view))
+  async findAll(pharmacyId: string) {
+    // Кассиры прежней версии получают системную роль здесь — до того, как владелец
+    // увидит список и захочет что-то поправить
+    await this.roles.ensure(pharmacyId)
+    const rows = await this.admin.account.findMany({
+      where: { pharmacyId },
+      orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
+      select: SELECT,
+    })
+    return rows.map(view)
+  }
+
+  // Роль для новой записи: владелец — без роли (он может всё), остальные — выбранная
+  // или системная роль кассира. Чужую роль (другой аптеки) назначить нельзя
+  private async resolveRole(pharmacyId: string, wantsOwner: boolean, roleId?: string) {
+    if (wantsOwner) return { role: 'founder', roleId: null as string | null }
+    const cashier = await this.roles.ensure(pharmacyId)
+    if (!roleId || roleId === cashier.id) return { role: 'cashier', roleId: cashier.id }
+    const r = await this.roles.find(pharmacyId, roleId)
+    if (!r) throw new BadRequestException('Роль не найдена')
+    return { role: 'cashier', roleId: r.id }
   }
 
   async create(dto: CreateUserDto, pharmacyId: string) {
@@ -56,14 +83,13 @@ export class UsersService {
     if (!name) throw new BadRequestException('Укажите имя сотрудника')
     const bad = passwordProblem(dto.password)
     if (bad) throw new BadRequestException(bad)
-    const role = dto.role === 'founder' ? 'founder' : 'cashier'
-
+    const { role, roleId } = await this.resolveRole(pharmacyId, dto.role === 'founder' || dto.roleId === 'owner', dto.roleId)
     // Шаг первый: бронь логина
     let acc
     try {
       acc = await this.admin.account.create({
-        data: { login: name, passwordHash: await AuthService.hashPassword(dto.password), role, pharmacyId },
-        select: { id: true, login: true, role: true, active: true, createdAt: true },
+        data: { login: name, passwordHash: await AuthService.hashPassword(dto.password), role, roleId, pharmacyId },
+        select: SELECT,
       })
     } catch (e) {
       if (isTaken(e)) {
@@ -104,6 +130,23 @@ export class UsersService {
     const data: any = {}
     if (name) data.login = name
     if (dto.active !== undefined) data.active = dto.active
+    // Смена роли. Последнего владельца разжаловать нельзя, себя — тоже: иначе
+    // аптека осталась бы без того, кто может всё
+    let roleChanged = false
+    if (dto.roleId !== undefined) {
+      const wantsOwner = dto.roleId === 'owner'
+      if (acc.role === 'founder' && !wantsOwner) {
+        if (id === currentAccountId) throw new BadRequestException('Свою роль владелец изменить не может')
+        const active = await this.admin.account.count({ where: { pharmacyId, role: 'founder', active: true } })
+        if (active <= 1) throw new BadRequestException('Нельзя снять права с единственного владельца')
+      }
+      const next = await this.resolveRole(pharmacyId, wantsOwner, dto.roleId)
+      if (next.role !== acc.role || next.roleId !== acc.roleId) {
+        data.role = next.role
+        data.roleId = next.roleId
+        roleChanged = true
+      }
+    }
     if (dto.password) {
       const bad = passwordProblem(dto.password)
       if (bad) throw new BadRequestException(bad)
@@ -118,7 +161,7 @@ export class UsersService {
       updated = await this.admin.account.update({
         where: { id },
         data,
-        select: { id: true, login: true, role: true, active: true, createdAt: true },
+        select: SELECT,
       })
     } catch (e) {
       if (isTaken(e)) throw new BadRequestException(`Логин «${name}» уже занят другим сотрудником сервиса`)
@@ -138,6 +181,13 @@ export class UsersService {
     }
     if (dto.active !== undefined && acc.tenantUserId) {
       await this.prisma.user.update({ where: { id: acc.tenantUserId }, data: { active: dto.active } }).catch(() => {})
+    }
+    if (roleChanged) {
+      if (acc.tenantUserId && data.role) {
+        await this.prisma.user.update({ where: { id: acc.tenantUserId }, data: { role: data.role } }).catch(() => {})
+      }
+      // Открытые окна этого сотрудника перечитают «кто я» и спрячут или покажут разделы
+      this.events.changed('roles', 'users')
     }
 
     // Доступ отобрали — обрываем и постоянное соединение. Обычные запросы

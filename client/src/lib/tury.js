@@ -5,7 +5,7 @@
 // элемента на странице. Справочник показывает текст, тур показывает тот же текст
 // рядом с подсвеченной кнопкой. Поправили урок — поправился и тур; перевод один на
 // оба способа, и разъехаться им негде.
-import { OBUCHENIE, OBSHIY_TUR } from './obuchenie'
+import { OBUCHENIE, OBSHIY_TUR, dostupno } from './obuchenie'
 import { OBSHIY } from './tur'
 
 // Третий элемент пункта: строка — это просто метка элемента, объект — метка
@@ -15,15 +15,15 @@ const spec = (s) => (typeof s === 'string' ? { t: s } : s || {})
 
 // Кассиру не показываем то, чего у него нет: иначе тур подсвечивал бы пустоту
 // и врал бы ему о его правах
-const можно = (isFounder) => (x) => !x.founderOnly || isFounder
+const можно = (user) => (x) => dostupno(user, x)
 
 // Шаг с пометкой kogda показывается только на подходящем устройстве: 'uzko' —
 // узкий экран, 'klava' — есть клавиатура. Среда не передана (справочник, проверки) —
 // показываем всё: там важен полный список, а не то, что видно на этом экране
 const кстати = (sreda) => (x) => !sreda || !x.kogda || !!sreda[x.kogda]
 
-export function stepsFor(id, isFounder, sreda) {
-  const can = (x) => можно(isFounder)(x) && кстати(sreda)(x)
+export function stepsFor(id, user, sreda) {
+  const can = (x) => можно(user)(x) && кстати(sreda)(x)
   if (id === OBSHIY) return OBSHIY_TUR.filter(can)
 
   const u = OBUCHENIE.find((x) => x.to === id)

@@ -5,6 +5,7 @@ import { LoginThrottle } from './throttle'
 import { AUTH_SECRET as SECRET } from '../common/config'
 import { hashPassword, verifyPassword, passwordProblem, isOutdatedHash } from './password'
 import { offlineDaysOf, subscriptionOf, subscriptionMessage } from '../admin/subscription'
+import { permissionsOf } from './permissions'
 import { AccountCache } from '../admin/account-cache.service'
 
 const TOKEN_TTL_MS = 30 * 24 * 3600 * 1000 // 30 дней
@@ -101,6 +102,8 @@ export class AuthService {
     id: string
     login: string
     role: string
+    roleId?: string | null
+    roleRef?: { id: string; name: string; permissions: string[] } | null
     pharmacy?: { code: string; name: string; paidUntil: Date; trial: boolean; blocked: boolean; offlineDays?: number } | null
   }) {
     const ph = acc.pharmacy
@@ -109,6 +112,11 @@ export class AuthService {
       id: acc.id,
       name: acc.login,
       role: acc.role,
+      // Роль и её права: по ним интерфейс прячет лишнее, а программа для Windows
+      // проверяет действия и без связи
+      roleId: acc.role === 'founder' ? 'owner' : acc.roleId ?? null,
+      roleName: acc.role === 'founder' ? 'Владелец' : acc.roleRef?.name || 'Кассир',
+      permissions: permissionsOf(acc),
       pharmacy: ph ? { code: ph.code, name: ph.name } : null,
       subscription: sub && {
         status: sub.status,
@@ -152,7 +160,7 @@ export class AuthService {
 
     const acc = await this.admin.account.findUnique({
       where: { login },
-      include: { pharmacy: true },
+      include: { pharmacy: true, roleRef: true },
     })
     if (!acc || !acc.active || !(await AuthService.verifyPassword(password, acc.passwordHash))) {
       this.byName.fail(nameKey)
@@ -223,7 +231,7 @@ export class AuthService {
 
     const acc = await this.admin.account.findUnique({
       where: { id: accountId },
-      include: { pharmacy: true },
+      include: { pharmacy: true, roleRef: true },
     })
     if (!acc || !(await AuthService.verifyPassword(oldPw, acc.passwordHash))) {
       this.byChange.fail(accountId)

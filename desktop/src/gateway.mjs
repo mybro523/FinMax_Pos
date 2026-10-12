@@ -26,6 +26,8 @@ import {
   setSubscription,
   subscriptionOf,
   userView,
+  hasPerm,
+  permissionsOf,
 } from './local/accounts.mjs'
 import { matchLocal, pendingInPeriod } from './local/api.mjs'
 import { confirmLicence, licenceOf, touchLicence } from './local/licence.mjs'
@@ -221,9 +223,11 @@ export function createGateway({
     // С какой отметки спрашивать изменения. Журнал списаний сервер отдаёт только
     // владельцу, и у него своя отметка (см. snapshot.mjs). Если её нет вовсе — касса
     // ни разу не получала списаний, и владелец получает всё заново, один раз
-    const founderHere = () => activeAccount()?.role === 'founder'
+    // Широкие разделы (списания, расходы, долги поставщикам) получает не только
+    // владелец, а всякий, кому они открыты правами
+    const wideHere = () => hasPerm(activeAccount(), 'suppliers.view', 'writeoffs.view', 'expenses.view', 'reports.view', 'dashboard.view')
     function cursor() {
-      if (founderHere() && !getMeta(db, 'wcursor')) return ''
+      if (wideHere() && !getMeta(db, 'wcursor')) return ''
       return getMeta(db, 'cursor') || ''
     }
 
@@ -300,7 +304,7 @@ export function createGateway({
           ...(appVersion ? { appVersion } : {}),
           ...(since ? { cursor: since } : {}),
           // Списания, изменившиеся, пока за кассой работал кассир
-          ...(since && founderHere() ? { wcursor: getMeta(db, 'wcursor') } : {}),
+          ...(since && wideHere() ? { wcursor: getMeta(db, 'wcursor') } : {}),
           // Операции, на которые не пришёл ответ: приняты ли они?
           ...(asked.length ? { ops: asked.join(',') } : {}),
         })
@@ -641,7 +645,8 @@ export function createGateway({
       data = found.handler({
         db: ph.db,
         now: clock.now(),
-        user: docUser(ph, acc),
+        // Права — из учётной записи: в документы попадают только номер и имя
+        user: { ...docUser(ph, acc), permissions: permissionsOf(acc) },
         deviceId,
         query: found.query,
         params: found.params,
@@ -881,6 +886,8 @@ export function createGateway({
 
     // Кто сейчас за кассой: founder | cashier, пусто — никто
     activeRole: () => activeAccount()?.role || '',
+    // Есть ли у вошедшего право (любое из перечисленных). Владелец может всё
+    activeCan: (...keys) => hasPerm(activeAccount(), ...keys),
 
     // Открытая база аптеки — для резервной копии
     pharmacyFile: () => (pharmacy ? { name: pharmacy.name, db: pharmacy.db } : null),

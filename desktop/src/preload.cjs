@@ -17,6 +17,11 @@ contextBridge.exposeInMainWorld('apteka', {
   // основная часть; ключ входа подставляет тоже она
   request: (req) => ipcRenderer.invoke('api:request', req),
 
+  app: {
+    // «Закрыть программу» с главного экрана
+    quit: () => ipcRenderer.invoke('app:quit'),
+  },
+
   session: {
     // Выход: за кассой больше никого. Без нового входа основная часть не выполнит
     // ни одного запроса окна
@@ -71,6 +76,10 @@ contextBridge.exposeInMainWorld('apteka', {
     // Чек или Z-отчёт готовыми строками (client/src/lib/ticket.js)
     ticket: (ticket) => ipcRenderer.invoke('print:ticket', ticket),
     test: () => ipcRenderer.invoke('print:test'),
+    // Свой экран печати: лента на выбранный принтер, лист как страница, PDF в файл
+    raw: (req) => ipcRenderer.invoke('print:raw', req),
+    page: (req) => ipcRenderer.invoke('print:page', req),
+    pdf: () => ipcRenderer.invoke('print:pdf'),
   },
 
   // Обновление программы

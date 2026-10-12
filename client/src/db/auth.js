@@ -1,20 +1,32 @@
 // ── Авторизация на клиенте ──
-// Токен и пользователь хранятся в localStorage; подписка через useSyncExternalStore.
+// Токен и пользователь хранятся во вкладке (sessionStorage); подписка через useSyncExternalStore.
 import { useSyncExternalStore } from 'react'
 import { api, setAuthErrorHandler } from './api'
 import { resetStore } from './store'
 import { bridge } from '../lib/desktop'
+import { can as canUser } from '../lib/permissions'
 
+// ── Ключ входа живёт только во вкладке ──
+// sessionStorage, а не localStorage: закрыли вкладку или программу — в следующий
+// раз снова вводится пароль. Так попросил владелец: касса стоит в общем зале, и
+// открытый вход на чужом компьютере опаснее лишнего набора пароля. Новая вкладка
+// тоже просит пароль — у неё своё хранилище.
 const LS_TOKEN = 'apteka_token'
 const LS_USER = 'apteka_user'
 // Спрятанный токен владельца сервиса на время, пока он смотрит чужую аптеку
 const LS_ADMIN = 'apteka_service_token'
+// Прежние версии держали ключ в localStorage — подчищаем, чтобы он там не лежал
+try {
+  for (const k of [LS_TOKEN, LS_USER, LS_ADMIN]) localStorage.removeItem(k)
+} catch {
+  /* приватный режим */
+}
 
 let token = null
 let user = null
 try {
-  token = localStorage.getItem(LS_TOKEN) || null
-  const u = localStorage.getItem(LS_USER)
+  token = sessionStorage.getItem(LS_TOKEN) || null
+  const u = sessionStorage.getItem(LS_USER)
   user = u ? JSON.parse(u) : null
 } catch {
   /* приватный режим */
@@ -33,11 +45,11 @@ function setAuth(t, u) {
   user = u
   try {
     if (t) {
-      localStorage.setItem(LS_TOKEN, t)
-      localStorage.setItem(LS_USER, JSON.stringify(u))
+      sessionStorage.setItem(LS_TOKEN, t)
+      sessionStorage.setItem(LS_USER, JSON.stringify(u))
     } else {
-      localStorage.removeItem(LS_TOKEN)
-      localStorage.removeItem(LS_USER)
+      sessionStorage.removeItem(LS_TOKEN)
+      sessionStorage.removeItem(LS_USER)
     }
   } catch {
     /* ignore */
@@ -93,6 +105,17 @@ export function isFounder() {
   return user?.role === 'founder'
 }
 
+// ── Права вошедшего ──
+// can('products.edit') — есть ли право (любое из перечисленных). Владелец может всё.
+// useCan() — то же для компонентов: перерисовка, когда «кто я» обновился
+export function can(...keys) {
+  return canUser(user, ...keys)
+}
+export function useCan() {
+  const u = useAuth()
+  return (...keys) => canUser(u, ...keys)
+}
+
 export async function login(name, password) {
   suspended = null
   const res = await api.post('/auth/login', { name, password })
@@ -120,7 +143,7 @@ export async function changePassword(oldPassword, newPassword) {
 export function logout() {
   suspended = null
   try {
-    localStorage.removeItem(LS_ADMIN)
+    sessionStorage.removeItem(LS_ADMIN)
   } catch {
     /* ignore */
   }
@@ -137,7 +160,7 @@ export function logout() {
 export async function enterPharmacy(pharmacyId) {
   const res = await api.post(`/admin/pharmacies/${pharmacyId}/enter`)
   try {
-    localStorage.setItem(LS_ADMIN, token)
+    sessionStorage.setItem(LS_ADMIN, token)
   } catch {
     /* приватный режим — вернуться придётся входом заново */
   }
@@ -151,7 +174,7 @@ export async function enterPharmacy(pharmacyId) {
 
 export function isImpersonating() {
   try {
-    return !!localStorage.getItem(LS_ADMIN)
+    return !!sessionStorage.getItem(LS_ADMIN)
   } catch {
     return false
   }
@@ -162,8 +185,8 @@ export function isImpersonating() {
 export async function leavePharmacy() {
   let admin = null
   try {
-    admin = localStorage.getItem(LS_ADMIN)
-    localStorage.removeItem(LS_ADMIN)
+    admin = sessionStorage.getItem(LS_ADMIN)
+    sessionStorage.removeItem(LS_ADMIN)
   } catch {
     /* ignore */
   }

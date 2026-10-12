@@ -2,7 +2,7 @@ import { BadRequestException, Body, Controller, Delete, Get, Injectable, Module,
 import { IsString, MaxLength, MinLength } from 'class-validator'
 import { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
-import { Roles } from '../auth/decorators'
+import { Perm } from '../auth/decorators'
 
 // ── Сервисы перевода ──
 // Через что покупатели переводят деньги: Alif, DC, Эсхата… На кассе кассир выбирает
@@ -53,13 +53,15 @@ export class PayServicesController {
   }
 
   @Post()
-  @Roles('founder')
+  @Perm('settings.payServices')
+
   create(@Body() dto: CreatePayServiceDto) {
     return this.services.create(dto)
   }
 
   @Delete(':id')
-  @Roles('founder')
+  @Perm('settings.payServices')
+
   remove(@Param('id') id: string) {
     return this.services.remove(id)
   }

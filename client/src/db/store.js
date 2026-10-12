@@ -42,7 +42,9 @@ const LS_BASE = 'apteka_cache_v3_'
 
 function currentCode() {
   try {
-    const u = JSON.parse(localStorage.getItem('apteka_user') || 'null')
+    // Ключ входа живёт во вкладке; старое хранилище — для проверок без браузера
+    const tab = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('apteka_user') : null
+    const u = JSON.parse(tab || localStorage.getItem('apteka_user') || 'null')
     return u?.pharmacy?.code || 'net'
   } catch {
     return 'net'

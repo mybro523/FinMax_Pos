@@ -77,7 +77,7 @@ test('настройки печати: что попало в файл наст�
   assert.deepEqual(sanitizePrint({ mode: 'laser', width: 100, codepage: 'koi8', port: -1, host: 'a b', name: 5, cut: 'да', drawer: 1, auto: 'yes' }), PRINT_DEFAULTS)
   assert.deepEqual(
     sanitizePrint({ mode: 'network', host: '192.168.1.50', port: 9100, width: 48, codepage: 'cp1251', cut: false, drawer: true, auto: true }),
-    { mode: 'network', host: '192.168.1.50', port: 9100, name: '', width: 48, codepage: 'cp1251', cut: false, drawer: true, auto: true },
+    { mode: 'network', host: '192.168.1.50', port: 9100, name: '', width: 48, codepage: 'cp1251', cut: false, drawer: true, auto: true, logo: true },
   )
   assert.equal(sanitizePrint({ mode: 'windows', name: 'XP-58 (копия 1)' }).name, 'XP-58 (копия 1)')
 })

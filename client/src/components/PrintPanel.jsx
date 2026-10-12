@@ -133,6 +133,7 @@ export default function PrintPanel() {
           </div>
           {[
             ['auto', t('Печатать чек сразу после продажи')],
+            ['logo', t('Эмблема FinMax в начале чека')],
             ['cut', t('Отрезать чек')],
             ['drawer', t('Открывать денежный ящик')],
           ].map(([key, label]) => (

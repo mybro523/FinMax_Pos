@@ -13,8 +13,9 @@ import { TX, TX_SNAPSHOT } from '../common/tx'
 import { setCashMoves, setExpenseCash, shiftTotals } from '../shifts/totals'
 import { withDeviceNames } from '../shifts/shifts.service'
 import { lockSupplier, supplierBrief } from '../suppliers/suppliers.service'
+import { CASHIER_DEFAULT, OP_PERMISSIONS, hasPerm, permissionsOf } from '../auth/permissions'
 import {
-  FOUNDER_ONLY,
+
   OP_TYPES,
   OpType,
   Reject,
@@ -57,6 +58,8 @@ type Tx = Prisma.TransactionClient
 export interface SyncUser {
   sub: string
   role: string
+  // Права из роли — по ним принимаются операции, сделанные без связи
+  permissions?: string[]
   tenantUserId?: string | null
   pharmacyId?: string | null
   name?: string
@@ -228,7 +231,7 @@ export class SyncService {
     // ── Кто сделал и кто прислал ──
     // Обычно это один человек. Чужую операцию может прислать только владелец:
     // иначе кассир записал бы свою недостачу на соседа — или списание на владельца.
-    let performer = { accountId: user.sub, role: user.role, tenantUserId: user.tenantUserId ?? null }
+    let performer = { accountId: user.sub, role: user.role, tenantUserId: user.tenantUserId ?? null, permissions: user.permissions || [] }
     if (op.accountId && op.accountId !== user.sub) {
       if (user.role !== 'founder') {
         return this.reject(op, deviceId, user, createdAt, 'Операцию другого сотрудника может отправить только он сам или владелец')
@@ -236,12 +239,13 @@ export class SyncService {
       const acc: any = await this.accounts.get(op.accountId)
       performer =
         acc && acc.pharmacyId === user.pharmacyId
-          ? { accountId: acc.id, role: acc.role, tenantUserId: acc.tenantUserId ?? null }
-          : // Сотрудника уже удалили — операция остаётся, просто без имени
-            { accountId: op.accountId, role: 'cashier', tenantUserId: null }
+          ? { accountId: acc.id, role: acc.role, tenantUserId: acc.tenantUserId ?? null, permissions: permissionsOf(acc) }
+          : // Сотрудника уже удалили — операция остаётся, просто без имени; права — как у кассира
+            { accountId: op.accountId, role: 'cashier', tenantUserId: null, permissions: CASHIER_DEFAULT }
     }
-    if (FOUNDER_ONLY.has(type) && performer.role !== 'founder') {
-      return this.reject(op, deviceId, user, createdAt, 'Недостаточно прав')
+    // Права на операцию — те же, что на сайте: по роли того, кто её сделал
+    for (const alternatives of requiredPermissions(type, op.payload)) {
+      if (!hasPerm(performer, ...alternatives)) return this.reject(op, deviceId, user, createdAt, 'Недостаточно прав')
     }
 
     const ctx: Ctx = { deviceId, tenantUserId: performer.tenantUserId, flagged: false, extra: new Set() }
@@ -1099,12 +1103,12 @@ export class SyncService {
     await this.pruneIfDue()
 
     // Журнал списаний и расходы сервер отдаёт только владельцу — как и на сайте
-    const founder = user.role === 'founder'
+    const scope = pullScope(user)
     const asked = mark(q.cursor)
     // Пока за кассой работал кассир, списания и расходы менялись мимо неё: в его обменах
     // этих разделов нет, а общая отметка двигалась. Владелец добирает их со своей отметки.
     // Поставщиков кассир получает, но без долгов — их владелец тоже добирает заново
-    const askedW = founder ? mark(q.wcursor) : null
+    const askedW = scope.wide ? mark(q.wcursor) : null
     const markKey = MARK + q.deviceId
     // Операции, которые касса отправляла, а ответа не дождалась: она спрашивает,
     // приняты ли они. Ответ берётся из того же снимка, что и данные, — поэтому касса
@@ -1131,7 +1135,7 @@ export class SyncService {
         // Отметка, которую сервер выдал этой кассе в прошлый раз
         given: mark(meta.get(markKey)),
       })
-      if (since === null) return { full: true, cursor: horizon, fates, data: await this.loadAll(tx, founder) }
+      if (since === null) return { full: true, cursor: horizon, fates, data: trimPull(await this.loadAll(tx, scope.wide), scope) }
 
       // Берём всё, что видно, начиная с отметки, — а не только «до горизонта». Записи
       // читаются в нынешнем виде, со всеми завершёнными операциями, и касса должна
@@ -1148,8 +1152,8 @@ export class SyncService {
             WHERE "tbl" IN ('WriteOff', 'Expense', 'ExpenseCategory', 'SupplierPayment', 'Supplier') AND "txid" >= ${askedW} AND "txid" < ${since} ORDER BY "seq"`),
         )
       }
-      if (rows.length > MAX_CHANGES) return { full: true, cursor: horizon, fates, data: await this.loadAll(tx, founder) }
-      return { full: false, cursor: horizon, fates, data: await this.loadChanged(tx, rows, founder) }
+      if (rows.length > MAX_CHANGES) return { full: true, cursor: horizon, fates, data: trimPull(await this.loadAll(tx, scope.wide), scope) }
+      return { full: false, cursor: horizon, fates, data: trimPull(await this.loadChanged(tx, rows, scope.wide), scope) }
     }, TX_SNAPSHOT)
 
     // Запоминаем, что выдали. Не записалось — не беда: следующий обмен этой кассы
@@ -1439,4 +1443,44 @@ export class SyncService {
       moves: rows.map((m) => ({ batchId: m.batchId, delta: m.delta, units: m.units, at: m.at })),
     }
   }
+}
+
+// ── Права и обмен ──
+// Что нужно, чтобы касса прислала операцию. Скидка и продажа в долг, приход в долг
+// поставщику — отдельные права, как и на сайте
+function requiredPermissions(type: string, payload: any): string[][] {
+  const need: string[][] = []
+  const base = OP_PERMISSIONS[type]
+  if (base) need.push(base)
+  if (type === 'sale') {
+    if (payload?.payment === 'debt') need.push(['pos.debt'])
+    if (Array.isArray(payload?.items) && payload.items.some((i: any) => Number(i?.discount) > 0)) need.push(['pos.discount'])
+  }
+  if (type === 'arrival' && Number(payload?.debt) > 0) need.push(['arrivals.debt'])
+  return need
+}
+
+// Какие разделы с деньгами аптеки касса получает в обмене: журнал списаний, расходы
+// и долги поставщикам видят только те, у кого на это есть право
+type PullScope = { wide: boolean; suppliers: boolean; writeoffs: boolean; expenses: boolean }
+function pullScope(user: any): PullScope {
+  // Те же права, что у журналов на сервере: отчёты и панель тоже читают списания и расходы
+  const suppliers = hasPerm(user, 'suppliers.view')
+  const writeoffs = hasPerm(user, 'writeoffs.view', 'reports.view', 'dashboard.view')
+  const expenses = hasPerm(user, 'expenses.view', 'reports.view')
+  return { wide: suppliers || writeoffs || expenses, suppliers, writeoffs, expenses }
+}
+function trimPull<T extends Record<string, any>>(data: T, scope: PullScope): T {
+  if (!scope.wide) return data
+  const out: any = { ...data }
+  if (!scope.writeoffs) delete out.writeoffs
+  if (!scope.expenses) {
+    delete out.expenses
+    delete out.expenseCategories
+  }
+  if (!scope.suppliers) {
+    delete out.supplierPayments
+    if (Array.isArray(out.suppliers?.upsert)) out.suppliers = { ...out.suppliers, upsert: out.suppliers.upsert.map(supplierBrief) }
+  }
+  return out
 }

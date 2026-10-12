@@ -82,6 +82,7 @@ model Pharmacy {
 
   accounts Account[]
   payments Payment[]
+  roles    Role[]
 
   // Главный экран панели — «у кого заканчивается оплата»
   @@index([paidUntil])
@@ -116,12 +117,18 @@ model Account {
   // Тот же сотрудник в схеме своей аптеки — на него ссылаются чеки и смены
   tenantUserId String?
 
+  // Роль с набором прав (см. src/auth/permissions.ts). У владельца её нет: он может всё.
+  // Кассир без роли — учётная запись из прежней версии, получает права кассира по умолчанию
+  roleId  String?
+  roleRef Role?   @relation(fields: [roleId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
 
   payments Payment[]
   actions  AuditLog[]
 
   @@index([pharmacyId])
+  @@index([roleId])
 }
 
 // ── Оплата подписки ──
@@ -173,5 +180,26 @@ model AuditLog {
   createdAt DateTime @default(now())
 
   @@index([createdAt])
+  @@index([pharmacyId])
+}
+
+// ── Роли сотрудников ──
+// Имя и набор прав; права — ключи из src/auth/permissions.ts. Роли свои у каждой
+// аптеки: владелец заводит их сам. system = 'cashier' — системная роль кассира,
+// её нельзя удалить и переименовать, но права в ней владелец меняет свободно.
+model Role {
+  id          String   @id @default(cuid())
+  pharmacyId  String
+  pharmacy    Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+  name        String
+  description String   @default("")
+  system      String?
+  permissions String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  accounts Account[]
+
+  @@unique([pharmacyId, name])
   @@index([pharmacyId])
 }

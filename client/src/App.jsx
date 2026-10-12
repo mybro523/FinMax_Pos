@@ -4,14 +4,16 @@ import { ToastProvider, DialogProvider, useToast } from './components/ui'
 import ErrorBoundary from './components/ErrorBoundary'
 import PageFallback from './components/PageFallback'
 import Login from './components/Login'
-import { setNotifier, startPolling } from './db/store'
+import { setNotifier, startPolling, onChanged } from './db/store'
 import { startRealtime, stopRealtime } from './db/realtime'
 import { useAuth, refreshMe, getUser, useSuspended, acknowledgeSuspension } from './db/auth'
 import Suspended from './components/Suspended'
 import { setThemeScope } from './lib/theme'
 import { setLangScope } from './lib/i18n'
+import { can } from './lib/permissions'
 
 // Ленивые страницы — код грузится по требованию (быстрый первый экран)
+const Home = lazy(() => import('./pages/Home'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Pos = lazy(() => import('./pages/Pos'))
 const Products = lazy(() => import('./pages/Products'))
@@ -24,6 +26,7 @@ const Shift = lazy(() => import('./pages/Shift'))
 const Reports = lazy(() => import('./pages/Reports'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Employees = lazy(() => import('./pages/Employees'))
+const Roles = lazy(() => import('./pages/Roles'))
 const Expiry = lazy(() => import('./pages/Expiry'))
 const Returns = lazy(() => import('./pages/Returns'))
 const Obuchenie = lazy(() => import('./pages/Obuchenie'))
@@ -64,16 +67,16 @@ const AHEAD_FOUNDER = [
   () => import('./pages/WriteOffs'),
   () => import('./pages/Inventory'),
   () => import('./pages/Employees'),
+  () => import('./pages/Roles'),
   () => import('./pages/Expenses'),
   () => import('./pages/Suppliers'),
   () => import('./pages/Reports'),
 ]
 
-// Пока человек набирает имя и пароль, качаем то, куда он попадёт сразу после входа.
-// Иначе после нажатия «Войти» он ждёт не только проверку пароля, но и загрузку кода
-// первого экрана — а набирает он пароль несколько секунд, и всё это время связь
-// простаивает.
-const AHEAD_LOGIN = [() => import('./pages/Dashboard'), () => import('./pages/Pos')]
+// Пока человек набирает имя и пароль, качаем то, куда он попадёт сразу после входа:
+// главный экран и кассу. Иначе после нажатия «Войти» он ждёт не только проверку
+// пароля, но и загрузку кода первого экрана.
+const AHEAD_LOGIN = [() => import('./pages/Home'), () => import('./pages/Pos')]
 
 function usePrefetchPages(role) {
   useEffect(() => {
@@ -105,14 +108,15 @@ function ErrorBridge() {
   return null
 }
 
-// Стартовая страница зависит от роли: основатель — панель управления, кассир — касса
-const homeFor = (user) =>
-  user?.role === 'superadmin' ? '/admin' : user?.role === 'founder' ? '/' : '/pos'
+// Стартовая страница: владелец сервиса — его панель, все остальные — главный экран
+const homeFor = (user) => (user?.role === 'superadmin' ? '/admin' : '/')
 
-// Роут только для владельца — кассира отправляем на его стартовую страницу
-// (именно на homeFor, а не на '/', иначе у кассира вышло бы кольцо редиректов)
-function FounderRoute({ user, children }) {
-  return user?.role === 'founder' ? children : <Navigate to={homeFor(user)} replace />
+// ── Раздел по праву ──
+// Нет права — на главный экран, где этот раздел показан серым. Проверка здесь —
+// для удобства, а не для защиты: сервер отклонит запрос и без неё
+function Allowed({ user, perm, owner, children }) {
+  const ok = owner ? user?.role === 'founder' : !perm || can(user, perm)
+  return ok ? children : <Navigate to="/" replace />
 }
 
 function AuthedApp({ user }) {
@@ -153,6 +157,10 @@ function AuthedApp({ user }) {
     return () => stopRealtime()
   }, [])
 
+  // Владелец поменял права роли — открытые окна перечитывают «кто я» и тут же
+  // прячут или показывают разделы, не дожидаясь нового входа
+  useEffect(() => onChanged((keys) => keys.includes('roles') && refreshMe()), [])
+
   if (isService) {
     return (
       <ErrorBoundary>
@@ -166,30 +174,35 @@ function AuthedApp({ user }) {
     )
   }
 
+  const guarded = (perm, el) => <Allowed user={user} perm={perm}>{el}</Allowed>
+  const ownerOnly = (el) => <Allowed user={user} owner>{el}</Allowed>
+
   return (
     <ErrorBoundary>
       <TurHost />
       <Suspense fallback={<PageFallback />}>
         <Routes>
-          <Route path="/" element={<FounderRoute user={user}><Dashboard /></FounderRoute>} />
-          <Route path="/pos" element={<Pos />} />
-          <Route path="/products" element={<Products />} />
-          <Route path="/arrivals" element={<Arrivals />} />
-          <Route path="/expiry" element={<Expiry />} />
-          <Route path="/deferred" element={<Deferred />} />
-          <Route path="/orders" element={<Orders />} />
-          <Route path="/returns" element={<Returns />} />
-          <Route path="/writeoffs" element={<FounderRoute user={user}><WriteOffs /></FounderRoute>} />
-          <Route path="/inventory" element={<FounderRoute user={user}><Inventory /></FounderRoute>} />
-          <Route path="/shift" element={<Shift />} />
-          <Route path="/debts" element={<Debts />} />
-          <Route path="/discounts" element={<Discounts />} />
-          <Route path="/expenses" element={<FounderRoute user={user}><Expenses /></FounderRoute>} />
-          <Route path="/suppliers" element={<FounderRoute user={user}><Suppliers /></FounderRoute>} />
-          <Route path="/reports" element={<FounderRoute user={user}><Reports /></FounderRoute>} />
+          <Route path="/" element={<Home />} />
+          <Route path="/dashboard" element={guarded('dashboard.view', <Dashboard />)} />
+          <Route path="/pos" element={guarded('pos.sell', <Pos />)} />
+          <Route path="/products" element={guarded('products.view', <Products />)} />
+          <Route path="/arrivals" element={guarded('arrivals.view', <Arrivals />)} />
+          <Route path="/expiry" element={guarded('expiry.view', <Expiry />)} />
+          <Route path="/deferred" element={guarded('deferred.view', <Deferred />)} />
+          <Route path="/orders" element={guarded('orders.view', <Orders />)} />
+          <Route path="/returns" element={guarded('returns.view', <Returns />)} />
+          <Route path="/writeoffs" element={guarded('writeoffs.view', <WriteOffs />)} />
+          <Route path="/inventory" element={guarded('inventory.view', <Inventory />)} />
+          <Route path="/shift" element={guarded('shift.view', <Shift />)} />
+          <Route path="/debts" element={guarded('debts.view', <Debts />)} />
+          <Route path="/discounts" element={guarded('discounts.view', <Discounts />)} />
+          <Route path="/expenses" element={guarded('expenses.view', <Expenses />)} />
+          <Route path="/suppliers" element={guarded('suppliers.view', <Suppliers />)} />
+          <Route path="/reports" element={guarded('reports.view', <Reports />)} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/obuchenie" element={<Obuchenie />} />
-          <Route path="/employees" element={<FounderRoute user={user}><Employees /></FounderRoute>} />
+          <Route path="/employees" element={ownerOnly(<Employees />)} />
+          <Route path="/roles" element={ownerOnly(<Roles />)} />
           <Route path="*" element={<Navigate to={homeFor(user)} replace />} />
         </Routes>
       </Suspense>
@@ -202,9 +215,9 @@ function Gate() {
   const stop = useSuspended()
 
   // ── Ждём сервер только тогда, когда ждать действительно надо ──
-  // Кто вошёл, известно с прошлого раза: и токен, и сам сотрудник лежат в браузере.
-  // Раньше программа всё равно спрашивала сервер «кто я» и до ответа держала пустой
-  // экран — четыреста миллисекунд при каждом открытии, каждый раз одни и те же.
+  // Кто вошёл, известно с прошлого раза: и ключ, и сам сотрудник лежат в памяти
+  // вкладки. Раньше программа всё равно спрашивала сервер «кто я» и до ответа держала
+  // пустой экран — четыреста миллисекунд при каждом открытии, каждый раз одни и те же.
   // А данные разделов и так показываются из сохранённого кэша.
   //
   // Спрашиваем в фоне. Если сессия кончилась, ответ придёт с отказом, и человек

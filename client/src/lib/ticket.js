@@ -1,10 +1,11 @@
-// ── Чек и Z-отчёт для чекового принтера ──
+// ── Чек, чек возврата и Z-отчёт: строки одного вида для экрана и принтера ──
 //
-// Обычная печать — это снимок того, что на экране. Чековому принтеру (программа для
-// Windows, ESC/POS) шлют не картинку, а строки: шапку, позиции, итоги. Здесь из
-// чека и из Z-отчёта собираются именно такие строки — уже готовыми словами, на
-// выбранном языке и с деньгами в принятом виде. Принтеру остаётся разложить их
-// по ленте (desktop/src/print/escpos.mjs).
+// Раньше на экране чек рисовался одним кодом, а на ленту уходил другим — и они
+// уже начали расходиться. Теперь любой чек сначала собирается здесь в один вид
+// (шапка, позиции, итоги, подвал), а дальше его одинаково показывают на экране
+// (components/TicketView.jsx), печатают окном браузера, шлют на чековую ленту
+// (desktop/src/print/escpos.mjs) и кладут в PDF. Поменяется строка — поменяется
+// во всех четырёх местах разом.
 //
 // Перевод, вид денег и дат передаются снаружи — модуль проверяется без браузера.
 import { uppOf, lineNet } from './units.js'
@@ -25,8 +26,30 @@ function payLabel(payment, t) {
   return t('Наличные')
 }
 
+// Шапка одна на все бумаги: название аптеки, затем адрес и телефон, если владелец
+// вписал их в Настройках (lib/rekvizity.js)
+function shapka(pharmacy, rekvizity, t) {
+  const r = rekvizity || {}
+  return [pharmacy || t('Аптека'), ...(r.address ? [r.address] : []), ...(r.phone ? [`${t('Тел.')} ${r.phone}`] : [])]
+}
+
+// Подвал тоже один: кассир, подпись владельца («Будьте здоровы!» и т.п.) и имя
+// программы — по нему покупатель и проверяющий видят, чем напечатан чек
+function podval(who, rekvizity, t, spasibo) {
+  const r = rekvizity || {}
+  return [
+    ...(who ? [`${t('Кассир')}: ${who}`] : []),
+    ...(r.footer ? [r.footer] : []),
+    ...(spasibo ? [t('Спасибо за покупку!')] : []),
+    'FinMax POS',
+  ]
+}
+
 // ── Чек продажи ──
-export function saleTicket(sale, { t, money, when, pharmacy = '', cashier = '' }) {
+// rekvizity — адрес/телефон/подпись с этого устройства; nomer — номер чека из даты
+// (lib/time.js, chekNomer); customerDebt — долг клиента после продажи в долг:
+// покупатель видит в чеке, сколько он теперь должен аптеке
+export function saleTicket(sale, { t, money, when, pharmacy = '', cashier = '', rekvizity = null, nomer = '', customerDebt = null }) {
   const items = Array.isArray(sale?.items) ? sale.items : []
   const discount = items.reduce((s, i) => s + (i.discount || 0), 0)
   const totals = []
@@ -40,23 +63,56 @@ export function saleTicket(sale, { t, money, when, pharmacy = '', cashier = '' }
     totals.push({ label: t('Сдача'), value: money(sale.change) })
   }
   if (sale.customer?.name) totals.push({ label: t('Клиент'), value: sale.customer.name })
+  if (sale.payment === 'debt' && customerDebt !== null && customerDebt !== undefined) {
+    totals.push({ label: t('Долг клиента'), value: money(customerDebt) })
+  }
   const who = cashier || sale.user?.name || ''
   return {
-    head: [pharmacy || t('Аптека'), when(sale.date)],
+    head: [...shapka(pharmacy, rekvizity, t), ...(nomer ? [`${t('Чек')} № ${nomer}`] : []), when(sale.date)],
     rows: items.map((i) => ({
       name: i.name,
       sub: qtyPriceText(i, t, money) + (i.discount > 0 ? ` · ${t('скидка')} −${money(i.discount)}` : ''),
       value: money(lineNet(i)),
     })),
     totals,
-    tail: [...(who ? [`${t('Кассир')}: ${who}`] : []), t('Спасибо за покупку!')],
+    tail: podval(who, rekvizity, t, true),
+  }
+}
+
+// ── Чек возврата ──
+// Покупателю на руки: что вернули, сколько денег и каким способом. saleNomer —
+// номер чека продажи, по которому оформлен возврат: по нему их сверяют друг с другом
+export function returnTicket(ret, { t, money, when, pharmacy = '', cashier = '', rekvizity = null, nomer = '', saleNomer = '' }) {
+  const items = Array.isArray(ret?.items) ? ret.items : []
+  const sposob =
+    ret.refund === 'card'
+      ? t('Возврат на карту')
+      : ret.refund === 'transfer'
+        ? t('Возврат переводом') + (ret.refundVia ? ` · ${ret.refundVia}` : '')
+        : ret.refund === 'debt'
+          ? t('Уменьшен долг клиента')
+          : t('Наличными из кассы')
+  return {
+    head: [...shapka(pharmacy, rekvizity, t), `${t('Чек возврата')}${nomer ? ` № ${nomer}` : ''}`, when(ret.date)],
+    rows: items.map((i) => ({
+      name: i.name,
+      // Списанная упаковка на полку не вернётся — об этом прямо в чеке
+      sub: `${i.units} ${t('шт')}` + (i.restock ? '' : ` · ${t('списано')}`),
+      value: money(i.amount || 0),
+    })),
+    totals: [
+      { label: t('Возвращено покупателю'), value: money(ret.total), big: true },
+      { label: t('Способ возврата'), value: sposob },
+      ...(saleNomer ? [{ label: t('По чеку'), value: `№ ${saleNomer}` }] : []),
+    ],
+    tail: podval(cashier || ret.user?.name || '', rekvizity, t, false),
   }
 }
 
 // ── Z-отчёт смены ──
 // totals — чистые числа смены (shiftTotals из lib/finance): выручка и прибыль за
 // вычетом возвратов
-export function shiftTicket(shift, totals, { t, money, when, pharmacy = '' }) {
+export function shiftTicket(shift, totals, { t, money, when, pharmacy = '', rekvizity = null }) {
   const rows = [
     { label: t('Чеков'), value: String(shift.count ?? 0) },
     { label: t('Наличными'), value: money(shift.salesCash) },
@@ -89,9 +145,9 @@ export function shiftTicket(shift, totals, { t, money, when, pharmacy = '' }) {
   rows.push({ label: t('Расхождение'), value: (shift.difference > 0 ? '+' : '') + money(shift.difference), big: true })
   const period = `${when(shift.openedAt)} — ${shift.closedAt ? when(shift.closedAt) : ''}`.trim()
   return {
-    head: [pharmacy || t('Аптека'), t('Z-отчёт смены'), period, ...(shift.deviceName ? [shift.deviceName] : [])],
+    head: [...shapka(pharmacy, rekvizity, t), t('Z-отчёт смены'), period, ...(shift.deviceName ? [shift.deviceName] : [])],
     rows: [],
     totals: rows,
-    tail: [...(shift.user?.name ? [`${t('Кассир')}: ${shift.user.name}`] : [])],
+    tail: podval(shift.user?.name || '', rekvizity, t, false),
   }
 }

@@ -1,11 +1,11 @@
 import { Body, Controller, Get, Post } from '@nestjs/common'
 import { BackupScheduleService } from './backup-schedule.service'
 import { BackupService } from './backup.service'
-import { Roles } from '../auth/decorators'
+import { Perm } from '../auth/decorators'
 
 // Резервные копии — только основатель: в файле вся коммерческая информация аптеки
 @Controller('backup')
-@Roles('founder')
+@Perm('settings.backup')
 export class BackupController {
   constructor(private readonly backup: BackupService, private readonly schedule: BackupScheduleService) {}
 

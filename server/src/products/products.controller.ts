@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { ProductsService } from './products.service'
-import { CurrentUser, Roles } from '../auth/decorators'
+import { CurrentUser, Perm } from '../auth/decorators'
 import { PeriodQuery } from '../common/period'
 import { CreateProductDto, UpdateProductDto } from './dto'
 
@@ -29,6 +29,7 @@ export class ProductsController {
   }
 
   @Post()
+  @Perm('products.create')
   create(@Body() dto: CreateProductDto) {
     return this.products.create(dto)
   }
@@ -36,19 +37,19 @@ export class ProductsController {
   // История движения товара: приход, продажа, возврат, списание, пересчёт, правка
   // остатка — одним списком. Только владельцу: там и списания, и закупочные цены
   @Get(':id/history')
-  @Roles('founder')
+  @Perm('products.history')
   history(@Param('id') id: string, @Query() q: PeriodQuery) {
     return this.products.history(id, q)
   }
 
   @Patch(':id')
-  @Roles('founder')
+  @Perm('products.edit')
   update(@Param('id') id: string, @Body() dto: UpdateProductDto, @CurrentUser() u: any) {
     return this.products.update(id, dto, u?.tenantUserId)
   }
 
   @Delete(':id')
-  @Roles('founder')
+  @Perm('products.delete')
   remove(@Param('id') id: string) {
     return this.products.remove(id)
   }

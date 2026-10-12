@@ -6,6 +6,7 @@ import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { JournalFilter, JournalCount, useJournalFilter } from '../components/JournalFilter'
 import NumberInput from '../components/NumberInput'
+import { useCan } from '../db/auth'
 import { useCollection, money, onChanged } from '../db/store'
 import { api } from '../db/api'
 import { addExpense, updateExpense, removeExpense } from '../db/ops'
@@ -30,6 +31,7 @@ const sourceName = (s, t) => (s.deviceId ? s.deviceName || t('Касса') : t('
 const defaultSource = (list) => (list.find((s) => !s.deviceId) || list[0])?.shiftId || ''
 
 export default function Expenses() {
+  const can = useCan()
   const t = useT()
   const toast = useToast()
   const dialog = useDialog()
@@ -153,7 +155,7 @@ export default function Expenses() {
         {t('Как это работает: вносите сюда всё, на что аптека тратит деньги помимо закупки товара. В «Отчётах» расходы вычитаются из прибыли — получается чистая прибыль.')}
       </div>
 
-      <div className="panel" style={{ maxWidth: 900 }}>
+      {can('expenses.create') && <div className="panel" style={{ maxWidth: 900 }}>
         <h2><span className="h2-title"><span className="ic"><LuPlus size={17} /></span>{t('Новый расход')}</span></h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0 14px' }}>
           <div className="field" data-tour="exp.date">
@@ -234,6 +236,8 @@ export default function Expenses() {
         </div>
       </div>
 
+      }
+
       <div className="panel mt" data-tour="exp.history" style={{ padding: 0 }}>
         <h2 style={{ padding: '16px 16px 0' }}>
           <span className="h2-title"><span className="ic"><LuWallet size={17} /></span>{t('История расходов')}</span>
@@ -282,7 +286,7 @@ export default function Expenses() {
                       <LuLock size={14} /> {t('в отчёте смены')}
                     </span>
                   ) : (
-                    <>
+                    can('expenses.edit') && <>
                       <button className="btn ghost sm icon" onClick={() => edit(e)} title={t('Изменить')} aria-label={t('Изменить')}><LuPencil size={15} /></button>{' '}
                       <button className="btn ghost sm icon" onClick={() => remove(e)} title={t('Удалить')} aria-label={t('Удалить')}><LuTrash2 size={15} /></button>
                     </>

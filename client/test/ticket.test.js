@@ -4,7 +4,7 @@
 // в котором сумма не та, что ему назвали.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { qtyPriceText, saleTicket, shiftTicket } from '../src/lib/ticket.js'
+import { qtyPriceText, returnTicket, saleTicket, shiftTicket } from '../src/lib/ticket.js'
 import { autoPrint, forgetPrintConfig, printTicket } from '../src/lib/print.js'
 import { setLang, translate as t } from '../src/lib/i18n.js'
 
@@ -49,7 +49,7 @@ test('чек продажи: шапка, позиции, скидка, итог,
     { label: 'Получено', value: '500 с.' },
     { label: 'Сдача', value: '155 с.' },
   ])
-  assert.deepEqual(ticket.tail, ['Кассир: Нилуфар', 'Спасибо за покупку!'])
+  assert.deepEqual(ticket.tail, ['Кассир: Нилуфар', 'Спасибо за покупку!', 'FinMax POS'])
 })
 
 test('чек без скидки, картой и в долг: лишних строк нет, клиент назван', () => {
@@ -61,7 +61,7 @@ test('чек без скидки, картой и в долг: лишних ст
   // Аптека без названия и чек без кассира не роняют печать
   const bare = saleTicket({ date: sale.date, total: 0, payment: 'cash', items: [] }, { t, money, when })
   assert.deepEqual(bare.head, ['Аптека', 'дата:2026-10-04'])
-  assert.deepEqual(bare.tail, ['Спасибо за покупку!'])
+  assert.deepEqual(bare.tail, ['Спасибо за покупку!', 'FinMax POS'])
 })
 
 const shift = {
@@ -91,7 +91,7 @@ test('Z-отчёт: те же строки, что на экране; выруч
     'Чеков', 'Наличными', 'Картой', 'В долг', 'Скидки', 'Выручка', 'Прибыль', 'Касса на старте', 'Ожидалось в кассе', 'Пересчитано (факт)', 'Расхождение',
   ])
   assert.deepEqual(ticket.totals.filter((r) => r.big).map((r) => [r.label, r.value]), [['Выручка', '1300 с.'], ['Расхождение', '-5 с.']])
-  assert.deepEqual(ticket.tail, ['Кассир: Нилуфар'])
+  assert.deepEqual(ticket.tail, ['Кассир: Нилуфар', 'FinMax POS'])
 
   // Возвраты и погашения долга появляются, только когда они были
   const busy = shiftTicket({ ...shift, debtPaid: 50, refundCash: 30, difference: 10 }, { gross: 1300, refunds: 150, netSales: 1150, netProfit: 350 }, opts)
@@ -112,11 +112,76 @@ test('на таджикском чек печатается таджикским
   try {
     const ticket = saleTicket(sale, opts)
     assert.equal(ticket.totals.find((r) => r.big).label, 'Ҳамагӣ')
-    assert.equal(ticket.tail.at(-1), 'Ташаккур барои харид!')
+    assert.equal(ticket.tail.at(-2), 'Ташаккур барои харид!')
+    assert.equal(ticket.tail.at(-1), 'FinMax POS', 'имя программы не переводится')
     assert.equal(ticket.rows[0].sub, '2 қуттӣ × 150 с.')
   } finally {
     setLang('ru')
   }
+})
+
+test('реквизиты и номер чека: адрес, телефон и подпись попадают на чек, когда они заданы', () => {
+  setLang('ru')
+  const full = saleTicket(sale, {
+    ...opts,
+    rekvizity: { address: 'ул. Рудаки, 10', phone: '+992 900', footer: 'Будьте здоровы!' },
+    nomer: '1004-103000',
+  })
+  assert.deepEqual(full.head, ['Аптека №1', 'ул. Рудаки, 10', 'Тел. +992 900', 'Чек № 1004-103000', 'дата:2026-10-04'])
+  assert.equal(full.tail.at(-2), 'Спасибо за покупку!')
+  assert.ok(full.tail.includes('Будьте здоровы!'), 'подпись владельца — в подвале')
+  // Пустые реквизиты не оставляют пустых строк
+  const empty = saleTicket(sale, { ...opts, rekvizity: { address: '', phone: '', footer: '' } })
+  assert.deepEqual(empty.head, ['Аптека №1', 'дата:2026-10-04'])
+})
+
+test('продажа в долг: чек называет клиента и его новый долг', () => {
+  setLang('ru')
+  const debt = saleTicket(
+    { ...sale, payment: 'debt', received: null, customer: { id: 'c1', name: 'Иван' } },
+    { ...opts, customerDebt: 345 },
+  )
+  assert.deepEqual(debt.totals.slice(-2), [
+    { label: 'Клиент', value: 'Иван' },
+    { label: 'Долг клиента', value: '345 с.' },
+  ])
+  // При оплате наличными долг не печатается, даже если его передали
+  const cash = saleTicket(sale, { ...opts, customerDebt: 345 })
+  assert.ok(!cash.totals.some((r) => r.label === 'Долг клиента'))
+})
+
+const ret = {
+  id: 'ret1',
+  date: '2026-10-04T12:00:00.000Z',
+  saleId: 's1',
+  refund: 'cash',
+  refundVia: '',
+  total: 150,
+  items: [
+    { id: 'l1', name: 'Нурофен', units: 1, restock: true, amount: 150 },
+    { id: 'l2', name: 'Парацетамол', units: 2, restock: false, amount: 0 },
+  ],
+}
+
+test('чек возврата: позиции с пометкой «списано», сумма, способ и номер чека продажи', () => {
+  setLang('ru')
+  const ticket = returnTicket(ret, { ...opts, nomer: '1004-120000', saleNomer: '1004-103000' })
+  assert.deepEqual(ticket.head, ['Аптека №1', 'Чек возврата № 1004-120000', 'дата:2026-10-04'])
+  assert.deepEqual(ticket.rows, [
+    { name: 'Нурофен', sub: '1 шт', value: '150 с.' },
+    { name: 'Парацетамол', sub: '2 шт · списано', value: '0 с.' },
+  ])
+  assert.deepEqual(ticket.totals, [
+    { label: 'Возвращено покупателю', value: '150 с.', big: true },
+    { label: 'Способ возврата', value: 'Наличными из кассы' },
+    { label: 'По чеку', value: '№ 1004-103000' },
+  ])
+  assert.deepEqual(ticket.tail, ['Кассир: Нилуфар', 'FinMax POS'])
+  // Возврат переводом называет сервис; уменьшение долга — прямым текстом
+  const via = returnTicket({ ...ret, refund: 'transfer', refundVia: 'Алиф' }, opts)
+  assert.equal(via.totals[1].value, 'Возврат переводом · Алиф')
+  const debt = returnTicket({ ...ret, refund: 'debt' }, opts)
+  assert.equal(debt.totals[1].value, 'Уменьшен долг клиента')
 })
 
 // ── Куда уходит печать ──

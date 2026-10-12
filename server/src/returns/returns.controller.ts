@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common'
 import { ReturnsService } from './returns.service'
-import { CurrentUser } from '../auth/decorators'
+import { CurrentUser, Perm } from '../auth/decorators'
 import { PeriodQuery } from '../common/period'
 import { CreateReturnDto } from './dto'
 
@@ -15,6 +15,8 @@ export class ReturnsController {
   }
 
   @Post()
+  @Perm('returns.create')
+
   create(@Body() dto: CreateReturnDto, @CurrentUser() u: any) {
     return this.returns.create(dto, u?.tenantUserId)
   }

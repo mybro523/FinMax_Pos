@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { SuppliersService } from './suppliers.service'
-import { CurrentUser, Roles } from '../auth/decorators'
+import { CurrentUser, Perm } from '../auth/decorators'
+import { hasPerm } from '../auth/permissions'
 import { PeriodQuery } from '../common/period'
 import { CreateSupplierDto, PaySupplierDto, UpdateSupplierDto } from './dto'
 
@@ -13,34 +14,35 @@ export class SuppliersController {
 
   @Get()
   findAll(@CurrentUser() u: any) {
-    return this.suppliers.findAll(u?.role === 'founder')
+    return this.suppliers.findAll(hasPerm(u, 'suppliers.view'))
   }
 
   @Post()
+  @Perm('suppliers.edit')
   create(@Body() dto: CreateSupplierDto, @CurrentUser() u: any) {
-    return this.suppliers.create(dto, u?.role === 'founder')
+    return this.suppliers.create(dto, hasPerm(u, 'suppliers.view'))
   }
 
   @Get(':id')
-  @Roles('founder')
+  @Perm('suppliers.view')
   findOne(@Param('id') id: string) {
     return this.suppliers.findOne(id)
   }
 
   @Patch(':id')
-  @Roles('founder')
+  @Perm('suppliers.edit')
   update(@Param('id') id: string, @Body() dto: UpdateSupplierDto) {
     return this.suppliers.update(id, dto)
   }
 
   @Delete(':id')
-  @Roles('founder')
+  @Perm('suppliers.delete')
   remove(@Param('id') id: string) {
     return this.suppliers.remove(id)
   }
 
   @Post(':id/pay')
-  @Roles('founder')
+  @Perm('suppliers.pay')
   pay(@Param('id') id: string, @Body() dto: PaySupplierDto, @CurrentUser() u: any) {
     return this.suppliers.pay(id, dto, u?.tenantUserId)
   }
@@ -48,7 +50,8 @@ export class SuppliersController {
 
 // Журнал оплат поставщикам — отдельным адресом: он нужен смене и обмену с кассами
 @Controller('supplier-payments')
-@Roles('founder')
+@Perm('suppliers.view')
+
 export class SupplierPaymentsController {
   constructor(private readonly suppliers: SuppliersService) {}
 
@@ -58,6 +61,7 @@ export class SupplierPaymentsController {
   }
 
   @Delete(':id')
+  @Perm('suppliers.pay')
   remove(@Param('id') id: string) {
     return this.suppliers.removePayment(id)
   }

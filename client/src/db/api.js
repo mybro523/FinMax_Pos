@@ -22,10 +22,11 @@ export const LONG_TIMEOUT_MS = 10 * 60 * 1000
 
 const TOKEN_KEY = 'apteka_token'
 
-// Токен авторизации читаем прямо из localStorage (без импорта auth — избегаем цикла)
+// Токен авторизации читаем прямо из хранилища вкладки (без импорта auth — избегаем
+// цикла). Он живёт в sessionStorage: закрыли вкладку — в следующий раз снова пароль
 function authHeader() {
   try {
-    const t = localStorage.getItem(TOKEN_KEY)
+    const t = sessionStorage.getItem(TOKEN_KEY)
     return t ? { Authorization: 'Bearer ' + t } : {}
   } catch {
     return {}

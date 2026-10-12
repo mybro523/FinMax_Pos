@@ -28,6 +28,7 @@ import { lastFloor, lastSeen } from './local/licence.mjs'
 import { CORE_SCHEMA, PHARMACY_SCHEMA } from './local/schema.mjs'
 import { createLog } from './log.mjs'
 import { renderTicket } from './print/escpos.mjs'
+import { LOGO } from './print/logo.mjs'
 import { runPowerShell } from './print/powershell.mjs'
 import { checkHost, sendNetwork, sendWindows } from './print/transport.mjs'
 import { isAppUrl, registerAppProtocol, registerScheme, START_URL } from './protocol.mjs'
@@ -357,6 +358,9 @@ async function start() {
   // Перед выходом: запомнить время и закрыть базы — так на диске не остаётся
   // незавершённой записи
   app.on('before-quit', () => {
+    // Закрыли программу — в следующий раз снова нужен пароль. Ключи сотрудников
+    // остаются: по ним уходит то, что сделано без связи (см. session.mjs)
+    store.deactivate()
     clearInterval(clockTimer)
     clearInterval(tickTimer)
     clearInterval(backupTimer)
@@ -396,9 +400,16 @@ async function start() {
     return true
   })
   ipcMain.handle('app:info', (event) => (trusted(event) ? { version: app.getVersion(), packaged: app.isPackaged } : null))
+  // «Закрыть программу» с главного экрана: у кассы не всегда есть мышь с крестиком
+  ipcMain.handle('app:quit', (event) => {
+    if (!trusted(event)) return false
+    app.quit()
+    return true
+  })
 
   // ── Состояние программы: связь, очередь, копия, обновление ──
-  const founder = () => gateway.activeRole() === 'founder'
+  // Папка копий и печать — по правам из роли, а не по должности
+  const allowed = (key) => gateway.activeCan(key)
   ipcMain.handle('sync:status', (event) => (trusted(event) ? fullStatus() : null))
   // «Обменяться сейчас» — и окно само зовёт это, когда система сообщает, что сеть вернулась
   ipcMain.handle('sync:now', async (event) => {
@@ -422,7 +433,7 @@ async function start() {
   // Вторая папка для копий. Путь окно передать не может: папку человек выбирает
   // в системном окне, которое открывает основная часть
   ipcMain.handle('backup:folder', async (event) => {
-    if (!trusted(event) || !founder()) return null
+    if (!trusted(event) || !allowed('settings.backup')) return null
     const r = await dialog.showOpenDialog(win, {
       title: 'Вторая папка для копий базы',
       properties: ['openDirectory', 'createDirectory'],
@@ -434,13 +445,13 @@ async function start() {
     return fullStatus()
   })
   ipcMain.handle('backup:folderClear', (event) => {
-    if (!trusted(event) || !founder()) return null
+    if (!trusted(event) || !allowed('settings.backup')) return null
     settings.set({ backupDir: '' })
     backupNote = { ...backupNote, extraOk: null }
     return fullStatus()
   })
   ipcMain.handle('backup:open', async (event) => {
-    if (!trusted(event) || !founder()) return false
+    if (!trusted(event) || !allowed('settings.backup')) return false
     fs.mkdirSync(backups.dir, { recursive: true })
     return (await shell.openPath(backups.dir)) === ''
   })
@@ -454,7 +465,7 @@ async function start() {
     const cfg = settings.get().print
     if (cfg.mode === 'system') return { ok: true, mode: 'system' }
     try {
-      const bytes = renderTicket(ticket, cfg)
+      const bytes = renderTicket(ticket, { ...cfg, logo: cfg.logo === false ? null : LOGO })
       if (cfg.mode === 'network') await sendNetwork({ net: nodeNet, host: cfg.host, port: cfg.port, bytes })
       else {
         await sendWindows({
@@ -481,7 +492,7 @@ async function start() {
   }
   ipcMain.handle('print:config', async (event) => (trusted(event) && gateway.activeRole() ? { ...settings.get().print, printers: await printerNames() } : null))
   ipcMain.handle('print:setConfig', (event, cfg) => {
-    if (!trusted(event) || !founder()) return null
+    if (!trusted(event) || !allowed('settings.print')) return null
     // Адрес не из сети аптеки не запоминаем вовсе — и прежнюю настройку не трогаем:
     // окно скажет человеку, что не так, а печать продолжит работать как работала
     if (cfg?.mode === 'network' && String(cfg.host ?? '').trim() && !checkHost(cfg.host)) return { refused: 'host' }
@@ -489,7 +500,7 @@ async function start() {
   })
   ipcMain.handle('print:ticket', (event, ticket) => (trusted(event) && gateway.activeRole() ? printTicket(ticket) : { ok: false, mode: 'system' }))
   ipcMain.handle('print:test', (event) =>
-    trusted(event) && founder()
+    trusted(event) && allowed('settings.print')
       ? printTicket({
           head: ['FinMax POS', 'Пробная печать'],
           rows: [{ name: 'Проверка русских букв: АБВГД абвгд ЁЖЗ', sub: '1 шт × 1', value: '1 сомони' }],
@@ -498,6 +509,64 @@ async function start() {
         })
       : { ok: false, mode: 'system' },
   )
+
+  // ── Свой экран печати ──
+  // Окно печати Chromium не умеет предпросмотр, поэтому у программы экран свой:
+  // окно показывает чек само, а сюда просит отправить его на принтер или в PDF.
+  // Лента (raw) уходит строками ESC/POS на выбранный принтер; лист (page) печатает
+  // страницу как она есть (печатным стилям виден только сам чек); pdf кладёт то же
+  // самое в файл — отправить в мессенджер или подшить.
+  ipcMain.handle('print:raw', async (event, req) => {
+    if (!trusted(event) || !gateway.activeRole()) return { ok: false, error: 'Требуется вход в систему' }
+    const printer = typeof req?.printer === 'string' ? req.printer.slice(0, 220) : ''
+    if (!printer) return { ok: false, error: 'Не удалось отправить задание на принтер.' }
+    const cfg = settings.get().print
+    const width = [32, 42, 48].includes(Number(req?.width)) ? Number(req.width) : cfg.width
+    try {
+      const bytes = renderTicket(req?.ticket, { width, codepage: cfg.codepage, cut: cfg.cut, drawer: false, logo: cfg.logo === false ? null : LOGO })
+      await sendWindows({
+        run: (script, env) => runPowerShell({ spawn, script, env }),
+        fs,
+        tmpFile: join(userData, `print-${process.pid}-${++printSeq}.bin`),
+        printer,
+        bytes,
+      })
+      return { ok: true, mode: 'windows' }
+    } catch (e) {
+      log.warn(`чек не напечатан (лента, ${printer}): ${e?.message || e}`)
+      return { ok: false, error: String(e?.message || e) }
+    }
+  })
+  ipcMain.handle('print:page', async (event, req) => {
+    if (!trusted(event) || !gateway.activeRole()) return { ok: false, error: 'Требуется вход в систему' }
+    const deviceName = typeof req?.printer === 'string' ? req.printer.slice(0, 220) : ''
+    return await new Promise((resolve) => {
+      win.webContents.print({ silent: true, deviceName, printBackground: true }, (done, reason) => {
+        if (!done) log.warn(`чек не напечатан (лист${deviceName ? ', ' + deviceName : ''}): ${reason || ''}`)
+        resolve(done ? { ok: true } : { ok: false, error: 'Не удалось отправить задание на принтер.' })
+      })
+    })
+  })
+  ipcMain.handle('print:pdf', async (event) => {
+    if (!trusted(event) || !gateway.activeRole()) return { ok: false, error: 'Требуется вход в систему' }
+    try {
+      const pdf = await win.webContents.printToPDF({ printBackground: true, pageSize: 'A4' })
+      const stamp = new Date().toISOString().slice(0, 10)
+      const r = await dialog.showSaveDialog(win, {
+        title: 'Сохранить чек в PDF',
+        defaultPath: join(app.getPath('documents'), `chek-${stamp}.pdf`),
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      })
+      if (r.canceled || !r.filePath) return { ok: false, canceled: true }
+      fs.writeFileSync(r.filePath, pdf)
+      // Показать файл в Проводнике: человек сразу видит, куда лёг чек
+      shell.showItemInFolder(r.filePath)
+      return { ok: true, path: r.filePath }
+    } catch (e) {
+      log.warn('PDF не сохранён: ' + (e?.message || e))
+      return { ok: false, error: 'Не получилось. Повторите.' }
+    }
+  })
 
   ipcMain.handle('update:check', async (event) => {
     if (!trusted(event)) return null

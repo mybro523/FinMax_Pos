@@ -1,6 +1,7 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, ForbiddenException } from '@nestjs/common'
 import { ArrivalsService } from './arrivals.service'
-import { CurrentUser, Roles } from '../auth/decorators'
+import { CurrentUser, Perm } from '../auth/decorators'
+import { hasPerm } from '../auth/permissions'
 import { PeriodQuery } from '../common/period'
 import { CreateArrivalDto, UpdateArrivalDto } from './dto'
 
@@ -13,7 +14,9 @@ import { CreateArrivalDto, UpdateArrivalDto } from './dto'
 export class ArrivalsController {
   constructor(private readonly arrivals: ArrivalsService) {}
 
+  // Журнал приходов — закупочные цены аптеки: только тем, кому открыт раздел
   @Get()
+  @Perm('arrivals.view')
   findAll(@Query() q: PeriodQuery) {
     return this.arrivals.findAll(q)
   }
@@ -21,24 +24,28 @@ export class ArrivalsController {
   // Один приход с подробностями для правки: сколько от каждой строки
   // уже продано и ниже чего нельзя опускать количество
   @Get(':id')
-  @Roles('founder')
+  @Perm('arrivals.view')
   findOne(@Param('id') id: string) {
     return this.arrivals.findOne(id)
   }
 
   @Post()
+  @Perm('arrivals.create')
   create(@Body() dto: CreateArrivalDto, @CurrentUser() u: any) {
+    // Приход в долг поставщику — отдельное право: это обязательство аптеки
+    if ((dto.debt || 0) > 0 && !hasPerm(u, 'arrivals.debt')) throw new ForbiddenException('Нет права оформлять приход в долг')
+
     return this.arrivals.create(dto, u?.tenantUserId)
   }
 
   @Patch(':id')
-  @Roles('founder')
+  @Perm('arrivals.edit')
   update(@Param('id') id: string, @Body() dto: UpdateArrivalDto) {
     return this.arrivals.update(id, dto)
   }
 
   @Delete(':id')
-  @Roles('founder')
+  @Perm('arrivals.edit')
   remove(@Param('id') id: string) {
     return this.arrivals.remove(id)
   }

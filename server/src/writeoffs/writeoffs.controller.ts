@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common'
 import { WriteOffsService } from './writeoffs.service'
-import { CurrentUser, Roles } from '../auth/decorators'
+import { CurrentUser, Perm } from '../auth/decorators'
 import { PeriodQuery } from '../common/period'
 import { CreateWriteOffDto } from './dto'
 
@@ -9,14 +9,15 @@ import { CreateWriteOffDto } from './dto'
 export class WriteOffsController {
   constructor(private readonly writeOffs: WriteOffsService) {}
 
+  // Журнал читают и отчёты с панелью: без списаний прибыль в них была бы завышена
   @Get()
-  @Roles('founder')
+  @Perm('writeoffs.view', 'reports.view', 'dashboard.view')
   findAll(@Query() q: PeriodQuery) {
     return this.writeOffs.findAll(q)
   }
 
   @Post()
-  @Roles('founder')
+  @Perm('writeoffs.create')
   create(@Body() dto: CreateWriteOffDto, @CurrentUser() u: any) {
     return this.writeOffs.create(dto, u?.tenantUserId)
   }

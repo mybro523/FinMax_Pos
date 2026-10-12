@@ -1,16 +1,21 @@
 import { useState, useMemo, useCallback } from 'react'
-import { LuUndo2, LuSearch, LuTriangleAlert, LuCircleCheck } from 'react-icons/lu'
+import { LuUndo2, LuSearch, LuTriangleAlert, LuCircleCheck, LuPrinter } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { Modal, useToast, PayBadge } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { JournalFilter, JournalCount, useJournalFilter } from '../components/JournalFilter'
 import { useCollection, money } from '../db/store'
 import { returnGoods } from '../db/ops'
-import { fmtDateTime, dayKey } from '../lib/time'
+import { fmtDateTime, dayKey, chekNomer } from '../lib/time'
 import { useT } from '../lib/i18n'
 import { useCategories, needsExpiry } from '../lib/categories'
 import NumberInput from '../components/NumberInput'
 import { uppOf, lineUnits as soldUnits } from '../lib/units'
+import { returnTicket } from '../lib/ticket'
+import TicketView from '../components/TicketView'
+import { usePechat } from '../components/PrintDialog'
+import { getRekvizity } from '../lib/rekvizity'
+import { useAuth, useCan } from '../db/auth'
 
 // ── Возврат товара ──
 // Кассир находит чек, отмечает что и сколько возвращают и решает по каждой позиции:
@@ -22,6 +27,7 @@ import { uppOf, lineUnits as soldUnits } from '../lib/units'
 // кассир держит в руках и может вписать его в поле «Срок на упаковке».
 
 export default function Returns() {
+  const can = useCan()
   const sales = useCollection('sales')
   // Журнал возвратов общий со сменой и отчётами: там от него зависят деньги в кассе
   const returns = useCollection('returns')
@@ -203,9 +209,11 @@ export default function Returns() {
                     <td className="num"><b>{money(s.total)}</b></td>
                     <td><PayBadge type={s.payment} /></td>
                     <td className="num">
-                      <button className="btn ghost sm" data-tour="ret.pick" onClick={() => pickSale(s)}>
-                        <LuSearch size={14} /> {t('Выбрать')}
-                      </button>
+                      {can('returns.create') && (
+                        <button className="btn ghost sm" data-tour="ret.pick" onClick={() => pickSale(s)}>
+                          <LuSearch size={14} /> {t('Выбрать')}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -387,28 +395,37 @@ export default function Returns() {
         </Modal>
       )}
 
-      {done && (
-        <Modal title={<><span className="ic" style={{ color: 'var(--green)' }}><LuCircleCheck size={18} /></span>{t('Возврат оформлен')}</>} onClose={() => setDone(null)}>
-          <div className="total-row big"><span>{t('Возвращено покупателю')}</span><span>{money(done.total)}</span></div>
-          <table style={{ marginTop: 12 }}>
-            <tbody>
-              {done.items.map((i) => (
-                <tr key={i.id}>
-                  <td>{i.name} <span className="tag-cat">×{i.units} {t('шт')}</span></td>
-                  <td className="num">
-                    {i.restock
-                      ? <span className="badge ok">{t('в продажу')}</span>
-                      : <span className="badge debt">{t('списано')}</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setDone(null)}>{t('Готово')}</button>
-          </div>
-        </Modal>
-      )}
+      {done && <ReturnReceipt ret={done} sales={sales} onClose={() => setDone(null)} />}
     </Layout>
+  )
+}
+// ── Чек возврата ──
+// Покупателю на руки: что вернули, сколько денег и как. Собирается в общий вид
+// чека (lib/ticket.js) — экран, лента, окно печати и PDF совпадают строка в строку
+function ReturnReceipt({ ret, sales, onClose }) {
+  const t = useT()
+  const auth = useAuth()
+  const { print, dialog } = usePechat()
+  // Номер чека продажи, по которому оформлен возврат, — чтобы их сверять друг с другом
+  const saleDate = sales.find((s) => s.id === ret.saleId)?.date
+  const ticket = returnTicket(ret, {
+    t,
+    money,
+    when: fmtDateTime,
+    pharmacy: auth?.pharmacy?.name,
+    cashier: auth?.name,
+    rekvizity: getRekvizity(auth?.pharmacy?.code),
+    nomer: chekNomer(ret.date),
+    saleNomer: saleDate ? chekNomer(saleDate) : '',
+  })
+  return (
+    <Modal className="printable" title={<><span className="ic" style={{ color: 'var(--green)' }}><LuCircleCheck size={18} /></span>{t('Возврат оформлен')}</>} onClose={onClose}>
+      <TicketView ticket={ticket} />
+      <div className="modal-actions">
+        <button className="btn ghost" onClick={() => print(ticket)}><span className="ic"><LuPrinter size={16} /></span> {t('Печать')}</button>
+        <button className="btn" onClick={onClose}>{t('Готово')}</button>
+      </div>
+      {dialog}
+    </Modal>
   )
 }

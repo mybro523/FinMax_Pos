@@ -7,7 +7,7 @@
 // Запуск: npm test (в папке desktop)
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { encode, escpos, printable, renderTicket, sanitizeTicket, twoColumns, wrap } from '../src/print/escpos.mjs'
+import { rasterImage, encode, escpos, printable, renderTicket, sanitizeTicket, twoColumns, wrap } from '../src/print/escpos.mjs'
 
 // Байты обратно в текст — чтобы сверять раскладку глазами. Команды выкидываются
 function text866(buf) {
@@ -151,4 +151,26 @@ test('чек из мусора не роняет печать: лишнее от
   assert.deepEqual(huge.rows, [{ name: '', sub: '', value: '' }, { name: '', sub: '', value: '' }, { name: '12', sub: '', value: '' }])
   // Пустой чек — всё равно корректное задание: сброс, подача, отрез
   assert.deepEqual([...renderTicket(null)], [0x1b, 0x40, 0x1b, 0x74, 17, 0x1b, 0x61, 1, 0x1b, 0x61, 0, 0x1b, 0x64, 3, 0x1d, 0x56, 0x42, 0x00])
+})
+test('эмблема: растровый блок GS v 0 с верной шириной в байтах, битая — не печатается', () => {
+  // 16×8: две полосы — проверяем и заголовок, и сами точки
+  const data = Buffer.alloc(16, 0).fill(0xff, 0, 8).toString('base64')
+  const img = rasterImage({ width: 16, height: 8, data })
+  assert.deepEqual([...img.slice(0, 8)], [0x1d, 0x76, 0x30, 0x00, 2, 0, 8, 0])
+  assert.equal(img.length, 8 + 16)
+  assert.equal(img[8], 0xff)
+  // Длина точек не сходится с размерами — блок пустой, лента не портится
+  assert.equal(rasterImage({ width: 16, height: 9, data }).length, 0)
+  assert.equal(rasterImage({ width: 0, height: 8, data }).length, 0)
+  assert.equal(rasterImage(null).length, 0)
+
+  // В чеке эмблема идёт первой, после выбора таблицы букв, по центру
+  const bytes = renderTicket({ head: ['Аптека'], rows: [], totals: [], tail: [] }, { width: 32, cut: false, logo: { width: 16, height: 8, data } })
+  const hex = bytes.toString('hex')
+  const raster = img.toString('hex')
+  assert.ok(hex.includes(raster), 'растровый блок попал в чек')
+  assert.ok(hex.indexOf(raster) < hex.indexOf(Buffer.from('1b6100', 'hex').toString('hex')), 'эмблема раньше возврата к левому краю')
+  // Без эмблемы байты прежние — как у всех старых проверок
+  const plain = renderTicket({ head: ['Аптека'], rows: [], totals: [], tail: [] }, { width: 32, cut: false })
+  assert.ok(!plain.toString('hex').includes('1d7630'), 'нет логотипа — нет растрового блока')
 })

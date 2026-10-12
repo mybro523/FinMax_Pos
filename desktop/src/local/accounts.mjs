@@ -88,12 +88,12 @@ export function saveAccount(db, user, { verifier, now }) {
   q(db, 'DELETE FROM accounts WHERE login = ? AND id <> ?').run(user.name, user.id)
   q(
     db,
-    `INSERT INTO accounts (id, login, role, pharmacyCode, pharmacyName, verifier, subStatus, paidUntil, seenAt)
-     VALUES (@id, @login, @role, @code, @name, @verifier, @subStatus, @paidUntil, @seenAt)
+    `INSERT INTO accounts (id, login, role, pharmacyCode, pharmacyName, verifier, subStatus, paidUntil, seenAt, permissions, roleName)
+     VALUES (@id, @login, @role, @code, @name, @verifier, @subStatus, @paidUntil, @seenAt, @permissions, @roleName)
      ON CONFLICT(id) DO UPDATE SET
        login = excluded.login, role = excluded.role, pharmacyCode = excluded.pharmacyCode,
        pharmacyName = excluded.pharmacyName, subStatus = excluded.subStatus, paidUntil = excluded.paidUntil,
-       seenAt = excluded.seenAt,
+       seenAt = excluded.seenAt, permissions = excluded.permissions, roleName = excluded.roleName,
        verifier = CASE WHEN @keep = 1 THEN accounts.verifier ELSE excluded.verifier END`,
   ).run({
     id: user.id,
@@ -106,6 +106,10 @@ export function saveAccount(db, user, { verifier, now }) {
     subStatus: sub.status || 'active',
     paidUntil: sub.paidUntil || null,
     seenAt,
+    // Права приходят с сервера вместе с «кто я». Нет списка — сервер прежней версии,
+    // тогда права кассира по умолчанию (пустая строка, см. permissionsOf)
+    permissions: Array.isArray(user.permissions) ? JSON.stringify(user.permissions) : '',
+    roleName: user.roleName || '',
   })
   return accountById(db, user.id)
 }
@@ -162,11 +166,42 @@ export function subscriptionMessage(v) {
   }
 }
 
+// ── Права учётной записи ──
+// Тот же минимум кассира, что на сервере и на сайте: для записей без списка прав
+export const CASHIER_DEFAULT = [
+  'pos.sell', 'pos.discount', 'pos.debt', 'pos.defer', 'customers.create',
+  'returns.view', 'returns.create', 'shift.view', 'shift.open', 'shift.cash',
+]
+export function permissionsOf(acc) {
+  if (!acc) return []
+  const raw = acc.permissions
+  if (Array.isArray(raw)) return raw
+  if (typeof raw === 'string' && raw) {
+    try {
+      const p = JSON.parse(raw)
+      if (Array.isArray(p)) return p
+    } catch {
+      /* испорченная запись — как без списка */
+    }
+  }
+  return acc.role === 'cashier' ? CASHIER_DEFAULT : []
+}
+// Владелец может всё; остальным — любое из перечисленных прав
+export function hasPerm(acc, ...keys) {
+  if (!acc) return false
+  if (acc.role === 'founder') return true
+  const own = permissionsOf(acc)
+  return keys.some((k) => own.includes(k))
+}
+
 // «Кто я» — в том же виде, что отдаёт сервер
 export const userView = (acc, now) => ({
   id: acc.id,
   name: acc.login,
   role: acc.role,
+  roleId: acc.role === 'founder' ? 'owner' : null,
+  roleName: acc.role === 'founder' ? 'Владелец' : acc.roleName || 'Кассир',
+  permissions: permissionsOf(acc),
   pharmacy: { code: acc.pharmacyCode, name: acc.pharmacyName },
   subscription: subscriptionOf(acc, now),
   impersonatedBy: null,

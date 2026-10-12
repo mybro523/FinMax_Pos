@@ -7,7 +7,7 @@ import { useCollection, db, money } from '../db/store'
 import { fmtDateTime } from '../lib/time'
 import { normalizeScan } from '../lib/scan'
 import { useT, translate as tr } from '../lib/i18n'
-import { useAuth } from '../db/auth'
+import { useCan } from '../db/auth'
 import { useCategories, categoryNames } from '../lib/categories'
 import { sellsBelowCost } from '../lib/pricing'
 import NumberInput from '../components/NumberInput'
@@ -20,7 +20,8 @@ export default function Deferred() {
   const [edit, setEdit] = useState(null) // {id, barcode} отложенного, который заводим
   // Карточку заводит владелец: он задаёт цену продажи и закупочную. Кассир
   // складывает сюда незнакомые штрихкоды с кассы и видит, что ещё не оформлено.
-  const isFounder = useAuth()?.role === 'founder'
+  const can = useCan()
+  const isFounder = can('products.create')
   const pg = usePagination(deferred, 10)
 
   async function del(item) {
@@ -103,7 +104,7 @@ export default function Deferred() {
                         </button>{' '}
                       </>
                     )}
-                    <button className="btn ghost sm icon" data-tour="def.delete" onClick={() => del(d)}><LuTrash2 size={15} /></button>
+                    {can('deferred.manage') && <button className="btn ghost sm icon" data-tour="def.delete" onClick={() => del(d)} title={t('Удалить')} aria-label={t('Удалить')}><LuTrash2 size={15} /></button>}
                   </td>
                 </tr>
               ))}
