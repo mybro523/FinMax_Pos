@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import {
+import { LuCircleDollarSign,
   LuLayoutDashboard, LuShoppingCart, LuPill, LuPackagePlus, LuLayoutGrid,
   LuClipboardList, LuReceipt, LuTrendingUp, LuSettings, LuClock, LuTag, LuCalculator, LuWifiOff,
   LuUsers, LuCalendarClock, LuUndo2, LuTrash2, LuClipboardCheck, LuTriangleAlert,
@@ -41,6 +41,7 @@ export const NAV = [
   { to: '/debts', label: 'Долги клиентов', Icon: LuReceipt, perm: 'debts.view' },
   { to: '/discounts', label: 'История скидок', Icon: LuTag, perm: 'discounts.view' },
   { to: '/suppliers', label: 'Поставщики', Icon: LuTruck, perm: 'suppliers.view' },
+  { to: '/supplier-debts', label: 'Долги поставщикам', Icon: LuCircleDollarSign, perm: 'suppliers.view' },
   { to: '/expenses', label: 'Расходы', Icon: LuHandCoins, perm: 'expenses.view' },
   { to: '/reports', label: 'Отчёты', Icon: LuTrendingUp, perm: 'reports.view' },
   { section: 'Управление' },

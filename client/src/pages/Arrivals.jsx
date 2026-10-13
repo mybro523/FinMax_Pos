@@ -1,11 +1,12 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
-import { LuPlus, LuTrash2, LuScanLine, LuPackagePlus, LuPencil } from 'react-icons/lu'
+import { LuBanknote, LuCreditCard, LuClock, LuCalculator, LuPlus, LuTrash2, LuScanLine, LuPackagePlus, LuPencil } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { isVesovoy, kgText, gramsOfKg } from '../lib/units'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { JournalFilter, JournalCount, useJournalFilter } from '../components/JournalFilter'
 import { useCollection, money, db } from '../db/store'
+import { api } from '../db/api'
 import { receiveArrival, findByBarcode, getArrival, updateArrival, deleteArrival } from '../db/ops'
 import { useCan } from '../db/auth'
 import { fmtDateTime } from '../lib/time'
@@ -96,6 +97,9 @@ export default function Arrivals() {
                 <td>
                   <b>{a.supplier}</b>
                   {Number(a.debt) > 0 && <div className="tag-cat" style={{ color: 'var(--danger)' }}>{t('в долг')} {money(a.debt)}</div>}
+                  {a.payMethod === 'cash' && <div className="tag-cat">{t('оплачен из кассы')}</div>}
+                  {a.payMethod === 'own' && <div className="tag-cat">{t('наличными')}</div>}
+                  {a.payMethod === 'card' && <div className="tag-cat">{t('картой')}</div>}
                 </td>
                 <td className="num">{a.items.length}</td>
                 <td className="num"><b>{money(a.total)}</b></td>
@@ -197,9 +201,28 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
   const categories = useCategories()
   const dialog = useDialog()
   const [supplierId, setSupplierId] = useState('')
-  // Приход в долг: оплачено не всё, остальное становится долгом перед поставщиком
-  const [credit, setCredit] = useState(false)
-  const [paid, setPaid] = useState('')
+  // Чем заплатили поставщику: из кассы, своими наличными, картой или в долг.
+  // Пока не выбрано — приход не проводится, как и просил владелец
+  const [payMethod, setPayMethod] = useState('')
+  const [paid, setPaid] = useState('') // оплачено сейчас (для «в долг»)
+  const [paidFromCash, setPaidFromCash] = useState(false) // оплаченное — из ящика кассы
+  // Открытые смены, из ящика которых можно взять деньги
+  const [tills, setTills] = useState([])
+  const [sourceId, setSourceId] = useState('')
+  useEffect(() => {
+    let alive = true
+    api
+      .get('/shifts/cash-sources')
+      .then((list) => {
+        if (!alive) return
+        setTills(list || [])
+        setSourceId(((list || []).find((x) => !x.deviceId) || (list || [])[0])?.shiftId || '')
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
   const [lines, setLines] = useState([])
   const [pick, setPick] = useState('')
   const [code, setCode] = useState('')
@@ -359,12 +382,25 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
       }
     }
     const sup = suppliers.find((s) => s.id === supplierId)
-    if (credit && !sup) {
-      toast(tr('Для прихода в долг выберите поставщика'), 'err')
+    if (!payMethod) {
+      toast(tr('Выберите, чем заплатили поставщику'), 'err')
       return
     }
-    const debt = credit ? Math.max(0, total - Math.max(0, Number(paid) || 0)) : 0
+    if ((payMethod === 'cash' || payMethod === 'debt') && !sup) {
+      toast(tr('Для этого способа выберите поставщика из справочника'), 'err')
+      return
+    }
+    const debt = payMethod === 'debt' ? Math.max(0, total - Math.max(0, Number(paid) || 0)) : 0
+    const paidNow = payMethod === 'debt' ? Math.min(Math.max(0, Number(paid) || 0), total) : 0
+    const paidCash = payMethod === 'cash' ? total : paidFromCash ? paidNow : 0
+    if (paidCash > 0 && !tills.length) {
+      toast(tr('Нет открытой смены — из кассы взять нечего.'), 'err')
+      return
+    }
     onSave({
+      payMethod,
+      paidCash,
+      shiftId: paidCash > 0 ? sourceId || '' : '',
       supplier: sup?.name || '',
       supplierId: sup?.id || '',
       debt,
@@ -491,7 +527,20 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
       )}
 
       <div className="total-row big" data-tour="af.total"><span>{tr('Итого')}</span><span>{money(total)}</span></div>
-      {can('arrivals.debt') && <CreditBlock credit={credit} setCredit={setCredit} paid={paid} setPaid={setPaid} total={total} tour="af.credit" />}
+      <PayBlock
+        method={payMethod}
+        setMethod={setPayMethod}
+        paid={paid}
+        setPaid={setPaid}
+        fromCash={paidFromCash}
+        setFromCash={setPaidFromCash}
+        tills={tills}
+        sourceId={sourceId}
+        setSourceId={setSourceId}
+        total={total}
+        canDebt={can('arrivals.debt')}
+        tour="af.credit"
+      />
       <div className="modal-actions">
         <button className="btn ghost" onClick={onClose}>{tr('Отмена')}</button>
         <button className="btn" data-tour="af.submit" disabled={!lines.length} onClick={submit}>{tr('Оприходовать')}</button>
@@ -629,6 +678,69 @@ function SupplierPick({ suppliers, value, onChange, dialog, toast, tour }) {
 }
 
 // Оплачено ли сразу. Не всё — остаток становится долгом перед поставщиком
+// ── Чем заплатили поставщику ──
+// Четыре кнопки: из кассы (деньги уходят из ящика открытой смены — записывается
+// оплата поставщику и попадает в Z-отчёт), наличными мимо кассы, картой, в долг
+// (с полем «оплачено сейчас»; оплаченную часть тоже можно взять из ящика)
+function PayBlock({ method, setMethod, paid, setPaid, fromCash, setFromCash, tills, sourceId, setSourceId, total, canDebt, tour }) {
+  const debt = Math.max(0, total - Math.max(0, Number(paid) || 0))
+  const KNOPKI = [
+    ['cash', tr('Из кассы'), LuCalculator],
+    ['own', tr('Наличными'), LuBanknote],
+    ['card', tr('Картой'), LuCreditCard],
+    ...(canDebt ? [['debt', tr('В долг'), LuClock]] : []),
+  ]
+  const nuzhenYashik = method === 'cash' || (method === 'debt' && fromCash)
+  return (
+    <div data-tour={tour} style={{ margin: '10px 0 4px' }}>
+      <label style={{ display: 'block', fontSize: 13, color: 'var(--muted)', marginBottom: 6 }}>{tr('Чем заплатили')}</label>
+      <div className="arr-pay">
+        {KNOPKI.map(([key, label, Icon]) => (
+          <button
+            key={key}
+            type="button"
+            className={'arr-pay-btn' + (method === key ? ' active' : '')}
+            disabled={key === 'cash' && !tills.length}
+            title={key === 'cash' && !tills.length ? tr('Нет открытой смены — из кассы взять нечего.') : undefined}
+            onClick={() => setMethod(key)}
+          >
+            <Icon size={16} />
+            <span>{label}</span>
+          </button>
+        ))}
+      </div>
+      {!method && <div className="arr-pay-hint">{tr('Выберите, чем заплатили поставщику')}</div>}
+      {method === 'debt' && (
+        <div className="row" style={{ alignItems: 'flex-end', marginTop: 10 }}>
+          <div className="field" style={{ maxWidth: 220, marginBottom: 0 }}>
+            <label>{tr('Оплачено сейчас (сомони)')}</label>
+            <NumberInput value={paid} placeholder="0" onChange={(e) => setPaid(e.target.value)} />
+          </div>
+          <div className="total-row" style={{ flex: 1, margin: '0 0 6px' }}>
+            <span>{tr('В долг поставщику')}</span>
+            <span style={{ color: 'var(--danger)' }}>{money(debt)}</span>
+          </div>
+        </div>
+      )}
+      {method === 'debt' && Number(paid) > 0 && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, marginTop: 8 }}>
+          <input type="checkbox" checked={fromCash} disabled={!tills.length} onChange={(e) => setFromCash(e.target.checked)} style={{ width: 16, height: 16 }} />
+          {tr('оплаченное — из кассы')}
+          {!tills.length && <span className="tag-cat">{tr('Нет открытой смены — из кассы взять нечего.')}</span>}
+        </label>
+      )}
+      {nuzhenYashik && tills.length > 1 && (
+        <div className="field" style={{ maxWidth: 320, marginTop: 8, marginBottom: 0 }}>
+          <label>{tr('Из какой кассы')}</label>
+          <select value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
+            {tills.map((x) => <option key={x.shiftId} value={x.shiftId}>{x.label || x.deviceName || tr('Касса сайта')}</option>)}
+          </select>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function CreditBlock({ credit, setCredit, paid, setPaid, total, tour }) {
   const debt = Math.max(0, total - Math.max(0, Number(paid) || 0))
   return (

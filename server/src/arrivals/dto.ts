@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer'
-import { ArrayMinSize, IsArray, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator'
+import { ArrayMinSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator'
 
 const MAX_MONEY = 9_999_999_999.99
 
@@ -20,6 +20,13 @@ export class CreateArrivalDto {
   // становится долгом перед ним. Не указано — приход оплачен полностью
   @IsOptional() @IsString() @MaxLength(64) supplierId?: string
   @IsOptional() @IsNumber() @Min(0) @Max(MAX_MONEY) debt?: number
+  // Чем заплатили поставщику: из кассы, своими наличными, картой или в долг
+  @IsOptional() @IsIn(['', 'cash', 'own', 'card', 'debt']) payMethod?: string
+  // Сколько из оплаченного взято из денежного ящика (создаётся оплата поставщику
+  // «наличными из кассы» — она видна в Z-отчёте и в журнале оплат)
+  @IsOptional() @IsNumber() @Min(0) @Max(MAX_MONEY) paidCash?: number
+  // Из какой открытой смены берутся деньги; не задано — смена сайта
+  @IsOptional() @IsString() @MaxLength(64) shiftId?: string
 
   @IsArray()
   @ArrayMinSize(1)

@@ -5,7 +5,7 @@
 // Без интернета иначе нельзя: касса не может знать, открыта ли смена на соседней,
 // а ждать связи, чтобы начать продавать, — значит не продавать.
 import { bodyOf, checker } from '../check.mjs'
-import { bad, inTx, newId } from '../db.mjs'
+import { bad, inTx, newId, q } from '../db.mjs'
 import { docsOfShift, enqueue, myOpenShift, putDoc } from '../docs.mjs'
 import { D, fromCents, toCents } from '../money.mjs'
 import { expenseCashOf } from './expense.mjs'
@@ -22,7 +22,24 @@ export function shiftView(db, shift) {
   // Открытая смена в списке кассы — всегда её собственная (docs.mjs, listShifts)
   if (shift.closedAt) return shift
   const { cashIn, cashOut } = cashMovesOf(db, shift.id)
-  return { ...shift, expenseCash: money(expenseCashOf(db, shift)), cashIn: money(cashIn), cashOut: money(cashOut) }
+  return {
+    ...shift,
+    expenseCash: money(expenseCashOf(db, shift)),
+    // Экран смены показывает «Оплачено поставщикам» по этой строке. Оплаченные из
+    // ящика приходы, ещё не дошедшие до сервера, добавляем сами — как при закрытии
+    supplierCash: money(D(shift.supplierCash || 0).plus(pendingPaidOf(db, shift.id))),
+    cashIn: money(cashIn),
+    cashOut: money(cashOut),
+  }
+}
+
+// Деньги, ушедшие поставщикам из ящика этой смены с непосланными приходами
+function pendingPaidOf(db, shiftId) {
+  let paid = D(0)
+  for (const r of q(db, "SELECT body FROM docs WHERE kind = 'arrival' AND shiftId = ? AND sync = 'pending'").all(shiftId)) {
+    paid = paid.plus(JSON.parse(r.body).paidCash || 0)
+  }
+  return paid
 }
 
 export function openShift(ctx, raw) {
@@ -115,9 +132,11 @@ export function shiftTotals(db, shift, countedCash) {
   }
 
   // Расходы аптеки и оплаты поставщикам из этой кассы — денег в ящике уже нет.
-  // Оплату поставщику касса сама не оформляет (только с интернетом), её сумму знает сервер
+  // Оплаты долгов знает сервер (shift.supplierCash); оплаченные из ящика приходы,
+  // ещё не дошедшие до него, касса добавляет сама — деньги-то уже ушли. Как только
+  // приход отправлен, он перестаёт быть pending, а сервер вписывает ту же сумму
   const expenseCash = expenseCashOf(db, shift)
-  const supplierCash = D(shift.supplierCash || 0)
+  const supplierCash = D(shift.supplierCash || 0).plus(pendingPaidOf(db, shift.id))
   // Внесено в ящик и изъято из него
   const { cashIn, cashOut } = cashMovesOf(db, shift.id)
 

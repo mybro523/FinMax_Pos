@@ -37,6 +37,7 @@ const WriteOffs = lazy(() => import('./pages/WriteOffs'))
 const Inventory = lazy(() => import('./pages/Inventory'))
 const Expenses = lazy(() => import('./pages/Expenses'))
 const Suppliers = lazy(() => import('./pages/Suppliers'))
+const SupplierDebts = lazy(() => import('./pages/SupplierDebts'))
 // Панель владельца сервиса: он обслуживает аптеки, но своей у него нет
 const Admin = lazy(() => import('./pages/Admin'))
 
@@ -70,6 +71,7 @@ const AHEAD_FOUNDER = [
   () => import('./pages/Roles'),
   () => import('./pages/Expenses'),
   () => import('./pages/Suppliers'),
+  () => import('./pages/SupplierDebts'),
   () => import('./pages/Reports'),
 ]
 
@@ -198,6 +200,7 @@ function AuthedApp({ user }) {
           <Route path="/discounts" element={guarded('discounts.view', <Discounts />)} />
           <Route path="/expenses" element={guarded('expenses.view', <Expenses />)} />
           <Route path="/suppliers" element={guarded('suppliers.view', <Suppliers />)} />
+          <Route path="/supplier-debts" element={guarded('suppliers.view', <SupplierDebts />)} />
           <Route path="/reports" element={guarded('reports.view', <Reports />)} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/obuchenie" element={<Obuchenie />} />

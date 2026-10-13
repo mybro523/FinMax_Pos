@@ -180,15 +180,16 @@ function applySuppliers(db, sup, full) {
   if (full) q(db, 'DELETE FROM suppliers').run()
   const insert = q(
     db,
-    `INSERT INTO suppliers (id, name, phone, note, openingDebtC, sDebtC, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO suppliers (id, name, phone, note, openingDebtC, sDebtC, debtArrivals, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET name = excluded.name, phone = excluded.phone, note = excluded.note,
        openingDebtC = COALESCE(excluded.openingDebtC, suppliers.openingDebtC),
-       sDebtC = COALESCE(excluded.sDebtC, suppliers.sDebtC), createdAt = excluded.createdAt`,
+       sDebtC = COALESCE(excluded.sDebtC, suppliers.sDebtC),
+       debtArrivals = COALESCE(excluded.debtArrivals, suppliers.debtArrivals), createdAt = excluded.createdAt`,
   )
   for (const s of sup.upsert) {
     if (!s || typeof s.id !== 'string') continue
     const known = s.debt !== undefined && s.debt !== null
-    insert.run(s.id, String(s.name ?? ''), String(s.phone ?? ''), String(s.note ?? ''), known ? toCents(s.openingDebt || 0) : null, known ? toCents(s.debt) : null, isoOrNull(s.createdAt) || '')
+    insert.run(s.id, String(s.name ?? ''), String(s.phone ?? ''), String(s.note ?? ''), known ? toCents(s.openingDebt || 0) : null, known ? toCents(s.debt) : null, Number.isInteger(s.debtArrivals) ? s.debtArrivals : null, isoOrNull(s.createdAt) || '')
   }
   for (const id of sup.remove) q(db, 'DELETE FROM suppliers WHERE id = ?').run(id)
 }

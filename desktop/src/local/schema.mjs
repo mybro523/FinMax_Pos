@@ -223,6 +223,11 @@ export const PHARMACY_SCHEMA = [
   );
   DELETE FROM meta WHERE key IN ('cursor', 'wcursor');
   `,
+  `
+  -- Сводке «Долги поставщикам» нужен счётчик долговых приходов и без связи.
+  -- NULL — сервер его не присылал (запись получал кассир, деньги не его)
+  ALTER TABLE suppliers ADD COLUMN debtArrivals INTEGER;
+  `,
 ]
 
 // ── Общая база программы ──

@@ -125,6 +125,9 @@ model Arrival {
   supplierId  String?
   supplierRef Supplier?  @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   debt     Decimal       @default(0) @db.Decimal(12, 2)
+  // Чем заплатили: cash — из кассы, own — наличными мимо кассы, card — картой,
+  // debt — в долг. Пусто — приход прежней версии
+  payMethod String   @default("")
   userId   String? // кто принял — для истории движения товара
   user     User?         @relation(fields: [userId], references: [id])
   items    ArrivalItem[]

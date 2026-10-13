@@ -19,7 +19,7 @@ import { createCustomer, payDebt } from './ops/customer.mjs'
 import { addDeferred, removeDeferred } from './ops/deferred.mjs'
 import { cashSources, createExpense, expenseCategoriesList } from './ops/expense.mjs'
 import { createCashMove } from './ops/cash.mjs'
-import { payServicesList, suppliersList } from './suppliers.mjs'
+import { suppliersDebts, payServicesList, suppliersList } from './suppliers.mjs'
 import { createReturn } from './ops/return.mjs'
 import { checkout } from './ops/sale.mjs'
 import { closeShift, openShift, shiftView } from './ops/shift.mjs'
@@ -116,6 +116,8 @@ const ROUTES = [
   ['GET', /^\/expense-categories$/, perm(['expenses.view', 'expenses.create', 'settings.expenseCategories'], (ctx) => expenseCategoriesList(ctx.db))],
   // Поставщики нужны приходу — всем; долги в них видит только владелец
   ['GET', /^\/suppliers$/, (ctx) => suppliersList(ctx.db, hasPerm(ctx.user, 'suppliers.view'))],
+  // Сводка «кому сколько должны» — с учётом своих непосланных приходов в долг
+  ['GET', /^\/suppliers\/debts$/, perm(['suppliers.view'], (ctx) => suppliersDebts(ctx.db))],
   ['GET', /^\/supplier-payments$/, perm(['suppliers.view'], journal('supplierpayment'))],
   ['GET', /^\/pay-services$/, (ctx) => payServicesList(ctx.db)],
   ['GET', /^\/cash-moves$/, journal('cashmove')],

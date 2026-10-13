@@ -171,7 +171,7 @@ export function checkout({ items, payment, payVia, customer }) {
 // Срок годности обязателен для лекарств (кроме категорий из NO_EXPIRY_CATEGORIES) — он задаёт
 // партию, из которой продажа спишет товар первым. Без него сервер приход не примет.
 // supplierId и debt — поставщик из справочника и неоплаченная часть (долг перед ним)
-export function receiveArrival({ supplier, supplierId, debt, items }) {
+export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash, shiftId, items }) {
   // Товар мог быть заведён только что и ещё не получить настоящий номер — см. realId
   items = items.map((i) => (i.productId ? { ...i, productId: realId(i.productId) } : i))
   if (!items.length) throw new Error('Добавьте хотя бы один товар')
@@ -192,6 +192,7 @@ export function receiveArrival({ supplier, supplierId, debt, items }) {
     supplier: supplier || '—',
     supplierId: supplierId || null,
     debt: supplierId ? Math.max(0, Number(debt) || 0) : 0,
+    payMethod: payMethod || '',
     total,
     items: arrItems,
   }
@@ -211,6 +212,9 @@ export function receiveArrival({ supplier, supplierId, debt, items }) {
     .post('/arrivals', {
       supplier,
       ...(supplierId ? { supplierId, debt: Math.max(0, Number(debt) || 0) } : {}),
+      ...(payMethod ? { payMethod } : {}),
+      // Оплаченная из ящика часть: сервер запишет оплату поставщику из этой смены
+      ...(Number(paidCash) > 0 ? { paidCash: Number(paidCash), ...(shiftId ? { shiftId } : {}) } : {}),
       items: arrItems.map((i) => ({
         productId: i.productId,
         qty: i.qty,
@@ -223,8 +227,8 @@ export function receiveArrival({ supplier, supplierId, debt, items }) {
     .then((arrival) => {
       setCollection('arrivals', db.get('arrivals').map((a) => (a.id === tempArrival.id ? arrival : a)))
       // Себестоимость пересчитана средневзвешенно на сервере — подтянем точные значения.
-      // Приход в долг изменил и долг поставщика
-      refresh('products', 'suppliers')
+      // Приход в долг изменил долг поставщика, оплата из кассы — деньги смены
+      refresh('products', 'suppliers', ...(Number(paidCash) > 0 ? ['shifts', 'supplierPayments'] : []))
     })
     .catch((e) => {
       setCollection('products', prevP)

@@ -231,6 +231,10 @@ export function parseArrival(p: any, now?: number) {
   // Неоплаченная часть — долг поставщику. Больше самого прихода она не бывает
   const debt = money(a.debt ?? 0, 'долг поставщику')
   if (debt > total + 0.01) throw new Reject('Долг поставщику больше суммы прихода')
+  // Оплаченная из ящика часть — не больше оплаченного вообще
+  const paidCash = money(a.paidCash ?? 0, 'оплачено из кассы')
+  if (paidCash > total - debt + 0.01) throw new Reject('Из кассы оплачено больше, чем стоит приход без долга')
+  if (paidCash > 0 && !idOrNull(a.supplierId, 'поставщик')) throw new Reject('Для оплаты из кассы нужен поставщик из справочника')
   return {
     id: id(a.id, 'приход'),
     date: when(a.date, 'приход', now),
@@ -238,6 +242,9 @@ export function parseArrival(p: any, now?: number) {
     supplierId: idOrNull(a.supplierId, 'поставщик'),
     debt,
     total,
+    payMethod: oneOf(a.payMethod ?? '', ['', 'cash', 'own', 'card', 'debt'] as const, 'способ оплаты'),
+    paidCash,
+    shiftId: idOrNull(a.shiftId, 'смена'),
     items: items.map((it, n) => ({ ...it, expiryDate: dateOrNull(expiry[n], 'срок годности') })),
   }
 }

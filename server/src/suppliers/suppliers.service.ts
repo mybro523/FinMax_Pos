@@ -115,6 +115,26 @@ export class SuppliersService {
   }
 
   // ── Оплата поставщику ──
+  // ── Кому сколько должны ──
+  // Сводка для раздела «Долги поставщикам»: сумма долгов, число должников и
+  // сколько приходов оформлено в долг — всего и по каждому. Счётчик приходов
+  // исторический: погашение долга его не уменьшает, как и сумма самого прихода
+  async debts() {
+    const sups = await this.prisma.supplier.findMany({ orderBy: [{ debt: 'desc' }, { name: 'asc' }] })
+    const counts = await this.prisma.arrival.groupBy({
+      by: ['supplierId'],
+      where: { debt: { gt: 0 }, supplierId: { not: null } },
+      _count: { _all: true },
+    })
+    const poId = new Map(counts.map((c) => [c.supplierId as string, c._count._all]))
+    const dolzhny = sups.filter((s) => D(s.debt).gt(0))
+    return {
+      total: dolzhny.reduce((a, s) => a.plus(s.debt), D(0)),
+      arrivals: counts.reduce((a, c) => a + c._count._all, 0),
+      suppliers: dolzhny.map((s) => ({ id: s.id, name: s.name, debt: s.debt, arrivals: poId.get(s.id) || 0 })),
+    }
+  }
+
   async pay(id: string, dto: PaySupplierDto, userId?: string) {
     const { clientId } = dto
     if (clientId) {

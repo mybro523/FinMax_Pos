@@ -9,6 +9,7 @@ import { bodyOf, checker, expiryOk, MAX_MONEY, sumOk, unitsOk } from '../check.m
 import { bad, inTx, newId } from '../db.mjs'
 import { enqueue, putDoc } from '../docs.mjs'
 import { D, fromCents, toCents } from '../money.mjs'
+import { myOpenShift } from '../docs.mjs'
 import { move, productById } from '../stock.mjs'
 import { supplierRow } from '../suppliers.mjs'
 import { isoOrNull } from '../time.mjs'
@@ -22,6 +23,9 @@ export function createArrival(ctx, raw) {
   // Поставщик из справочника и неоплаченная часть — долг перед ним
   const supplierId = c.str(dto.supplierId, 'supplierId', { optional: true })
   const debtAsked = c.num(dto.debt, 'debt', { optional: true, max: MAX_MONEY })
+  // Чем заплатили и сколько из этого — деньгами из ящика кассы
+  const payMethod = c.oneOf(dto.payMethod ?? '', 'payMethod', ['', 'cash', 'own', 'card', 'debt'])
+  const paidCashAsked = c.num(dto.paidCash, 'paidCash', { optional: true, max: MAX_MONEY })
   const items = c.list(dto.items, 'items').map((it, n) => ({
     productId: c.str(it?.productId, `items.${n}.productId`),
     // Целые упаковки (у весового товара — килограммы); ноль допустим при pieces > 0
@@ -89,6 +93,19 @@ export function createArrival(ctx, raw) {
     const debtD = !sup ? D(0) : asked.gt(total) ? total : asked
     const debt = fromCents(toCents(debtD))
 
+    // «Из кассы»: деньги уходят из ящика ОТКРЫТОЙ смены этой кассы. Пока приход
+    // не отправлен, закрытие смены само добавит эту сумму к «оплачено поставщикам»
+    // (см. ops/shift.mjs); сервер при приёме запишет ту же оплату поставщику
+    const paidCash = fromCents(toCents(D(paidCashAsked || 0)))
+    let paidShiftId = null
+    if (paidCash > 0) {
+      if (!sup) throw bad('Для оплаты из кассы выберите поставщика из справочника')
+      if (D(paidCash).gt(total.minus(debtD).plus(D('0.01')))) throw bad('Из кассы оплачено больше, чем стоит приход без долга')
+      const shift = myOpenShift(db, ctx.deviceId)
+      if (!shift) throw bad('Нет открытой смены — из кассы взять нечего.')
+      paidShiftId = shift.id
+    }
+
     const arrivalId = newId()
     const opId = newId()
     const weighed = new Set()
@@ -124,6 +141,9 @@ export function createArrival(ctx, raw) {
       supplier: sup?.name || supplier || '—',
       supplierId: sup?.id ?? null,
       debt,
+      payMethod,
+      paidCash,
+      shiftId: paidShiftId,
       userId: ctx.user.id,
       user: { id: ctx.user.id, name: ctx.user.name },
       total: fromCents(toCents(total)),

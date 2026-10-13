@@ -23,6 +23,14 @@ export class SuppliersController {
     return this.suppliers.create(dto, hasPerm(u, 'suppliers.view'))
   }
 
+  // Сводка долгов: всего, скольким поставщикам и сколько приходов в долг.
+  // Стоит раньше ':id', иначе «debts» приняли бы за номер поставщика
+  @Get('debts')
+  @Perm('suppliers.view')
+  debts() {
+    return this.suppliers.debts()
+  }
+
   @Get(':id')
   @Perm('suppliers.view')
   findOne(@Param('id') id: string) {

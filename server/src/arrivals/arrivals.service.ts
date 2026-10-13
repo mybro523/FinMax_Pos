@@ -4,6 +4,8 @@ import { PrismaService } from '../prisma/prisma.service'
 import { D } from '../common/money'
 import { weightedPackCost, costFromBatches } from '../common/cost'
 import { addUnits, expiryFrom, lockProducts, syncProduct, uppOf } from '../common/stock'
+import { openShiftFor } from '../shifts/till'
+import { setSupplierCash } from '../shifts/totals'
 import { TX } from '../common/tx'
 import { periodFilter, PeriodQuery, MAX_ROWS } from '../common/period'
 import { lockSupplier } from '../suppliers/suppliers.service'
@@ -192,6 +194,7 @@ export class ArrivalsService {
           supplier: sup.name || supplier?.trim() || '—',
           supplierId: sup.supplierId,
           debt: sup.debt,
+          payMethod: ['cash', 'own', 'card', 'debt'].includes(dto.payMethod || '') ? dto.payMethod! : '',
           userId: userId ?? null,
           total,
           items: { create: arrivalItems },
@@ -199,6 +202,31 @@ export class ArrivalsService {
         include: { items: true },
       })
       await addDebt(tx, sup.supplierId, sup.debt)
+
+      // «Из кассы»: оплаченная часть прихода уходит из денежного ящика. Записываем
+      // её оплатой поставщику «наличными из кассы» той же транзакцией — она видна
+      // в журнале оплат, уменьшает ожидаемые наличные и попадает в Z-отчёт.
+      // Долг поставщика она не трогает: это оплата самого прихода, а не долга
+      const paidCash = D(dto.paidCash || 0).toDecimalPlaces(2)
+      if (paidCash.gt(0)) {
+        if (!sup.supplierId) throw new BadRequestException('Для оплаты из кассы выберите поставщика из справочника')
+        if (paidCash.gt(total.minus(sup.debt).plus(D('0.01')))) {
+          throw new BadRequestException('Из кассы оплачено больше, чем стоит приход без долга')
+        }
+        const shiftId = await openShiftFor(tx, dto.shiftId, 'Нет открытой смены — из кассы взять нечего.')
+        await tx.supplierPayment.create({
+          data: {
+            clientId: arrival.id + ':pay',
+            supplierId: sup.supplierId,
+            amount: paidCash,
+            note: 'Оплата прихода',
+            fromCash: true,
+            shiftId,
+            userId: userId ?? null,
+          },
+        })
+        await setSupplierCash(tx, shiftId)
+      }
 
       // Каждая строка прихода — партия со своим сроком годности
       for (let n = 0; n < arrivalItems.length; n++) {

@@ -10,7 +10,7 @@ import { weightedPackCost } from '../common/cost'
 import { addUnits, consumeUnitsTolerant, lockProducts, returnExpiry, shortageWorth, uppOf } from '../common/stock'
 import { Count, firstCountAfter, forgetShortageDoc, lockInventories, pruneCounted, rememberShortageDoc, shortageDocOf } from '../common/counted'
 import { TX, TX_SNAPSHOT } from '../common/tx'
-import { setCashMoves, setExpenseCash, shiftTotals } from '../shifts/totals'
+import { setCashMoves, setExpenseCash, setSupplierCash, shiftTotals } from '../shifts/totals'
 import { withDeviceNames } from '../shifts/shifts.service'
 import { lockSupplier, supplierBrief } from '../suppliers/suppliers.service'
 import { CASHIER_DEFAULT, OP_PERMISSIONS, hasPerm, permissionsOf } from '../auth/permissions'
@@ -848,6 +848,19 @@ export class SyncService {
   }
 
   // ── Приход ──
+  // Строки поставщиков для обмена: кассиру — без денег, владельцу — с долгом и
+  // числом долговых приходов (его показывает раздел «Долги поставщикам» без связи)
+  private async supplierRows(tx: Tx, founder: boolean, sups: any[]) {
+    if (!founder) return sups.map((s) => supplierBrief(s))
+    const counts = await tx.arrival.groupBy({
+      by: ['supplierId'],
+      where: { debt: { gt: 0 }, supplierId: { in: sups.map((s) => s.id) } },
+      _count: { _all: true },
+    })
+    const poId = new Map(counts.map((c) => [c.supplierId as string, c._count._all]))
+    return sups.map((s) => ({ ...s, debtArrivals: poId.get(s.id) || 0 }))
+  }
+
   private async applyArrival(tx: Tx, p: ReturnType<typeof parseArrival>, ctx: Ctx): Promise<string> {
     if (await tx.arrival.findUnique({ where: { id: p.id }, select: { id: true } })) return p.id
 
@@ -928,6 +941,7 @@ export class SyncService {
         supplier: supplierName,
         supplierId,
         debt,
+        payMethod: p.payMethod || '',
         userId: ctx.tenantUserId,
         total,
         items: { create: p.items.map((i) => ({ id: i.id, productId: i.productId, name: i.name, qty: i.qty, pieces: i.pieces || 0, cost: D(i.cost) })) },
@@ -936,6 +950,26 @@ export class SyncService {
     if (supplierId && debt.gt(0)) {
       await tx.supplier.update({ where: { id: supplierId }, data: { debt: { increment: debt } } })
       ctx.extra.add('suppliers')
+    }
+    // Оплата прихода из ящика кассы, оформленная без связи: касса уже вычла эти
+    // деньги из своей смены — сервер записывает ту же оплату поставщику. Повтор
+    // операции не плодит вторую: ключ clientId один и тот же
+    if (p.paidCash > 0 && supplierId) {
+      await tx.supplierPayment.upsert({
+        where: { clientId: p.id + ':pay' },
+        create: {
+          clientId: p.id + ':pay',
+          supplierId,
+          amount: D(p.paidCash).toDecimalPlaces(2),
+          note: 'Оплата прихода',
+          fromCash: true,
+          shiftId: p.shiftId,
+          userId: ctx.tenantUserId,
+        },
+        update: {},
+      })
+      if (p.shiftId) await setSupplierCash(tx, p.shiftId)
+      ctx.extra.add('supplierPayments')
     }
     for (const it of p.items) {
       if (counted.has(it.productId)) continue
@@ -1210,8 +1244,10 @@ export class SyncService {
       sales: all(await tx.sale.findMany({ where: { date: { gte: salesFrom } }, include: saleInclude, orderBy: { date: 'desc' } })),
       returns: all(await tx.saleReturn.findMany({ where: { date: { gte: journalFrom } }, include: withUser, orderBy: { date: 'desc' } })),
       arrivals: all(await tx.arrival.findMany({ where: { date: { gte: journalFrom } }, include: { items: true }, orderBy: { date: 'desc' } })),
-      // Поставщики нужны приходу — всем; долги в них видит только владелец
-      suppliers: all((await tx.supplier.findMany({ orderBy: { name: 'asc' } })).map((s) => (founder ? s : supplierBrief(s)))),
+      // Поставщики нужны приходу — всем; долги в них видит только владелец.
+      // Владельцу — ещё и сколько приходов в долг у каждого: раздел «Долги
+      // поставщикам» в программе показывает это и без связи
+      suppliers: all(await this.supplierRows(tx, founder, await tx.supplier.findMany({ orderBy: { name: 'asc' } }))),
       payServices: all(await tx.payService.findMany({ orderBy: [{ ord: 'asc' }, { name: 'asc' }] })),
       cashMoves: all(await tx.cashMove.findMany({ where: { date: { gte: journalFrom } }, include: userOnly, orderBy: { date: 'desc' } })),
       ...(founder
@@ -1270,7 +1306,7 @@ export class SyncService {
       sales: await load('Sale', (part) => tx.sale.findMany({ where: inIds(part), include: saleInclude })),
       returns: await load('SaleReturn', (part) => tx.saleReturn.findMany({ where: inIds(part), include: withUser })),
       arrivals: await load('Arrival', (part) => tx.arrival.findMany({ where: inIds(part), include: { items: true } })),
-      suppliers: await load('Supplier', async (part) => (await tx.supplier.findMany({ where: inIds(part) })).map((s) => (founder ? s : supplierBrief(s)))),
+      suppliers: await load('Supplier', async (part) => this.supplierRows(tx, founder, await tx.supplier.findMany({ where: inIds(part) }))),
       payServices: await load('PayService', (part) => tx.payService.findMany({ where: inIds(part) })),
       cashMoves: await load('CashMove', (part) => tx.cashMove.findMany({ where: inIds(part), include: userOnly })),
       ...(founder

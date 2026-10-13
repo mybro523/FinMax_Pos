@@ -455,7 +455,7 @@ test('приход: партия со сроком, средневзвешенн
       ['Бинт', 10, 5, true],
     ],
   )
-  assert.deepEqual(Object.keys(arrival), ['id', 'date', 'supplier', 'supplierId', 'debt', 'userId', 'user', 'total', 'items'])
+  assert.deepEqual(Object.keys(arrival), ['id', 'date', 'supplier', 'supplierId', 'debt', 'payMethod', 'paidCash', 'shiftId', 'userId', 'user', 'total', 'items'])
 
   const list = productsList(db, NOW)
   const par = list.find((p) => p.id === 'par')
@@ -519,6 +519,44 @@ test('приход весового товара: граммы сверх цел
   // Серверу уходит та же строка с граммами
   const op = outbox(db).at(-1)
   assert.deepEqual(op.payload.arrival.items.map((i) => [i.qty, i.pieces]), [[12, 350]])
+})
+
+test('приход «из кассы»: деньги уходят из открытой смены, без смены и поставщика — отказ', () => {
+  const { db } = apteka({ suppliers: SUPPLIERS.map((s) => ({ ...s })) })
+  // Без открытой смены из кассы взять нечего
+  refused(
+    () => createArrival(ctx(db), { supplierId: 'sup-1', payMethod: 'cash', paidCash: 105, items: [{ productId: 'bint', qty: 21, cost: 5 }] }),
+    400,
+    'Нет открытой смены — из кассы взять нечего.',
+  )
+  // Без поставщика из справочника оплату записать некому
+  openShift(ctx(db), { openingCash: 500 })
+  refused(
+    () => createArrival(ctx(db), { payMethod: 'cash', paidCash: 105, items: [{ productId: 'bint', qty: 21, cost: 5 }] }),
+    400,
+    'Для оплаты из кассы выберите поставщика из справочника',
+  )
+  // Больше стоимости прихода из ящика не взять
+  refused(
+    () => createArrival(ctx(db), { supplierId: 'sup-1', payMethod: 'cash', paidCash: 200, items: [{ productId: 'bint', qty: 21, cost: 5 }] }),
+    400,
+    'Из кассы оплачено больше, чем стоит приход без долга',
+  )
+
+  const arrival = createArrival(ctx(db), { supplierId: 'sup-1', payMethod: 'cash', paidCash: 105, items: [{ productId: 'bint', qty: 21, cost: 5 }] })
+  assert.equal(arrival.payMethod, 'cash')
+  assert.equal(arrival.paidCash, 105)
+  assert.ok(arrival.shiftId, 'оплата привязана к открытой смене')
+  // Серверу уходит та же оплата — он запишет её оплатой поставщику
+  const op = outbox(db).at(-1)
+  assert.equal(op.payload.arrival.paidCash, 105)
+  assert.equal(op.payload.arrival.shiftId, arrival.shiftId)
+
+  // Закрытие смены: 500 на старте − 105 поставщику = 395 ожидается
+  const closed = closeShift(ctx(db), { countedCash: 395 })
+  assert.equal(closed.supplierCash, 105)
+  assert.equal(closed.expectedCash, 395)
+  assert.equal(closed.difference, 0)
 })
 
 test('приход: товар с новым сроком сразу продаётся, а ближайший срок в карточке обновляется', () => {
