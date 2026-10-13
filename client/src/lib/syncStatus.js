@@ -90,6 +90,18 @@ export function opTitle(type, t) {
 }
 
 // ── Обновление программы — одной строкой ──
+// Чип версии в шапке: какая версия стоит и последняя ли она.
+// «Последняя» пишем только после настоящей проверки (checkedAt), не раньше
+export function versionBadgeOf(st, t) {
+  if (!st?.version) return null
+  const u = st.update || {}
+  if (u.state === 'ready') return { tone: 'ok', label: `${t('Версия')} ${u.version} ${t('готова — перезапустите')}` }
+  if (u.state === 'downloading') return { tone: 'busy', label: `${t('Скачивается')} ${u.version || ''} · ${u.percent || 0}%` }
+  if (u.state === 'checking') return { tone: 'muted', label: `${t('Версия')} ${st.version} · ${t('проверяем…')}` }
+  if (u.state === 'idle' && u.checkedAt) return { tone: 'ok', label: `${t('Версия')} ${st.version} · ${t('последняя')}` }
+  return { tone: 'muted', label: `${t('Версия')} ${st.version}` }
+}
+
 export function updateText(update, t) {
   switch (update?.state) {
     case 'checking':

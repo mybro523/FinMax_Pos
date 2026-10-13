@@ -1275,6 +1275,11 @@ tbody tr.clickable { cursor: pointer; }
 }
 
 
+/* Чип версии в шапке: какая стоит и последняя ли */
+.sync-badge.ver { opacity: 0.92; }
+.sync-badge.ver.muted { background: var(--soft); color: var(--muted); border-color: var(--border); }
+.sync-badge.ver.ok { background: var(--green-soft, var(--soft)); }
+
 /* ── Карточка товара: галочка «продаётся на вес» ── */
 .pf-ves {
   display: flex; align-items: flex-start; gap: 10px;

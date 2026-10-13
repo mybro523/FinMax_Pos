@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { LuCheck, LuCloudOff, LuRefreshCw, LuTriangleAlert, LuDownload } from 'react-icons/lu'
+import { LuBadgeCheck, LuCheck, LuCloudOff, LuRefreshCw, LuTriangleAlert, LuDownload } from 'react-icons/lu'
 import { bridge } from '../lib/desktop'
 import { desktopAction, refreshDesktopStatus, useDesktopStatus } from '../db/desktopStatus'
 import { useAuth } from '../db/auth'
 import { money } from '../db/store'
 import { fmtDate, fmtShort, serverNow } from '../lib/time'
 import { useT } from '../lib/i18n'
-import { badgeOf, leftText, opTitle, updateBadgeOf, updateText } from '../lib/syncStatus'
+import { badgeOf, leftText, opTitle, updateBadgeOf, updateText, versionBadgeOf } from '../lib/syncStatus'
 import { rejectedDetail } from '../lib/rejected'
 import { Modal, useToast } from './ui'
 
@@ -33,10 +33,17 @@ export default function SyncBadge() {
   const badge = badgeOf(st, t)
   if (!badge) return null
   const update = updateBadgeOf(st, t)
+  const ver = versionBadgeOf(st, t)
   const Icon = ICONS[badge.tone]
 
   return (
     <>
+      {ver && (
+        <button type="button" className={'sync-badge ver ' + ver.tone} onClick={() => setOpen(true)} title={t('Версия программы')} data-testid="version-badge">
+          <span className="ic">{ver.tone === 'busy' ? <LuDownload size={14} /> : <LuBadgeCheck size={14} />}</span>
+          <span className="sync-label">{ver.label}</span>
+        </button>
+      )}
       <button type="button" className={'sync-badge ' + badge.tone} onClick={() => setOpen(true)} title={t('Состояние программы')} data-testid="sync-badge">
         <span className={'ic' + (badge.tone === 'busy' ? ' spin' : '')}><Icon size={15} /></span>
         <span className="sync-label">{badge.label}</span>
