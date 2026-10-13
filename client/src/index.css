@@ -1275,6 +1275,20 @@ tbody tr.clickable { cursor: pointer; }
 }
 
 
+/* ── Отчёт ОПУ ── */
+.opu-print-head { display: none; }
+.opu-table td, .opu-table th { padding: 11px 16px; }
+.opu-b td { font-weight: 600; }
+.opu-big td { font-size: 15px; }
+@media print {
+  /* На бумаге — шапка и таблица; карточки повторяют те же числа и лист не нужен им */
+  .opu-print-head { display: block; text-align: center; margin: 0 0 12px; font-size: 15px; }
+  .opu-print-head b { font-size: 17px; }
+  .opu .opu-cards { display: none !important; }
+  .opu .opu-panel { border: none; box-shadow: none; margin-top: 0; }
+  .opu-table td, .opu-table th { border-bottom: 1px solid #c7ccd8; }
+}
+
 /* ── Приход: чем заплатили ── */
 .arr-pay { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; }
 .arr-pay-btn {

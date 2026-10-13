@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { LuDownload, LuWallet, LuTrendingUp, LuBoxes, LuReceipt, LuUndo2, LuHandCoins, LuPiggyBank } from 'react-icons/lu'
+import { LuDownload, LuWallet, LuTrendingUp, LuBoxes, LuReceipt, LuUndo2, LuHandCoins, LuPiggyBank, LuPrinter, LuTruck, LuUsers, LuCalculator } from 'react-icons/lu'
 import { Link } from 'react-router-dom'
 import Layout from '../components/Layout'
 import Metric from '../components/Metric'
@@ -10,7 +10,8 @@ import { stockUnits, stockValue, stockCost, lineUnits } from '../lib/units'
 import { startOfDay, startOfDaysAgo, fmtShort, fmtDateTime, dayKey } from '../lib/time'
 import { useT, translate as tr } from '../lib/i18n'
 import { periodFinance } from '../lib/finance'
-import { useCan } from '../db/auth'
+import { opuFinance } from '../lib/opu'
+import { useCan, getUser } from '../db/auth'
 
 const PERIODS = [
   { key: 'today', label: 'Сегодня', days: 0 },
@@ -49,6 +50,148 @@ function SalesTable({ list }) {
   )
 }
 
+// ── Отчёт ОПУ (прибыли и убытки) ──
+// Карточки и таблица «Показатель — Сумма» — вид, к которому привыкли владельцы
+// магазинов. Формулы в lib/opu.js; кнопка «Печать» выводит лист с шапкой аптеки.
+const OPU_KEYS = ['sales', 'returns', 'writeoffs', 'expenses', 'payments', 'supplierPayments', 'arrivals']
+const dstr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+function Opu() {
+  const t = useT()
+  const sales = useCollection('sales')
+  const returns = useCollection('returns')
+  const writeOffs = useCollection('writeoffs')
+  const expenses = useCollection('expenses')
+  const debtPayments = useCollection('payments')
+  const supplierPayments = useCollection('supplierPayments')
+  const arrivals = useCollection('arrivals')
+
+  // По умолчанию — текущий месяц: даты сразу видны в полях, цифры считаются сразу.
+  // «Показать» применяет то, что введено, — цифры не прыгают при каждом нажатии клавиши
+  const now = new Date()
+  const [fromDate, setFromDate] = useState(dstr(new Date(now.getFullYear(), now.getMonth(), 1)))
+  const [toDate, setToDate] = useState(dstr(now))
+  const [applied, setApplied] = useState({ from: dstr(new Date(now.getFullYear(), now.getMonth(), 1)), to: dstr(now) })
+  const range = useMemo(
+    () => ({
+      from: applied.from ? startOfDay(applied.from) : new Date(0),
+      to: applied.to ? new Date(startOfDay(applied.to).getTime() + 86400000) : null,
+    }),
+    [applied],
+  )
+
+  // Период глубже кэша устройства — догружаем всю историю отрезка с сервера,
+  // ровно как во вкладке «Подробно»
+  const needsServer = OPU_KEYS.some((k) => needsServerFor(k, range.from))
+  const [deep, setDeep] = useState(null)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  useEffect(() => {
+    if (!needsServer) {
+      setDeep(null)
+      return
+    }
+    let cancelled = false
+    setLoadingOlder(true)
+    Promise.all(OPU_KEYS.map((k) => (needsServerFor(k, range.from) ? loadRange(k, range.from, range.to) : Promise.resolve(null))))
+      .then((arr) => { if (!cancelled) setDeep(Object.fromEntries(OPU_KEYS.map((k, i) => [k, arr[i]]))) })
+      .catch(() => { if (!cancelled) setDeep(null) })
+      .finally(() => { if (!cancelled) setLoadingOlder(false) })
+    return () => { cancelled = true }
+  }, [needsServer, range.from, range.to])
+
+  const d = useMemo(
+    () =>
+      opuFinance({
+        sales: (deep && deep.sales) || sales,
+        returns: (deep && deep.returns) || returns,
+        writeOffs: (deep && deep.writeoffs) || writeOffs,
+        expenses: (deep && deep.expenses) || expenses,
+        debtPayments: (deep && deep.payments) || debtPayments,
+        supplierPayments: (deep && deep.supplierPayments) || supplierPayments,
+        arrivals: (deep && deep.arrivals) || arrivals,
+        from: range.from,
+        to: range.to,
+      }),
+    [deep, sales, returns, writeOffs, expenses, debtPayments, supplierPayments, arrivals, range],
+  )
+
+  const apt = getUser()?.pharmacy?.name || ''
+  const rows = [
+    [t('Продажа'), d.prodazha],
+    [t('Себестоимость'), d.sebestoimost],
+    [t('Валовой доход'), d.valovoy, 'b'],
+    [t('Оплата поставщику'), d.supplierPaid],
+    [t('Расход магазина'), d.magazin],
+    [t('Налоги'), d.nalogi],
+    [t('Зарплата'), d.zarplata],
+    [t('Другие расходы'), d.other],
+    [t('Все расходы'), d.allExpenses, 'b'],
+    [t('Чистый доход'), d.chistiy, 'big'],
+  ]
+
+  return (
+    <div className="printable opu">
+      {/* Шапка видна только на бумаге: чья аптека и за какой период отчёт */}
+      <div className="opu-print-head">
+        <b>{apt}</b>
+        <div>{t('Отчёт ОПУ')} · {applied.from} — {applied.to}</div>
+      </div>
+
+      <div className="row no-print" data-tour="opu.period" style={{ maxWidth: 620, marginBottom: 14, gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div className="field" style={{ flex: 1, minWidth: 140, marginBottom: 0 }}>
+          <label>{t('С даты')}</label>
+          <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+        </div>
+        <div className="field" style={{ flex: 1, minWidth: 140, marginBottom: 0 }}>
+          <label>{t('По дату')}</label>
+          <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+        </div>
+        <button className="btn" data-tour="opu.show" onClick={() => setApplied({ from: fromDate, to: toDate })}>{t('Показать')}</button>
+        <button className="btn gold" data-tour="opu.print" onClick={() => window.print()}>
+          <span className="ic"><LuPrinter size={16} /></span> {t('Печать')}
+        </button>
+      </div>
+
+      {loadingOlder && <div className="note info no-print" style={{ marginBottom: 12 }}>{t('Загружаем историю за выбранный период…')}</div>}
+
+      <div className="cards six opu-cards" data-tour="opu.cards">
+        <Metric label={t('Выручка')} value={money(d.prodazha)} Icon={LuWallet} tint="accent" />
+        <Metric label={t('Себестоимость')} value={money(d.sebestoimost)} Icon={LuBoxes} tint="blue" />
+        <Metric label={t('Валовой доход')} value={money(d.valovoy)} Icon={LuTrendingUp} tint="green" />
+        <Metric label={t('Поставщик')} value={money(d.supplierPaid)} Icon={LuTruck} tint="blue" />
+        <Metric label={t('Зарплата')} value={money(d.zarplata)} Icon={LuUsers} tint="accent" />
+        <Metric label={t('Другие расходы')} value={money(d.allExpenses - d.zarplata)} Icon={LuHandCoins} tint="danger" />
+        <Metric label={t('Все расходы')} value={money(d.allExpenses)} Icon={LuReceipt} tint="danger" />
+        <Metric label={t('Чистый доход')} value={money(d.chistiy)} Icon={LuPiggyBank} tint={d.chistiy < 0 ? 'danger' : 'green'} />
+        <Metric label={t('Касса')} value={money(d.kassa)} Icon={LuCalculator} tint="accent" />
+      </div>
+
+      <div className="panel mt opu-panel" data-tour="opu.table" style={{ padding: 0 }}>
+        <table className="opu-table">
+          <thead><tr><th>{t('Показатель')}</th><th className="num">{t('Сумма')}</th></tr></thead>
+          <tbody>
+            {rows.map(([label, v, kind]) => (
+              <tr key={label} className={kind ? 'opu-' + kind : ''}>
+                <td>{label}</td>
+                <td className="num">
+                  {kind === 'big'
+                    ? <b style={{ color: v < 0 ? 'var(--danger)' : 'var(--green)' }}>{money(v)}</b>
+                    : kind ? <b>{money(v)}</b> : money(v)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="tag-cat no-print" style={{ marginTop: 10, lineHeight: 1.6, maxWidth: 720 }}>
+        {t('Чистый доход — кассовый: валовой доход минус все расходы и деньги, отданные поставщикам за товар.')}{' '}
+        {t('Чтобы зарплата и налоги попали в свои строки, записывайте их в разделе «Расходы» в статьи «Зарплата», «Налоги» и «Расход магазина».')}
+      </p>
+    </div>
+  )
+}
+
 export default function Reports() {
   const can = useCan()
   const sales = useCollection('sales')
@@ -61,6 +204,15 @@ export default function Reports() {
   // товаре, а не то, что аптека заработала на самом деле
   const expenses = useCollection('expenses')
   const t = useT()
+  // Вкладки: «Отчёт ОПУ» открывается первой, подробная аналитика — рядом.
+  // Выбор запоминается: кто живёт в ОПУ, тот в нём и остаётся
+  const [tab, setTabRaw] = useState(() => {
+    try { return localStorage.getItem('apteka_otchet_vkladka') || 'opu' } catch { return 'opu' }
+  })
+  const setTab = (v) => {
+    setTabRaw(v)
+    try { localStorage.setItem('apteka_otchet_vkladka', v) } catch { /* без хранилища просто не запомнится */ }
+  }
   const [period, setPeriod] = useState('7')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
@@ -259,8 +411,16 @@ export default function Reports() {
 
   return (
     <Layout title={t('Отчёты')} subtitle={t('Продажи, прибыль, выручка и склад')}
-      actions={can('reports.export') && <button className="btn ghost" data-tour="rep.export" onClick={exportCsv}><span className="ic"><LuDownload size={16} /></span> {t('Экспорт CSV')}</button>}>
+      actions={tab === 'detail' && can('reports.export') && <button className="btn ghost" data-tour="rep.export" onClick={exportCsv}><span className="ic"><LuDownload size={16} /></span> {t('Экспорт CSV')}</button>}>
 
+      <div className="chips" data-tour="rep.tabs" style={{ marginBottom: 14 }}>
+        <button className={'chip ' + (tab === 'opu' ? 'active' : '')} data-tour="rep.tab-opu" onClick={() => setTab('opu')}>{t('Отчёт ОПУ')}</button>
+        <button className={'chip ' + (tab === 'detail' ? 'active' : '')} data-tour="rep.tab-detail" onClick={() => setTab('detail')}>{t('Подробно')}</button>
+      </div>
+
+      {tab === 'opu' && <Opu />}
+
+      {tab === 'detail' && <>
       <div className="chips" data-tour="rep.period" style={{ marginBottom: 12 }}>
         {PERIODS.map((p) => (
           <button key={p.key} className={'chip ' + (period === p.key ? 'active' : '')} onClick={() => setPeriod(p.key)}>{t(p.label)}</button>
@@ -415,6 +575,7 @@ export default function Reports() {
       </div>
 
       {modal && renderModal()}
+      </>}
     </Layout>
   )
 }
