@@ -39,4 +39,8 @@ export class UpdateProductDto {
   @IsOptional() @IsString() dosage?: string
   @IsOptional() @IsString() expiryDate?: string
   @IsOptional() @IsArray() @IsString({ each: true }) analogIds?: string[]
+  // Фото: как при создании. Поле, забытое здесь, сервер выбрасывает МОЛЧА
+  // (whitelist) — «товар обновлён», а фото пропало. Паритет полей создания и
+  // правки прибит тестом products/dto.spec.ts
+  @IsOptional() @IsString() @MaxLength(200_000) @Matches(/^$|^data:image\/(jpeg|png|webp);base64,/) image?: string
 }
