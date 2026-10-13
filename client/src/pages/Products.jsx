@@ -14,7 +14,7 @@ import { useCategories, categoryNames } from '../lib/categories'
 import { sellsBelowCost } from '../lib/pricing'
 import ProductForm, { emptyProduct, productPayload } from '../components/ProductForm'
 import { editPatch, stockAtOpen } from '../lib/productEdit'
-import { stockValue } from '../lib/units'
+import { isVesovoy, stockUnits, stockValue } from '../lib/units'
 
 // Печать этикеток нужна редко — грузим по требованию, чтобы не утяжелять страницу
 const LabelPrint = lazy(() => import('../components/LabelPrint'))
@@ -103,8 +103,11 @@ export default function Products() {
   function openEdit(p) {
     setEdit({
       ...p,
-      cost: String(p.cost), price: String(p.price), stock: String(p.stock), minStock: String(p.minStock),
-      unitsPerPack: String(p.unitsPerPack ?? 1), looseUnits: String(p.looseUnits ?? 0),
+      cost: String(p.cost), price: String(p.price), minStock: String(p.minStock),
+      // Весовой товар правится в килограммах: 12 кг 350 г -> «12.35»
+      stock: isVesovoy(p) ? String(stockUnits(p) / 1000) : String(p.stock),
+      unit: p.unit || '',
+      unitsPerPack: String(p.unitsPerPack ?? 1), looseUnits: isVesovoy(p) ? '0' : String(p.looseUnits ?? 0),
       dosage: p.dosage || '',
       expiryDate: p.expiryDate ? String(p.expiryDate).slice(0, 10) : '',
       analogIds: Array.isArray(p.analogIds) ? p.analogIds : [],

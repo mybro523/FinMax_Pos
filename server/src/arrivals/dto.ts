@@ -5,7 +5,10 @@ const MAX_MONEY = 9_999_999_999.99
 
 export class ArrivalItemDto {
   @IsString() productId: string
-  @IsInt() @Min(1) qty: number
+  // Целые упаковки (у весового товара — килограммы). Ноль допустим, когда есть pieces
+  @IsInt() @Min(0) qty: number
+  // Штуки (граммы) сверх целых упаковок
+  @IsOptional() @IsInt() @Min(0) @Max(99_999) pieces?: number
   @IsNumber() @Min(0) cost: number
   // Срок годности партии: обязателен для лекарств, необязателен для приборов и расходников
   @IsOptional() @IsString() expiryDate?: string
@@ -32,6 +35,7 @@ export class CreateArrivalDto {
 export class UpdateArrivalItemDto {
   @IsString() id: string
   @IsInt() @Min(0) qty: number
+  @IsOptional() @IsInt() @Min(0) @Max(99_999) pieces?: number
   @IsNumber() @Min(0) cost: number
   @IsOptional() @IsString() expiryDate?: string
 }

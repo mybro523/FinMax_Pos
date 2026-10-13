@@ -18,7 +18,7 @@ import { checkout } from '../src/local/ops/sale.mjs'
 import { closeShift, openShift } from '../src/local/ops/shift.mjs'
 import { createWriteOff } from '../src/local/ops/writeoff.mjs'
 import { applySnapshot } from '../src/local/snapshot.mjs'
-import { ctx, customer, day, NOW, pharmacy, product, refused, row, rows } from '../test-support/pharmacy.mjs'
+import { SUPPLIERS, ctx, customer, day, NOW, pharmacy, product, refused, row, rows } from '../test-support/pharmacy.mjs'
 
 // Аптека с тремя товарами: делимый (20 таблеток в пачке), неделимый и бинт без срока
 function apteka(extra = {}) {
@@ -68,7 +68,7 @@ test('продажа: суммы, скидка, остаток в штуках, 
   )
   // Вид чека — как у сервера: те же поля в том же порядке
   assert.deepEqual(Object.keys(sale), ['id', 'clientId', 'date', 'total', 'cost', 'profit', 'payment', 'payVia', 'customerId', 'shiftId', 'userId', 'items', 'customer', 'user'])
-  assert.deepEqual(Object.keys(sale.items[0]), ['id', 'saleId', 'productId', 'name', 'qty', 'pieces', 'unitsPerPack', 'price', 'cost', 'discount'])
+  assert.deepEqual(Object.keys(sale.items[0]), ['id', 'saleId', 'productId', 'name', 'qty', 'pieces', 'unitsPerPack', 'unit', 'price', 'cost', 'discount'])
 
   assert.deepEqual(stockOf(db, 'par'), [7, 15])
   assert.deepEqual(stockOf(db, 'nur'), [3, 0])
@@ -489,11 +489,36 @@ test('приход: у лекарства срок годности обязат
   refused(() => createArrival(ctx(db), { items: [{ productId: 'nur', qty: 1, cost: 90, expiryDate: '' }] }), 400, 'Укажите срок годности: Нурофен')
   refused(() => createArrival(ctx(db), { items: [{ productId: 'nur', qty: 1, cost: 90, expiryDate: 'завтра' }] }), 400, 'Некорректные данные запроса')
   refused(() => createArrival(ctx(db), { items: [{ productId: 'нет', qty: 1, cost: 90 }] }), 400, 'Товар не найден')
-  refused(() => createArrival(ctx(db), { items: [{ productId: 'nur', qty: 0, cost: 90 }] }), 400, 'items.0.qty: не меньше 1')
+  // Ноль упаковок допустим, только когда есть штуки (граммы): пустая строка — отказ
+  refused(() => createArrival(ctx(db), { items: [{ productId: 'nur', qty: 0, cost: 90 }] }), 400, 'Укажите количество: Нурофен')
+  refused(() => createArrival(ctx(db), { items: [{ productId: 'nur', qty: 0, pieces: -1, cost: 90 }] }), 400, 'items.0.pieces: не меньше 0')
   refused(() => createArrival(ctx(db), { items: [{ productId: 'nur', qty: 1, cost: -1 }] }), 400, 'items.0.cost: не меньше 0')
   assert.equal(outbox(db).length, 0)
   // Поставщик не указан — прочерк, как на сервере
   assert.equal(createArrival(ctx(db), { items: [{ productId: 'bint', qty: 1, cost: 5 }] }).supplier, '—')
+})
+
+test('приход весового товара: граммы сверх целых килограммов, цена долей, долг поставщику', () => {
+  // Сахар: 5 кг по 10 с/кг на полке. Привезли 12,350 кг по 8 сомони за килограмм
+  const sahar = product({ id: 'sahar', name: 'Сахар', category: 'Перевязка', unit: 'кг', unitsPerPack: 1000, price: 12, cost: 10, stock: 5, expiryDate: null })
+  const db = pharmacy({ products: [sahar], suppliers: SUPPLIERS.map((s) => ({ ...s })) })
+  const arrival = createArrival(ctx(db), {
+    supplierId: 'sup-1',
+    debt: 50,
+    items: [{ productId: 'sahar', qty: 12, pieces: 350, cost: 8 }],
+  })
+  // 12,35 кг × 8 = 98,80; в долг — 50
+  assert.equal(arrival.total, 98.8)
+  assert.equal(arrival.debt, 50)
+  assert.deepEqual(arrival.items.map((i) => [i.qty, i.pieces]), [[12, 350]])
+  const p = productsList(db, NOW).find((x) => x.id === 'sahar')
+  // Остаток: 5 кг + 12,350 кг = 17 кг и 350 г
+  assert.deepEqual([p.stock, p.looseUnits], [17, 350])
+  // Средняя цена килограмма: (5 × 10 + 98,8) / 17,35 = 8,576… → 8,58
+  assert.equal(p.cost, 8.58)
+  // Серверу уходит та же строка с граммами
+  const op = outbox(db).at(-1)
+  assert.deepEqual(op.payload.arrival.items.map((i) => [i.qty, i.pieces]), [[12, 350]])
 })
 
 test('приход: товар с новым сроком сразу продаётся, а ближайший срок в карточке обновляется', () => {

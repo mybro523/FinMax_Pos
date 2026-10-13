@@ -82,3 +82,11 @@ test('пустая полка не обнуляет цену — остаётс�
   assert.equal(Number(costFromBatches([], 1, 77)), 77)
   assert.equal(Number(costFromBatches([{ units: 0, cost: 100 }], 1, 77)), 77)
 })
+
+test('весовой товар: дробные «упаковки»-килограммы считаются точно', () => {
+  // Сахар: 5 кг по 10 с/кг на складе и 350 г во «вскрытом» килограмме.
+  // Привезли 12,350 кг на 98,80 сомони (по 8 с/кг).
+  // Старое: 5350 г по 0,01 с/г = 53,50; всего (53,50 + 98,80) / 17 700 г × 1000 = 8,6045…
+  const r = weightedPackCost({ stock: 5, looseUnits: 350, unitsPerPack: 1000, cost: 10, addPacks: 12.35, addValue: 98.8 })
+  assert.equal(num(r), 8.6045)
+})

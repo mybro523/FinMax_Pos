@@ -91,6 +91,7 @@ export function checkout(ctx, raw) {
         qty: l.qty,
         pieces: l.pieces,
         unitsPerPack: upp,
+        unit: p.unit || '',
         price: fromCents(p.priceC),
         cost: fromCents(p.costC),
         discount: fromCents(toCents(discount)),

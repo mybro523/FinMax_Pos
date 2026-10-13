@@ -86,7 +86,7 @@ export function checkout({ items, payment, payVia, customer }) {
     const units = (Number(i.qty) || 0) * upp + (Number(i.pieces) || 0)
     const gross = (i.price / upp) * units
     const discount = Math.min(Math.max(0, Number(i.discount) || 0), gross)
-    return { productId: i.productId, name: i.name, qty: Number(i.qty) || 0, pieces: Number(i.pieces) || 0, unitsPerPack: upp, price: i.price, cost: i.cost, discount }
+    return { productId: i.productId, name: i.name, qty: Number(i.qty) || 0, pieces: Number(i.pieces) || 0, unitsPerPack: upp, unit: i.unit || '', price: i.price, cost: i.cost, discount }
   })
   const total = saleItems.reduce((s, i) => {
     const units = i.qty * i.unitsPerPack + i.pieces
@@ -177,10 +177,11 @@ export function receiveArrival({ supplier, supplierId, debt, items }) {
   if (!items.length) throw new Error('Добавьте хотя бы один товар')
 
   const arrItems = items.map((i) => ({
-    productId: i.productId, name: i.name, qty: Number(i.qty), cost: Number(i.cost),
+    productId: i.productId, name: i.name, qty: Number(i.qty), pieces: Math.max(0, Number(i.pieces) || 0), cost: Number(i.cost),
     expiryDate: i.expiryDate || '',
   }))
-  const total = arrItems.reduce((s, i) => s + i.cost * i.qty, 0)
+  // Цена за упаковку (за килограмм): граммы оплачиваются долей тысячной
+  const total = arrItems.reduce((s, i) => s + i.cost * (i.qty + i.pieces / 1000), 0)
 
   const prevP = db.get('products')
   const prevA = db.get('arrivals')
@@ -197,7 +198,11 @@ export function receiveArrival({ supplier, supplierId, debt, items }) {
 
   setCollection('products', prevP.map((p) => {
     const it = arrItems.find((i) => i.productId === p.id)
-    return it ? { ...p, stock: p.stock + it.qty } : p
+    if (!it) return p
+    // Граммы сверх целых килограммов складываются со вскрытым остатком и
+    // перекладываются в целые — иначе «350 + 800 г» показывались бы как 1150 г
+    const vsego = stockUnits(p) + it.qty * uppOf(p) + it.pieces
+    return { ...p, ...splitUnits(vsego, p) }
   }))
   setCollection('arrivals', [tempArrival, ...prevA])
 
@@ -209,6 +214,7 @@ export function receiveArrival({ supplier, supplierId, debt, items }) {
       items: arrItems.map((i) => ({
         productId: i.productId,
         qty: i.qty,
+        ...(i.pieces > 0 ? { pieces: i.pieces } : {}),
         cost: i.cost,
         // Пустую строку не шлём: у категорий без срока сервер ждёт именно её отсутствия
         ...(i.expiryDate ? { expiryDate: i.expiryDate } : {}),
@@ -394,6 +400,7 @@ export function returnGoods({ saleId, refund, refundVia, customerId, lines, tota
       productId: l.productId,
       name: l.name,
       units: l.units,
+      unit: l.unit || '',
       unitsPerPack: l.unitsPerPack || 1,
       price: l.price || 0,
       cost: l.cost || 0,

@@ -46,6 +46,11 @@ export class ArrivalsService {
   // Кроме самих строк отдаём то, чего в базе нет, но без чего правку не показать:
   // сколько от каждой строки ещё лежит на полке и сколько уже ушло покупателям.
   // Ниже проданного количество опускать нельзя — этих упаковок физически нет.
+  // Штук в строке прихода: упаковки × штук в упаковке + штуки (граммы) сверх
+  private unitsOf(it: { qty: number; pieces?: number | null }, upp: number) {
+    return (it.qty || 0) * upp + Math.max(0, Math.trunc(it.pieces || 0))
+  }
+
   async findOne(id: string) {
     const arrival = await this.prisma.arrival.findUnique({ where: { id }, include: { items: true } })
     if (!arrival) throw new BadRequestException('Приход не найден')
@@ -74,7 +79,7 @@ export class ArrivalsService {
     for (const it of arrival.items) {
       if (!it.productId) continue
       const upp = uppOf(byId.get(it.productId) || {})
-      broughtByProduct.set(it.productId, (broughtByProduct.get(it.productId) || 0) + it.qty * upp)
+      broughtByProduct.set(it.productId, (broughtByProduct.get(it.productId) || 0) + this.unitsOf(it, upp))
       linesByProduct.set(it.productId, (linesByProduct.get(it.productId) || 0) + 1)
     }
 
@@ -125,7 +130,9 @@ export class ArrivalsService {
       const arrivalItems = items.map((it) => {
         const p = byId.get(it.productId)
         if (!p) throw new BadRequestException('Товар не найден')
-        return { productId: p.id, name: p.name, qty: it.qty, cost: D(it.cost) }
+        const pieces = Math.max(0, Math.trunc(it.pieces || 0))
+        if (it.qty * uppOf(p) + pieces <= 0) throw new BadRequestException(`Укажите количество: ${p.name}`)
+        return { productId: p.id, name: p.name, qty: it.qty, pieces, cost: D(it.cost) }
       })
 
       // Срок годности партии: у лекарств он обязателен, иначе контроль сроков дырявый.
@@ -146,11 +153,15 @@ export class ArrivalsService {
 
       // Агрегируем по товару: суммарное кол-во и суммарная стоимость (один товар может
       // встретиться в нескольких строках) — иначе средневзвешенная считалась бы неверно.
-      const agg = new Map<string, { qty: number; value: Prisma.Decimal }>()
+      const agg = new Map<string, { units: number; value: Prisma.Decimal }>()
       for (const it of arrivalItems) {
-        const a = agg.get(it.productId) || { qty: 0, value: D(0) }
-        a.qty += it.qty
-        a.value = a.value.plus(it.cost.times(it.qty))
+        const p = byId.get(it.productId)!
+        const upp = uppOf(p)
+        const units = this.unitsOf(it, upp)
+        const a = agg.get(it.productId) || { units: 0, value: D(0) }
+        a.units += units
+        // Цена указана за упаковку (за килограмм): граммы оплачиваются долей
+        a.value = a.value.plus(it.cost.times(D(units).div(upp)))
         agg.set(it.productId, a)
       }
 
@@ -163,14 +174,16 @@ export class ArrivalsService {
           looseUnits: p.looseUnits,
           unitsPerPack: p.unitsPerPack,
           cost: p.cost,
-          addPacks: a.qty,
+          addPacks: Number(D(a.units).div(uppOf(p))),
           addValue: a.value,
         })
         await tx.product.update({ where: { id: pid }, data: { cost: weighted } })
       }
 
       let total = D(0)
-      for (const it of arrivalItems) total = total.plus(it.cost.times(it.qty))
+      for (const it of arrivalItems) {
+        total = total.plus(it.cost.times(D(this.unitsOf(it, uppOf(byId.get(it.productId)!))).div(uppOf(byId.get(it.productId)!))))
+      }
 
       // Поставщик — после товаров, в том же порядке, что и у правки прихода
       const sup = await supplierDebt(tx, dto.supplierId, dto.debt, total)
@@ -192,7 +205,7 @@ export class ArrivalsService {
         const it = arrivalItems[n]
         const p = byId.get(it.productId)!
         const upp = Math.max(1, p.unitsPerPack || 1)
-        await addUnits(tx, it.productId, it.qty * upp, it.cost, expiryByIndex[n], arrival.id)
+        await addUnits(tx, it.productId, this.unitsOf(it, upp), it.cost, expiryByIndex[n], arrival.id)
       }
 
       return arrival
@@ -218,7 +231,7 @@ export class ArrivalsService {
       const byLineId = new Map(arrival.items.map((i) => [i.id, i]))
       const lines = dto.items.filter((l) => byLineId.has(l.id))
       if (!lines.length) throw new BadRequestException('Строки прихода не найдены')
-      if (!lines.some((l) => l.qty > 0)) {
+      if (!lines.some((l) => l.qty > 0 || (l.pieces || 0) > 0)) {
         throw new BadRequestException('В приходе не осталось ни одной позиции. Чтобы убрать его целиком, удалите приход.')
       }
 
@@ -249,17 +262,19 @@ export class ArrivalsService {
         const upp = uppOf(p || {})
         const mine = arrival.items.filter((i) => i.productId === pid)
 
-        const brought = mine.reduce((s, i) => s + i.qty * upp, 0)
+        const brought = mine.reduce((s, i) => s + this.unitsOf(i, upp), 0)
         const left = batches.filter((b) => b.productId === pid).reduce((s, b) => s + b.units, 0)
         const sold = Math.max(0, brought - left)
 
         const newLines = mine.map((i) => wanted.get(i.id)).filter(Boolean) as typeof lines
-        const wantUnits = newLines.reduce((s, l) => s + l.qty * upp, 0)
+        const wantUnits = newLines.reduce((s, l) => s + this.unitsOf(l, upp), 0)
 
         if (wantUnits < sold) {
           const name = p?.name || mine[0]?.name || 'товар'
+          // Весовому — в килограммах: «350 шт» для него значило бы граммы
+          const skolko = p?.unit === 'кг' ? `${sold / 1000} кг` : `${sold} шт (${Math.ceil(sold / upp)} уп)`
           throw new BadRequestException(
-            `«${name}»: из этого прихода уже продано ${sold} шт (${Math.ceil(sold / upp)} уп). ` +
+            `«${name}»: из этого прихода уже продано ${skolko}. ` +
               'Меньше проданного поставить нельзя — этого товара на полке уже нет.',
           )
         }
@@ -283,7 +298,7 @@ export class ArrivalsService {
         let toPlace = wantUnits - sold
         for (const l of newLines) {
           if (toPlace <= 0) break
-          const take = Math.min(l.qty * upp, toPlace)
+          const take = Math.min(this.unitsOf(l, upp), toPlace)
           if (take <= 0) continue
           const срок = l.expiryDate ? expiryFrom(l.expiryDate) : прежнийСрок.get(pid) ?? null
           await addUnits(tx, pid, take, D(l.cost), срок, id)
@@ -303,11 +318,11 @@ export class ArrivalsService {
       // Сами строки: убранные удаляем, остальные переписываем
       for (const it of arrival.items) {
         const l = wanted.get(it.id)
-        if (!l || l.qty <= 0) {
+        if (!l || l.qty * uppOf(byId.get(it.productId || '') || {}) + (l.pieces || 0) <= 0) {
           await tx.arrivalItem.delete({ where: { id: it.id } })
           continue
         }
-        await tx.arrivalItem.update({ where: { id: it.id }, data: { qty: l.qty, cost: D(l.cost) } })
+        await tx.arrivalItem.update({ where: { id: it.id }, data: { qty: l.qty, pieces: Math.max(0, Math.trunc(l.pieces || 0)), cost: D(l.cost) } })
       }
 
       const kept = lines.filter((l) => l.qty > 0)

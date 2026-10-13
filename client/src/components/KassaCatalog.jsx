@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { money } from '../db/store'
-import { uppOf, isDivisible, sellableUnits, stockUnits, expiredUnits, hasExpired } from '../lib/units'
+import { isVesovoy, kgText, uppOf, isDivisible, sellableUnits, stockUnits, expiredUnits, hasExpired } from '../lib/units'
 import { useT } from '../lib/i18n'
 
 // ── Каталог кассы ──
@@ -23,6 +23,7 @@ export const LIMIT = 100
 // готовым из общего помощника: тот пишет единицы по-русски, а каталог открыт
 // и на таджикском
 function ostatok(p, t) {
+  if (isVesovoy(p)) return `${kgText(stockUnits(p))} ${t('кг')}`
   const packs = Number(p.stock) || 0
   const loose = Number(p.looseUnits) || 0
   const unit = t(p.unit || 'уп')
@@ -67,7 +68,9 @@ function KassaCatalog({ rows, total, hi, showHi, outside, loading, noProducts, o
                   узкая, и поставленные в ряд они не оставили бы места названию */}
               <span className="kc-right">
                 <b className="kc-price">{money(p.price)}</b>
-                {isDivisible(p) && <span className="tag-cat">{money(p.price / uppOf(p))}/{t('шт')}</span>}
+                {isVesovoy(p)
+                  ? <span className="tag-cat">{t('за 1 кг')}</span>
+                  : isDivisible(p) && <span className="tag-cat">{money(p.price / uppOf(p))}/{t('шт')}</span>}
                 <span className={'badge ' + (net ? 'debt' : p.stock <= p.minStock ? 'low' : 'ok')}>
                   {net && stockUnits(p) <= 0 ? t('нет') : ostatok(p, t)}
                 </span>

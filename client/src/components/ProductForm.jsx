@@ -6,6 +6,7 @@ import { useCollection } from '../db/store'
 import { useT } from '../lib/i18n'
 import { useCategories, categoryNames, categoryOptions } from '../lib/categories'
 import { generateEan13, isInternalBarcode } from '../lib/barcode'
+import { KG, gramsOfKg, isVesovoy } from '../lib/units'
 
 // ── Карточка товара: одна форма на всю программу ──
 //
@@ -27,12 +28,32 @@ import { generateEan13, isInternalBarcode } from '../lib/barcode'
 
 export const emptyProduct = {
   name: '', barcode: '', category: '', cost: '', price: '', stock: '', minStock: '',
-  unitsPerPack: '1', looseUnits: '0', dosage: '', expiryDate: '', analogIds: [],
+  unitsPerPack: '1', looseUnits: '0', dosage: '', expiryDate: '', analogIds: [], unit: '',
 }
 
 // Из формы — в то, что уходит на сервер. Одна воронка на обе страницы: раньше
 // каждая приводила числа по-своему, и «пусто» превращалось то в 0, то в NaN.
 export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
+  // Весовой товар: в форме остаток набран в килограммах, а хранится он как
+  // «целые кг + граммы» — та же пара, что упаковки и вскрытые штуки
+  if (isVesovoy(f)) {
+    const grams = gramsOfKg(f.stock)
+    return {
+      name: (f.name || '').trim(),
+      barcode: normalizeBarcode(f.barcode || ''),
+      category: (f.category || '').trim(),
+      cost: Number(f.cost) || 0,
+      price: Number(f.price) || 0,
+      stock: Math.floor(grams / KG),
+      looseUnits: grams % KG,
+      minStock: Number(f.minStock) || 0,
+      unit: 'кг',
+      unitsPerPack: KG,
+      dosage: (f.dosage || '').trim(),
+      expiryDate: f.expiryDate || '',
+      analogIds: Array.isArray(f.analogIds) ? f.analogIds : [],
+    }
+  }
   return {
     name: (f.name || '').trim(),
     barcode: normalizeBarcode(f.barcode || ''),
@@ -41,6 +62,7 @@ export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
     price: Number(f.price) || 0,
     stock: Number(f.stock) || 0,
     minStock: Number(f.minStock) || 0,
+    unit: (f.unit || '').trim() || 'уп',
     unitsPerPack: Math.max(1, Number(f.unitsPerPack) || 1),
     looseUnits: Math.max(0, Number(f.looseUnits) || 0),
     dosage: (f.dosage || '').trim(),
@@ -69,6 +91,18 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode' }) 
   }, [autoFocus])
 
   const set = (k, v) => onChange({ ...value, [k]: v })
+  const ves = isVesovoy(value)
+
+  // Галочка «на вес»: единица меняется на килограммы, упаковки и штуки уходят.
+  // Остаток при переключении очищается: прежнее число значило упаковки, а не кг
+  const toggleVes = (on) =>
+    onChange({
+      ...value,
+      unit: on ? 'кг' : '',
+      unitsPerPack: on ? String(KG) : '1',
+      looseUnits: '0',
+      stock: '',
+    })
 
   // Свой штрихкод для товара без заводского кода — уникальный в пределах базы
   function genBarcode() {
@@ -131,6 +165,14 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode' }) 
         </div>
       </div>
 
+      <label className="pf-ves" data-tour="pf.ves">
+        <input type="checkbox" checked={ves} onChange={(e) => toggleVes(e.target.checked)} />
+        <span>
+          {t('Продаётся на вес (килограммами)')}
+          <span className="tag-cat">{t('Цена за 1 кг, вес с точностью до грамма. Код на весах впишите в поле штрихкода.')}</span>
+        </span>
+      </label>
+
       <div className="row">
         <div className="field" style={{ flex: 1 }} data-tour="pf.dosage">
           <label>{t('Дозировка')}</label>
@@ -144,48 +186,50 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode' }) 
 
       <div className="row">
         <div className="field" style={{ flex: 1 }} data-tour="pf.prices">
-          <label>{t('Закупочная цена')}</label>
+          <label>{ves ? t('Закупочная цена за 1 кг') : t('Закупочная цена')}</label>
           <NumberInput value={value.cost} onChange={(e) => set('cost', e.target.value)} />
         </div>
         <div className="field" style={{ flex: 1 }} data-tour="pf.prices">
-          <label>{t('Цена продажи')}</label>
+          <label>{ves ? t('Цена продажи за 1 кг') : t('Цена продажи')}</label>
           <NumberInput value={value.price} onChange={(e) => set('price', e.target.value)} />
         </div>
       </div>
 
       <div className="row">
         <div className="field" style={{ flex: 1 }} data-tour="pf.stock">
-          <label>{t('Остаток (упаковок)')}</label>
-          <NumberInput integer value={value.stock} onChange={(e) => set('stock', e.target.value)} />
+          <label>{ves ? t('Остаток (кг)') : t('Остаток (упаковок)')}</label>
+          <NumberInput integer={!ves} value={value.stock} onChange={(e) => set('stock', e.target.value)} placeholder={ves ? '12.5' : ''} />
         </div>
         <div className="field" style={{ flex: 1 }} data-tour="pf.stock">
-          <label>{t('Мин. остаток')}</label>
+          <label>{ves ? t('Мин. остаток (кг)') : t('Мин. остаток')}</label>
           <NumberInput integer value={value.minStock} onChange={(e) => set('minStock', e.target.value)} />
         </div>
       </div>
 
-      <div className="row">
-        <div className="field" style={{ flex: 1 }} data-tour="pf.upp">
-          <label>{t('Штук в упаковке')}</label>
-          <NumberInput
-            integer
-            value={value.unitsPerPack}
-            onChange={(e) => set('unitsPerPack', e.target.value)}
-            placeholder="1"
-            title="Для деления на таблетки. 1 = продаётся только целиком"
-          />
+      {!ves && (
+        <div className="row">
+          <div className="field" style={{ flex: 1 }} data-tour="pf.upp">
+            <label>{t('Штук в упаковке')}</label>
+            <NumberInput
+              integer
+              value={value.unitsPerPack}
+              onChange={(e) => set('unitsPerPack', e.target.value)}
+              placeholder="1"
+              title="Для деления на таблетки. 1 = продаётся только целиком"
+            />
+          </div>
+          <div className="field" style={{ flex: 1 }} data-tour="pf.loose">
+            <label>{t('Вскрыто (штук)')}</label>
+            <NumberInput
+              integer
+              value={value.looseUnits}
+              onChange={(e) => set('looseUnits', e.target.value)}
+              placeholder="0"
+              title="Остаток штук во вскрытой упаковке"
+            />
+          </div>
         </div>
-        <div className="field" style={{ flex: 1 }} data-tour="pf.loose">
-          <label>{t('Вскрыто (штук)')}</label>
-          <NumberInput
-            integer
-            value={value.looseUnits}
-            onChange={(e) => set('looseUnits', e.target.value)}
-            placeholder="0"
-            title="Остаток штук во вскрытой упаковке"
-          />
-        </div>
-      </div>
+      )}
 
       {/* Аналоги: чем заменить, если этого не осталось */}
       <div className="field" data-tour="pf.analogs">

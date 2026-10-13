@@ -53,6 +53,22 @@ export const sellableUnits = (p) => Math.max(0, stockUnits(p) - expiredUnits(p))
 
 export const hasExpired = (p) => expiredUnits(p) > 0
 
+// ── Весовой товар ──
+// Продаётся килограммами: яблоки, крупы, орехи. Внутри система считает его той же
+// механикой, что упаковки и штуки, только «упаковка» — это килограмм, а «штука» —
+// грамм (unitsPerPack = 1000). Деньги и остатки остаются целыми числами, и ни одна
+// формула выше не меняется. Людям же везде показываются килограммы: «0,350 кг».
+export const KG = 1000
+export const isVesovoy = (x) => String(x?.unit || '').trim().toLowerCase() === 'кг'
+
+// 12350 г → «12,35», 350 г → «0,35», 1000 г → «1»
+// Делим на 1000 и меняем точку на запятую: дробных знаков не больше трёх,
+// а toLocaleString вставлял бы неразрывный пробел в тысячи килограммов
+export const kgText = (units) => String(num(units) / KG).replace('.', ',')
+
+// «1,25» или «1.25» кг → 1250 г. Мусор и минус превращаются в ноль
+export const gramsOfKg = (kg) => Math.max(0, Math.round((Number(String(kg ?? '').replace(',', '.')) || 0) * KG))
+
 // Разложить общее число штук обратно на упаковки и вскрытую — так остаток
 // хранится в карточке товара
 export function splitUnits(units, x) {

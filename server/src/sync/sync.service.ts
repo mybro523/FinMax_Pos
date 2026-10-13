@@ -859,15 +859,19 @@ export class SyncService {
       if (!byId.has(it.productId)) throw new Reject(`Товар не найден: ${it.name}`)
     }
 
-    // Средневзвешенная цена — один раз на товар, от остатка ДО прихода
-    const agg = new Map<string, { qty: number; value: Prisma.Decimal }>()
+    // Средневзвешенная цена — один раз на товар, от остатка ДО прихода.
+    // Всё в штуках (у весового товара — в граммах): граммы оплачиваются долей цены
+    const unitsOf = (it: { qty: number; pieces?: number }, upp: number) => it.qty * upp + Math.max(0, it.pieces || 0)
+    const agg = new Map<string, { units: number; value: Prisma.Decimal }>()
     let total = D(0)
     for (const it of p.items) {
-      const a = agg.get(it.productId) || { qty: 0, value: D(0) }
-      a.qty += it.qty
-      a.value = a.value.plus(D(it.cost).times(it.qty))
+      const upp = uppOf(byId.get(it.productId)!)
+      const dolya = D(unitsOf(it, upp)).div(upp)
+      const a = agg.get(it.productId) || { units: 0, value: D(0) }
+      a.units += unitsOf(it, upp)
+      a.value = a.value.plus(D(it.cost).times(dolya))
       agg.set(it.productId, a)
-      total = total.plus(D(it.cost).times(it.qty))
+      total = total.plus(D(it.cost).times(dolya))
     }
     // Закупочную цену касса присылает как ввели, без округления, и сумма сходится
     // точно. Допуск в дирам на строку — на случай, если по дороге её всё же округлили
@@ -875,7 +879,7 @@ export class SyncService {
     total = D(p.total)
 
     for (const it of p.items) {
-      if (it.qty * uppOf(byId.get(it.productId)!) > MAX_UNITS) throw new Reject('В приходе слишком большое количество')
+      if (unitsOf(it, uppOf(byId.get(it.productId)!)) > MAX_UNITS) throw new Reject('В приходе слишком большое количество')
     }
     // Остаток этих товаров пересчитали уже после прихода: привезённое лежало на полке
     // и в пересчёт попало. Документ остаётся, а класть товар второй раз нельзя
@@ -884,7 +888,7 @@ export class SyncService {
       const count = counted.get(productId)
       if (!count) continue
       const product = byId.get(productId)!
-      await this.absorb(tx, ctx, p, count, product, a.qty * uppOf(product))
+      await this.absorb(tx, ctx, p, count, product, a.units)
     }
 
     for (const [productId, a] of agg) {
@@ -895,7 +899,7 @@ export class SyncService {
         looseUnits: product.looseUnits,
         unitsPerPack: product.unitsPerPack,
         cost: product.cost,
-        addPacks: a.qty,
+        addPacks: Number(D(a.units).div(uppOf(product))),
         addValue: a.value,
       })
       await tx.product.update({ where: { id: productId }, data: { cost: weighted } })
@@ -926,7 +930,7 @@ export class SyncService {
         debt,
         userId: ctx.tenantUserId,
         total,
-        items: { create: p.items.map((i) => ({ id: i.id, productId: i.productId, name: i.name, qty: i.qty, cost: D(i.cost) })) },
+        items: { create: p.items.map((i) => ({ id: i.id, productId: i.productId, name: i.name, qty: i.qty, pieces: i.pieces || 0, cost: D(i.cost) })) },
       },
     })
     if (supplierId && debt.gt(0)) {
@@ -935,7 +939,7 @@ export class SyncService {
     }
     for (const it of p.items) {
       if (counted.has(it.productId)) continue
-      await addUnits(tx, it.productId, it.qty * uppOf(byId.get(it.productId)!), D(it.cost), it.expiryDate, p.id)
+      await addUnits(tx, it.productId, unitsOf(it, uppOf(byId.get(it.productId)!)), D(it.cost), it.expiryDate, p.id)
     }
     return p.id
   }

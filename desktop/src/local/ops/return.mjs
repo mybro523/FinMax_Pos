@@ -107,6 +107,7 @@ export function createReturn(ctx, raw) {
         name: product.name,
         units,
         unitsPerPack: upp,
+        unit: product?.unit || '',
         price: fromCents(toCents(price)),
         cost: fromCents(toCents(cost)),
         amount: fromCents(toCents(amount)),

@@ -4,12 +4,13 @@ import Layout from '../components/Layout'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { JournalFilter, JournalCount, useJournalFilter } from '../components/JournalFilter'
-import { useCollection, money, totalUnits, unitsPerPack } from '../db/store'
-import { expiredUnits } from '../lib/units'
+import { useCollection, money, totalUnits, unitsPerPack, stockText } from '../db/store'
+import { expiredUnits, isVesovoy, kgText } from '../lib/units'
 import { writeOffGoods } from '../db/ops'
 import { fmtDateTime } from '../lib/time'
 import { useT } from '../lib/i18n'
 import NumberInput from '../components/NumberInput'
+import VesInput from '../components/VesInput'
 import { useCan } from '../db/auth'
 
 // ── Списание товара ──
@@ -60,7 +61,7 @@ export default function WriteOffs() {
         // рядом с негодной партией обычно лежит и годная, её убирать незачем.
         // Если сервер ещё не посчитал — берём весь остаток, как было раньше.
         const bad = expiredUnits(p)
-        setRows([{ productId: p.id, name: p.name, units: bad || totalUnits(p), max: totalUnits(p) }])
+        setRows([{ productId: p.id, name: p.name, units: bad || totalUnits(p), max: totalUnits(p), ves: isVesovoy(p) }])
         setReason('expired')
       }
     } catch {
@@ -75,7 +76,7 @@ export default function WriteOffs() {
       setPick('')
       return toast(t('Этот товар уже добавлен'), 'err')
     }
-    setRows([...rows, { productId: p.id, name: p.name, units: 1, max: totalUnits(p) }])
+    setRows([...rows, { productId: p.id, name: p.name, units: isVesovoy(p) ? 1000 : 1, max: totalUnits(p), ves: isVesovoy(p) }])
     setPick('')
   }
 
@@ -138,7 +139,7 @@ export default function WriteOffs() {
               <select value={pick} onChange={(e) => setPick(e.target.value)}>
                 <option value="">{t('— выберите товар —')}</option>
                 {products.filter((p) => totalUnits(p) > 0).map((p) => (
-                  <option key={p.id} value={p.id}>{p.name} ({t('остаток')} {totalUnits(p)} {t('шт')})</option>
+                  <option key={p.id} value={p.id}>{p.name} ({t('остаток')} {stockText(p)})</option>
                 ))}
               </select>
               <button className="btn icon" onClick={addRow}><LuPlus size={17} /></button>
@@ -162,15 +163,26 @@ export default function WriteOffs() {
                 {rows.map((r, n) => (
                   <tr key={r.productId}>
                     <td><b>{r.name}</b></td>
-                    <td className="num">{r.max}</td>
+                    <td className="num">{r.ves ? `${kgText(r.max)} ${t('кг')}` : r.max}</td>
                     <td>
-                      <NumberInput
-                        integer className="disc-input" value={r.units || ''}
-                        onChange={(e) => {
-                          const v = Math.max(0, Math.min(r.max, Math.trunc(Number(e.target.value) || 0)))
-                          setRows((rs) => rs.map((x, i) => (i === n ? { ...x, units: v } : x)))
-                        }}
-                      />
+                      {r.ves ? (
+                        <VesInput
+                          className="disc-input"
+                          grams={r.units || 0}
+                          onGrams={(g) => {
+                            const v = Math.max(0, Math.min(r.max, g))
+                            setRows((rs) => rs.map((x, i) => (i === n ? { ...x, units: v } : x)))
+                          }}
+                        />
+                      ) : (
+                        <NumberInput
+                          integer className="disc-input" value={r.units || ''}
+                          onChange={(e) => {
+                            const v = Math.max(0, Math.min(r.max, Math.trunc(Number(e.target.value) || 0)))
+                            setRows((rs) => rs.map((x, i) => (i === n ? { ...x, units: v } : x)))
+                          }}
+                        />
+                      )}
                     </td>
                     <td className="num">
                       <button className="btn ghost sm icon" onClick={() => setRows((rs) => rs.filter((_, i) => i !== n))}>

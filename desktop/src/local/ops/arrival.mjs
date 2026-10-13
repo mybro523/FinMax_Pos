@@ -24,7 +24,10 @@ export function createArrival(ctx, raw) {
   const debtAsked = c.num(dto.debt, 'debt', { optional: true, max: MAX_MONEY })
   const items = c.list(dto.items, 'items').map((it, n) => ({
     productId: c.str(it?.productId, `items.${n}.productId`),
-    qty: c.int(it?.qty, `items.${n}.qty`, { min: 1 }),
+    // Целые упаковки (у весового товара — килограммы); ноль допустим при pieces > 0
+    qty: c.int(it?.qty, `items.${n}.qty`, { min: 0 }),
+    // Штуки (граммы) сверх целых упаковок
+    pieces: it?.pieces === undefined || it?.pieces === null ? 0 : c.int(it.pieces, `items.${n}.pieces`, { min: 0, max: 99999 }),
     cost: c.num(it?.cost, `items.${n}.cost`),
     expiryDate: c.str(it?.expiryDate, `items.${n}.expiryDate`, { optional: true }),
   }))
@@ -36,10 +39,12 @@ export function createArrival(ctx, raw) {
       if (!byId.has(it.productId)) byId.set(it.productId, productById(db, it.productId))
       const p = byId.get(it.productId)
       if (!p) throw bad('Товар не найден')
+      const units = it.qty * uppOf(p) + it.pieces
+      if (units <= 0) throw bad(`Укажите количество: ${p.name}`)
       // Тот же отказ и теми же словами, что у сервера: позже его прислал бы он —
       // когда товар уже стоит на полке
-      unitsOk(it.qty * uppOf(p), 'В приходе слишком большое количество')
-      return { productId: p.id, name: p.name, qty: it.qty, cost: D(it.cost) }
+      unitsOk(units, 'В приходе слишком большое количество')
+      return { productId: p.id, name: p.name, qty: it.qty, pieces: it.pieces, units, cost: D(it.cost) }
     })
 
     // Срок годности партии: у лекарств он обязателен, иначе контроль сроков дырявый.
@@ -62,11 +67,14 @@ export function createArrival(ctx, raw) {
     const agg = new Map()
     let total = D(0)
     for (const l of lines) {
-      const a = agg.get(l.productId) || { qty: 0, value: D(0) }
-      a.qty += l.qty
-      a.value = a.value.plus(l.cost.times(l.qty))
+      const upp = uppOf(byId.get(l.productId))
+      // Цена — за упаковку (за килограмм): граммы оплачиваются долей
+      const dolya = D(l.units).div(upp)
+      const a = agg.get(l.productId) || { units: 0, value: D(0) }
+      a.units += l.units
+      a.value = a.value.plus(l.cost.times(dolya))
       agg.set(l.productId, a)
-      total = total.plus(l.cost.times(l.qty))
+      total = total.plus(l.cost.times(dolya))
     }
     sumOk(total)
 
@@ -98,11 +106,12 @@ export function createArrival(ctx, raw) {
           opId,
           productId: l.productId,
           kind: 'arrival',
-          units: l.qty * uppOf(p),
+          units: l.units,
           costC: toCents(l.cost),
           expiryDate: expiry[n],
           arrivalId,
-          wPacks: first ? a.qty : null,
+          // Дробные «упаковки» (12,35 кг) — это нормально: средняя цена считается в штуках
+          wPacks: first ? Number(D(a.units).div(uppOf(p))) : null,
           wValue: first ? a.value.toString() : null,
         },
         { now },
@@ -124,6 +133,7 @@ export function createArrival(ctx, raw) {
         productId: l.productId,
         name: l.name,
         qty: l.qty,
+        pieces: l.pieces,
         cost: fromCents(toCents(l.cost)),
       })),
     }

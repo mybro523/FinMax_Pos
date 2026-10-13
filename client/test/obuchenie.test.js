@@ -109,10 +109,18 @@ test('каждая метка тура указывает на настоящи�
     // Пункты и группы меню размечаются в цикле по списку меню — сверяем со списком
     if (id.startsWith('nav:')) return !адреса.includes(id.slice(4))
     if (id.startsWith('grp:')) return !группы.includes(id.slice(4))
+    // Кнопки разделов настроек размечаются в цикле по списку разделов
+    if (id.startsWith('set.nav-')) return !разделыНастроек().includes(id.slice('set.nav-'.length))
     return !src.includes(`data-tour="${id}"`) && !src.includes(`tour="${id}"`)
   })
   assert.deepEqual(нет, [], `тур указывает в пустоту — таких меток нет на страницах: ${нет.join(', ')}`)
 })
+
+const разделыНастроек = () => {
+  const src = read('src/pages/Settings.jsx')
+  assert.ok(src.includes("data-tour={'set.nav-' + r.id}"), 'у кнопок разделов настроек пропала метка тура')
+  return [...src.matchAll(/\{ id: '([a-z]+)', label:/g)].map((m) => m[1])
+}
 
 test('метки в цикле меню на месте', () => {
   // Метки плиток и групп главного экрана ставятся не буквально, а в цикле — проверяем сам цикл

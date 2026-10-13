@@ -3,7 +3,7 @@ import {
   LuShoppingCart, LuPackagePlus, LuCreditCard, LuClipboardList, LuTrendingUp, LuServer, LuRefreshCw,
   LuKeyRound, LuUser, LuPalette, LuLanguages, LuSun, LuMoon, LuDatabaseBackup, LuDownload, LuTriangleAlert,
   LuTags, LuPlus, LuPencil, LuTrash2, LuUpload,
-  LuCalendarClock, LuHandCoins, LuQrCode,
+  LuCalendarClock, LuHandCoins, LuQrCode, LuReceiptText, LuMonitorSmartphone, LuWallet,
 } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { useToast, useDialog, PasswordInput, Modal } from '../components/ui'
@@ -16,6 +16,7 @@ import { useTheme, setTheme } from '../lib/theme'
 import DevicesPanel from '../components/DevicesPanel'
 import PrintPanel from '../components/PrintPanel'
 import ChekPanel from '../components/ChekPanel'
+import VesyPanel from '../components/VesyPanel'
 import { isDesktop } from '../lib/desktop'
 
 // ── Подписка ──
@@ -36,7 +37,7 @@ function Podpiska({ t }) {
   const left = sub.daysLeft
 
   return (
-    <div className="panel" data-tour="set.sub" style={{ maxWidth: 640, borderColor: soon ? 'var(--warn)' : undefined }}>
+    <div className="panel mt" data-tour="set.sub" style={{ maxWidth: 640, borderColor: soon ? 'var(--warn)' : undefined }}>
       <h2>
         <span className="h2-title">
           <span className="ic" style={{ color: soon ? 'var(--warn)' : undefined }}>
@@ -152,124 +153,194 @@ export default function Settings() {
 
   const set = (k, v) => setPw((s) => ({ ...s, [k]: v }))
 
+  // ── Разделы настроек ──
+  // Длинная простыня панелей стала шестью разделами: слева список, справа только
+  // выбранное. Права решают, какие разделы видны; выбранный запоминается на устройстве
+  const RAZDEL_KEY = 'apteka_nastroyki_razdel'
+  const razdely = [
+    { id: 'profil', label: 'Профиль', Icon: LuUser, show: true },
+    { id: 'chek', label: 'Чек и печать', Icon: LuReceiptText, show: can('settings.print') },
+    { id: 'kategorii', label: 'Категории товаров', Icon: LuTags, show: can('settings.categories') },
+    { id: 'dengi', label: 'Деньги', Icon: LuWallet, show: can('settings.expenseCategories') || can('settings.payServices') },
+    { id: 'ustroystva', label: 'Кассы и устройства', Icon: LuMonitorSmartphone, show: can('settings.devices') },
+    { id: 'kopiya', label: 'Резервная копия', Icon: LuDatabaseBackup, show: can('settings.backup') },
+  ].filter((r) => r.show)
+  const [razdel, setRazdel] = useState(() => {
+    try {
+      return localStorage.getItem(RAZDEL_KEY) || 'profil'
+    } catch {
+      return 'profil'
+    }
+  })
+  // Права могли сузиться с прошлого раза — чужой раздел не показываем
+  const active = razdely.some((r) => r.id === razdel) ? razdel : razdely[0]?.id || 'profil'
+  const pick = (id) => {
+    setRazdel(id)
+    try {
+      localStorage.setItem(RAZDEL_KEY, id)
+    } catch {
+      /* не запомнилось — не страшно */
+    }
+  }
+
   return (
     <Layout title={t('Настройки')} subtitle={t('Профиль и система')}>
-      <Podpiska t={t} />
+      <div className="set-wrap">
+        <nav className="set-nav" data-tour="set.nav" aria-label={t('Разделы настроек')}>
+          {razdely.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              className={'set-nav-btn' + (active === r.id ? ' active' : '')}
+              data-tour={'set.nav-' + r.id}
+              onClick={() => pick(r.id)}
+            >
+              <span className="ic"><r.Icon size={17} /></span>
+              <span>{t(r.label)}</span>
+            </button>
+          ))}
+        </nav>
 
-      {/* Оформление: язык + тема */}
-      <div className="panel" style={{ maxWidth: 640 }}>
-        <h2><span className="h2-title"><span className="ic"><LuPalette size={17} /></span>{t('Оформление')}</span></h2>
-        <div className="field" data-tour="set.lang">
-          <label><LuLanguages size={13} style={{ verticalAlign: '-2px' }} /> {t('Язык')}</label>
-          <div className="chips">
-            {LANGS.map((l) => (
-              <button key={l.key} className={'chip ' + (lang === l.key ? 'active' : '')} onClick={() => setLang(l.key)}>{l.label}</button>
-            ))}
-          </div>
-        </div>
-        <div className="field" data-tour="set.theme" style={{ marginBottom: 0 }}>
-          <label>{t('Тема')}</label>
-          <div className="chips">
-            <button className={'chip ' + (theme === 'light' ? 'active' : '')} onClick={() => setTheme('light')}><LuSun size={13} style={{ verticalAlign: '-2px' }} /> {t('Светлая')}</button>
-            <button className={'chip ' + (theme === 'dark' ? 'active' : '')} onClick={() => setTheme('dark')}><LuMoon size={13} style={{ verticalAlign: '-2px' }} /> {t('Тёмная')}</button>
-          </div>
-        </div>
-      </div>
+        <div className="set-body">
+          {active === 'profil' && (
+            <>
+              <Podpiska t={t} />
 
-      <div className="panel mt" data-tour="set.profile" style={{ maxWidth: 640 }}>
-        <h2><span className="h2-title"><span className="ic"><LuUser size={17} /></span>{t('Мой профиль')}</span></h2>
-        <p style={{ fontSize: 14, color: 'var(--muted)' }}>
-          {t('Вы вошли как')} <b>{user?.name}</b> — {user?.role === 'founder' ? t('Основатель') : t('Кассир')}.
-        </p>
-      </div>
+              {/* Оформление: язык + тема */}
+              <div className="panel mt" style={{ maxWidth: 640 }}>
+                <h2><span className="h2-title"><span className="ic"><LuPalette size={17} /></span>{t('Оформление')}</span></h2>
+                <div className="field" data-tour="set.lang">
+                  <label><LuLanguages size={13} style={{ verticalAlign: '-2px' }} /> {t('Язык')}</label>
+                  <div className="chips">
+                    {LANGS.map((l) => (
+                      <button key={l.key} className={'chip ' + (lang === l.key ? 'active' : '')} onClick={() => setLang(l.key)}>{l.label}</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="field" data-tour="set.theme" style={{ marginBottom: 0 }}>
+                  <label>{t('Тема')}</label>
+                  <div className="chips">
+                    <button className={'chip ' + (theme === 'light' ? 'active' : '')} onClick={() => setTheme('light')}><LuSun size={13} style={{ verticalAlign: '-2px' }} /> {t('Светлая')}</button>
+                    <button className={'chip ' + (theme === 'dark' ? 'active' : '')} onClick={() => setTheme('dark')}><LuMoon size={13} style={{ verticalAlign: '-2px' }} /> {t('Тёмная')}</button>
+                  </div>
+                </div>
+              </div>
 
-      <div className="panel mt" data-tour="set.password" style={{ maxWidth: 640 }}>
-        <h2><span className="h2-title"><span className="ic"><LuKeyRound size={17} /></span>{t('Смена пароля')}</span></h2>
-        <div className="field"><label>{t('Текущий пароль')}</label>
-          <PasswordInput value={pw.oldPassword} onChange={(e) => set('oldPassword', e.target.value)} autoComplete="current-password" />
-        </div>
-        <div className="row">
-          <div className="field" style={{ flex: 1 }}><label>{t('Новый пароль')}</label>
-            <PasswordInput value={pw.newPassword} onChange={(e) => set('newPassword', e.target.value)} autoComplete="new-password" />
-          </div>
-          <div className="field" style={{ flex: 1 }}><label>{t('Повторите')}</label>
-            <PasswordInput value={pw.confirm} onChange={(e) => set('confirm', e.target.value)} autoComplete="new-password" />
-          </div>
-        </div>
-        <button className="btn" onClick={changePassword} disabled={saving}>{saving ? t('Сохранение…') : t('Изменить пароль')}</button>
-      </div>
+              <div className="panel mt" data-tour="set.profile" style={{ maxWidth: 640 }}>
+                <h2><span className="h2-title"><span className="ic"><LuUser size={17} /></span>{t('Мой профиль')}</span></h2>
+                <p style={{ fontSize: 14, color: 'var(--muted)' }}>
+                  {t('Вы вошли как')} <b>{user?.name}</b> — {user?.role === 'founder' ? t('Основатель') : user?.roleName || t('Кассир')}.
+                </p>
+              </div>
 
-      {can('settings.categories') && <CategoriesPanel />}
+              <div className="panel mt" data-tour="set.password" style={{ maxWidth: 640 }}>
+                <h2><span className="h2-title"><span className="ic"><LuKeyRound size={17} /></span>{t('Смена пароля')}</span></h2>
+                <div className="field"><label>{t('Текущий пароль')}</label>
+                  <PasswordInput value={pw.oldPassword} onChange={(e) => set('oldPassword', e.target.value)} autoComplete="current-password" />
+                </div>
+                <div className="row">
+                  <div className="field" style={{ flex: 1 }}><label>{t('Новый пароль')}</label>
+                    <PasswordInput value={pw.newPassword} onChange={(e) => set('newPassword', e.target.value)} autoComplete="new-password" />
+                  </div>
+                  <div className="field" style={{ flex: 1 }}><label>{t('Повторите')}</label>
+                    <PasswordInput value={pw.confirm} onChange={(e) => set('confirm', e.target.value)} autoComplete="new-password" />
+                  </div>
+                </div>
+                <button className="btn" onClick={changePassword} disabled={saving}>{saving ? t('Сохранение…') : t('Изменить пароль')}</button>
+              </div>
 
-      {can('settings.expenseCategories') && <ExpenseCategoriesPanel />}
-
-      {can('settings.payServices') && <PayServicesPanel />}
-
-      {can('settings.devices') && <DevicesPanel />}
-
-      {/* Что печатается на чеке: адрес, телефон, подпись — на сайте и в программе */}
-      {can('settings.print') && <ChekPanel />}
-
-      {/* Чековый принтер настраивается на каждом компьютере отдельно — только в программе */}
-      {can('settings.print') && isDesktop && <PrintPanel />}
-
-      {can('settings.backup') && (
-        <div className="panel mt" data-tour="set.backup" style={{ maxWidth: 640 }}>
-          <h2><span className="h2-title"><span className="ic"><LuDatabaseBackup size={17} /></span>{t('Резервная копия')}</span></h2>
-          <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7, marginBottom: 12 }}>
-            {t('Скачайте файл со всеми данными аптеки и храните его у себя — на компьютере или флешке. Если с сервером что-то случится, из этого файла всё восстановится.')}
-          </p>
-
-          {backupAgeDays === null ? (
-            <div className="note err" style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-              <LuTriangleAlert size={16} style={{ flexShrink: 0 }} />
-              <span>{t('Копия ещё ни разу не делалась')}</span>
-            </div>
-          ) : backupAgeDays >= 7 ? (
-            <div className="note err" style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-              <LuTriangleAlert size={16} style={{ flexShrink: 0 }} />
-              <span>{t('Последняя копия')}: {fmtDate(lastBackup)} — {t('пора сделать новую')}</span>
-            </div>
-          ) : (
-            <div className="note info" style={{ marginBottom: 12 }}>
-              {t('Последняя копия')}: {fmtDate(lastBackup)}
-            </div>
+              <div className="panel mt" style={{ maxWidth: 640 }}>
+                <h2><span className="h2-title"><span className="ic"><LuServer size={17} /></span>{t('О системе')}</span></h2>
+                <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7 }}>
+                  {t('Данные хранятся на сервере — все устройства видят одну общую базу.')} {t('Время — таджикское (UTC+5).')}{' '}
+                  {t('Сейчас в базе')}: <b>{products.length}</b> {t('товаров')}, <b>{sales.length}</b> {t('продаж')}.
+                </p>
+                <ul style={{ listStyle: 'none', marginTop: 14, display: 'flex', flexDirection: 'column', gap: 11 }}>
+                  {FEATURES.map((f, i) => (
+                    <li key={i} style={{ display: 'flex', alignItems: 'center', gap: 11, fontSize: 14 }}>
+                      <span style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--accent-soft)', color: 'var(--accent-dark)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                        <f.Icon size={16} />
+                      </span>
+                      {f.text}
+                    </li>
+                  ))}
+                </ul>
+                <button className="btn ghost" data-tour="set.reload" style={{ marginTop: 14 }} onClick={reload}><span className="ic"><LuRefreshCw size={16} /></span> {t('Обновить данные')}</button>
+              </div>
+            </>
           )}
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-            <button className="btn" onClick={downloadBackup} disabled={backing}>
-              <span className="ic"><LuDownload size={16} /></span> {backing ? t('Готовим копию…') : t('Скачать копию')}
-            </button>
-            <button className="btn ghost" onClick={() => setRestoring(true)}>
-              <span className="ic"><LuUpload size={16} /></span> {t('Восстановить из копии')}
-            </button>
-          </div>
-          <p style={{ fontSize: 12.5, color: 'var(--muted-2)', marginTop: 10, lineHeight: 1.6 }}>
-            {t('Совет: делайте копию раз в неделю и храните несколько последних файлов. Пароли сотрудников в копию не попадают.')}
-          </p>
+          {active === 'chek' && can('settings.print') && (
+            <>
+              {/* Что печатается на чеке: адрес, телефон, подпись — на сайте и в программе */}
+              <ChekPanel />
+              {/* Чековый принтер настраивается на каждом компьютере отдельно — только в программе */}
+              {isDesktop && <PrintPanel />}
+              {!isDesktop && (
+                <div className="note info mt" style={{ maxWidth: 640 }}>
+                  {t('Чековый принтер настраивается в программе для Windows — на той кассе, к которой он подключён.')}
+                </div>
+              )}
+            </>
+          )}
+
+          {active === 'kategorii' && can('settings.categories') && <CategoriesPanel />}
+
+          {active === 'dengi' && (
+            <>
+              {can('settings.expenseCategories') && <ExpenseCategoriesPanel />}
+              {can('settings.payServices') && <PayServicesPanel />}
+            </>
+          )}
+
+          {active === 'ustroystva' && can('settings.devices') && (
+            <>
+              <DevicesPanel />
+              {/* Этикетки весов разбирает касса на этом устройстве — настройка здесь же */}
+              <VesyPanel />
+            </>
+          )}
+
+          {active === 'kopiya' && can('settings.backup') && (
+            <div className="panel mt" data-tour="set.backup" style={{ maxWidth: 640 }}>
+              <h2><span className="h2-title"><span className="ic"><LuDatabaseBackup size={17} /></span>{t('Резервная копия')}</span></h2>
+              <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7, marginBottom: 12 }}>
+                {t('Скачайте файл со всеми данными аптеки и храните его у себя — на компьютере или флешке. Если с сервером что-то случится, из этого файла всё восстановится.')}
+              </p>
+
+              {backupAgeDays === null ? (
+                <div className="note err" style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+                  <LuTriangleAlert size={16} style={{ flexShrink: 0 }} />
+                  <span>{t('Копия ещё ни разу не делалась')}</span>
+                </div>
+              ) : backupAgeDays >= 7 ? (
+                <div className="note err" style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+                  <LuTriangleAlert size={16} style={{ flexShrink: 0 }} />
+                  <span>{t('Последняя копия')}: {fmtDate(lastBackup)} — {t('пора сделать новую')}</span>
+                </div>
+              ) : (
+                <div className="note info" style={{ marginBottom: 12 }}>
+                  {t('Последняя копия')}: {fmtDate(lastBackup)}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                <button className="btn" onClick={downloadBackup} disabled={backing}>
+                  <span className="ic"><LuDownload size={16} /></span> {backing ? t('Готовим копию…') : t('Скачать копию')}
+                </button>
+                <button className="btn ghost" onClick={() => setRestoring(true)}>
+                  <span className="ic"><LuUpload size={16} /></span> {t('Восстановить из копии')}
+                </button>
+              </div>
+              <p style={{ fontSize: 12.5, color: 'var(--muted-2)', marginTop: 10, lineHeight: 1.6 }}>
+                {t('Совет: делайте копию раз в неделю и храните несколько последних файлов. Пароли сотрудников в копию не попадают.')}
+              </p>
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
       {restoring && <RestoreBox onClose={() => setRestoring(false)} />}
-
-      <div className="panel mt" style={{ maxWidth: 640 }}>
-        <h2><span className="h2-title"><span className="ic"><LuServer size={17} /></span>{t('О системе')}</span></h2>
-        <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7 }}>
-          {t('Данные хранятся на сервере — все устройства видят одну общую базу.')} {t('Время — таджикское (UTC+5).')}{' '}
-          {t('Сейчас в базе')}: <b>{products.length}</b> {t('товаров')}, <b>{sales.length}</b> {t('продаж')}.
-        </p>
-        <ul style={{ listStyle: 'none', marginTop: 14, display: 'flex', flexDirection: 'column', gap: 11 }}>
-          {FEATURES.map((f, i) => (
-            <li key={i} style={{ display: 'flex', alignItems: 'center', gap: 11, fontSize: 14 }}>
-              <span style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--accent-soft)', color: 'var(--accent-dark)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-                <f.Icon size={16} />
-              </span>
-              {f.text}
-            </li>
-          ))}
-        </ul>
-        <button className="btn ghost" data-tour="set.reload" style={{ marginTop: 14 }} onClick={reload}><span className="ic"><LuRefreshCw size={16} /></span> {t('Обновить данные')}</button>
-      </div>
     </Layout>
   )
 }

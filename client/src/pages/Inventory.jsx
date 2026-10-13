@@ -9,7 +9,8 @@ import { fmtDateTime, serverNow } from '../lib/time'
 import { useT } from '../lib/i18n'
 import { useCategories, categoryNames } from '../lib/categories'
 import NumberInput from '../components/NumberInput'
-import { splitUnits } from '../lib/units'
+import VesInput from '../components/VesInput'
+import { isVesovoy, kgText, splitUnits } from '../lib/units'
 import {
   MAX_DIGITS, countOf, shownOf, retype, deltaOf, merged, settle, sameCounts, tally,
   readDraft, writeDraft, dropDraft, closeDraft, pruneDrafts,
@@ -504,25 +505,39 @@ export default function Inventory() {
                 {open.items.map((i) => {
                   const raw = shownOf(i, typed)
                   const actual = countOf(raw)
+                  // Весовой товар считается в килограммах: храним граммы, показываем кг
+                  const ves = isVesovoy(products.find((p) => p.id === i.productId))
                   const diff = actual === null ? null : actual - i.expectedUnits
+                  const chislo = (n) => (ves ? `${kgText(n)} ${t('кг')}` : n)
                   return (
                     <tr key={i.id}>
                       <td><b>{i.name}</b></td>
-                      <td className="num">{i.expectedUnits}</td>
+                      <td className="num">{chislo(i.expectedUnits)}</td>
                       <td data-tour="inv.fact">
-                        <NumberInput
-                          integer className="disc-input" style={{ width: 100 }}
-                          value={raw}
-                          disabled={open.status === 'applied'}
-                          placeholder="—"
-                          maxLength={MAX_DIGITS}
-                          onChange={(e) => type(i, e.target.value)}
-                        />
+                        {ves ? (
+                          <VesInput
+                            className="disc-input"
+                            style={{ width: 100 }}
+                            grams={actual ?? 0}
+                            disabled={open.status === 'applied'}
+                            placeholder="—"
+                            onGrams={(g) => type(i, String(g))}
+                          />
+                        ) : (
+                          <NumberInput
+                            integer className="disc-input" style={{ width: 100 }}
+                            value={raw}
+                            disabled={open.status === 'applied'}
+                            placeholder="—"
+                            maxLength={MAX_DIGITS}
+                            onChange={(e) => type(i, e.target.value)}
+                          />
+                        )}
                       </td>
                       <td className="num">
                         {diff === null ? <span className="tag-cat">{t('не считали')}</span>
                           : diff === 0 ? <span className="badge ok">{t('сходится')}</span>
-                            : <span className={'badge ' + (diff < 0 ? 'debt' : 'low')}>{diff > 0 ? '+' : ''}{diff}</span>}
+                            : <span className={'badge ' + (diff < 0 ? 'debt' : 'low')}>{diff > 0 ? '+' : ''}{chislo(diff)}</span>}
                       </td>
                     </tr>
                   )

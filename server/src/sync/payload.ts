@@ -213,13 +213,19 @@ export function parseWriteOff(p: any, now?: number) {
 export function parseArrival(p: any, now?: number) {
   const root = obj(p, 'приход')
   const a = obj(root.arrival, 'приход')
-  const items = list(a.items, 'позиции прихода', (i) => ({
-    id: id(i.id, 'позиция прихода'),
-    productId: id(i.productId, 'товар'),
-    name: text(i.name, 300),
-    qty: int(i.qty, 'упаковки', 1),
-    cost: money(i.cost, 'закупочная цена'),
-  }))
+  const items = list(a.items, 'позиции прихода', (i) => {
+    const row = {
+      id: id(i.id, 'позиция прихода'),
+      productId: id(i.productId, 'товар'),
+      name: text(i.name, 300),
+      qty: int(i.qty, 'упаковки', 0),
+      // Штуки (у весового товара — граммы) сверх целых упаковок
+      pieces: i.pieces === undefined || i.pieces === null ? 0 : int(i.pieces, 'штуки', 0),
+      cost: money(i.cost, 'закупочная цена'),
+    }
+    if (row.qty <= 0 && row.pieces <= 0) throw new Reject('Пустая позиция прихода')
+    return row
+  })
   const expiry = Array.isArray(root.expiry) ? root.expiry : []
   const total = money(a.total, 'сумма прихода')
   // Неоплаченная часть — долг поставщику. Больше самого прихода она не бывает

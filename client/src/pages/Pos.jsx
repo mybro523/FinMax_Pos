@@ -11,7 +11,7 @@ const CameraScanner = lazy(() => import('../components/CameraScanner'))
 import KassaCatalog, { LIMIT } from '../components/KassaCatalog'
 import { useCollection, useFirstLoading, money, db, stockText, realId } from '../db/store'
 import { useAuth, useCan } from '../db/auth'
-import {
+import { isVesovoy, kgText, KG, gramsOfKg,
   uppOf, isDivisible as isDiv, lineUnits, lineGross, lineNet,
   sellableUnits, expiredUnits, hasExpired, stockUnits,
   fitLine,
@@ -25,6 +25,7 @@ import ProductForm, { emptyProduct, productPayload } from '../components/Product
 import { beepOk, beepError, unlockAudio } from '../lib/sound'
 import { fmtDateTime, chekNomer } from '../lib/time'
 import { normalizeScan } from '../lib/scan'
+import { parseVesEtiketku, productPoVesKodu } from '../lib/vesy'
 import { useT, translate as tr } from '../lib/i18n'
 import { blockUpdate } from '../lib/version'
 import { sellsBelowCost } from '../lib/pricing'
@@ -288,9 +289,43 @@ export default function Pos() {
     ostanovitVystrel()
   }
 
+  // ── Весовой товар в корзину ──
+  // Вес приходит с этикетки весов (точный) или добавляется килограммом по клику,
+  // а дальше кассир правит его в строке. Хранится граммами в «штуках» строки.
+  const addWeight = useCallback(
+    (p, grams) => {
+      const avail = availUnits(p)
+      const ex = cartRef.current.find((i) => i.productId === p.id)
+      const used = ex ? lineUnits(ex) : 0
+      if (avail <= used || avail <= 0) {
+        toast(`${t('Максимум на складе')}: ${kgText(avail)} ${t('кг')}`, 'err')
+        return false
+      }
+      const add = Math.min(Math.max(1, Math.trunc(grams) || 0), avail - used)
+      if (add < grams) toast(`${t('Максимум на складе')}: ${kgText(avail)} ${t('кг')}`, 'err')
+      setCart((c) => {
+        const e = c.find((i) => i.productId === p.id)
+        if (e) return c.map((i) => (i.productId === p.id ? { ...i, qty: 0, pieces: lineUnits(i) + add } : i))
+        return [
+          ...c,
+          {
+            productId: p.id, name: p.name, price: p.price, cost: p.cost,
+            unitsPerPack: uppOf(p), unit: p.unit, stock: p.stock, looseUnits: p.looseUnits,
+            qty: 0, pieces: add, discount: 0,
+          },
+        ]
+      })
+      setSelId(p.id)
+      return true
+    },
+    [toast, setCart, t],
+  )
+
   // Возвращает true, если товар реально добавлен в корзину (false — нет на складе / лимит)
   const addProduct = useCallback(
     (p) => {
+      // Весовой добавляется килограммом, а не «упаковкой»
+      if (isVesovoy(p)) return addWeight(p, KG)
       const upp = uppOf(p)
       const avail = availUnits(p)
       if (avail <= 0) {
@@ -343,7 +378,7 @@ export default function Pos() {
       setSelId(p.id)
       return true
     },
-    [toast, products, setCart, t],
+    [toast, products, setCart, t, addWeight],
   )
 
   const handleUnknown = useCallback((barcode) => {
@@ -355,6 +390,18 @@ export default function Pos() {
   const onCameraDetect = useCallback(
     (code) => {
       setCamera(false)
+      const ves = parseVesEtiketku(code)
+      if (ves) {
+        const wp = productPoVesKodu(products, ves.code)
+        if (wp && addWeight(wp, ves.grams)) {
+          beepOk()
+          toast(`${wp.name}: ${kgText(ves.grams)} ${t('кг')} ${t('добавлен в корзину')}`)
+        } else {
+          beepError()
+          if (!wp) toast(`${t('Весовой товар с кодом')} ${ves.code} ${t('не найден — впишите этот код в штрихкод весового товара')}`, 'err')
+        }
+        return
+      }
       const p = findByBarcode(code)
       if (p) {
         // Тост-успех и «бип» — только если товар реально добавлен (иначе addProduct уже показал ошибку)
@@ -370,7 +417,7 @@ export default function Pos() {
         setNewProduct({ barcode: normalizeScan(code) })
       }
     },
-    [addProduct, toast, isFounder, t],
+    [addProduct, addWeight, products, toast, isFounder, t],
   )
 
   // ── Каталог ──
@@ -457,12 +504,14 @@ export default function Pos() {
   }, [selLine, cart.length])
   const changeSel = (d) => sel && changeQty(sel.productId, d)
   const removeSel = () => sel && remove(sel.productId)
-  const focusCell = (cls) => {
+  const focusCell = (cls, zapas) => {
     if (!sel) {
       toast(t('Корзина пуста — отсканируйте товар'), 'err')
       return
     }
-    const el = document.querySelector(`[data-line="${CSS.escape(sel.productId)}"] .${cls}`)
+    const el =
+      document.querySelector(`[data-line="${CSS.escape(sel.productId)}"] .${cls}`) ||
+      (zapas ? document.querySelector(`[data-line="${CSS.escape(sel.productId)}"] .${zapas}`) : null)
     if (el) {
       el.focus()
       el.select?.()
@@ -518,6 +567,21 @@ export default function Pos() {
     // сканер сам дожимает Enter, и однажды продажа прошла бы случайно
     if (e.key !== 'Enter') return
     if (!val) return
+
+    // Этикетка весов: в коде зашиты товар и точный вес
+    const ves = parseVesEtiketku(val)
+    if (ves) {
+      const wp = productPoVesKodu(products, ves.code)
+      if (wp) {
+        if (addWeight(wp, ves.grams)) beepOk()
+        else beepError()
+      } else {
+        beepError()
+        toast(`${t('Весовой товар с кодом')} ${ves.code} ${t('не найден — впишите этот код в штрихкод весового товара')}`, 'err')
+      }
+      setCode('')
+      return
+    }
 
     const p = findByBarcode(val)
     if (p) {
@@ -613,9 +677,11 @@ export default function Pos() {
       // только из-за упаковки. Раньше он видел просто «максимум 5 шт» и не понимал,
       // что делать, — а сделать было и правда нечего.
       toast(
-        fit.blockedByPacks
-          ? `${t('Максимум на складе')}: ${avail} ${t('шт')}. ${t('Уберите упаковку кнопкой «−», чтобы продать штуками')}`
-          : `${t('Максимум на складе')}: ${avail} ${t('шт')}`,
+        isVesovoy(item)
+          ? `${t('Максимум на складе')}: ${kgText(avail)} ${t('кг')}`
+          : fit.blockedByPacks
+            ? `${t('Максимум на складе')}: ${avail} ${t('шт')}. ${t('Уберите упаковку кнопкой «−», чтобы продать штуками')}`
+            : `${t('Максимум на складе')}: ${avail} ${t('шт')}`,
         'err',
       )
     }
@@ -636,9 +702,20 @@ export default function Pos() {
   //
   // Второе нажатие на уже пустой строке её убирает: привычный способ передумать
   // остаётся, а рядом есть корзинка для того же самого.
+  // Вес в строке правится одним числом в килограммах. Черновик набора живёт,
+  // только пока поле в фокусе: убрали курсор — показывается точный вес строки
+  const [vesDraft, setVesDraft] = useState(null) // { id, val }
+  const vesValue = (i) => (vesDraft?.id === i.productId ? vesDraft.val : String(lineUnits(i) / KG || ''))
+  const changeVes = (id, val) => {
+    setVesDraft({ id, val })
+    applyLine(id, 0, gramsOfKg(val))
+  }
+
   const changeQty = (id, delta) => {
     const it = cart.find((i) => i.productId === id)
     if (!it) return
+    // Весовому «упаковкой больше/меньше» означает ±1 кг
+    if (isVesovoy(it)) return applyLine(id, 0, Math.max(0, lineUnits(it) + delta * KG))
     const empty = it.qty === 0 && (it.pieces || 0) === 0
     if (delta < 0 && empty) return remove(id)
     applyLine(id, it.qty + delta, it.pieces || 0)
@@ -681,9 +758,18 @@ export default function Pos() {
   }
   const total = cart.reduce((s, i) => s + lineNet(i), 0)
   const discountTotal = cart.reduce((s, i) => s + Math.min(i.discount || 0, lineGross(i)), 0)
-  const packsCount = cart.reduce((s, i) => s + i.qty, 0)
-  const piecesCount = cart.reduce((s, i) => s + (i.pieces || 0), 0)
-  const countText = `${packsCount} ${t('уп')}${piecesCount ? ` + ${piecesCount} ${t('шт')}` : ''}`
+  // Весовые позиции в сводке — килограммами, остальные — упаковками и штуками
+  const obychnye = cart.filter((i) => !isVesovoy(i))
+  const packsCount = obychnye.reduce((s, i) => s + i.qty, 0)
+  const piecesCount = obychnye.reduce((s, i) => s + (i.pieces || 0), 0)
+  const vesCount = cart.filter(isVesovoy).reduce((s, i) => s + lineUnits(i), 0)
+  const countText = [
+    packsCount || !cart.length || obychnye.length ? `${packsCount} ${t('уп')}` : '',
+    piecesCount ? `${piecesCount} ${t('шт')}` : '',
+    vesCount ? `${kgText(vesCount)} ${t('кг')}` : '',
+  ]
+    .filter(Boolean)
+    .join(' + ') || `0 ${t('уп')}`
   // Сдача считается только для наличных: картой и в долг «получено» не бывает
   const sd = payment === 'cash' ? sdacha(total, received) : { state: 'none', diff: 0, received: null }
   const bills = payment === 'cash' ? kupyury(total) : []
@@ -852,7 +938,7 @@ export default function Pos() {
       const { sale, synced } = checkout({
         items: items.map((i) => ({
           productId: i.productId, name: i.name, qty: i.qty, pieces: i.pieces || 0,
-          price: i.price, cost: i.cost, unitsPerPack: uppOf(i), discount: i.discount,
+          price: i.price, cost: i.cost, unitsPerPack: uppOf(i), unit: i.unit || '', discount: i.discount,
         })),
         payment,
         payVia: via,
@@ -983,7 +1069,7 @@ export default function Pos() {
       if (document.querySelector('.overlay, .tur-root')) return
       const k = keys.current
       if (e.key === 'F2') { e.preventDefault(); k.focusCell('inp-discount'); return }
-      if (e.key === 'F4') { e.preventDefault(); k.focusCell('inp-pieces'); return }
+      if (e.key === 'F4') { e.preventDefault(); k.focusCell('inp-pieces', 'inp-ves'); return }
       if (e.key === 'F8') { e.preventDefault(); k.novyyChek(); return }
       if (e.key === 'F9') { e.preventDefault(); k.kOplate(); return }
 
@@ -1168,22 +1254,39 @@ export default function Pos() {
                         <td className="kt-name">
                           <b>{i.name}</b>
                           <div className="tag-cat">
-                            {money(i.price)}{isDiv(i) && ` · ${money(i.price / uppOf(i))}/${t('шт')}`}
+                            {money(i.price)}
+                            {isVesovoy(i) ? ` / ${t('кг')}` : isDiv(i) && ` · ${money(i.price / uppOf(i))}/${t('шт')}`}
                             {/* На телефоне колонки «В уп.» нет — число переезжает сюда */}
-                            {isDiv(i) && <span className="kt-upp-m"> · {t('в уп.')} {uppOf(i)}</span>}
+                            {!isVesovoy(i) && isDiv(i) && <span className="kt-upp-m"> · {t('в уп.')} {uppOf(i)}</span>}
                           </div>
                         </td>
-                        <td className="num kt-upp">{isDiv(i) ? uppOf(i) : <span className="tag-cat">—</span>}</td>
+                        <td className="num kt-upp">{isVesovoy(i) ? <span className="tag-cat">{t('кг')}</span> : isDiv(i) ? uppOf(i) : <span className="tag-cat">—</span>}</td>
                         {/* data-label — подпись поля на телефоне: заголовка таблицы там нет */}
-                        <td className="kt-qty" data-label={t('Упаковок')}>
-                          <div className="qty-ctrl" data-tour="pos.qty">
-                            <button onClick={() => changeQty(i.productId, -1)} aria-label={t('Упаковкой меньше')}><LuMinus size={14} /></button>
-                            <b>{i.qty}</b>
-                            <button onClick={() => changeQty(i.productId, 1)} aria-label={t('Упаковкой больше')}><LuPlus size={14} /></button>
-                          </div>
+                        <td className="kt-qty" data-label={isVesovoy(i) ? t('Вес, кг') : t('Упаковок')}>
+                          {isVesovoy(i) ? (
+                            <NumberInput
+                              className="disc-input inp-ves"
+                              value={vesValue(i)}
+                              onChange={(e) => changeVes(i.productId, e.target.value)}
+                              onKeyDown={(e) => onCellKey(e, i.productId)}
+                              onFocus={() => { snapLine(i.productId); setVesDraft({ id: i.productId, val: String(lineUnits(i) / KG || '') }) }}
+                              onBlur={() => setVesDraft(null)}
+                              placeholder="0.000"
+                              title={t('Вес в килограммах, до грамма')}
+                              aria-label={t('Вес, кг')}
+                            />
+                          ) : (
+                            <div className="qty-ctrl" data-tour="pos.qty">
+                              <button onClick={() => changeQty(i.productId, -1)} aria-label={t('Упаковкой меньше')}><LuMinus size={14} /></button>
+                              <b>{i.qty}</b>
+                              <button onClick={() => changeQty(i.productId, 1)} aria-label={t('Упаковкой больше')}><LuPlus size={14} /></button>
+                            </div>
+                          )}
                         </td>
                         <td className="kt-pcs" data-label={t('Штук')} data-tour="pos.pieces">
-                          {isDiv(i) ? (
+                          {isVesovoy(i) ? (
+                            <span className="tag-cat">—</span>
+                          ) : isDiv(i) ? (
                             <NumberInput
                               className="disc-input inp-pieces"
                               integer

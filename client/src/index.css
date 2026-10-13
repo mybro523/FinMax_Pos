@@ -1275,6 +1275,47 @@ tbody tr.clickable { cursor: pointer; }
 }
 
 
+/* ── Карточка товара: галочка «продаётся на вес» ── */
+.pf-ves {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px; margin-bottom: 14px;
+  background: var(--soft); border: 1px solid var(--border); border-radius: 10px;
+  cursor: pointer; font-size: 14px; font-weight: 500;
+}
+.pf-ves input[type='checkbox'] { width: 16px; height: 16px; margin-top: 2px; flex: none; }
+.pf-ves span { display: flex; flex-direction: column; gap: 2px; }
+.pf-ves .tag-cat { font-weight: 400; }
+
+/* ═════════ Настройки: разделы слева, содержимое справа ═════════ */
+.set-wrap { display: flex; gap: 22px; align-items: flex-start; }
+.set-nav {
+  position: sticky; top: 76px;
+  width: 248px; flex: none;
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 8px;
+}
+.set-nav-btn {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border: none; border-radius: 9px;
+  background: none; color: var(--text); font-size: 14px; font-weight: 500;
+  text-align: left; cursor: pointer; transition: background 0.12s, color 0.12s;
+}
+.set-nav-btn .ic { color: var(--muted); display: inline-flex; }
+.set-nav-btn:hover { background: var(--soft); }
+.set-nav-btn.active { background: var(--accent-soft); color: var(--accent-dark); font-weight: 600; }
+.set-nav-btn.active .ic { color: var(--accent-dark); }
+.set-body { flex: 1; min-width: 0; }
+.set-body > .panel.mt:first-child, .set-body > *:first-child .panel.mt:first-child { margin-top: 0; }
+@media (max-width: 860px) {
+  .set-wrap { flex-direction: column; gap: 14px; }
+  .set-nav {
+    position: static; width: 100%;
+    flex-direction: row; overflow-x: auto; padding: 6px;
+  }
+  .set-nav-btn { flex: none; padding: 8px 12px; }
+}
+
 /* ═════════ Чек (TicketView): экран, предпросмотр, печать — один вид ═════════ */
 .ticket { font-size: 14px; color: var(--text); }
 .ticket-emblem { display: block; margin: 0 auto 8px; }

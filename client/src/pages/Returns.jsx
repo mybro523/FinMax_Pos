@@ -10,7 +10,8 @@ import { fmtDateTime, dayKey, chekNomer } from '../lib/time'
 import { useT } from '../lib/i18n'
 import { useCategories, needsExpiry } from '../lib/categories'
 import NumberInput from '../components/NumberInput'
-import { uppOf, lineUnits as soldUnits } from '../lib/units'
+import VesInput from '../components/VesInput'
+import { uppOf, lineUnits as soldUnits, isVesovoy, kgText } from '../lib/units'
 import { returnTicket } from '../lib/ticket'
 import TicketView from '../components/TicketView'
 import { usePechat } from '../components/PrintDialog'
@@ -91,6 +92,9 @@ export default function Returns() {
         deleted: !i.productId,
         name: i.name,
         unitsPerPack: uppOf(i),
+        // Весовой товар возвращается в килограммах (внутри — граммы)
+        ves: isVesovoy(products.find((p) => p.id === i.productId) || i),
+        unit: (products.find((p) => p.id === i.productId) || i).unit || '',
         max: i.productId ? Math.max(0, soldUnits(i) - (already[i.productId] || 0)) : 0,
         units: 0,
         restock: true,
@@ -244,19 +248,32 @@ export default function Returns() {
                     <b>{l.name}</b>
                     {l.deleted && <div className="tag-cat" style={{ color: 'var(--warn)' }}>{t('товар удалён из базы')}</div>}
                   </td>
-                  <td className="num">{l.deleted ? '—' : l.max}</td>
+                  <td className="num">{l.deleted ? '—' : l.ves ? `${kgText(l.max)} ${t('кг')}` : l.max}</td>
                   <td data-tour="ret.lines">
-                    <NumberInput
-                      integer className="disc-input"
-                      value={l.units || ''}
-                      placeholder="0"
-                      disabled={l.deleted}
-                      title={l.deleted ? t('Этот товар удалён из базы — вернуть его на склад некуда') : undefined}
-                      onChange={(e) => {
-                        const v = Math.max(0, Math.min(l.max, Math.trunc(Number(e.target.value) || 0)))
-                        setLines((ls) => ls.map((x, i) => (i === n ? { ...x, units: v } : x)))
-                      }}
-                    />
+                    {l.ves ? (
+                      <VesInput
+                        className="disc-input"
+                        grams={l.units || 0}
+                        disabled={l.deleted}
+                        placeholder="0"
+                        onGrams={(g) => {
+                          const v = Math.max(0, Math.min(l.max, g))
+                          setLines((ls) => ls.map((x, i) => (i === n ? { ...x, units: v } : x)))
+                        }}
+                      />
+                    ) : (
+                      <NumberInput
+                        integer className="disc-input"
+                        value={l.units || ''}
+                        placeholder="0"
+                        disabled={l.deleted}
+                        title={l.deleted ? t('Этот товар удалён из базы — вернуть его на склад некуда') : undefined}
+                        onChange={(e) => {
+                          const v = Math.max(0, Math.min(l.max, Math.trunc(Number(e.target.value) || 0)))
+                          setLines((ls) => ls.map((x, i) => (i === n ? { ...x, units: v } : x)))
+                        }}
+                      />
+                    )}
                   </td>
                   <td data-tour="ret.restock">
                     <select
@@ -352,7 +369,10 @@ export default function Returns() {
               <tr key={r.id}>
                 <td>{fmtDateTime(r.date)}</td>
                 <td>
-                  {r.items.map((i) => `${i.name} ×${i.units}`).join(', ').slice(0, 60)}
+                  {r.items
+                    .map((i) => `${i.name} ×${i.unit === 'кг' || isVesovoy(products.find((p) => p.id === i.productId)) ? `${kgText(i.units)} ${t('кг')}` : i.units}`)
+                    .join(', ')
+                    .slice(0, 60)}
                   {r.items.some((i) => !i.restock) && (
                     <div className="tag-cat" style={{ color: 'var(--warn)' }}>{t('часть списана')}</div>
                   )}

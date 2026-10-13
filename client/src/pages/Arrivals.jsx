@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { LuPlus, LuTrash2, LuScanLine, LuPackagePlus, LuPencil } from 'react-icons/lu'
 import Layout from '../components/Layout'
+import { isVesovoy, kgText, gramsOfKg } from '../lib/units'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { JournalFilter, JournalCount, useJournalFilter } from '../components/JournalFilter'
@@ -137,7 +138,12 @@ export default function Arrivals() {
             <thead><tr><th>{t('Товар')}</th><th className="num">{t('Кол-во')}</th><th className="num">{t('Закуп.')}</th><th className="num">{t('Сумма')}</th></tr></thead>
             <tbody>
               {view.items.map((i, n) => (
-                <tr key={n}><td>{i.name}</td><td className="num">{i.qty}</td><td className="num">{money(i.cost)}</td><td className="num">{money(i.cost * i.qty)}</td></tr>
+                <tr key={n}>
+                  <td>{i.name}</td>
+                  <td className="num">{i.pieces > 0 ? `${kgText(i.qty * 1000 + i.pieces)} ${t('кг')}` : i.qty}</td>
+                  <td className="num">{money(i.cost)}</td>
+                  <td className="num">{money(i.cost * (i.qty + (i.pieces || 0) / 1000))}</td>
+                </tr>
               ))}
             </tbody>
           </table>
@@ -242,7 +248,7 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
       setFocusId(p.id)
       return false
     }
-    setLines((ls) => [...ls, { productId: p.id, name: p.name, qty: 1, cost: p.cost, expiryDate: '', category: p.category }])
+    setLines((ls) => [...ls, { productId: p.id, name: p.name, qty: 1, cost: p.cost, expiryDate: '', category: p.category, ves: isVesovoy(p) }])
     setFocusId(p.id)
     beepOk()
     return true
@@ -304,6 +310,9 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
     if (!form.name.trim()) return toast(tr('Введите название'), 'err')
     if (!form.category.trim()) return toast(tr('Выберите категорию'), 'err')
     try {
+      if ((form.unit || '').trim().toLowerCase() === 'кг') {
+        return toast(tr('Весовой товар заведите в разделе «Товары» — там есть галочка «Продаётся на вес»'), 'err')
+      }
       const created = await db.push('products', {
         name: form.name.trim(),
         barcode: normalizeScan(form.barcode),
@@ -324,13 +333,18 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
     }
   }
 
-  const total = lines.reduce((s, l) => s + (Number(l.cost) || 0) * (Number(l.qty) || 0), 0)
+  const total = lines.reduce((s, l) => s + (Number(l.cost) || 0) * (l.ves ? gramsOfKg(l.qty) / 1000 : Number(l.qty) || 0), 0)
 
   function submit() {
-    // Валидация: целое кол-во >= 1, цена >= 0
+    // Валидация: целое кол-во >= 1 (у весового — вес больше нуля), цена >= 0
     for (const l of lines) {
       const qty = Number(l.qty)
-      if (!Number.isInteger(qty) || qty < 1) {
+      if (l.ves) {
+        if (gramsOfKg(l.qty) <= 0) {
+          toast(`«${l.name}»: ${tr('укажите вес в килограммах')}`, 'err')
+          return
+        }
+      } else if (!Number.isInteger(qty) || qty < 1) {
         toast(`«${l.name}»: ${tr('количество должно быть целым числом ≥ 1')}`, 'err')
         return
       }
@@ -350,7 +364,16 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
       return
     }
     const debt = credit ? Math.max(0, total - Math.max(0, Number(paid) || 0)) : 0
-    onSave({ supplier: sup?.name || '', supplierId: sup?.id || '', debt, items: lines })
+    onSave({
+      supplier: sup?.name || '',
+      supplierId: sup?.id || '',
+      debt,
+      items: lines.map((l) => {
+        if (!l.ves) return l
+        const g = gramsOfKg(l.qty)
+        return { ...l, qty: Math.floor(g / 1000), pieces: g % 1000 }
+      }),
+    })
   }
 
   return (
@@ -425,15 +448,16 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
               </div>
               <div className="arr-fields">
                 <label className="arr-f">
-                  <span>{tr('Кол-во')}</span>
+                  <span>{l.ves ? tr('Кг') : tr('Кол-во')}</span>
                   {/* Именно NumberInput, а не обычное поле: в остальной программе
                       минус и буквы в числа не попадают физически, а здесь стояло
                       обычное поле с нерабочим признаком integer — браузер такой
-                      признак не понимает и просто ругался в консоли */}
+                      признак не понимает и просто ругался в консоли.
+                      У весового товара количество — это килограммы с дробью */}
                   <NumberInput
                     ref={(el) => { qtyRefs.current[l.productId] = el }}
                     className="arr-qty"
-                    integer
+                    integer={!l.ves}
                     value={l.qty}
                     onChange={(e) => updNum(l.productId, 'qty', e.target.value)}
                     onKeyDown={onCellKey}
@@ -636,27 +660,33 @@ function EditArrival({ arrival, suppliers, t, onClose, onSave }) {
   const [credit, setCredit] = useState(Number(arrival.debt) > 0)
   const [paid, setPaid] = useState(String(Math.max(0, Number(arrival.total) - Number(arrival.debt || 0))))
   const [lines, setLines] = useState(() =>
-    arrival.items.map((i) => ({
-      id: i.id,
-      name: i.name,
-      qty: String(i.qty),
-      cost: String(i.cost),
-      expiryDate: i.expiryDate || '',
-      soldUnits: i.soldUnits || 0,
-      minQty: i.minQty || 0,
-      unitsPerPack: i.unitsPerPack || 1,
-      exists: i.exists !== false,
-    })),
+    arrival.items.map((i) => {
+      const ves = i.unit === 'кг'
+      return {
+        id: i.id,
+        name: i.name,
+        // Весовая строка правится в килограммах одним числом
+        qty: ves ? String((i.qty * 1000 + (i.pieces || 0)) / 1000) : String(i.qty),
+        ves,
+        cost: String(i.cost),
+        expiryDate: i.expiryDate || '',
+        soldUnits: i.soldUnits || 0,
+        minQty: i.minQty || 0,
+        unitsPerPack: i.unitsPerPack || 1,
+        exists: i.exists !== false,
+      }
+    }),
   )
   const [saving, setSaving] = useState(false)
 
   const set = (n, k, v) => setLines(lines.map((l, i) => (i === n ? { ...l, [k]: v } : l)))
-  const total = lines.reduce((s, l) => s + (Number(l.cost) || 0) * (Number(l.qty) || 0), 0)
+  const kolvo = (l) => (l.ves ? gramsOfKg(l.qty) / 1000 : Number(l.qty) || 0)
+  const total = lines.reduce((s, l) => s + (Number(l.cost) || 0) * kolvo(l), 0)
 
   // Проданное вернуть нельзя — эту строку сервер отвергнет, поэтому
   // не даём даже нажать и объясняем почему
-  const плохо = lines.find((l) => (Number(l.qty) || 0) < l.minQty)
-  const пусто = !lines.some((l) => (Number(l.qty) || 0) > 0)
+  const плохо = lines.find((l) => (l.ves ? gramsOfKg(l.qty) < l.soldUnits : (Number(l.qty) || 0) < l.minQty))
+  const пусто = !lines.some((l) => kolvo(l) > 0)
 
   async function save() {
     setSaving(true)
@@ -670,12 +700,16 @@ function EditArrival({ arrival, suppliers, t, onClose, onSave }) {
         supplier: sup?.name || '',
         supplierId: sup?.id || '',
         debt: credit ? Math.max(0, total - Math.max(0, Number(paid) || 0)) : 0,
-        items: lines.map((l) => ({
-          id: l.id,
-          qty: Math.max(0, Number(l.qty) || 0),
-          cost: Number(l.cost) || 0,
-          ...(l.expiryDate ? { expiryDate: l.expiryDate } : {}),
-        })),
+        items: lines.map((l) => {
+          const g = l.ves ? gramsOfKg(l.qty) : 0
+          return {
+            id: l.id,
+            qty: l.ves ? Math.floor(g / 1000) : Math.max(0, Number(l.qty) || 0),
+            ...(l.ves ? { pieces: g % 1000 } : {}),
+            cost: Number(l.cost) || 0,
+            ...(l.expiryDate ? { expiryDate: l.expiryDate } : {}),
+          }
+        }),
       })
     } finally {
       setSaving(false)
@@ -715,7 +749,7 @@ function EditArrival({ arrival, suppliers, t, onClose, onSave }) {
               </td>
               <td className="num" style={{ width: 92 }}>
                 <NumberInput
-                  integer
+                  integer={!l.ves}
                   className="disc-input"
                   value={l.qty}
                   onChange={(e) => set(n, 'qty', e.target.value)}

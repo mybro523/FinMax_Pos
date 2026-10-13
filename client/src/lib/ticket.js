@@ -8,12 +8,14 @@
 // во всех четырёх местах разом.
 //
 // Перевод, вид денег и дат передаются снаружи — модуль проверяется без браузера.
-import { uppOf, lineNet } from './units.js'
+import { uppOf, lineNet, lineUnits, isVesovoy, kgText } from './units.js'
 
 // Сколько и почём: целые упаковки — по цене упаковки, всё остальное — в штуках по
 // цене штуки. То же, что видит кассир в чеке на экране
 export function qtyPriceText(i, t, money) {
   const upp = uppOf(i)
+  // Весовой товар: вес в килограммах и цена за килограмм
+  if (isVesovoy(i)) return `${kgText(lineUnits(i))} ${t('кг')} × ${money(i.price)}`
   if (!i.pieces && i.qty) return `${i.qty} ${t('уп')} × ${money(i.price)}`
   const units = (i.qty || 0) * upp + (i.pieces || 0)
   return `${units} ${t('шт')} × ${money(i.price / upp)}`
@@ -96,8 +98,11 @@ export function returnTicket(ret, { t, money, when, pharmacy = '', cashier = '',
     head: [...shapka(pharmacy, rekvizity, t), `${t('Чек возврата')}${nomer ? ` № ${nomer}` : ''}`, when(ret.date)],
     rows: items.map((i) => ({
       name: i.name,
-      // Списанная упаковка на полку не вернётся — об этом прямо в чеке
-      sub: `${i.units} ${t('шт')}` + (i.restock ? '' : ` · ${t('списано')}`),
+      // Списанная упаковка на полку не вернётся — об этом прямо в чеке.
+      // Весовой товар возвращается в килограммах
+      sub:
+        (isVesovoy(i) ? `${kgText(i.units)} ${t('кг')}` : `${i.units} ${t('шт')}`) +
+        (i.restock ? '' : ` · ${t('списано')}`),
       value: money(i.amount || 0),
     })),
     totals: [

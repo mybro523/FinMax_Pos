@@ -226,6 +226,9 @@ model ArrivalItem {
   product   Product? @relation(fields: [productId], references: [id])
   name      String
   qty       Int
+  // Штуки (у весового товара — граммы) сверх целых упаковок: приход «12,350 кг»
+  // хранится как 12 упаковок-килограммов и 350 штук-граммов
+  pieces    Int      @default(0)
   cost      Decimal  @db.Decimal(12, 2)
 
   @@index([arrivalId])
