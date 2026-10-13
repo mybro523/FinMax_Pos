@@ -1305,8 +1305,12 @@ tbody tr.clickable { cursor: pointer; }
 .set-nav-btn:hover { background: var(--soft); }
 .set-nav-btn.active { background: var(--accent-soft); color: var(--accent-dark); font-weight: 600; }
 .set-nav-btn.active .ic { color: var(--accent-dark); }
-.set-body { flex: 1; min-width: 0; }
-.set-body > .panel.mt:first-child, .set-body > *:first-child .panel.mt:first-child { margin-top: 0; }
+/* Панели раздела раскладываются колонками: на широком экране их две, и пустого
+   поля справа больше нет. Панель не разрывается между колонками. */
+.set-body { flex: 1; min-width: 0; columns: 2 480px; column-gap: 16px; }
+.set-body > * { break-inside: avoid; }
+.set-body .panel { margin-top: 0; margin-bottom: 16px; }
+.set-body .note.mt, .set-body > .note { margin-top: 0; margin-bottom: 16px; }
 @media (max-width: 860px) {
   .set-wrap { flex-direction: column; gap: 14px; }
   .set-nav {
@@ -1314,6 +1318,7 @@ tbody tr.clickable { cursor: pointer; }
     flex-direction: row; overflow-x: auto; padding: 6px;
   }
   .set-nav-btn { flex: none; padding: 8px 12px; }
+  .set-body { columns: 1; }
 }
 
 /* ═════════ Чек (TicketView): экран, предпросмотр, печать — один вид ═════════ */
