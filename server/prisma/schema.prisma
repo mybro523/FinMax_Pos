@@ -9,6 +9,8 @@ datasource db {
 
 model Product {
   id           String        @id @default(cuid())
+  // Фото товара: маленький сжатый кадр строкой (data:image/jpeg). Пусто — фото нет
+  image        String        @default("")
   name         String
   barcode      String        @unique
   category     String        @default("Прочее")

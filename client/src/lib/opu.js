@@ -54,16 +54,18 @@ export function opuFinance({ sales = [], returns = [], writeOffs = [], expenses 
   for (const p of supplierPayments) {
     if (p && p.clientId) paidByClient.set(p.clientId, num(p.amount))
   }
-  let supplierPaid = 0
+  let paidZapisi = 0 // записи «оплата поставщику»: погашения долгов и оплаты из кассы
   for (const p of supplierPayments) {
     const d = p && (p.date || p.createdAt)
-    if (d && inRange(d, from, to)) supplierPaid += num(p.amount)
+    if (d && inRange(d, from, to)) paidZapisi += num(p.amount)
   }
+  let paidPriPrihode = 0 // оплачено прямо при приходе (наличными своими, картой)
   for (const a of arrivals) {
     if (!a || !a.date || !inRange(a.date, from, to)) continue
     const paidNow = num(a.total) - num(a.debt) - (paidByClient.get(a.id + ':pay') || 0)
-    if (paidNow > 0) supplierPaid += paidNow
+    if (paidNow > 0) paidPriPrihode += paidNow
   }
+  const supplierPaid = paidZapisi + paidPriPrihode
 
   // Касса — наличные, пришедшие за период: продажи налом и погашения долгов
   // клиентов минус возвраты, выданные наличными
@@ -86,6 +88,12 @@ export function opuFinance({ sales = [], returns = [], writeOffs = [], expenses 
     sebestoimost: fin.cost,
     valovoy,
     supplierPaid,
+    // Составляющие — модалка «из чего сложилось» показывает их по отдельности
+    paidZapisi,
+    paidPriPrihode,
+    debtPaid,
+    refundsCash,
+    cashSales: fin.byPay.cash,
     zarplata,
     nalogi,
     magazin,

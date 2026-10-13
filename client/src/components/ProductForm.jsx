@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react'
-import { LuWandSparkles, LuX } from 'react-icons/lu'
+import { LuCamera, LuWandSparkles, LuX } from 'react-icons/lu'
 import NumberInput from './NumberInput'
-import { useToast } from './ui'
+import { AddCategoryBtn } from './CategorySelect'
+import { szhatFoto } from '../lib/foto'
+import { useDialog, useToast } from './ui'
 import { useCollection } from '../db/store'
 import { useT } from '../lib/i18n'
 import { useCategories, categoryNames, categoryOptions } from '../lib/categories'
@@ -27,7 +29,7 @@ import { KG, gramsOfKg, isVesovoy } from '../lib/units'
 // на подпись рядом с числом.
 
 export const emptyProduct = {
-  name: '', barcode: '', category: '', cost: '', price: '', stock: '', minStock: '',
+  name: '', barcode: '', category: '', image: '', cost: '', price: '', stock: '', minStock: '',
   unitsPerPack: '1', looseUnits: '0', dosage: '', expiryDate: '', analogIds: [], unit: '',
 }
 
@@ -42,6 +44,7 @@ export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
       name: (f.name || '').trim(),
       barcode: normalizeBarcode(f.barcode || ''),
       category: (f.category || '').trim(),
+      image: f.image || '',
       cost: Number(f.cost) || 0,
       price: Number(f.price) || 0,
       stock: Math.floor(grams / KG),
@@ -58,6 +61,7 @@ export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
     name: (f.name || '').trim(),
     barcode: normalizeBarcode(f.barcode || ''),
     category: (f.category || '').trim(),
+    image: f.image || '',
     cost: Number(f.cost) || 0,
     price: Number(f.price) || 0,
     stock: Number(f.stock) || 0,
@@ -72,8 +76,20 @@ export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
 }
 
 export default function ProductForm({ value, onChange, autoFocus = 'barcode' }) {
+  const dialog = useDialog()
+  const fotoRef = useRef(null)
   const t = useT()
   const toast = useToast()
+
+  // Фото выбрано — сжимаем на месте и кладём строкой в карточку
+  async function pickFoto(file) {
+    if (!file) return
+    try {
+      onChange({ ...value, image: await szhatFoto(file) })
+    } catch (e) {
+      toast(t(e.message), 'err')
+    }
+  }
   const products = useCollection('products')
   const catList = useCategories()
 
@@ -153,16 +169,33 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode' }) 
           )}
         </div>
         <div className="field" style={{ flex: 1 }} data-tour="pf.category">
-          <label>{t('Категория')}</label>
-          <select value={value.category} onChange={(e) => set('category', e.target.value)}>
-            <option value="">{t('— выберите категорию —')}</option>
-            {categoryOptions(value.category, catList).map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.legacy ? `${o.value} — ${t('старая категория')}` : t(o.value)}
-              </option>
-            ))}
-          </select>
+          <label>{t('Категория (необязательно)')}</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <select style={{ flex: 1, minWidth: 0 }} value={value.category} onChange={(e) => set('category', e.target.value)}>
+              <option value="">{t('— без категории —')}</option>
+              {categoryOptions(value.category, catList).map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.legacy ? `${o.value} — ${t('старая категория')}` : t(o.value)}
+                </option>
+              ))}
+            </select>
+            <AddCategoryBtn dialog={dialog} toast={toast} options={categoryNames(catList)} onPicked={(name) => set('category', name)} />
+          </div>
         </div>
+      </div>
+
+      {/* ── Фото товара ── */}
+      <div className="field" data-tour="pf.foto">
+        <label>{t('Фото товара (необязательно)')}</label>
+        <div className="pf-foto">
+          {value.image ? <img className="foto-mini lg" src={value.image} alt="" /> : <span className="pf-foto-none">{t('нет фото')}</span>}
+          <input ref={fotoRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => { pickFoto(e.target.files?.[0]); e.target.value = '' }} />
+          <button type="button" className="btn ghost" onClick={() => fotoRef.current?.click()}>
+            <span className="ic"><LuCamera size={15} /></span> {value.image ? t('Заменить') : t('Загрузить фото')}
+          </button>
+          {value.image && <button type="button" className="btn ghost" onClick={() => set('image', '')}>{t('Убрать')}</button>}
+        </div>
+        <div className="tag-cat" style={{ marginTop: 6 }}>{t('Кружок с фото появится в кассе и в списке товаров; нажатие открывает снимок во весь экран.')}</div>
       </div>
 
       <label className="pf-ves" data-tour="pf.ves">

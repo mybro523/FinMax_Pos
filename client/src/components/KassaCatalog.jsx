@@ -30,7 +30,7 @@ function ostatok(p, t) {
   return isDivisible(p) && loose > 0 ? `${packs} ${unit} + ${loose} ${t('шт')}` : `${packs} ${unit}`
 }
 
-function KassaCatalog({ rows, total, hi, showHi, outside, loading, noProducts, onPick }) {
+function KassaCatalog({ rows, total, hi, showHi, outside, loading, noProducts, onPick, onFoto }) {
   const t = useT()
 
   if (loading) return <div className="empty">{t('Список товаров загружается…')}</div>
@@ -58,6 +58,19 @@ function KassaCatalog({ rows, total, hi, showHi, outside, loading, noProducts, o
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => onPick(p)}
             >
+              {p.image && (
+                /* Клик по фото — просмотр во весь экран, товар в чек не добавляется */
+                <img
+                  className="kc-foto"
+                  src={p.image}
+                  alt=""
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onFoto && onFoto(p)
+                  }}
+                />
+              )}
               <span className="kc-name">
                 <b>{p.name}</b>
                 <span className="tag-cat">

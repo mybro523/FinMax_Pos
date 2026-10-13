@@ -40,8 +40,18 @@ export default function WriteOffs() {
   // с других устройств, а страница не ждёт отдельного запроса
   const list = useCollection('writeoffs')
   const [reasonFilter, setReasonFilter] = useState('all')
+  // Поиск находит и по штрихкоду: имя товара в строке списания уже есть,
+  // а штрихкод достаём из карточки товара по его id
+  const barcodeById = useMemo(() => new Map(products.map((p) => [p.id, p.barcode || ''])), [products])
   const journal = useJournalFilter('writeoffs', {
-    textOf: (w) => (w.items || []).map((i) => i.name).join(' ') + ' ' + (w.note || '') + ' ' + (w.user?.name || ''),
+    textOf: (w) =>
+      (w.items || []).map((i) => i.name).join(' ') +
+      ' ' +
+      (w.items || []).map((i) => barcodeById.get(i.productId) || '').join(' ') +
+      ' ' +
+      (w.note || '') +
+      ' ' +
+      (w.user?.name || ''),
   })
   // Причина — свой фильтр: «что мы списали по сроку за месяц» спрашивают чаще всего
   const journalRows = useMemo(
@@ -151,6 +161,13 @@ export default function WriteOffs() {
               {REASONS.map((r) => <option key={r.key} value={r.key}>{t(r.label)}</option>)}
             </select>
           </div>
+          {reason === 'other' && (
+            /* «Другое» без пояснения ничего не скажет через месяц — поле тут же */
+            <div className="field" style={{ flex: 2, minWidth: 220 }}>
+              <label>{t('Какая причина?')}</label>
+              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('напр. угостили покупателя')} />
+            </div>
+          )}
         </div>
 
         {rows.length > 0 && (

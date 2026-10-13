@@ -11,10 +11,11 @@ import { receiveArrival, findByBarcode, getArrival, updateArrival, deleteArrival
 import { useCan } from '../db/auth'
 import { fmtDateTime } from '../lib/time'
 import { useT, translate as tr } from '../lib/i18n'
-import { needsExpiry, useCategories, categoryNames } from '../lib/categories'
+import { useCategories, categoryNames } from '../lib/categories'
 import { normalizeScan } from '../lib/scan'
 import { beepOk, beepError } from '../lib/sound'
 import NumberInput from '../components/NumberInput'
+import { AddCategoryBtn } from '../components/CategorySelect'
 
 export default function Arrivals() {
   const arrivals = useCollection('arrivals')
@@ -198,7 +199,6 @@ export default function Arrivals() {
 // в одно поле, товар сам встаёт строкой, а незнакомый штрихкод заводится на месте.
 function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
   const can = useCan()
-  const categories = useCategories()
   const dialog = useDialog()
   const [supplierId, setSupplierId] = useState('')
   // Чем заплатили поставщику: из кассы, своими наличными, картой или в долг.
@@ -331,7 +331,6 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
   // иначе количество учлось бы дважды: и в карточке, и приходом.
   async function saveNewProduct(form) {
     if (!form.name.trim()) return toast(tr('Введите название'), 'err')
-    if (!form.category.trim()) return toast(tr('Выберите категорию'), 'err')
     try {
       if ((form.unit || '').trim().toLowerCase() === 'кг') {
         return toast(tr('Весовой товар заведите в разделе «Товары» — там есть галочка «Продаётся на вес»'), 'err')
@@ -339,7 +338,7 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
       const created = await db.push('products', {
         name: form.name.trim(),
         barcode: normalizeScan(form.barcode),
-        category: form.category.trim(),
+        category: (form.category || '').trim(),
         cost: 0,
         price: Number(form.price) || 0,
         stock: 0,
@@ -373,11 +372,6 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
       }
       if (Number(l.cost) < 0 || Number.isNaN(Number(l.cost))) {
         toast(`«${l.name}»: ${tr('некорректная закупочная цена')}`, 'err')
-        return
-      }
-      // У лекарств срок годности обязателен — иначе контроль сроков будет дырявым
-      if (!l.expiryDate && needsExpiry(l.category, categories)) {
-        toast(`«${l.name}»: ${tr('укажите срок годности')}`, 'err')
         return
       }
     }
@@ -469,6 +463,10 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
             {products.map((p) => <option key={p.id} value={p.id}>{p.name} ({tr('остаток')} {p.stock})</option>)}
           </select>
           <button className="btn icon" onClick={addLine}><LuPlus size={17} /></button>
+          {/* Товара ещё нет в списке — карточка заводится прямо отсюда, не бросая приёмку */}
+          <button className="btn ghost" data-tour="af.newprod" style={{ flexShrink: 0 }} onClick={() => setNewProduct({ barcode: '' })}>
+            <span className="ic"><LuPackagePlus size={15} /></span> {tr('Новый товар')}
+          </button>
         </div>
       </div>
 
@@ -510,15 +508,11 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
                 </label>
                 <label className="arr-f">
                   <span>{tr('Срок годности')}</span>
-                  {needsExpiry(l.category, categories) ? (
-                    <input
-                      className="arr-exp" type="date"
-                      value={l.expiryDate || ''}
-                      onChange={(e) => upd(l.productId, 'expiryDate', e.target.value)}
-                    />
-                  ) : (
-                    <span className="arr-none">{tr('не требуется')}</span>
-                  )}
+                  <input
+                    className="arr-exp" type="date"
+                    value={l.expiryDate || ''}
+                    onChange={(e) => upd(l.productId, 'expiryDate', e.target.value)}
+                  />
                 </label>
               </div>
             </div>
@@ -549,6 +543,8 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
       {newProduct && (
         <NewProductForm
           barcode={newProduct.barcode}
+          dialog={dialog}
+          toast={toast}
           onSave={saveNewProduct}
           onClose={() => {
             setNewProduct(null)
@@ -564,7 +560,7 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
 // Заводим карточку прямо здесь, чтобы не бросать приёмку на полпути.
 // Количество и закупочную цену не спрашиваем: они у строки прихода, а остаток
 // добавит сам приход — иначе товар посчитался бы дважды.
-function NewProductForm({ barcode, onSave, onClose }) {
+function NewProductForm({ barcode, onSave, onClose, dialog, toast }) {
   const categories = categoryNames(useCategories())
   const [f, setF] = useState({ name: '', barcode, category: '', price: '', unitsPerPack: '1', unit: 'уп', minStock: '5' })
   const [saving, setSaving] = useState(false)
@@ -581,10 +577,16 @@ function NewProductForm({ barcode, onSave, onClose }) {
   }
 
   return (
-    <Modal title={<><span className="ic"><LuPackagePlus size={18} /></span>{tr('Новый товар по штрихкоду')}</>} onClose={onClose}>
-      <div className="note info" style={{ marginBottom: 14 }}>
-        {tr('Штрихкод')}: <b>{barcode}</b> — {tr('такого товара в базе нет. Заполните карточку — товар заведётся и сразу встанет в этот приход. Количество и закупочную цену введёте в строке прихода.')}
-      </div>
+    <Modal title={<><span className="ic"><LuPackagePlus size={18} /></span>{tr(barcode ? 'Новый товар по штрихкоду' : 'Новый товар')}</>} onClose={onClose}>
+      {barcode ? (
+        <div className="note info" style={{ marginBottom: 14 }}>
+          {tr('Штрихкод')}: <b>{barcode}</b> — {tr('такого товара в базе нет. Заполните карточку — товар заведётся и сразу встанет в этот приход. Количество и закупочную цену введёте в строке прихода.')}
+        </div>
+      ) : (
+        <div className="note info" style={{ marginBottom: 14 }}>
+          {tr('Заполните карточку — товар заведётся и сразу встанет в этот приход. Количество и закупочную цену введёте в строке прихода.')}
+        </div>
+      )}
       <div className="field">
         <label>{tr('Название')}</label>
         <input value={f.name} onChange={(e) => set('name', e.target.value)} placeholder="Напр. Индометацин 25мг №30" autoFocus />
@@ -595,11 +597,14 @@ function NewProductForm({ barcode, onSave, onClose }) {
           <input value={f.barcode} onChange={(e) => set('barcode', e.target.value)} />
         </div>
         <div className="field" style={{ flex: 1 }}>
-          <label>{tr('Категория')}</label>
-          <select value={f.category} onChange={(e) => set('category', e.target.value)}>
-            <option value="">{tr('— выберите категорию —')}</option>
-            {categories.map((c) => <option key={c} value={c}>{tr(c)}</option>)}
-          </select>
+          <label>{tr('Категория (необязательно)')}</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <select style={{ flex: 1, minWidth: 0 }} value={f.category} onChange={(e) => set('category', e.target.value)}>
+              <option value="">{tr('— без категории —')}</option>
+              {categories.map((c) => <option key={c} value={c}>{tr(c)}</option>)}
+            </select>
+            <AddCategoryBtn dialog={dialog} toast={toast} options={categories} onPicked={(name) => set('category', name)} />
+          </div>
         </div>
       </div>
       <div className="row">

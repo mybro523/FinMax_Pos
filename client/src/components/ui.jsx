@@ -48,7 +48,7 @@ export function PasswordInput({ value, onChange, ...props }) {
 export function BrandWord({ className }) {
   return (
     <span className={'brand-word' + (className ? ' ' + className : '')}>
-      <span><span className="fin">Fin</span>Max</span>
+      <span><span className="fin">Fin</span><span className="brand-max">Max</span></span>
       <span className="brand-pos">POS</span>
     </span>
   )

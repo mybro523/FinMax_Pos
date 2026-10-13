@@ -483,17 +483,19 @@ test('приход: партия со сроком, средневзвешенн
   assert.deepEqual(op.payload.expiry, [day('2028-01-31'), day('2028-06-30'), null])
 })
 
-test('приход: у лекарства срок годности обязателен, у бинта — нет', () => {
+test('приход: срок годности не обязателен, но битую дату не принимаем', () => {
   const { db } = apteka()
-  refused(() => createArrival(ctx(db), { items: [{ productId: 'nur', qty: 1, cost: 90 }] }), 400, 'Укажите срок годности: Нурофен')
-  refused(() => createArrival(ctx(db), { items: [{ productId: 'nur', qty: 1, cost: 90, expiryDate: '' }] }), 400, 'Укажите срок годности: Нурофен')
+  // Система универсальная: у хлеба и шампуня даты нет — приход без срока проходит,
+  // партия просто живёт без срока
+  const bez = createArrival(ctx(db), { items: [{ productId: 'nur', qty: 1, cost: 90 }] })
+  assert.equal(bez.items.length, 1)
   refused(() => createArrival(ctx(db), { items: [{ productId: 'nur', qty: 1, cost: 90, expiryDate: 'завтра' }] }), 400, 'Некорректные данные запроса')
   refused(() => createArrival(ctx(db), { items: [{ productId: 'нет', qty: 1, cost: 90 }] }), 400, 'Товар не найден')
   // Ноль упаковок допустим, только когда есть штуки (граммы): пустая строка — отказ
   refused(() => createArrival(ctx(db), { items: [{ productId: 'nur', qty: 0, cost: 90 }] }), 400, 'Укажите количество: Нурофен')
   refused(() => createArrival(ctx(db), { items: [{ productId: 'nur', qty: 0, pieces: -1, cost: 90 }] }), 400, 'items.0.pieces: не меньше 0')
   refused(() => createArrival(ctx(db), { items: [{ productId: 'nur', qty: 1, cost: -1 }] }), 400, 'items.0.cost: не меньше 0')
-  assert.equal(outbox(db).length, 0)
+  assert.equal(outbox(db).length, 1) // в очереди только приход без срока, отказы не попали
   // Поставщик не указан — прочерк, как на сервере
   assert.equal(createArrival(ctx(db), { items: [{ productId: 'bint', qty: 1, cost: 5 }] }).supplier, '—')
 })

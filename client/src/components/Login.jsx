@@ -82,11 +82,11 @@ export default function Login() {
             <BrandWord />
           </div>
           <h1>{t('Вход')}</h1>
-          <p className="auth-sub">{t('Введите имя сотрудника и пароль')}</p>
+          <p className="auth-sub">{t('Введите логин и пароль')}</p>
 
           <div className="field">
-            <label htmlFor="lg-name">{t('Имя сотрудника')}</label>
-            <input id="lg-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus autoComplete="username" />
+            <label htmlFor="lg-name">{t('Логин')}</label>
+            <input id="lg-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('Введите логин')} autoFocus autoComplete="username" />
           </div>
           <div className="field">
             <label htmlFor="lg-pw">{t('Пароль')}</label>
@@ -104,7 +104,7 @@ export default function Login() {
           </button>
 
           <div className="auth-foot">
-            <span>{t('Имя и пароль выдаёт владелец аптеки')}</span>
+            <span>{t('Логин и пароль выдаёт владелец')}</span>
             <div className="lang-switch" role="group" aria-label={t('Язык')}>
               {LANGS.map((l) => (
                 <button

@@ -53,6 +53,113 @@ function SalesTable({ list }) {
 // ── Отчёт ОПУ (прибыли и убытки) ──
 // Карточки и таблица «Показатель — Сумма» — вид, к которому привыкли владельцы
 // магазинов. Формулы в lib/opu.js; кнопка «Печать» выводит лист с шапкой аптеки.
+// ── Модалка карточки ОПУ: из чего сложилось число и как оно считается ──
+function OpuModal({ kind, d, onClose }) {
+  const t = useT()
+  const fin = d.fin
+  const VIDY = {
+    vyruchka: {
+      title: 'Выручка',
+      rows: [
+        ['Продано на', fin.revenueGross],
+        ...(fin.refunds > 0 ? [['Возвращено покупателям', -fin.refunds]] : []),
+      ],
+      total: ['Выручка', d.prodazha],
+      text: 'Все продажи за период минус деньги, возвращённые покупателям.',
+    },
+    sebest: {
+      title: 'Себестоимость',
+      rows: [],
+      total: ['Себестоимость', d.sebestoimost],
+      text: 'Во сколько магазину обошёлся проданный за период товар — по закупочной цене.',
+    },
+    valovoy: {
+      title: 'Валовой доход',
+      rows: [
+        ['Наценка с продаж', fin.profitGross],
+        ...(fin.refunds > 0 ? [['Возвращено покупателям', -fin.refunds]] : []),
+        ...(fin.returnedCost > 0 ? [['Товар вернулся на склад (закупочная)', fin.returnedCost]] : []),
+        ...(fin.writeOffCost > 0 ? [['Списано (просрочка, бой, недостача)', -fin.writeOffCost]] : []),
+      ],
+      total: ['Валовой доход', d.valovoy],
+      text: 'Заработок на товаре: продажи минус их закупочная цена, минус потери на возвратах и списаниях.',
+    },
+    postavshik: {
+      title: 'Поставщик',
+      rows: [
+        ['Оплаты поставщикам (долги и «из кассы»)', d.paidZapisi],
+        ['Оплачено сразу при приходе', d.paidPriPrihode],
+      ],
+      total: ['Отдано поставщикам', d.supplierPaid],
+      text: 'Все деньги, отданные поставщикам за период: оплаты из раздела «Поставщики» и приходы, оплаченные сразу. Долг перед поставщиком попадает сюда только после оплаты.',
+    },
+    zarplata: {
+      title: 'Зарплата',
+      rows: [],
+      total: ['Зарплата', d.zarplata],
+      text: 'Расходы по статье «Зарплата» за период. Записывайте зарплату в разделе «Расходы» со статьёй «Зарплата» — и она попадёт в эту строку.',
+    },
+    drugie: {
+      title: 'Другие расходы',
+      rows: [
+        ['Налоги', d.nalogi],
+        ['Расход магазина', d.magazin],
+        ['Прочие статьи', d.other],
+      ],
+      total: ['Другие расходы', d.allExpenses - d.zarplata],
+      text: 'Все расходы, кроме зарплаты. Налоги и расходы магазина записывайте в одноимённые статьи раздела «Расходы» — остальное попадает в «Прочие».',
+    },
+    vse: {
+      title: 'Все расходы',
+      rows: [
+        ['Зарплата', d.zarplata],
+        ['Налоги', d.nalogi],
+        ['Расход магазина', d.magazin],
+        ['Прочие статьи', d.other],
+      ],
+      total: ['Все расходы', d.allExpenses],
+      text: 'Всё, что магазин потратил за период помимо закупки товара, — по статьям раздела «Расходы».',
+    },
+    chistiy: {
+      title: 'Чистый доход',
+      rows: [
+        ['Валовой доход', d.valovoy],
+        ['Все расходы', -d.allExpenses],
+        ['Отдано поставщикам', -d.supplierPaid],
+      ],
+      total: ['Чистый доход', d.chistiy],
+      text: 'Сколько денег на самом деле осталось: валовой доход минус все расходы и минус деньги, отданные поставщикам за товар.',
+    },
+    kassa: {
+      title: 'Касса',
+      rows: [
+        ['Продажи наличными', d.cashSales],
+        ['Погашения долгов клиентов', d.debtPaid],
+        ...(d.refundsCash > 0 ? [['Возвраты наличными', -d.refundsCash]] : []),
+      ],
+      total: ['Касса', d.kassa],
+      text: 'Наличные, пришедшие за период: продажи налом и погашения долгов клиентов минус возвраты, выданные наличными.',
+    },
+  }
+  const v = VIDY[kind]
+  if (!v) return null
+  return (
+    <Modal title={t(v.title)} onClose={onClose}>
+      {v.rows.map(([label, val]) => (
+        <div className="total-row" key={label}>
+          <span>{t(label)}</span>
+          <span style={val < 0 ? { color: 'var(--danger)' } : undefined}>{val < 0 ? '−' + money(-val) : money(val)}</span>
+        </div>
+      ))}
+      <div className="total-row big">
+        <span>{t(v.total[0])}</span>
+        <span style={{ color: v.total[1] < 0 ? 'var(--danger)' : undefined }}>{money(v.total[1])}</span>
+      </div>
+      <p style={{ fontSize: 13.5, color: 'var(--muted)', marginTop: 10, lineHeight: 1.6 }}>{t(v.text)}</p>
+    </Modal>
+  )
+}
+
 const OPU_KEYS = ['sales', 'returns', 'writeoffs', 'expenses', 'payments', 'supplierPayments', 'arrivals']
 const dstr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
@@ -116,6 +223,7 @@ function Opu() {
   )
 
   const apt = getUser()?.pharmacy?.name || ''
+  const [modal, setModal] = useState(null) // карточка, чью разбивку смотрим
   const rows = [
     [t('Продажа'), d.prodazha],
     [t('Себестоимость'), d.sebestoimost],
@@ -155,15 +263,15 @@ function Opu() {
       {loadingOlder && <div className="note info no-print" style={{ marginBottom: 12 }}>{t('Загружаем историю за выбранный период…')}</div>}
 
       <div className="cards six opu-cards" data-tour="opu.cards">
-        <Metric label={t('Выручка')} value={money(d.prodazha)} Icon={LuWallet} tint="accent" />
-        <Metric label={t('Себестоимость')} value={money(d.sebestoimost)} Icon={LuBoxes} tint="blue" />
-        <Metric label={t('Валовой доход')} value={money(d.valovoy)} Icon={LuTrendingUp} tint="green" />
-        <Metric label={t('Поставщик')} value={money(d.supplierPaid)} Icon={LuTruck} tint="blue" />
-        <Metric label={t('Зарплата')} value={money(d.zarplata)} Icon={LuUsers} tint="accent" />
-        <Metric label={t('Другие расходы')} value={money(d.allExpenses - d.zarplata)} Icon={LuHandCoins} tint="danger" />
-        <Metric label={t('Все расходы')} value={money(d.allExpenses)} Icon={LuReceipt} tint="danger" />
-        <Metric label={t('Чистый доход')} value={money(d.chistiy)} Icon={LuPiggyBank} tint={d.chistiy < 0 ? 'danger' : 'green'} />
-        <Metric label={t('Касса')} value={money(d.kassa)} Icon={LuCalculator} tint="accent" />
+        <Metric label={t('Выручка')} value={money(d.prodazha)} Icon={LuWallet} tint="accent" sub={t('подробнее')} onClick={() => setModal('vyruchka')} />
+        <Metric label={t('Себестоимость')} value={money(d.sebestoimost)} Icon={LuBoxes} tint="blue" sub={t('подробнее')} onClick={() => setModal('sebest')} />
+        <Metric label={t('Валовой доход')} value={money(d.valovoy)} Icon={LuTrendingUp} tint="green" sub={t('подробнее')} onClick={() => setModal('valovoy')} />
+        <Metric label={t('Поставщик')} value={money(d.supplierPaid)} Icon={LuTruck} tint="blue" sub={t('подробнее')} onClick={() => setModal('postavshik')} />
+        <Metric label={t('Зарплата')} value={money(d.zarplata)} Icon={LuUsers} tint="accent" sub={t('подробнее')} onClick={() => setModal('zarplata')} />
+        <Metric label={t('Другие расходы')} value={money(d.allExpenses - d.zarplata)} Icon={LuHandCoins} tint="danger" sub={t('подробнее')} onClick={() => setModal('drugie')} />
+        <Metric label={t('Все расходы')} value={money(d.allExpenses)} Icon={LuReceipt} tint="danger" sub={t('подробнее')} onClick={() => setModal('vse')} />
+        <Metric label={t('Чистый доход')} value={money(d.chistiy)} Icon={LuPiggyBank} tint={d.chistiy < 0 ? 'danger' : 'green'} sub={t('подробнее')} onClick={() => setModal('chistiy')} />
+        <Metric label={t('Касса')} value={money(d.kassa)} Icon={LuCalculator} tint="accent" sub={t('подробнее')} onClick={() => setModal('kassa')} />
       </div>
 
       <div className="panel mt opu-panel" data-tour="opu.table" style={{ padding: 0 }}>
@@ -188,6 +296,8 @@ function Opu() {
         {t('Чистый доход — кассовый: валовой доход минус все расходы и деньги, отданные поставщикам за товар.')}{' '}
         {t('Чтобы зарплата и налоги попали в свои строки, записывайте их в разделе «Расходы» в статьи «Зарплата», «Налоги» и «Расход магазина».')}
       </p>
+
+      {modal && <OpuModal kind={modal} d={d} onClose={() => setModal(null)} />}
     </div>
   )
 }

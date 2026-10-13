@@ -9,6 +9,7 @@ import { Modal, useToast, useDialog, PAYMENTS } from '../components/ui'
 // Грузим её только при нажатии «Камера», иначе она замедляла открытие Кассы каждый раз.
 const CameraScanner = lazy(() => import('../components/CameraScanner'))
 import KassaCatalog, { LIMIT } from '../components/KassaCatalog'
+import Lightbox from '../components/Lightbox'
 import { useCollection, useFirstLoading, money, db, stockText, realId } from '../db/store'
 import { useAuth, useCan } from '../db/auth'
 import { isVesovoy, kgText, KG, gramsOfKg,
@@ -132,6 +133,7 @@ export default function Pos() {
   const loadingProducts = useFirstLoading('products')
   const [receipt, setReceipt] = useState(null)
   const [camera, setCamera] = useState(false)
+  const [foto, setFoto] = useState(null) // товар, чьё фото смотрим на весь экран
   const [newProduct, setNewProduct] = useState(null)
   const [paying, setPaying] = useState(false)
   const [analogFor, setAnalogFor] = useState(null) // товар нет в наличии -> предложить аналоги
@@ -1163,6 +1165,7 @@ export default function Pos() {
               </div>
             )}
             <KassaCatalog
+              onFoto={setFoto}
               rows={shown}
               total={found.rows.length}
               hi={hi}
@@ -1491,6 +1494,7 @@ export default function Pos() {
         </Modal>
       )}
       {receipt && <Receipt sale={receipt} onClose={() => setReceipt(null)} />}
+      {foto && <Lightbox src={foto.image} alt={foto.name} onClose={() => setFoto(null)} />}
       {camera && (
         <Suspense fallback={
           <div className="overlay" onClick={() => setCamera(false)}>

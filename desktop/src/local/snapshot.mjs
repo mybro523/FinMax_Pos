@@ -85,11 +85,12 @@ function applyProducts(db, products, batches, full, now) {
   const upsertProduct = q(
     db,
     `INSERT INTO products
-       (id, ord, name, barcode, category, priceC, minStock, unit, unitsPerPack, dosage, analogIds, createdAt, sCostC, costC, sExpiry, expiryDate)
-     VALUES (@id, @ord, @name, @barcode, @category, @priceC, @minStock, @unit, @upp, @dosage, @analogIds, @createdAt, @costC, @costC, @expiry, @expiry)
+       (id, ord, name, barcode, category, priceC, minStock, unit, unitsPerPack, dosage, image, analogIds, createdAt, sCostC, costC, sExpiry, expiryDate)
+     VALUES (@id, @ord, @name, @barcode, @category, @priceC, @minStock, @unit, @upp, @dosage, @image, @analogIds, @createdAt, @costC, @costC, @expiry, @expiry)
      ON CONFLICT(id) DO UPDATE SET
        name = excluded.name, barcode = excluded.barcode, category = excluded.category, priceC = excluded.priceC,
        minStock = excluded.minStock, unit = excluded.unit, unitsPerPack = excluded.unitsPerPack, dosage = excluded.dosage,
+       image = excluded.image,
        analogIds = excluded.analogIds, createdAt = excluded.createdAt, sCostC = excluded.sCostC, costC = excluded.costC,
        sExpiry = excluded.sExpiry, expiryDate = excluded.expiryDate`,
   )
@@ -109,6 +110,7 @@ function applyProducts(db, products, batches, full, now) {
       unit: String(p.unit ?? 'уп'),
       upp: uppOf(p),
       dosage: String(p.dosage ?? ''),
+      image: String(p.image ?? ''),
       analogIds: JSON.stringify(Array.isArray(p.analogIds) ? p.analogIds : []),
       createdAt: isoOrNull(p.createdAt) || new Date(now).toISOString(),
       costC: toCents(p.cost),

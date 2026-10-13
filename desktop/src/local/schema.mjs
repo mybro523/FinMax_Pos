@@ -224,6 +224,10 @@ export const PHARMACY_SCHEMA = [
   DELETE FROM meta WHERE key IN ('cursor', 'wcursor');
   `,
   `
+  -- Фото товара: сжатый кадр строкой, как прислал сервер (пусто — фото нет)
+  ALTER TABLE products ADD COLUMN image TEXT;
+  `,
+  `
   -- Сводке «Долги поставщикам» нужен счётчик долговых приходов и без связи.
   -- NULL — сервер его не присылал (запись получал кассир, деньги не его)
   ALTER TABLE suppliers ADD COLUMN debtArrivals INTEGER;

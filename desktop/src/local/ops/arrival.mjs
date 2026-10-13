@@ -4,7 +4,6 @@
 // оформление: правка и удаление прихода остаются за сервером). Каждая строка —
 // партия со своим сроком годности; закупочная цена товара после прихода становится
 // средневзвешенной между тем, что лежало, и тем, что привезли.
-import { noExpiryCategories } from '../catalog.mjs'
 import { bodyOf, checker, expiryOk, MAX_MONEY, sumOk, unitsOk } from '../check.mjs'
 import { bad, inTx, newId } from '../db.mjs'
 import { enqueue, putDoc } from '../docs.mjs'
@@ -51,19 +50,14 @@ export function createArrival(ctx, raw) {
       return { productId: p.id, name: p.name, qty: it.qty, pieces: it.pieces, units, cost: D(it.cost) }
     })
 
-    // Срок годности партии: у лекарств он обязателен, иначе контроль сроков дырявый.
-    // Где срок не нужен (бинты, вата, приборы) — решает владелец галочкой у категории
-    const noExpiry = noExpiryCategories(db)
+    // Срок годности партии не обязателен: впишут — партия под контролем сроков,
+    // оставят пустым — партия без срока (хлеб, шампунь и прочее без даты)
     const expiry = items.map((it) => {
-      const p = byId.get(it.productId)
-      if (it.expiryDate) {
-        const iso = isoOrNull(it.expiryDate)
-        if (!iso) throw bad('Некорректные данные запроса')
-        expiryOk(iso)
-        return iso
-      }
-      if (!noExpiry.has(p.category)) throw bad(`Укажите срок годности: ${p.name}`)
-      return null
+      if (!it.expiryDate) return null
+      const iso = isoOrNull(it.expiryDate)
+      if (!iso) throw bad('Некорректные данные запроса')
+      expiryOk(iso)
+      return iso
     })
 
     // Один товар может стоять в приходе несколькими строками. Среднюю цену считаем

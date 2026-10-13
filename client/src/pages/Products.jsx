@@ -13,6 +13,7 @@ import { useCan } from '../db/auth'
 import { useCategories, categoryNames } from '../lib/categories'
 import { sellsBelowCost } from '../lib/pricing'
 import ProductForm, { emptyProduct, productPayload } from '../components/ProductForm'
+import Lightbox from '../components/Lightbox'
 import { editPatch, stockAtOpen } from '../lib/productEdit'
 import { isVesovoy, stockUnits, stockValue } from '../lib/units'
 
@@ -41,6 +42,7 @@ export default function Products() {
   const [edit, setEdit] = useState(null) // объект формы или null
   const [labelFor, setLabelFor] = useState(null) // товар, для которого печатаем этикетки
   const [historyFor, setHistoryFor] = useState(null) // товар, чью историю движения смотрим
+  const [foto, setFoto] = useState(null) // товар, чьё фото смотрим на весь экран
 
   // Курсор в штрихкод под сканер ставит сама форма — там же, где поле
 
@@ -60,7 +62,6 @@ export default function Products() {
   async function save() {
     const f = edit
     if (!f.name || !f.barcode) return toast(t('Укажите название и штрихкод'), 'err')
-    if (!f.category.trim()) return toast(t('Выберите категорию'), 'err')
     // DataMatrix -> GTIN(EAN-13); обычный штрихкод как есть
     const data = productPayload(f, { normalizeBarcode: normalizeScan })
     const dup = products.find((p) => canonBarcode(p.barcode) === canonBarcode(data.barcode) && p.id !== f.id)
@@ -146,7 +147,12 @@ export default function Products() {
               const e = expiryStatus(p)
               return (
                 <tr key={p.id}>
-                  <td><b>{p.name}</b>{p.dosage ? <div className="tag-cat">{p.dosage}</div> : null}</td>
+                  <td>
+                    <span className="prod-name-cell">
+                      {p.image && <img className="foto-mini" src={p.image} alt="" onClick={() => setFoto(p)} />}
+                      <span><b>{p.name}</b>{p.dosage ? <div className="tag-cat">{p.dosage}</div> : null}</span>
+                    </span>
+                  </td>
                   <td className="tag-cat">{p.barcode}</td>
                   <td>{p.category}</td>
                   <td className="num"><b>{money(p.price)}</b></td>
@@ -196,6 +202,8 @@ export default function Products() {
           </div>
         </Modal>
       )}
+
+      {foto && <Lightbox src={foto.image} alt={foto.name} onClose={() => setFoto(null)} />}
 
       {labelFor && (
         <Suspense fallback={null}>

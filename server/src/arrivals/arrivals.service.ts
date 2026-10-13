@@ -137,20 +137,12 @@ export class ArrivalsService {
         return { productId: p.id, name: p.name, qty: it.qty, pieces, cost: D(it.cost) }
       })
 
-      // Срок годности партии: у лекарств он обязателен, иначе контроль сроков дырявый.
-      // Где срок не нужен (бинты, вата, приборы) — задаёт владелец галочкой у категории,
-      // а не зашитый в код список: категориями он теперь управляет сам.
-      const noExpiry = new Set(
-        (await tx.category.findMany({ where: { noExpiry: true }, select: { name: true } })).map((c) => c.name),
-      )
-      const expiryByIndex = items.map((it, n) => {
-        const p = byId.get(it.productId)!
+      // Срок годности партии не обязателен: система универсальная, у хлеба или
+      // шампуня даты может не быть. Впишут срок — партия под контролем сроков,
+      // оставят пустым — партия живёт без срока
+      const expiryByIndex = items.map((it) => {
         const raw = (it as any).expiryDate
-        if (raw) return expiryFrom(raw)
-        if (!noExpiry.has(p.category)) {
-          throw new BadRequestException(`Укажите срок годности: ${p.name}`)
-        }
-        return null
+        return raw ? expiryFrom(raw) : null
       })
 
       // Агрегируем по товару: суммарное кол-во и суммарная стоимость (один товар может

@@ -1,4 +1,4 @@
-import { IsArray, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator'
+import { Matches, MaxLength, IsArray, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator'
 
 export class CreateProductDto {
   @IsString() name: string
@@ -18,6 +18,9 @@ export class CreateProductDto {
   @IsOptional() @IsString() dosage?: string // дозировка
   @IsOptional() @IsString() expiryDate?: string // срок годности (ISO-дата или пусто)
   @IsOptional() @IsArray() @IsString({ each: true }) analogIds?: string[] // аналоги (id товаров)
+  // Фото: сжатый кадр data:image/…;base64 или пустая строка «фото убрали».
+  // Предел длины согласован с клиентом (lib/foto.js) — крупнее сюда не присылают
+  @IsOptional() @IsString() @MaxLength(200_000) @Matches(/^$|^data:image\/(jpeg|png|webp);base64,/) image?: string
 }
 
 export class UpdateProductDto {
