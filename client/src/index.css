@@ -1147,6 +1147,10 @@ input, select { transition: border 0.14s, box-shadow 0.14s, background 0.14s; }
 .auth-brandline .brand-word { color: var(--text); font-size: 19px; }
 .auth-brandline .brand-word .fin { color: var(--gold); }
 .auth-brandline .brand-word .brand-pos { color: var(--accent); border-color: var(--accent); }
+/* Тёмная тема: имя в карточке входа — точь-в-точь как в углу синей панели */
+:root[data-theme="dark"] .auth-brandline .brand-word { color: #fff; font-size: 22px; }
+:root[data-theme="dark"] .auth-brandline .brand-word .fin { color: #fff; }
+:root[data-theme="dark"] .auth-brandline .brand-word .brand-pos { color: #fff; border-color: #fff; }
 .auth-card h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
 .auth-sub { font-size: 13.5px; color: var(--muted); margin: 4px 0 22px; }
 .auth-card .field label { color: var(--text); }
