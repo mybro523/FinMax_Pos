@@ -56,29 +56,25 @@ export default function Employees() {
     api.patch(`/users/${u.id}`, { password: r.password }).catch((e) => toast(e.message, 'err'))
   }
 
+  // Экран отвечает мгновенно, но последнее слово всегда за сервером: после каждого
+  // действия список перечитывается. Иначе при обрыве связи он копил бы призрачные
+  // строки: удалённый «возвращался», а добавленный «появлялся дважды»
   function toggleActive(u) {
-    const prev = list
     setList((ls) => ls.map((x) => (x.id === u.id ? { ...x, active: !u.active } : x)))
     toast(u.active ? t('Сотрудник заблокирован') : t('Сотрудник разблокирован'))
-    api.patch(`/users/${u.id}`, { active: !u.active }).catch((e) => {
-      setList(prev)
-      toast(e.message, 'err')
-    })
+    api
+      .patch(`/users/${u.id}`, { active: !u.active })
+      .catch((e) => toast(e.message, 'err'))
+      .finally(load)
   }
 
   function changeRole(u, roleId) {
-    const prev = list
     setList((ls) => ls.map((x) => (x.id === u.id ? { ...x, roleId } : x)))
     api
       .patch(`/users/${u.id}`, { roleId })
-      .then((upd) => {
-        setList((ls) => ls.map((x) => (x.id === u.id ? upd : x)))
-        toast(t('Роль изменена'))
-      })
-      .catch((e) => {
-        setList(prev)
-        toast(e.message, 'err')
-      })
+      .then(() => toast(t('Роль изменена')))
+      .catch((e) => toast(e.message, 'err'))
+      .finally(load)
   }
 
   async function remove(u) {
@@ -89,19 +85,23 @@ export default function Employees() {
       confirmText: t('Удалить'),
     })
     if (!ok) return
-    const prev = list
     setList((ls) => ls.filter((x) => x.id !== u.id))
     toast(t('Сотрудник удалён'))
-    api.del(`/users/${u.id}`).catch((e) => {
-      setList(prev)
-      toast(e.message, 'err')
-    })
+    api
+      .del(`/users/${u.id}`)
+      .catch((e) => {
+        // «Не найден» — значит он уже удалён (строка была призраком после обрыва
+        // связи). Возвращать её не надо — перечитанный список и так скажет правду
+        if (e.status !== 404) toast(e.message, 'err')
+      })
+      .finally(load)
   }
 
   function added(u) {
     setList((ls) => [...ls, u])
     setAdding(false)
     toast(t('Сотрудник добавлен'))
+    load()
   }
 
   return (

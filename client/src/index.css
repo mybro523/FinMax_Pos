@@ -25,6 +25,8 @@
   --sidebar-muted: #7f8cb4;
   --sidebar-icon: #8e9bc6;
   --sidebar-line: rgba(255, 255, 255, 0.07);
+  /* Рамка плиток главного меню: заметный контур, а не «линия внутри меню» */
+  --tile-line: rgba(255, 255, 255, 0.22);
 
   --bg: #f3f5fa;
   --card: #ffffff;
@@ -75,6 +77,7 @@
   --sidebar-muted: #7e8ab2;
   --sidebar-icon: #8894c0;
   --sidebar-line: rgba(255, 255, 255, 0.06);
+  --tile-line: rgba(160, 180, 235, 0.38);
   --bg: #0a1230;
   --card: #111b45;
   --text: #e8ecf8;
@@ -1442,17 +1445,17 @@ tbody tr.clickable { cursor: pointer; }
   position: relative; display: flex; flex-direction: column; justify-content: space-between; gap: 18px;
   min-height: 112px; padding: 16px 16px 14px; border-radius: 14px;
   background: var(--sidebar); color: #fff; text-decoration: none;
-  border: 1px solid var(--sidebar-line); box-shadow: var(--shadow-sm);
-  transition: background 0.14s, transform 0.1s, box-shadow 0.14s;
+  border: 1px solid var(--tile-line); box-shadow: var(--shadow-sm);
+  transition: background 0.14s, transform 0.1s, box-shadow 0.14s, border-color 0.14s;
 }
-.hub-tile:hover { background: var(--sidebar-2); box-shadow: var(--shadow); }
+.hub-tile:hover { background: var(--sidebar-2); border-color: var(--gold); box-shadow: var(--shadow); }
 .hub-tile:active { transform: scale(0.985); }
 .hub-tile .hub-ic { display: inline-flex; color: var(--gold); }
 .hub-tile .hub-name { font-size: 15px; font-weight: 600; line-height: 1.25; letter-spacing: -0.005em; }
 .hub-tile.gold { background: var(--gold); border-color: var(--gold); color: var(--on-gold); }
 .hub-tile.gold:hover { background: var(--gold-dark); }
 .hub-tile.gold .hub-ic { color: var(--on-gold); }
-.hub-tile.off { background: var(--track); border-color: var(--border); color: var(--muted-2); box-shadow: none; cursor: not-allowed; }
+.hub-tile.off { background: var(--track); border-color: var(--border-strong); color: var(--muted-2); box-shadow: none; cursor: not-allowed; }
 .hub-tile.off .hub-ic { color: var(--muted-2); }
 .hub-tile.off:hover { background: var(--track); box-shadow: none; }
 .hub-badge {

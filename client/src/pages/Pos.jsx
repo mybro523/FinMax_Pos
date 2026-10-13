@@ -211,29 +211,29 @@ export default function Pos() {
 
   // ── Защита числовых полей от «выстрела» сканера ──
   // Кассир мог поправить количество и, не нажав Enter, взяться за сканер. Тогда штрихкод
-  // печатается в поле числа. Слои защиты: Enter/Tab, пауза в наборе, откат по длине
-  // и «глушение» остатка выстрела.
+  // печатается в поле числа. Слои защиты: Enter/Tab, откат по длине и «глушение»
+  // остатка выстрела.
+  //
+  // Возврата фокуса «по паузе» здесь больше НЕТ намеренно: раньше стоял таймер на
+  // 1,5 с, и у кассира, который задумался над количеством, курсор вырывало на сканер —
+  // следующие цифры улетали в поиск. Пока человек в поле, курсор его. Выстрел сканера
+  // в поле числа и без таймера ловится ниже — по скорости набора и длине кода.
 
   // 1) Enter/Tab — сразу возвращаем фокус на сканер.
-  // 2) Пауза в наборе (набор человеком — интервалы 0,15–0,4 с): фокус сам уходит на сканер,
-  //    поэтому взятый через секунду сканер снова работает.
-  const idleRef = useRef(null)
-  const stopIdle = useCallback(() => clearTimeout(idleRef.current), [])
-  const armIdle = useCallback(() => {
-    clearTimeout(idleRef.current)
-    idleRef.current = setTimeout(focusScanner, 1500)
-  }, [focusScanner])
-  useEffect(() => () => clearTimeout(idleRef.current), [])
 
   // Человек печатает с интервалами 150–400 мс, сканер «выстреливает» за единицы миллисекунд.
   // По этому признаку отличаем реальный ввод кассира от штрихкода и запоминаем как «чистое»
   // только то значение, которое набрал человек.
   const lastKeyRef = useRef(0)
   const HUMAN_GAP_MS = 60
+  // Очередь «нечеловеческих» цифр подряд. Проверка «8+ цифр в значении» ниже не
+  // спасает поля количества: они зажимают значение на каждой букве, и до восьми
+  // цифр оно не доживает. А вот ЧЕТЫРЕ цифры с промежутками меньше 60 мс пальцами
+  // не набрать — это точно сканер, каким бы коротким ни было поле
+  const fastRunRef = useRef(0)
 
   const onCellKey = (e, productId) => {
     if (e.key === 'Enter' || e.key === 'Tab') {
-      stopIdle()
       e.preventDefault()
       focusScanner()
       return
@@ -241,9 +241,16 @@ export default function Pos() {
     const now = performance.now()
     const humanPace = now - lastKeyRef.current > HUMAN_GAP_MS
     lastKeyRef.current = now
+    const digit = e.key.length === 1 && e.key >= '0' && e.key <= '9'
+    if (!digit || humanPace) fastRunRef.current = 0
+    else if (++fastRunRef.current >= 4) {
+      fastRunRef.current = 0
+      e.preventDefault() // пятая цифра выстрела в поле уже не попадает
+      bailOutScan()
+      return
+    }
     // keydown приходит до изменения значения, поэтому здесь в корзине ещё «чистое» состояние
     if (humanPace) snapLine(productId)
-    armIdle()
   }
 
   // 3) Если в поле числа всё же «прилетел» штрихкод (8+ цифр — для количества и скидки
@@ -255,7 +262,6 @@ export default function Pos() {
     lineSnapRef.current = it
       ? { productId: id, qty: it.qty, pieces: it.pieces || 0, discount: it.discount || 0 }
       : null
-    armIdle()
   }
   const looksLikeScan = (v) => String(v).replace(/\D/g, '').length >= 8
 
@@ -266,12 +272,11 @@ export default function Pos() {
   const muteUntil = useRef(0)
   const ostanovitVystrel = useCallback(() => {
     muteUntil.current = performance.now() + 350
-    stopIdle()
     beepError()
     toast(t('Это похоже на штрихкод — сканируйте ещё раз'), 'err')
     setCode('')
     focusScanner()
-  }, [stopIdle, toast, t, focusScanner])
+  }, [toast, t, focusScanner])
 
   function bailOutScan() {
     const s = lineSnapRef.current
@@ -1186,7 +1191,6 @@ export default function Pos() {
                               onChange={(e) => changePieces(i.productId, e.target.value)}
                               onKeyDown={(e) => onCellKey(e, i.productId)}
                               onFocus={() => snapLine(i.productId)}
-                              onBlur={stopIdle}
                               placeholder="0"
                               title={`${t('Штук из упаковки')} (${t('в уп.')} ${uppOf(i)})`}
                               aria-label={t('Штук')}
@@ -1204,7 +1208,6 @@ export default function Pos() {
                               onChange={(e) => setDiscount(i.productId, e.target.value)}
                               onKeyDown={(e) => onCellKey(e, i.productId)}
                               onFocus={() => snapLine(i.productId)}
-                              onBlur={stopIdle}
                               placeholder="0"
                               title={t('Скидка на позицию, сомони')}
                               aria-label={t('Скидка')}
