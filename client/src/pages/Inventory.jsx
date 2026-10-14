@@ -3,6 +3,9 @@ import { LuClipboardCheck, LuPlus, LuCircleCheck, LuTriangleAlert, LuTrash2 } fr
 import Layout from '../components/Layout'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
+import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import { skachatXlsx } from '../lib/excel'
+import { getUser } from '../db/auth'
 import { useCollection, money, refresh, db, setCollection } from '../db/store'
 import { api, LONG_TIMEOUT_MS } from '../db/api'
 import { fmtDateTime, serverNow } from '../lib/time'
@@ -421,8 +424,55 @@ export default function Inventory() {
 
   const pg = usePagination(list, 10)
 
+  // Выгрузка и печать: открыт лист — выгружается ЛИСТ (с ним ходят по полкам);
+  // иначе — история пересчётов
+  const chisloEx = (i, n) => {
+    const ves = isVesovoy(products.find((p) => p.id === i.productId))
+    return ves ? `${kgText(n)} ${t('кг')}` : n
+  }
+  const exList = open
+    ? {
+        zagolovok: t('Лист пересчёта'),
+        podzag: `${open.scope === 'all' ? t('Весь склад') : t(open.scope)} · ${fmtDateTime(open.date)} · ${open.status === 'applied' ? t('применён') : t('не закончен')}`,
+        cols: [
+          { header: t('Товар'), key: 'name', width: 44 },
+          { header: t('По системе, шт'), key: 'exp', width: 16, num: true },
+          { header: t('По факту, шт'), key: 'fact', width: 16, num: true },
+          { header: t('Расхождение'), key: 'diff', width: 14, num: true },
+        ],
+        rows: open.items.map((i) => {
+          const actual = countOf(shownOf(i, typed))
+          return {
+            name: i.name,
+            exp: chisloEx(i, i.expectedUnits),
+            fact: actual === null ? '' : chisloEx(i, actual),
+            diff: actual === null ? '' : chisloEx(i, actual - i.expectedUnits),
+          }
+        }),
+      }
+    : {
+        zagolovok: t('Инвентаризация'),
+        podzag: `${t('Найдено записей')}: ${list.length}`,
+        cols: [
+          { header: t('Дата'), key: 'date', width: 18 },
+          { header: t('Охват'), key: 'scope', width: 24 },
+          { header: t('Кто'), key: 'user', width: 20 },
+          { header: t('Статус'), key: 'status', width: 16 },
+        ],
+        rows: list.map((inv) => ({
+          date: fmtDateTime(inv.date),
+          scope: inv.scope === 'all' ? t('Весь склад') : t(inv.scope),
+          user: inv.user?.name || '—',
+          status: inv.status === 'applied' ? t('применён') : t('не закончен'),
+        })),
+      }
+  const exportExcel = () =>
+    skachatXlsx({ fayl: exList.zagolovok, zagolovok: `${getUser()?.pharmacy?.name || ''} — ${exList.zagolovok}`, podzag: exList.podzag, cols: exList.cols, rows: exList.rows })
+
   return (
-    <Layout title={t('Инвентаризация')} subtitle={t('Пересчёт остатков и сверка с системой')}>
+    <Layout title={t('Инвентаризация')} subtitle={t('Пересчёт остатков и сверка с системой')}
+      actions={<ExportPechat onExcel={exportExcel} />}>
+      <PrintSheet zagolovok={exList.zagolovok} podzag={exList.podzag} cols={exList.cols} rows={exList.rows} />
       {!open ? (
         <>
           <div className="note info" style={{ marginBottom: 16, maxWidth: 820 }}>

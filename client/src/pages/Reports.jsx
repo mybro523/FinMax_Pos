@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect } from 'react'
-import { LuDownload, LuWallet, LuTrendingUp, LuBoxes, LuReceipt, LuUndo2, LuHandCoins, LuPiggyBank, LuPrinter, LuTruck, LuUsers, LuCalculator } from 'react-icons/lu'
+import { useRef, useState, useMemo, useEffect } from 'react'
+import { LuWallet, LuTrendingUp, LuBoxes, LuReceipt, LuUndo2, LuHandCoins, LuPiggyBank, LuPrinter, LuTruck, LuUsers, LuCalculator } from 'react-icons/lu'
 import { Link } from 'react-router-dom'
 import Layout from '../components/Layout'
 import Metric from '../components/Metric'
@@ -7,10 +7,12 @@ import { Modal, PayBadge } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { useCollection, money, loadRange, needsServerFor } from '../db/store'
 import { stockUnits, stockValue, stockCost, lineUnits } from '../lib/units'
-import { startOfDay, startOfDaysAgo, fmtShort, fmtDateTime, dayKey } from '../lib/time'
+import { startOfDay, startOfDaysAgo, fmtShort, fmtDateTime } from '../lib/time'
 import { useT, translate as tr } from '../lib/i18n'
 import { periodFinance } from '../lib/finance'
 import { opuFinance } from '../lib/opu'
+import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import { skachatXlsx } from '../lib/excel'
 import { useCan, getUser } from '../db/auth'
 
 const PERIODS = [
@@ -163,7 +165,7 @@ function OpuModal({ kind, d, onClose }) {
 const OPU_KEYS = ['sales', 'returns', 'writeoffs', 'expenses', 'payments', 'supplierPayments', 'arrivals']
 const dstr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
-function Opu() {
+function Opu({ onExcelRef }) {
   const t = useT()
   const sales = useCollection('sales')
   const returns = useCollection('returns')
@@ -236,6 +238,20 @@ function Opu() {
     [t('Все расходы'), d.allExpenses, 'b'],
     [t('Чистый доход'), d.chistiy, 'big'],
   ]
+
+  // Экспорт таблицы ОПУ в Excel — кнопка живёт в шапке раздела
+  const opuExcel = () =>
+    skachatXlsx({
+      fayl: t('Отчёт ОПУ'),
+      zagolovok: `${apt} — ${t('Отчёт ОПУ')}`,
+      podzag: `${applied.from} — ${applied.to}`,
+      cols: [
+        { header: t('Показатель'), key: 'p', width: 32 },
+        { header: t('Сумма'), key: 's', width: 18, money: true },
+      ],
+      rows: rows.map(([label, v]) => ({ p: label, s: Number(v) || 0 })),
+    })
+  if (onExcelRef) onExcelRef.current = opuExcel
 
   return (
     <div className="printable opu">
@@ -316,6 +332,8 @@ export default function Reports() {
   const t = useT()
   // Вкладки: «Отчёт ОПУ» открывается первой, подробная аналитика — рядом.
   // Выбор запоминается: кто живёт в ОПУ, тот в нём и остаётся
+  // Экспорт ОПУ собирает сам компонент вкладки — шапка зовёт его через реф
+  const opuExcelRef = useRef(() => {})
   const [tab, setTabRaw] = useState(() => {
     try { return localStorage.getItem('apteka_otchet_vkladka') || 'opu' } catch { return 'opu' }
   })
@@ -411,32 +429,36 @@ export default function Reports() {
     ? `${fromDate || '…'} — ${toDate || '…'}`
     : t(PERIODS.find((x) => x.key === period)?.label || '')
 
-  function exportCsv() {
-    const rows = [['Дата', 'Товары', 'Кол-во', 'Сумма', 'Прибыль', 'Оплата']]
-    data.list.forEach((s) =>
-      rows.push([
-        fmtDateTime(s.date),
-        s.items.map((i) => `${i.name} ×${i.qty || 0}${i.pieces ? '+' + i.pieces + 'шт' : ''}`).join('; '),
-        // Всего штук: упаковки × штук в упаковке + отдельные штуки
-        s.items.reduce((a, i) => a + lineUnits(i), 0),
-        s.total,
-        s.profit || 0,
-        s.payment === 'transfer' ? 'Перевод' + (s.payVia ? ` (${s.payVia})` : '') : { cash: 'Наличные', card: 'Карта', debt: 'Долг' }[s.payment],
-      ]),
-    )
-    const cell = (v) => {
-      let s = String(v ?? '')
-      if (/^[=+\-@]/.test(s)) s = "'" + s
-      return '"' + s.replace(/"/g, '""') + '"'
-    }
-    const csv = '﻿' + rows.map((r) => r.map(cell).join(';')).join('\n')
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `Отчёт_${dayKey()}.csv`
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 0)
+  // Excel вместо сжатого CSV: тот же список продаж, но с шапкой и форматами
+  const salesCols = [
+    { header: 'Дата', key: 'date', width: 18 },
+    { header: 'Товары', key: 'items', width: 60 },
+    { header: 'Кол-во', key: 'qty', width: 10, num: true },
+    { header: 'Сумма', key: 'total', width: 13, money: true },
+    { header: 'Прибыль', key: 'profit', width: 13, money: true },
+    { header: 'Оплата', key: 'pay', width: 14 },
+  ].map((c) => ({ ...c, header: t(c.header) }))
+  const salesRows = data.list.map((s) => ({
+    date: fmtDateTime(s.date),
+    items: s.items.map((i) => `${i.name} ×${i.qty || 0}${i.pieces ? '+' + i.pieces + 'шт' : ''}`).join('; '),
+    qty: s.items.reduce((a, i) => a + lineUnits(i), 0),
+    total: Number(s.total) || 0,
+    profit: Number(s.profit) || 0,
+    pay: s.payment === 'transfer' ? t('Перевод') + (s.payVia ? ` (${s.payVia})` : '') : t({ cash: 'Наличные', card: 'Карта', debt: 'Долг' }[s.payment] || '—'),
+  }))
+  const salesItogi = { date: t('Итого'), total: data.revenueGross, profit: data.profitGross, qty: '' }
+  const detPodzag = `${rangeLabel} · ${t('Выручка')}: ${money(data.revenue)} · ${t('Прибыль')}: ${money(data.profit)} · ${t('Чистая прибыль')}: ${money(data.netProfit)} · ${t('Чеков')}: ${data.count}`
+  function exportExcel() {
+    return skachatXlsx({
+      fayl: t('Отчёты'),
+      zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Отчёты')}`,
+      podzag: detPodzag,
+      cols: salesCols,
+      rows: salesRows,
+      itogi: salesItogi,
+    })
   }
+
 
   function renderModal() {
     if (modal === 'revenue' || modal === 'checks') {
@@ -521,14 +543,18 @@ export default function Reports() {
 
   return (
     <Layout title={t('Отчёты')} subtitle={t('Продажи, прибыль, выручка и склад')}
-      actions={tab === 'detail' && can('reports.export') && <button className="btn ghost" data-tour="rep.export" onClick={exportCsv}><span className="ic"><LuDownload size={16} /></span> {t('Экспорт CSV')}</button>}>
+      actions={can('reports.export') && <span data-tour="rep.export" style={{ display: 'inline-flex', gap: 8 }}>
+        <ExportPechat onExcel={tab === 'opu' ? opuExcelRef.current : exportExcel} />
+      </span>}>
 
       <div className="chips" data-tour="rep.tabs" style={{ marginBottom: 14 }}>
         <button className={'chip ' + (tab === 'opu' ? 'active' : '')} data-tour="rep.tab-opu" onClick={() => setTab('opu')}>{t('Отчёт ОПУ')}</button>
         <button className={'chip ' + (tab === 'detail' ? 'active' : '')} data-tour="rep.tab-detail" onClick={() => setTab('detail')}>{t('Подробно')}</button>
       </div>
 
-      {tab === 'opu' && <Opu />}
+      {tab === 'detail' && <PrintSheet zagolovok={t('Отчёты')} podzag={detPodzag} cols={salesCols} rows={salesRows} itogi={salesItogi} />}
+
+      {tab === 'opu' && <Opu onExcelRef={opuExcelRef} />}
 
       {tab === 'detail' && <>
       <div className="chips" data-tour="rep.period" style={{ marginBottom: 12 }}>

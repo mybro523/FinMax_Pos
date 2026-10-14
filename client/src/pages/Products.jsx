@@ -9,11 +9,13 @@ import { normalizeScan, canonBarcode } from '../lib/scan'
 import { expiryStatus, expiryLabel } from '../lib/expiry'
 import { fmtDate } from '../lib/time'
 import { useT } from '../lib/i18n'
-import { useCan } from '../db/auth'
+import { getUser, useCan } from '../db/auth'
 import { useCategories, categoryNames } from '../lib/categories'
 import { sellsBelowCost } from '../lib/pricing'
 import ProductForm, { emptyProduct, productPayload } from '../components/ProductForm'
 import Lightbox from '../components/Lightbox'
+import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import { skachatXlsx } from '../lib/excel'
 import { editPatch, stockAtOpen } from '../lib/productEdit'
 import { isVesovoy, stockUnits, stockValue } from '../lib/units'
 
@@ -119,12 +121,44 @@ export default function Products() {
   const totalValue = products.reduce((s, p) => s + stockValue(p), 0)
 
 
+  // Выгрузка и печать: ВСЕГДА весь склад, независимо от поиска и фильтров —
+  // так решил владелец. Итоги — в подзаголовке листа
+  const exCols = [
+    { header: t('Наименование'), key: 'name', width: 44 },
+    { header: t('Штрихкод'), key: 'barcode', width: 17 },
+    { header: t('Категория'), key: 'category', width: 18 },
+    { header: t('Продажа'), key: 'price', width: 13, money: true },
+    { header: t('Остаток'), key: 'ostatok', width: 13, num: true },
+    { header: t('Годен до'), key: 'exp', width: 13 },
+  ]
+  const exRows = useMemo(
+    () =>
+      [...products]
+        .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+        .map((p) => ({
+          name: p.name + (p.dosage ? ` (${p.dosage})` : ''),
+          barcode: p.barcode || '',
+          category: p.category || '—',
+          price: Number(p.price) || 0,
+          ostatok: stockText(p),
+          exp: p.expiryDate ? String(p.expiryDate).slice(0, 10) : '—',
+        })),
+    [products],
+  )
+  const exPodzag = `${t('Наименований')}: ${products.length} · ${t('Стоимость склада')}: ${money(products.reduce((s, p) => s + stockValue(p), 0))}`
+  const exportExcel = () =>
+    skachatXlsx({ fayl: t('Товары'), zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Товары')}`, podzag: exPodzag, cols: exCols, rows: exRows })
+
   return (
     <Layout
       title={t('Товары')}
       subtitle={`${products.length} ${t('наименований · склад на')} ${money(totalValue)}`}
-      actions={can('products.create') && <button className="btn" data-tour="prod.add" onClick={() => setEdit({ ...empty })}><span className="ic"><LuPlus size={16} /></span> {t('Добавить товар')}</button>}
+      actions={<>
+        <ExportPechat onExcel={exportExcel} />
+        {can('products.create') && <button className="btn" data-tour="prod.add" onClick={() => setEdit({ ...empty })}><span className="ic"><LuPlus size={16} /></span> {t('Добавить товар')}</button>}
+      </>}
     >
+      <PrintSheet zagolovok={t('Товары')} podzag={exPodzag} cols={exCols} rows={exRows} />
       <div className="toolbar">
         <input className="search" data-tour="prod.search" placeholder={t('Поиск по названию или штрихкоду…')} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>

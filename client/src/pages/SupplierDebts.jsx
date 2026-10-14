@@ -6,6 +6,9 @@ import { useToast } from '../components/ui'
 import { api } from '../db/api'
 import { money, onChanged } from '../db/store'
 import { useT } from '../lib/i18n'
+import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import { skachatXlsx } from '../lib/excel'
+import { getUser } from '../db/auth'
 
 // ── Долги поставщикам ──
 // Сводка одним экраном: сколько аптека должна всего, сколько приходов оформлено
@@ -32,8 +35,20 @@ export default function SupplierDebts() {
 
   const s = svodka || { total: 0, arrivals: 0, suppliers: [] }
 
+  const exCols = [
+    { header: t('Поставщик'), key: 'name', width: 36 },
+    { header: t('Долг'), key: 'debt', width: 16, money: true },
+    { header: t('Приходов в долг'), key: 'arrivals', width: 16, num: true },
+  ]
+  const exRows = s.suppliers.map((p) => ({ name: p.name, debt: Number(p.debt) || 0, arrivals: p.arrivals }))
+  const exItogi = { name: t('Итого'), debt: Number(s.total) || 0, arrivals: s.arrivals }
+  const exportExcel = () =>
+    skachatXlsx({ fayl: t('Долги поставщикам'), zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Долги поставщикам')}`, podzag: `${t('Всего должны')}: ${money(s.total)}`, cols: exCols, rows: exRows, itogi: exItogi })
+
   return (
-    <Layout title={t('Долги поставщикам')} subtitle={`${t('Всего должны')}: ${money(s.total)}`}>
+    <Layout title={t('Долги поставщикам')} subtitle={`${t('Всего должны')}: ${money(s.total)}`}
+      actions={<ExportPechat onExcel={exportExcel} />}>
+      <PrintSheet zagolovok={t('Долги поставщикам')} podzag={`${t('Всего должны')}: ${money(s.total)}`} cols={exCols} rows={exRows} itogi={exItogi} />
       <div className="mini-cards supd-cards" data-tour="supd.cards">
         <div className="mini-card">
           <div className="m-label">{t('Всего должны')}</div>

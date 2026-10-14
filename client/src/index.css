@@ -1305,6 +1305,14 @@ tbody tr.clickable { cursor: pointer; }
 .lightbox img { max-width: min(92vw, 900px); max-height: 82vh; border-radius: 12px; background: #fff; }
 .lightbox-name { color: #fff; font-size: 16px; font-weight: 600; text-align: center; }
 
+/* ── Печатный лист раздела (Excel-кнопке пара) ── */
+.print-sheet { display: none; }
+@media print {
+  .print-sheet { display: block; }
+  .print-sheet .opu-table td, .print-sheet .opu-table th { border-bottom: 1px solid #c7ccd8; padding: 8px 10px; font-size: 12.5px; }
+  .print-sheet-foot { margin-top: 10px; font-size: 12px; color: #434b5e; }
+}
+
 /* ── Отчёт ОПУ ── */
 .opu-print-head { display: none; }
 .opu-table td, .opu-table th { padding: 11px 16px; }

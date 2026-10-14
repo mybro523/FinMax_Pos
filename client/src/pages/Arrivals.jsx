@@ -16,6 +16,9 @@ import { normalizeScan } from '../lib/scan'
 import { beepOk, beepError } from '../lib/sound'
 import NumberInput from '../components/NumberInput'
 import { AddCategoryBtn } from '../components/CategorySelect'
+import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import { skachatXlsx } from '../lib/excel'
+import { getUser } from '../db/auth'
 
 export default function Arrivals() {
   const arrivals = useCollection('arrivals')
@@ -76,12 +79,41 @@ export default function Arrivals() {
 
   const pg = usePagination(journal.rows, 10, journal.controls.period + journal.controls.q)
 
+  // Выгрузка и печать журнала — то, что отфильтровано (период и поиск), все страницы
+  const exCols = [
+    { header: t('Дата'), key: 'date', width: 18 },
+    { header: t('Поставщик'), key: 'supplier', width: 30 },
+    { header: t('Оплата'), key: 'pay', width: 20 },
+    { header: t('Позиций'), key: 'poz', width: 10, num: true },
+    { header: t('Сумма'), key: 'total', width: 14, money: true },
+  ]
+  const sposob = (a) =>
+    a.payMethod === 'cash' ? t('Из кассы')
+      : a.payMethod === 'own' ? t('Наличными')
+        : a.payMethod === 'card' ? t('Картой')
+          : Number(a.debt) > 0 ? `${t('В долг')} (${money(a.debt)})` : '—'
+  const exRows = journal.rows.map((a) => ({
+    date: fmtDateTime(a.date),
+    supplier: a.supplier || '—',
+    pay: sposob(a),
+    poz: (a.items || []).length,
+    total: Number(a.total) || 0,
+  }))
+  const exItogi = { date: t('Итого'), poz: journal.rows.reduce((s, a) => s + (a.items || []).length, 0), total: journal.rows.reduce((s, a) => s + (Number(a.total) || 0), 0) }
+  const exPodzag = `${t('Найдено записей')}: ${journal.rows.length}`
+  const exportExcel = () =>
+    skachatXlsx({ fayl: t('Приход товара'), zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Приход товара')}`, podzag: exPodzag, cols: exCols, rows: exRows, itogi: exItogi })
+
   return (
     <Layout
       title={t('Приход товара')}
       subtitle={`${arrivals.length} ${t('поставок')}`}
-      actions={can('arrivals.create') && <button className="btn" data-tour="arr.new" onClick={() => setOpen(true)}><span className="ic"><LuPlus size={16} /></span> {t('Новый приход')}</button>}
+      actions={<>
+        <ExportPechat onExcel={exportExcel} />
+        {can('arrivals.create') && <button className="btn" data-tour="arr.new" onClick={() => setOpen(true)}><span className="ic"><LuPlus size={16} /></span> {t('Новый приход')}</button>}
+      </>}
     >
+      <PrintSheet zagolovok={t('Приход товара')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />
       <div className="panel" style={{ padding: 0 }}>
         <div data-tour="arr.filter" style={{ padding: '16px 16px 0' }}>
           <JournalFilter controls={journal.controls} placeholder={t('Поиск по поставщику или товару…')} />
