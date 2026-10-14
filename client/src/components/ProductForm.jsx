@@ -75,7 +75,7 @@ export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
   }
 }
 
-export default function ProductForm({ value, onChange, autoFocus = 'barcode' }) {
+export default function ProductForm({ value, onChange, autoFocus = 'barcode', hideStock = false }) {
   const dialog = useDialog()
   const fotoRef = useRef(null)
   const t = useT()
@@ -229,10 +229,14 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode' }) 
       </div>
 
       <div className="row">
-        <div className="field" style={{ flex: 1 }} data-tour="pf.stock">
-          <label>{ves ? t('Остаток (кг)') : t('Остаток (упаковок)')}</label>
-          <NumberInput integer={!ves} value={value.stock} onChange={(e) => set('stock', e.target.value)} placeholder={ves ? '12.5' : ''} />
-        </div>
+        {/* В приходе остаток не спрашиваем: сколько пришло — в строке прихода,
+            иначе товар посчитался бы дважды */}
+        {!hideStock && (
+          <div className="field" style={{ flex: 1 }} data-tour="pf.stock">
+            <label>{ves ? t('Остаток (кг)') : t('Остаток (упаковок)')}</label>
+            <NumberInput integer={!ves} value={value.stock} onChange={(e) => set('stock', e.target.value)} placeholder={ves ? '12.5' : ''} />
+          </div>
+        )}
         <div className="field" style={{ flex: 1 }} data-tour="pf.stock">
           <label>{ves ? t('Мин. остаток (кг)') : t('Мин. остаток')}</label>
           <NumberInput integer value={value.minStock} onChange={(e) => set('minStock', e.target.value)} />
@@ -251,7 +255,7 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode' }) 
               title="Для деления на таблетки. 1 = продаётся только целиком"
             />
           </div>
-          <div className="field" style={{ flex: 1 }} data-tour="pf.loose">
+          {!hideStock && <div className="field" style={{ flex: 1 }} data-tour="pf.loose">
             <label>{t('Вскрыто (штук)')}</label>
             <NumberInput
               integer
@@ -260,7 +264,7 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode' }) 
               placeholder="0"
               title="Остаток штук во вскрытой упаковке"
             />
-          </div>
+          </div>}
         </div>
       )}
 

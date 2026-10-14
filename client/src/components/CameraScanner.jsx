@@ -18,19 +18,45 @@ const ZXING_FORMATS = [
 // Сколько раз подряд код должен совпасть, чтобы его принять (защита от misread)
 const CONFIRM = 2
 
-function makeZxing() {
+// Пауза между распознаваниями. Прежде ZXing молотил почти каждый кадр FullHD-видео
+// прямо в потоке интерфейса — на телефоне тормозило и видео, и кнопки. 140 мс —
+// это ~7 попыток в секунду: для наведения за глаза, а телефону легко
+const SCAN_MS = 140
+
+// Те же форматы для встроенного распознавателя браузера (Chrome/Android —
+// аппаратный, почти не грузит процессор). Если он знает меньше пяти наших
+// форматов — реализация куцая, работаем ZXing-ом
+const NATIVE_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'data_matrix', 'qr_code', 'aztec']
+
+async function makeNativeDetector() {
+  try {
+    if (!('BarcodeDetector' in window)) return null
+    const sup = await window.BarcodeDetector.getSupportedFormats()
+    const formats = NATIVE_FORMATS.filter((f) => sup.includes(f))
+    if (formats.length < 5) return null
+    return new window.BarcodeDetector({ formats })
+  } catch {
+    return null
+  }
+}
+
+function makeZxing(tryHarder) {
   const hints = new Map()
   hints.set(DecodeHintType.POSSIBLE_FORMATS, ZXING_FORMATS)
-  hints.set(DecodeHintType.TRY_HARDER, true)
-  return new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 60 })
+  // TRY_HARDER в непрерывном цикле слишком дорог для телефона — он включается
+  // только для ручного «Сфотографировать и распознать»
+  if (tryHarder) hints.set(DecodeHintType.TRY_HARDER, true)
+  return new BrowserMultiFormatReader(hints)
 }
 
 export default function CameraScanner({ onDetect, onClose }) {
   const backdrop = useBackdropClose(onClose)
   const videoRef = useRef(null)
   const streamRef = useRef(null)
-  const readerRef = useRef(null) // ZXing-ридер, используется и для ручного кадра capture()
-  const zxingControlsRef = useRef(null)
+  const detectorRef = useRef(null) // встроенный распознаватель браузера (если есть)
+  const zxingRef = useRef(null) // ZXing для цикла — там, где встроенного нет
+  const scanTimerRef = useRef(null)
+  const scanCanvasRef = useRef(null) // переиспользуемый холст кадра — без мусора в памяти
   const doneRef = useRef(false)
   const voteRef = useRef({ code: '', count: 0 })
   const [error, setError] = useState('')
@@ -74,8 +100,43 @@ export default function CameraScanner({ onDetect, onClose }) {
 
   function cleanup() {
     doneRef.current = true
-    try { zxingControlsRef.current?.stop() } catch {}
+    clearTimeout(scanTimerRef.current)
     try { streamRef.current?.getTracks().forEach((t) => t.stop()) } catch {}
+  }
+
+  // Кадр для распознавания: НЕ весь экран, а жёлтая рамка прицела, и не крупнее
+  // 800 точек по ширине. Пикселей в разы меньше — распознаётся быстро даже без
+  // встроенного распознавателя. full=true — весь кадр (ручной снимок)
+  function snapFrame(full) {
+    const video = videoRef.current
+    if (!video || !video.videoWidth) return null
+    const vw = video.videoWidth
+    const vh = video.videoHeight
+    const sx = full ? 0 : Math.round(vw * 0.08)
+    const sy = full ? 0 : Math.round(vh * 0.2)
+    const sw = full ? vw : Math.round(vw * 0.84)
+    const sh = full ? vh : Math.round(vh * 0.6)
+    const k = Math.min(1, (full ? 1200 : 800) / sw)
+    const canvas = (scanCanvasRef.current ||= document.createElement('canvas'))
+    canvas.width = Math.round(sw * k)
+    canvas.height = Math.round(sh * k)
+    canvas.getContext('2d', { willReadFrequently: true }).drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
+    return canvas
+  }
+
+  // Одна попытка распознавания: встроенным распознавателем, а где его нет — ZXing
+  async function decodeOnce(full) {
+    const canvas = snapFrame(full)
+    if (!canvas) return null
+    if (detectorRef.current) {
+      const found = await detectorRef.current.detect(canvas)
+      return found && found[0] ? String(found[0].rawValue) : null
+    }
+    try {
+      return (zxingRef.current ||= makeZxing(false)).decodeFromCanvas(canvas).getText()
+    } catch {
+      return null
+    }
   }
 
   useEffect(() => {
@@ -91,8 +152,10 @@ export default function CameraScanner({ onDetect, onClose }) {
     async function start() {
       const video = videoRef.current
       try {
+        // 720p достаточно для любого штрихкода, а пикселей вчетверо меньше,
+        // чем в FullHD, — видео и распознавание перестают тормозить телефон
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false,
         })
         if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return }
@@ -126,15 +189,25 @@ export default function CameraScanner({ onDetect, onClose }) {
 
         setReady(true)
 
-        // ЕДИНЫЙ движок ZXing на ВСЕХ устройствах — распознавание строго одинаковое.
-        const reader = makeZxing()
+        // Распознавание: встроенный распознаватель браузера (аппаратный, лёгкий),
+        // где его нет — ZXing по той же схеме. В обоих случаях — свой неторопливый
+        // цикл по области рамки, а не перемалывание каждого кадра целиком
+        detectorRef.current = await makeNativeDetector()
+        if (cancelled) return
         setHint('Наведите код в рамку: штрихкод, QR или DataMatrix. Мелкий код — приблизьте зумом, при бликах включите подсветку')
-        const controls = await reader.decodeFromStream(stream, video, (result) => {
-          if (result && confirmRead(result.getText())) fire(result.getText())
-        })
-        if (cancelled) { try { controls.stop() } catch {}; return }
-        zxingControlsRef.current = controls
-        readerRef.current = reader // используем для ручного кадра capture()
+
+        const tick = async () => {
+          if (cancelled || doneRef.current) return
+          const t0 = performance.now()
+          try {
+            const code = await decodeOnce(false)
+            if (code && confirmRead(code)) return fire(code)
+          } catch { /* неудачный кадр — просто пробуем следующий */ }
+          if (cancelled || doneRef.current) return
+          // держим ровный темп: вычитаем из паузы время, потраченное на распознавание
+          scanTimerRef.current = setTimeout(tick, Math.max(40, SCAN_MS - (performance.now() - t0)))
+        }
+        tick()
       } catch (e) {
         if (cancelled) return
         if (e?.name === 'NotAllowedError') setError('Доступ к камере запрещён. Разрешите камеру в настройках браузера и обновите.')
@@ -150,21 +223,24 @@ export default function CameraScanner({ onDetect, onClose }) {
     }
   }, [])
 
-  // Ручной захват чёткого кадра (один движок — ZXing, одинаково везде)
-  function capture() {
-    const video = videoRef.current
-    const reader = readerRef.current
-    if (!video || !reader || !video.videoWidth || doneRef.current) return
-    const canvas = document.createElement('canvas')
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height)
+  // Ручной захват чёткого кадра: весь кадр и самый дотошный разбор —
+  // это одна попытка по нажатию, здесь можно не экономить
+  async function capture() {
+    if (doneRef.current) return
     try {
-      const result = reader.decodeFromCanvas(canvas)
-      fire(result.getText())
-    } catch {
-      setHint('Не распознал. Держите штрихкод ровно, ближе и без бликов, снимите ещё раз')
-    }
+      let code = null
+      if (detectorRef.current) {
+        const canvas = snapFrame(true)
+        const found = canvas && (await detectorRef.current.detect(canvas))
+        code = found && found[0] ? String(found[0].rawValue) : null
+      }
+      if (!code) {
+        const canvas = snapFrame(true)
+        code = canvas ? makeZxing(true).decodeFromCanvas(canvas).getText() : null
+      }
+      if (code) return fire(code)
+    } catch { /* не распознался — подскажем ниже */ }
+    setHint('Не распознал. Держите штрихкод ровно, ближе и без бликов, снимите ещё раз')
   }
 
   function submitManual() {

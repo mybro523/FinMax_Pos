@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo, useDeferredValue, lazy, Suspense } from 'react'
 import {
-  LuCamera, LuShoppingCart, LuPlus, LuMinus, LuTrash2, LuCheck, LuPrinter, LuScanLine, LuPackagePlus, LuClock,
+  LuCamera, LuShoppingCart, LuPlus, LuMinus, LuTrash2, LuCheck, LuPrinter, LuScanLine, LuClock,
   LuTriangleAlert, LuX,
 } from 'react-icons/lu'
 import Layout from '../components/Layout'
@@ -22,7 +22,8 @@ import {
   osvezhit, sdacha, kupyury, pohozheNaKod, estBukva,
 } from '../lib/cheki'
 import { findByBarcode, checkout } from '../db/ops'
-import ProductForm, { emptyProduct, productPayload } from '../components/ProductForm'
+import { productPayload } from '../components/ProductForm'
+import NewProductModal from '../components/NewProductModal'
 import { beepOk, beepError, unlockAudio } from '../lib/sound'
 import { fmtDateTime, chekNomer } from '../lib/time'
 import { normalizeScan } from '../lib/scan'
@@ -630,7 +631,6 @@ export default function Pos() {
 
   async function saveNewProduct(form) {
     if (!form.name.trim()) return toast(t('Введите название'), 'err')
-    if (!form.category.trim()) return toast(t('Выберите категорию'), 'err')
     // Продажа дешевле закупки бывает нужна, но чаще это опечатка в цене
     if (sellsBelowCost(form.cost, form.price)) {
       const ok = await dialog.confirm({
@@ -1508,8 +1508,11 @@ export default function Pos() {
       )}
       {newProduct &&
         (isFounder ? (
-          <QuickAdd
+          <NewProductModal
             barcode={newProduct.barcode}
+            stock="1"
+            note={tr('товара нет в базе. Заполните карточку (добавится в корзину) или нажмите «Добавить позже» — штрихкод уйдёт в «Отложенные».')}
+            confirmText={tr('Добавить и в корзину')}
             onSave={saveNewProduct}
             onDefer={can('pos.defer', 'deferred.manage') ? () => deferBarcode(newProduct.barcode) : null}
             onClose={() => setNewProduct(null)}
@@ -1551,57 +1554,6 @@ function UnknownBarcode({ barcode, onDefer, onClose }) {
   )
 }
 
-// ── Быстрое добавление незнакомого товара ──
-function QuickAdd({ barcode, onSave, onDefer, onClose }) {
-  // Та же форма, что в разделе «Товары», — буквально тот же компонент.
-  // Прежде здесь была своя, укороченная: без дозировки, срока годности,
-  // минимального остатка, вскрытых штук и аналогов. Владелец заводил товар
-  // с кассы и половину карточки не заполнял, потому что не знал, что она есть.
-  const [f, setF] = useState({ ...emptyProduct, barcode, stock: '1', minStock: '5' })
-  const [saving, setSaving] = useState(false)
-
-  async function submit() {
-    if (saving) return
-    setSaving(true)
-    try {
-      await onSave(f)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Modal title={<><span className="ic"><LuPackagePlus size={18} /></span>{tr('Новый товар по штрихкоду')}</>} onClose={onClose}>
-      <div className="note info" style={{ marginBottom: 14 }}>
-        {tr('Штрихкод')}: <b>{barcode}</b> — {tr('товара нет в базе. Заполните карточку (добавится в корзину) или нажмите «Добавить позже» — штрихкод уйдёт в «Отложенные».')}
-      </div>
-
-      {/* ── Курсор встаёт в штрихкод, а не в название ──
-          Сканер уже вписал код, но верить ему до конца нельзя: помятая упаковка,
-          блик, чужая наклейка — и в поле окажется не то. Поэтому кассир видит код
-          там, где его можно тут же переснять или поправить. Код при этом выделен
-          целиком: повторный скан заменит его, а не допишет в конец. Если код верный,
-          поле просто не трогают — Enter уводит в название. */}
-      <ProductForm value={f} onChange={setF} autoFocus="barcode" />
-
-      {/* ── Кнопки остаются кассовыми ──
-          «Сохранить», как в «Товарах», завела бы товар, но не положила его
-          в корзину: кассиру пришлось бы сканировать заново, а покупатель ждёт.
-          И отложить незнакомый штрихкод было бы нечем. */}
-      <div className="modal-actions" style={{ justifyContent: 'space-between' }}>
-        {onDefer ? (
-          <button className="btn ghost" onClick={onDefer} disabled={saving} title={tr('Отложить штрихкод')}>
-            <span className="ic"><LuClock size={16} /></span> {tr('Добавить позже')}
-          </button>
-        ) : <span />}
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn ghost" onClick={onClose} disabled={saving}>{tr('Отмена')}</button>
-          <button className="btn" onClick={submit} disabled={saving}>{saving ? tr('Сохранение…') : tr('Добавить и в корзину')}</button>
-        </div>
-      </div>
-    </Modal>
-  )
-}
 
 
 // ── Чек ──

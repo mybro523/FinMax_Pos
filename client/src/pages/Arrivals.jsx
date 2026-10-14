@@ -11,11 +11,12 @@ import { receiveArrival, findByBarcode, getArrival, updateArrival, deleteArrival
 import { useCan } from '../db/auth'
 import { fmtDateTime } from '../lib/time'
 import { useT, translate as tr } from '../lib/i18n'
-import { useCategories, categoryNames } from '../lib/categories'
 import { normalizeScan } from '../lib/scan'
 import { beepOk, beepError } from '../lib/sound'
 import NumberInput from '../components/NumberInput'
-import { AddCategoryBtn } from '../components/CategorySelect'
+import NewProductModal from '../components/NewProductModal'
+import { productPayload } from '../components/ProductForm'
+import { canonBarcode } from '../lib/scan'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
 import { getUser } from '../db/auth'
@@ -362,30 +363,22 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
   // Остаток и закупочную здесь не спрашиваем — их даст сама строка прихода,
   // иначе количество учлось бы дважды: и в карточке, и приходом.
   async function saveNewProduct(form) {
-    if (!form.name.trim()) return toast(tr('Введите название'), 'err')
+    if (!form.name.trim() || !(form.barcode || '').trim()) return toast(tr('Укажите название и штрихкод'), 'err')
+    const data = productPayload(form, { normalizeBarcode: normalizeScan })
+    const dup = products.find((p) => canonBarcode(p.barcode) === canonBarcode(data.barcode))
+    if (dup) return toast(tr('Такой штрихкод уже есть') + ': ' + dup.name, 'err')
     try {
-      if ((form.unit || '').trim().toLowerCase() === 'кг') {
-        return toast(tr('Весовой товар заведите в разделе «Товары» — там есть галочка «Продаётся на вес»'), 'err')
-      }
-      const created = await db.push('products', {
-        name: form.name.trim(),
-        barcode: normalizeScan(form.barcode),
-        category: (form.category || '').trim(),
-        cost: 0,
-        price: Number(form.price) || 0,
-        stock: 0,
-        looseUnits: 0,
-        minStock: Number(form.minStock) || 5,
-        unit: form.unit || 'уп',
-        unitsPerPack: Math.max(1, Number(form.unitsPerPack) || 1),
-      })
+      // Остаток принудительно нулевой: сколько пришло, скажет строка прихода
+      const created = await db.push('products', { ...data, stock: 0, looseUnits: 0 })
       setNewProduct(null)
       addProduct(created)
-      toast(`«${created.name}» ${tr('заведён и добавлен в приход')}`)
+      toast(`«${created.name}» ${tr('добавлен в базу')}`)
+      focusScanner()
     } catch (e) {
-      toast(e.message, 'err')
+      toast(tr(e.message), 'err')
     }
   }
+
 
   const total = lines.reduce((s, l) => s + (Number(l.cost) || 0) * (l.ves ? gramsOfKg(l.qty) / 1000 : Number(l.qty) || 0), 0)
 
@@ -573,10 +566,11 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
       </div>
 
       {newProduct && (
-        <NewProductForm
+        <NewProductModal
           barcode={newProduct.barcode}
-          dialog={dialog}
-          toast={toast}
+          hideStock
+          note={tr('Заполните карточку — товар заведётся и сразу встанет в этот приход. Количество и закупочную цену введёте в строке прихода (весовой — в килограммах).')}
+          confirmText={tr('Завести и добавить в приход')}
           onSave={saveNewProduct}
           onClose={() => {
             setNewProduct(null)
@@ -588,84 +582,6 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
   )
 }
 
-// ── Незнакомый штрихкод при приёмке ──
-// Заводим карточку прямо здесь, чтобы не бросать приёмку на полпути.
-// Количество и закупочную цену не спрашиваем: они у строки прихода, а остаток
-// добавит сам приход — иначе товар посчитался бы дважды.
-function NewProductForm({ barcode, onSave, onClose, dialog, toast }) {
-  const categories = categoryNames(useCategories())
-  const [f, setF] = useState({ name: '', barcode, category: '', price: '', unitsPerPack: '1', unit: 'уп', minStock: '5' })
-  const [saving, setSaving] = useState(false)
-  const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
-
-  async function submit() {
-    if (saving) return
-    setSaving(true)
-    try {
-      await onSave(f)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Modal title={<><span className="ic"><LuPackagePlus size={18} /></span>{tr(barcode ? 'Новый товар по штрихкоду' : 'Новый товар')}</>} onClose={onClose}>
-      {barcode ? (
-        <div className="note info" style={{ marginBottom: 14 }}>
-          {tr('Штрихкод')}: <b>{barcode}</b> — {tr('такого товара в базе нет. Заполните карточку — товар заведётся и сразу встанет в этот приход. Количество и закупочную цену введёте в строке прихода.')}
-        </div>
-      ) : (
-        <div className="note info" style={{ marginBottom: 14 }}>
-          {tr('Заполните карточку — товар заведётся и сразу встанет в этот приход. Количество и закупочную цену введёте в строке прихода.')}
-        </div>
-      )}
-      <div className="field">
-        <label>{tr('Название')}</label>
-        <input value={f.name} onChange={(e) => set('name', e.target.value)} placeholder="Напр. Индометацин 25мг №30" autoFocus />
-      </div>
-      <div className="row">
-        <div className="field" style={{ flex: 1 }}>
-          <label>{tr('Штрихкод')}</label>
-          <input value={f.barcode} onChange={(e) => set('barcode', e.target.value)} />
-        </div>
-        <div className="field" style={{ flex: 1 }}>
-          <label>{tr('Категория (необязательно)')}</label>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <select style={{ flex: 1, minWidth: 0 }} value={f.category} onChange={(e) => set('category', e.target.value)}>
-              <option value="">{tr('— без категории —')}</option>
-              {categories.map((c) => <option key={c} value={c}>{tr(c)}</option>)}
-            </select>
-            <AddCategoryBtn dialog={dialog} toast={toast} options={categories} onPicked={(name) => set('category', name)} />
-          </div>
-        </div>
-      </div>
-      <div className="row">
-        <div className="field" style={{ flex: 1 }}>
-          <label>{tr('Цена продажи')}</label>
-          <NumberInput value={f.price} onChange={(e) => set('price', e.target.value)} />
-        </div>
-        <div className="field" style={{ flex: 1 }}>
-          <label>{tr('Штук в упаковке')}</label>
-          <NumberInput integer value={f.unitsPerPack} onChange={(e) => set('unitsPerPack', e.target.value)} title="Для деления на таблетки. 1 = только целиком" />
-        </div>
-      </div>
-      <div className="row">
-        <div className="field" style={{ flex: 1 }}>
-          <label>{tr('Мин. остаток')}</label>
-          <NumberInput integer value={f.minStock} onChange={(e) => set('minStock', e.target.value)} title="Ниже этого остатка товар попадёт в Авто-заявку" />
-        </div>
-        <div className="field" style={{ width: 110 }}>
-          <label>{tr('Ед.')}</label>
-          <input value={f.unit} onChange={(e) => set('unit', e.target.value)} />
-        </div>
-      </div>
-      <div className="modal-actions">
-        <button className="btn ghost" onClick={onClose} disabled={saving}>{tr('Отмена')}</button>
-        <button className="btn" onClick={submit} disabled={saving}>{saving ? tr('Сохранение…') : tr('Завести и добавить в приход')}</button>
-      </div>
-    </Modal>
-  )
-}
 
 // ── Правка прихода ──
 //
