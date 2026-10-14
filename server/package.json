@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "description": "NestJS backend for Apteka POS",
   "private": true,
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "nest build",
     "start": "nest start",
@@ -41,5 +43,9 @@
     "@types/compression": "^1.8.1",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0"
+  },
+  "overrides": {
+    "body-parser": "^1.20.8",
+    "multer": "^2.4.0"
   }
 }

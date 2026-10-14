@@ -17,6 +17,20 @@ const HUMAN_DB_ERRORS: Record<string, string> = {
 
 // Единый формат ошибок + понятный маппинг Prisma-исключений
 // (иначе они «протекают» как 500). Валидация/HttpException проходят как есть.
+// Ошибки разбора тела (body-parser) — не HttpException: это обычный Error со
+// своим статусом 4xx в поле status и типом в поле type. Узнаём их по этим полям
+function bodyParserError(e: unknown): boolean {
+  const x = e as { status?: unknown; type?: unknown }
+  return (
+    !!x &&
+    typeof x.status === 'number' &&
+    x.status >= 400 &&
+    x.status < 500 &&
+    typeof x.type === 'string' &&
+    x.type.startsWith('entity.')
+  )
+}
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger('Exceptions')
@@ -58,6 +72,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
       this.logger.error(`Prisma validation: ${exception.message}`)
       status = HttpStatus.BAD_REQUEST
       message = 'Некорректные данные запроса'
+    } else if (bodyParserError(exception)) {
+      // Отказ разбора тела (слишком большое, битый JSON) — ошибка присланного
+      // запроса, а не сервера. Раньше такой отказ уходил наружу как 500
+      // «внутренняя ошибка», хотя сервер жив и всё сделал правильно
+      const e = exception as { status: number; type?: string }
+      status = e.status
+      message =
+        e.type === 'entity.too.large'
+          ? 'Запрос слишком большой'
+          : e.type === 'entity.parse.failed'
+            ? 'Некорректные данные запроса'
+            : 'Некорректный запрос'
     } else if (exception instanceof Error) {
       this.logger.error(exception.message, exception.stack)
     }

@@ -72,7 +72,10 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   // Подключение без действующего входа обрываем: раздел, который прислали,
   // сам по себе секрета не несёт, но и слушать его посторонним незачем
   async handleConnection(client: Socket) {
-    const token = String(client.handshake?.auth?.token || client.handshake?.query?.token || '')
+    // Токен — только из тела рукопожатия (auth). Из адресной строки (query) не
+    // берём намеренно: адрес оседает в журналах прокси и платформы, и токен
+    // утёк бы туда целиком. И сайт, и программа шлют его через auth
+    const token = String(client.handshake?.auth?.token || '')
     const payload = this.auth.verify(token)
     if (!payload) return void client.disconnect(true)
 

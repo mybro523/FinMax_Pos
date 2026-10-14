@@ -8,7 +8,10 @@ import { offlineDaysOf, subscriptionOf, subscriptionMessage } from '../admin/sub
 import { permissionsOf } from './permissions'
 import { AccountCache } from '../admin/account-cache.service'
 
-const TOKEN_TTL_MS = 30 * 24 * 3600 * 1000 // 30 дней
+// Неделя, а не месяц: украденный токен должен умирать быстро. Кассе без
+// интернета недели хватает с запасом, а на сайте вход и так живёт только
+// до закрытия вкладки (sessionStorage)
+const TOKEN_TTL_MS = 7 * 24 * 3600 * 1000 // 7 дней
 
 // ── Что лежит в токене ──
 // Кроме самого сотрудника — аптека, которую он обслуживает: её код (для журналов

@@ -58,10 +58,17 @@ async function bootstrap() {
   syncSchema()
 
   // Разбор тела отключаем на старте и включаем сами — иначе Nest успевает
-  // поставить свой разбор со стандартными 100 КБ, и наш лимит уже ничего не решает
+  // поставить свой разбор со стандартными 100 КБ, и наш лимит уже ничего не решает.
+  //
+  // Большой лимит (BODY_LIMIT, по умолчанию 100 МБ) нужен РОВНО ОДНОМУ месту —
+  // восстановлению из резервной копии: там в теле вся база аптеки. Всем остальным
+  // хватает 8 МБ с запасом (пачка чеков с касс — мегабайты, фото товара — сотни КБ).
+  // Держать гигантский лимит на каждом маршруте — подарок для заваливания сервера.
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false })
-  app.useBodyParser('json', { limit: BODY_LIMIT })
-  app.useBodyParser('urlencoded', { limit: BODY_LIMIT, extended: true })
+  const { json } = await import('express')
+  app.use('/api/backup/restore', json({ limit: BODY_LIMIT }))
+  app.useBodyParser('json', { limit: '8mb' })
+  app.useBodyParser('urlencoded', { limit: '1mb', extended: true })
 
   // ── Чей адрес считать адресом устройства ──
   // Railway ставит перед приложением ДВА прокси, и адрес клиента приходит цепочкой:

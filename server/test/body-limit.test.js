@@ -40,10 +40,25 @@ test('свой разбор тела включён для json и форм', ()
   assert.match(code, /useBodyParser\(\s*'urlencoded'/, "нет вызова useBodyParser('urlencoded')")
 })
 
-test('лимит берётся из одной величины, а не задан числом в двух местах', () => {
-  const calls = [...code.matchAll(/useBodyParser\([^)]*limit:\s*([A-Za-z_$][\w$]*)/g)].map((m) => m[1])
-  assert.equal(calls.length, 2, `ожидались два вызова useBodyParser с limit, найдено ${calls.length}`)
-  assert.equal(calls[0], calls[1], 'json и urlencoded используют разные величины лимита — они разъедутся при первой же правке')
+test('гигантский лимит стоит только на восстановлении копии, остальным — скромный', () => {
+  // Большое тело нужно одному месту — restore (вся база аптеки одним запросом).
+  // Висеть стомегабайтный лимит на каждом маршруте не должен: это подарок тому,
+  // кто захочет завалить сервер памятью.
+  assert.match(
+    code,
+    /app\.use\(\s*'\/api\/backup\/restore'\s*,\s*json\(\{\s*limit:\s*BODY_LIMIT\s*\}\)\s*\)/,
+    'восстановление копии осталось без большого лимита — копия перестанет подниматься',
+  )
+  const restoreAt = code.indexOf("app.use('/api/backup/restore'")
+  const commonAt = code.indexOf("useBodyParser('json'")
+  assert.ok(restoreAt >= 0 && commonAt > restoreAt, 'большой лимит должен подключаться РАНЬШЕ общего разбора, иначе он не сработает')
+
+  const common = /useBodyParser\(\s*'json'\s*,\s*\{\s*limit:\s*'([^']+)'/.exec(code)
+  assert.ok(common, 'у общего разбора json нет явного лимита')
+  const bytes = toBytes(common[1])
+  // Не меньше 2 МБ (пачки чеков с касс, фото товара) и не больше 16 МБ —
+  // иначе это снова лимит «на всё про всё»
+  assert.ok(bytes >= 2 * 1024 ** 2 && bytes <= 16 * 1024 ** 2, `общий лимит ${common[1]} вне разумного коридора 2–16 МБ`)
 })
 
 test('лимита хватает на резервную копию работающей аптеки', () => {
