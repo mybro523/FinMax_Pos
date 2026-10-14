@@ -35,6 +35,8 @@ function productView(row, u) {
     unit: row.unit,
     unitsPerPack: row.unitsPerPack,
     looseUnits,
+    // Фото — строкой, как прислал сервер: кружок в кассе работает и без интернета
+    image: row.image || '',
     dosage: row.dosage,
     expiryDate: row.expiryDate,
     expiredUnits: Math.min(units, u?.expired || 0),
