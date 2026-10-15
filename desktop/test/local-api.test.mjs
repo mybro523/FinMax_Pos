@@ -1,4 +1,4 @@
-// ── Локальный сервер аптеки и учётные записи ──
+// ── Локальный сервер магазина и учётные записи ──
 //
 // Что касса отвечает сама, а за чем идёт на сервер; кому что разрешено; как долго
 // закрыт вход после подбора пароля. Всё это — граница между «работает без
@@ -172,7 +172,7 @@ const user = (over = {}) => ({
   id: 'acc-1',
   name: 'kassir',
   role: 'cashier',
-  pharmacy: { code: 'apteka-1', name: 'Аптека №1' },
+  pharmacy: { code: 'apteka-1', name: 'Магазин №1' },
   subscription: { status: 'active', paidUntil: '2026-11-01T12:00:00.000Z' },
   ...over,
 })
@@ -208,7 +208,7 @@ test('сведения о сотруднике обновляются, а отп
   assert.equal(accountById(db, 'acc-1').verifier, 'новый')
   dropVerifier(db, 'acc-1')
   assert.equal(accountById(db, 'acc-1').verifier, null)
-  // Владелец сервиса (без аптеки) сюда не записывается
+  // Владелец сервиса (без магазина) сюда не записывается
   assert.equal(saveAccount(db, user({ id: 'adm', name: 'admin', pharmacy: null }), { now: NOW }), null)
 })
 
@@ -236,7 +236,7 @@ test('подписка без связи: предупреждение, проб
   assert.equal(subscriptionOf(acc, at('2026-11-01T11:59:00.000Z')).canWrite, true)
   const over = subscriptionOf(acc, at('2026-11-01T12:00:00.000Z'))
   assert.deepEqual([over.status, over.canWrite], ['expired', false])
-  assert.match(over.message, /^Подписка закончилась 01\.11\.2026 в 17:00\. Данные аптеки сохранены/)
+  assert.match(over.message, /^Подписка закончилась 01\.11\.2026 в 17:00\. Данные магазина сохранены/)
 
   const trial = subscriptionOf({ ...acc, subStatus: 'trial' }, at('2026-10-04T10:00:00.000Z'))
   assert.deepEqual([trial.status, trial.warn, trial.message], ['trial', true, 'Пробный период: осталось 29 дн.'])
@@ -249,7 +249,7 @@ test('подписка без связи: предупреждение, проб
   assert.equal(subscriptionOf({ paidUntil: null }, NOW), null)
 })
 
-test('подписка касается всей аптеки: продлили — у всех её сотрудников на этом компьютере', () => {
+test('подписка касается всего магазина: продлили — у всех его сотрудников на этом компьютере', () => {
   const db = core()
   saveAccount(db, user({ id: 'a', name: 'kassir' }), { now: NOW })
   saveAccount(db, user({ id: 'b', name: 'vladelec' }), { now: NOW })
@@ -259,7 +259,7 @@ test('подписка касается всей аптеки: продлили 
   // Пусто — «не трогать»
   setSubscription(db, 'apteka-1', { status: 'active' })
   assert.equal(accountById(db, 'a').paidUntil, '2027-01-01T00:00:00.000Z')
-  assert.deepEqual(userView(accountById(db, 'a'), NOW).pharmacy, { code: 'apteka-1', name: 'Аптека №1' })
+  assert.deepEqual(userView(accountById(db, 'a'), NOW).pharmacy, { code: 'apteka-1', name: 'Магазин №1' })
 })
 
 test('защита от подбора: минута, пять, пятнадцать — и счёт лежит в базе', () => {
@@ -324,7 +324,7 @@ test('номер кассы создаётся один раз и не меня�
   assert.equal(deviceIdOf(db), id)
 })
 
-test('сотрудник аптеки узнаётся по документам, которые он уже оформлял', () => {
+test('сотрудник магазина узнаётся по документам, которые он уже оформлял', () => {
   const db = openDb(':memory:', PHARMACY_SCHEMA)
   assert.equal(tenantUserOf(db, 'kassir'), null)
   applySnapshot(

@@ -21,7 +21,7 @@ import { subscriptionOf, subscriptionMessage, SubscriptionStatus } from './subsc
 // сервер перезапускается, а будильники живут в памяти, и после перезапуска их
 // расставляет заново тот же обход.
 //
-// Будильник, сработав, ПЕРЕЧИТЫВАЕТ аптеку. За час до срока клиент вполне может
+// Будильник, сработав, ПЕРЕЧИТЫВАЕТ магазин. За час до срока клиент вполне может
 // заплатить, и отключать его тогда нельзя ни в коем случае.
 const EVERY_MS = 60 * 60 * 1000
 const HOUR = 60 * 60 * 1000
@@ -30,7 +30,7 @@ const HOUR = 60 * 60 * 1000
 export class SubscriptionWatchService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('Subscription')
   private timer: NodeJS.Timeout | null = null
-  // Что мы в прошлый раз видели у каждой аптеки. Только в памяти: после перезапуска
+  // Что мы в прошлый раз видели у каждого магазина. Только в памяти: после перезапуска
   // первый проход просто запомнит нынешнее, ничего не разослав, — и это правильно,
   // потому что устройства при переподключении спрашивают своё состояние сами.
   private seen = new Map<string, SubscriptionStatus>()
@@ -57,13 +57,13 @@ export class SubscriptionWatchService implements OnModuleInit, OnModuleDestroy {
     this.alarms.clear()
   }
 
-  // Возвращает, сколько аптек сменили состояние
+  // Возвращает, сколько магазинов сменили состояние
   async tick(now: Date = new Date()): Promise<number> {
     const list = await this.admin.pharmacy.findMany({
       select: { id: true, code: true, name: true, schemaName: true, paidUntil: true, trial: true, blocked: true },
     })
 
-    // Аптеки могли и удалить — иначе память тихо росла бы вместе с забытыми кодами
+    // Магазины могли и удалить — иначе память тихо росла бы вместе с забытыми кодами
     const alive = new Set(list.map((p) => p.id))
     for (const id of [...this.seen.keys()]) if (!alive.has(id)) this.seen.delete(id)
     for (const id of [...this.alarms.keys()]) if (!alive.has(id)) this.forget(id)
@@ -78,7 +78,7 @@ export class SubscriptionWatchService implements OnModuleInit, OnModuleDestroy {
       if (was === undefined || was === view.status) continue
 
       changed++
-      this.log.log(`Аптека «${ph.code}»: подписка ${was} → ${view.status}`)
+      this.log.log(`Магазин «${ph.code}»: подписка ${was} → ${view.status}`)
 
       if (view.status === 'expired') {
         // Срок вышел между обходами — например, пока сервер был выключен.
@@ -125,7 +125,7 @@ export class SubscriptionWatchService implements OnModuleInit, OnModuleDestroy {
     if (leftMs <= 0 || leftMs > HOUR) return
 
     // Полсекунды сверху: таймеры срабатывают «не раньше», и без запаса можно
-    // проснуться за миллисекунду ДО срока — тогда аптека ещё считается оплаченной,
+    // проснуться за миллисекунду ДО срока — тогда магазин ещё считается оплаченным,
     // и отключение пришлось бы ждать следующего часа
     const t = setTimeout(() => {
       this.fire(id).catch((e) => this.log.error('отключение по сроку не удалось: ' + (e?.message || e)))
@@ -162,7 +162,7 @@ export class SubscriptionWatchService implements OnModuleInit, OnModuleDestroy {
     now: Date = new Date(),
   ) {
     const view = subscriptionOf(ph, now)
-    this.log.warn(`Аптека «${ph.code}»: срок вышел — работа остановлена (${status})`)
+    this.log.warn(`Магазин «${ph.code}»: срок вышел — работа остановлена (${status})`)
     this.events.suspendPharmacy(ph.schemaName, subscriptionMessage(view, ph.name))
   }
 }

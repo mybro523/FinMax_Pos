@@ -206,7 +206,7 @@ test('разбор введённого по списку листов: прим
   writeDraft('s-applied-same', { a: '7' }, now)
   writeDraft('s-applied-other', { a: '7' }, now)
   writeDraft('s-draft', { a: '3' }, now)
-  writeDraft('s-chuzhoy', { a: '4' }, now) // лист другой аптеки в этом же браузере
+  writeDraft('s-chuzhoy', { a: '4' }, now) // лист другого магазина в этом же браузере
   writeDraft('s-zabyty', { a: '5' }, now - 61 * DAY)
   writeDraft('s-idet', { a: '6' }, now) // применяется прямо сейчас
   const list = [
@@ -222,7 +222,7 @@ test('разбор введённого по списку листов: прим
   assert.deepEqual(page.readDraft('s-applied-same'), {})
   assert.deepEqual(page.readDraft('s-applied-other'), {})
   assert.deepEqual(page.readDraft('s-draft'), { a: '3' }, 'неприменённый лист — введённое на месте')
-  assert.deepEqual(page.readDraft('s-chuzhoy'), { a: '4' }, 'листа нет в списке — возможно, он другой аптеки')
+  assert.deepEqual(page.readDraft('s-chuzhoy'), { a: '4' }, 'листа нет в списке — возможно, он другого магазина')
   assert.deepEqual(page.readDraft('s-zabyty'), {}, 'два месяца не возвращались')
   assert.deepEqual(page.readDraft('s-idet'), { a: '6' }, 'судьбу листа, который применяется сейчас, решает ответ на применение')
   assert.equal(localStorage.getItem('apteka_inv_s-zabyty'), null)

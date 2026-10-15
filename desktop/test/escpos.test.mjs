@@ -44,13 +44,13 @@ test('русские буквы ложатся в таблицу принтер�
   assert.deepEqual([...encode('Ёё№', 'cp1251')], [0xa8, 0xb8, 0xb9])
   // Латиница, цифры и знаки — как есть
   assert.equal(encode('Nurofen 200mg x2 = 30.50', 'cp866').toString('latin1'), 'Nurofen 200mg x2 = 30.50')
-  assert.equal(text866(encode('Аптека №1: Нурофен 200 мг', 'cp866')), 'Аптека №1: Нурофен 200 мг')
+  assert.equal(text866(encode('Магазин №1: Нурофен 200 мг', 'cp866')), 'Магазин №1: Нурофен 200 мг')
 })
 
 test('таджикских букв у принтера нет — печатается ближайшая русская, а не пустой квадрат', () => {
   assert.equal(printable('Қарзи мизоҷ: ҳама фурӯхта шуд'), 'Карзи мизоч: хама фурухта шуд')
   assert.equal(text866(encode('Ғӣ Ҷӯ Ҳқ')), 'Ги Чу Хк')
-  assert.equal(printable('«Аптека» — чек… 5 × 10'), '"Аптека" - чек... 5 x 10')
+  assert.equal(printable('«Магазин» — чек… 5 × 10'), '"Магазин" - чек... 5 x 10')
   // Неразрывный пробел из денег («1 234,5») становится обычным
   assert.equal(printable('1 234,5 сомони'), '1 234,5 сомони')
   // Совсем незнакомый знак — вопросом, а не сбоем таблицы
@@ -94,7 +94,7 @@ test('команды принтера: сброс и таблица букв, ж
 })
 
 const TICKET = {
-  head: ['Аптека №1', '04.10.2026, 15:30'],
+  head: ['Магазин №1', '04.10.2026, 15:30'],
   rows: [
     { name: 'Нурофен 200 мг №10', sub: '2 уп × 150', value: '300 сомони' },
     { name: 'Парацетамол 500 мг таблетки №20 (очень длинное название товара)', sub: '5 шт × 10 · скидка −5', value: '45 сомони' },
@@ -114,7 +114,7 @@ test('чек на ленте 58 мм: всё на своих местах и н�
   assert.deepEqual([...bytes.subarray(-7)], [0x1b, 0x64, 3, 0x1d, 0x56, 0x42, 0x00])
   const lines = text866(bytes).split('\n')
   assert.ok(lines.every((l) => l.length <= 32), 'строка вылезла за ленту: ' + lines.find((l) => l.length > 32))
-  assert.deepEqual(lines.slice(0, 3), ['Аптека №1', '04.10.2026, 15:30', '-'.repeat(32)])
+  assert.deepEqual(lines.slice(0, 3), ['Магазин №1', '04.10.2026, 15:30', '-'.repeat(32)])
   assert.ok(lines.includes('Нурофен 200 мг №10'))
   assert.ok(lines.includes('  2 уп x 150' + ' '.repeat(10) + '300 сомони'), 'количество слева, сумма у правого края')
   assert.ok(lines.includes('Итого' + ' '.repeat(17) + '345 сомони'))
@@ -165,12 +165,12 @@ test('эмблема: растровый блок GS v 0 с верной шир�
   assert.equal(rasterImage(null).length, 0)
 
   // В чеке эмблема идёт первой, после выбора таблицы букв, по центру
-  const bytes = renderTicket({ head: ['Аптека'], rows: [], totals: [], tail: [] }, { width: 32, cut: false, logo: { width: 16, height: 8, data } })
+  const bytes = renderTicket({ head: ['Магазин'], rows: [], totals: [], tail: [] }, { width: 32, cut: false, logo: { width: 16, height: 8, data } })
   const hex = bytes.toString('hex')
   const raster = img.toString('hex')
   assert.ok(hex.includes(raster), 'растровый блок попал в чек')
   assert.ok(hex.indexOf(raster) < hex.indexOf(Buffer.from('1b6100', 'hex').toString('hex')), 'эмблема раньше возврата к левому краю')
   // Без эмблемы байты прежние — как у всех старых проверок
-  const plain = renderTicket({ head: ['Аптека'], rows: [], totals: [], tail: [] }, { width: 32, cut: false })
+  const plain = renderTicket({ head: ['Магазин'], rows: [], totals: [], tail: [] }, { width: 32, cut: false })
   assert.ok(!plain.toString('hex').includes('1d7630'), 'нет логотипа — нет растрового блока')
 })

@@ -60,7 +60,7 @@ export default function Deferred() {
         stock: Number(form.stock) || 0,
         minStock: Number(form.minStock) || 5,
         unit: form.unit || 'уп',
-        // Без этого товар заводился неделимым, и продать из него таблетку
+        // Без этого товар заводился неделимым, и продать из него штуку
         // поштучно было нельзя, пока не откроешь карточку и не исправишь вручную
         unitsPerPack: Math.max(1, Number(form.unitsPerPack) || 1),
       })
@@ -157,7 +157,7 @@ function ProductForm({ barcode, onSave, onClose }) {
         <div className="field" style={{ flex: 1 }}><label>{tr('Остаток')}</label><NumberInput integer value={f.stock} onChange={(e) => set('stock', e.target.value)} /></div>
         <div className="field" style={{ flex: 1 }}>
           <label>{tr('Штук в упаковке')}</label>
-          <NumberInput integer value={f.unitsPerPack} onChange={(e) => set('unitsPerPack', e.target.value)} title="Для деления на таблетки. 1 = только целиком" />
+          <NumberInput integer value={f.unitsPerPack} onChange={(e) => set('unitsPerPack', e.target.value)} title="Для продажи поштучно. 1 = только целиком" />
         </div>
         <div className="field" style={{ width: 90 }}><label>{tr('Ед.')}</label><input value={f.unit} onChange={(e) => set('unit', e.target.value)} /></div>
       </div>

@@ -45,7 +45,7 @@ function gateway(pool = fakePool()) {
   return g
 }
 
-test('аптека слышит только своё', () => {
+test('магазин слышит только своё', () => {
   const g = gateway()
   g.changedIn('tenant_shifo', 'products', 'sales')
   assert.deepEqual(g.server.sent, [
@@ -53,7 +53,7 @@ test('аптека слышит только своё', () => {
   ])
 })
 
-test('без аптеки не уходит ничего — лучше молчание, чем рассылка всем', () => {
+test('без магазина не уходит ничего — лучше молчание, чем рассылка всем', () => {
   const g = gateway()
   g.changedIn(undefined, 'products')
   g.changedIn('', 'products')
@@ -81,7 +81,7 @@ test('приостановка: сначала объяснение, потом 
   assert.deepEqual(g.server.dropped, ['tenant_shifo'], 'связь так и не оборвалась')
 })
 
-test('продление доходит до аптеки', () => {
+test('продление доходит до магазина', () => {
   const g = gateway()
   g.subscriptionChanged('tenant_shifo', 'Подписка продлена')
   assert.deepEqual(g.server.sent, [
@@ -89,7 +89,7 @@ test('продление доходит до аптеки', () => {
   ])
 })
 
-test('новости панели уходят в комнату владельца сервиса, а не аптекам', () => {
+test('новости панели уходят в комнату владельца сервиса, а не магазинам', () => {
   const g = gateway()
   g.toService('pharmacies', { code: 'shifo' })
   assert.deepEqual(g.server.sent, [
@@ -98,20 +98,20 @@ test('новости панели уходят в комнату владель�
 })
 
 // ── Кто сейчас на связи ──
-test('аптека считается работающей, пока жив хоть один её экран', () => {
+test('магазин считается работающим, пока жив хоть один его экран', () => {
   const g = gateway()
   g.markOnline('shifo', 'tenant_shifo', +1) // касса
   g.markOnline('shifo', 'tenant_shifo', +1) // телефон владельца
   assert.deepEqual(g.onlinePharmacies(), ['shifo'])
 
   g.markOnline('shifo', 'tenant_shifo', -1) // телефон закрыли
-  assert.deepEqual(g.onlinePharmacies(), ['shifo'], 'аптека пропала из-за одного закрытого экрана')
+  assert.deepEqual(g.onlinePharmacies(), ['shifo'], 'магазин пропал из-за одного закрытого экрана')
 
   g.markOnline('shifo', 'tenant_shifo', -1) // ушли и с кассы
   assert.deepEqual(g.onlinePharmacies(), [])
 })
 
-test('панель дёргается только при появлении и уходе аптеки', () => {
+test('панель дёргается только при появлении и уходе магазина', () => {
   const g = gateway()
   const presence = () => g.server.sent.filter((s) => s.event === 'presence').length
 
@@ -162,7 +162,7 @@ function gatewayWith(payload, account, pool = fakePool()) {
 
 const LIVE_ACCOUNT = { active: true, passwordChangedAt: null, pharmacy: { blocked: false } }
 
-test('пущенной аптеке сразу говорят, что можно работать', async () => {
+test('пущенному магазину сразу говорят, что можно работать', async () => {
   // Это слово снимает объявление о приостановке у того, кто заплатил, пока
   // объявление висело на экране. Без него он смотрел бы на него до перезагрузки.
   const g = gatewayWith({ sub: 'a1', sch: 'tenant_shifo', ph: 'shifo', iat: 1 }, LIVE_ACCOUNT)
@@ -174,7 +174,7 @@ test('пущенной аптеке сразу говорят, что можно
   assert.deepEqual(s.mine, [{ event: 'resumed', payload: undefined }])
 })
 
-test('приостановленную аптеку не пускают и работать не разрешают', async () => {
+test('приостановленный магазин не пускают и работать не разрешают', async () => {
   const g = gatewayWith(
     { sub: 'a1', sch: 'tenant_shifo', ph: 'shifo', iat: 1 },
     { active: true, passwordChangedAt: null, pharmacy: { blocked: true } },
@@ -182,8 +182,8 @@ test('приостановленную аптеку не пускают и ра�
   const s = fakeSocket('token')
   await g.handleConnection(s)
 
-  assert.equal(s.closed, true, 'приостановленную аптеку пустили на связь')
-  assert.deepEqual(s.mine, [], 'приостановленной аптеке разрешили работать')
+  assert.equal(s.closed, true, 'приостановленный магазин пустили на связь')
+  assert.deepEqual(s.mine, [], 'приостановленному магазину разрешили работать')
   assert.deepEqual(g.onlinePharmacies(), [], 'она ещё и числится работающей')
 })
 
@@ -194,7 +194,7 @@ test('владелец сервиса слушает своё и сразу уз
 
   assert.deepEqual(s.rooms, ['service'], 'владелец сервиса попал не в свою комнату')
   assert.equal(s.mine[0].event, 'presence')
-  // И аптекой он не числится: своей у него нет
+  // И магазином он не числится: своей у него нет
   assert.deepEqual(g.onlinePharmacies(), [])
 })
 
@@ -204,7 +204,7 @@ test('поддержка, зашедшая под владельцем, отме
   const s = fakeSocket('token')
   await g.handleConnection(s)
 
-  assert.deepEqual(s.rooms, ['tenant_shifo'], 'поддержка не слышит аптеку, в которую зашла')
+  assert.deepEqual(s.rooms, ['tenant_shifo'], 'поддержка не слышит магазин, в который зашла')
   assert.deepEqual(g.onlinePharmacies(), [], 'поддержка зажгла отметку «сейчас работают»')
 })
 
@@ -222,7 +222,7 @@ test('пока за кассой кто-то есть, подключение к
   g.markOnline('shifo', 'tenant_shifo', +1)
   assert.deepEqual(g.pool_.warmed, ['tenant_shifo'], 'подключение не подготовили')
 
-  // Второй экран той же аптеки ничего не меняет
+  // Второй экран того же магазина ничего не меняет
   g.markOnline('shifo', 'tenant_shifo', +1)
   assert.deepEqual(g.pool_.warmed, ['tenant_shifo'], 'дёргаем запас на каждое подключение')
   assert.deepEqual(g.pool_.cooled, [])
@@ -238,7 +238,7 @@ test('счётчик не уходит в минус от лишнего отк�
   g.markOnline('shifo', 'tenant_shifo', -1)
   g.markOnline('shifo', 'tenant_shifo', -1)
   g.markOnline('shifo', 'tenant_shifo', +1)
-  assert.deepEqual(g.onlinePharmacies(), ['shifo'], 'аптека не показалась: счётчик ушёл в минус')
+  assert.deepEqual(g.onlinePharmacies(), ['shifo'], 'магазин не показался: счётчик ушёл в минус')
 })
 
 test('изменение отмечается даже до появления первого соединения', () => {

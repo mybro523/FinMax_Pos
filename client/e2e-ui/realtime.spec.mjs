@@ -10,7 +10,7 @@
 // Что проверяется:
 //   владелец сервиса видит, кто сейчас за кассой;
 //   продление доходит до кассы в ту же секунду — предупреждение снимается само;
-//   работа в одном окне аптеки видна во втором окне той же аптеки;
+//   работа в одном окне магазина видна во втором окне того же магазина;
 //   приостановка приходит с объяснением, а не молчаливым обрывом связи.
 //
 // Запуск:  npx playwright test e2e-ui/realtime.spec.mjs   (в папке client)
@@ -41,7 +41,7 @@ async function signIn(page, name, password) {
   }
 }
 
-// Аптеку для прогона заводим запросом, а не руками: сам путь заведения проверяется
+// Магазин для прогона заводим запросом, а не руками: сам путь заведения проверяется
 // в panel.spec.mjs, а здесь он занял бы минуту чужого времени
 test.beforeAll(async ({ request }) => {
   const res = await request.post(`${API}/auth/login`, { data: { name: USER, password: PASS } })
@@ -53,7 +53,7 @@ test.beforeAll(async ({ request }) => {
     timeout: 180_000,
     data: {
       code: TAG,
-      name: `Аптека ${TAG}`,
+      name: `Магазин ${TAG}`,
       ownerName: 'Проверка связи',
       city: 'Душанбе',
       trialDays: 3, // мало — чтобы предупреждение о пробном периоде точно висело
@@ -61,7 +61,7 @@ test.beforeAll(async ({ request }) => {
       ownerPassword: OWNER_PASS,
     },
   })
-  expect(made.ok(), `аптеку для прогона завести не удалось: ${await made.text()}`).toBeTruthy()
+  expect(made.ok(), `магазин для прогона завести не удалось: ${await made.text()}`).toBeTruthy()
   state.id = (await made.json()).id
 })
 
@@ -83,7 +83,7 @@ test('владелец сервиса видит, кто сейчас за ка�
   const kassa = await browser.newPage()
 
   await signIn(panel, USER, PASS)
-  await expect(panel.locator('.topbar h1')).toHaveText('Аптеки')
+  await expect(panel.locator('.topbar h1')).toHaveText('Магазины')
 
   const row = panel.locator('tbody tr', { hasText: TAG }).first()
   await expect(row).toBeVisible({ timeout: 30_000 })
@@ -127,7 +127,7 @@ test('продление доходит до кассы в ту же секун�
 
   await signIn(panel, USER, PASS)
   await panel.locator('tbody tr', { hasText: TAG }).first().click()
-  const card = panel.locator('.modal', { hasText: `Аптека ${TAG}` }).first()
+  const card = panel.locator('.modal', { hasText: `Магазин ${TAG}` }).first()
   await expect(card).toBeVisible()
   await card.getByRole('button', { name: /Продлить/ }).click()
 
@@ -150,7 +150,7 @@ test('продление доходит до кассы в ту же секун�
   await kassa.close()
 })
 
-test('работа в одном окне аптеки видна во втором без перезагрузки', async ({ browser }) => {
+test('работа в одном окне магазина видна во втором без перезагрузки', async ({ browser }) => {
   test.setTimeout(120_000)
   const one = await browser.newPage()
   const two = await browser.newPage()
@@ -192,18 +192,18 @@ test('приостановка приходит с объяснением, а н
 
   await signIn(panel, USER, PASS)
   await panel.locator('tbody tr', { hasText: TAG }).first().click()
-  const card = panel.locator('.modal', { hasText: `Аптека ${TAG}` }).first()
+  const card = panel.locator('.modal', { hasText: `Магазин ${TAG}` }).first()
   await card.getByRole('button', { name: /Приостановить/ }).click()
   // Приостановка спрашивает подтверждение: это не то действие, которое делают
   // случайным нажатием мимо строки
-  const ask = panel.locator('.modal', { hasText: 'Приостановить работу аптеки?' })
+  const ask = panel.locator('.modal', { hasText: 'Приостановить работу магазина?' })
   await expect(ask).toBeVisible()
   await ask.getByRole('button', { name: /^Приостановить$/ }).click()
 
   // На кассе — понятное объяснение вместо пропавшей связи. Без него кассир решил бы,
   // что виноват интернет, и упёрся бы в отказ посреди продажи.
   const stop = kassa.locator('.suspended-card')
-  await expect(stop, 'аптеку отключили молча').toBeVisible({ timeout: INSTANT })
+  await expect(stop, 'магазин отключили молча').toBeVisible({ timeout: INSTANT })
   await expect(stop).toContainText(/приостановлен/i)
   await expect(stop).toContainText(/поставщику программы/i)
 
@@ -213,7 +213,7 @@ test('приостановка приходит с объяснением, а н
 
   // Возвращаем работу, чтобы уборка прошла как обычно
   await card.getByRole('button', { name: /Возобновить/ }).click()
-  const askBack = panel.locator('.modal', { hasText: 'Возобновить работу аптеки?' })
+  const askBack = panel.locator('.modal', { hasText: 'Возобновить работу магазина?' })
   await expect(askBack).toBeVisible()
   await askBack.getByRole('button', { name: /^Возобновить$/ }).click()
   await expect(card.getByRole('button', { name: /Приостановить/ })).toBeVisible({ timeout: 30_000 })

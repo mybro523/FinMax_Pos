@@ -16,7 +16,7 @@ export const isKnownCategory = (name, categories) =>
   (categories || []).some((c) => c.name === String(name || '').trim())
 
 // Срок годности при приёмке. У бинтов, ваты и приборов его нет — это отмечено
-// галочкой у категории. Неизвестная категория считается лекарством: лучше лишний
+// галочкой у категории. Неизвестная категория считается товаром: лучше лишний
 // раз спросить срок, чем пропустить просрочку на полку.
 export function needsExpiry(category, categories) {
   const c = (categories || []).find((x) => x.name === String(category || '').trim())

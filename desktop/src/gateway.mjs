@@ -70,7 +70,7 @@ export const MESSAGES = {
   payServicesOnline: 'Сервисы перевода меняются только с интернетом.',
   historyOnline: 'История движения товара открывается только с интернетом.',
   noOfflineLogin: 'Нет связи с сервером. Под этим именем на этом компьютере ещё не входили — первый вход возможен только с интернетом.',
-  suspended: 'Работа аптеки приостановлена. Обратитесь к поставщику программы.',
+  suspended: 'Работа магазина приостановлен. Обратитесь к поставщику программы.',
   broken: 'Программа не смогла выполнить действие. Повторите; если не поможет — перезапустите программу.',
   oldSale: 'Этот чек оформлен давно и на кассе не хранится. Возврат по нему возможен только с интернетом.',
   offlineLimit:
@@ -109,7 +109,7 @@ const LOCAL_SECTIONS = new Set([
   'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices',
 ])
 
-// Имя файла из кода аптеки. Код приходит с сервера, но в путь на диске попадает
+// Имя файла из кода магазина. Код приходит с сервера, но в путь на диске попадает
 // только то, что безвредно в имени файла
 const fileSafe = (code) => String(code).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80) || 'apteka'
 
@@ -128,7 +128,7 @@ export function createGateway({
   onSession = () => {},
   // Версия программы — сервер запоминает её у кассы
   appVersion = '',
-  // Открыть файл базы аптеки. Основная часть программы передаёт сюда открытие с
+  // Открыть файл базы магазина. Основная часть программы передаёт сюда открытие с
   // починкой из копии (backup.mjs): { db, restored }. По умолчанию — просто открыть
   openFile = (file) => ({ db: openDb(file, PHARMACY_SCHEMA), restored: null }),
   log = { info() {}, warn() {}, error() {} },
@@ -140,7 +140,7 @@ export function createGateway({
   const asDevice = { 'X-Device-Key': deviceKeyOf(core) }
   const remote = createRemote({ apiUrl, fetchImpl, onDate: (d, age) => clock.serverTime(d, age) })
 
-  // Открытая база аптеки. Одна: на компьютере работает одна аптека
+  // Открытая база магазина. Одна: на компьютере работает один магазин
   let pharmacy = null
   // Слушает ли окно события (после входа — да)
   let listening = false
@@ -164,7 +164,7 @@ export function createGateway({
     return id ? accountById(core, id) : null
   }
 
-  // ── База аптеки ──
+  // ── База магазина ──
   function closePharmacy() {
     if (!pharmacy) return
     pharmacy.sync.stop()
@@ -176,7 +176,7 @@ export function createGateway({
     pharmacy = null
   }
 
-  // Большой обмен (первая загрузка всей аптеки) идёт дольше обычного запроса
+  // Большой обмен (первая загрузка всего магазина) идёт дольше обычного запроса
   const SYNC_TIMEOUT_MS = 120000
   // Отправка — небольшая пачка, сервер принимает её за секунду-две. Ждать дольше
   // незачем: если сеть «зависла», кассир должен увидеть «нет интернета» скоро,
@@ -193,14 +193,14 @@ export function createGateway({
     // ушедшее на сервер пропало
     if (restored) {
       setMeta(db, 'restored', JSON.stringify({ from: restored.at, at: clock.now() }))
-      log.error(`база аптеки ${code} была повреждена — ${restored.at ? 'поднята из копии' : 'начата заново'}`)
+      log.error(`база магазина ${code} была повреждена — ${restored.at ? 'поднята из копии' : 'начата заново'}`)
     }
     const ph = { code, name, db, users: new Map(), sync: null }
     // Чьим ключом ушла пачка — чтобы знать, чей вход отозван, если сервер откажет
     const sentAs = new Map()
 
     // Каким ключом отправить операцию. Обычно — ключом того, кто её сделал. Если его
-    // ключа уже нет (сменили пароль, вышел срок), годится ключ владельца аптеки,
+    // ключа уже нет (сменили пароль, вышел срок), годится ключ владельца магазина,
     // входившего на этом компьютере: сервер принимает от владельца операции любого
     // сотрудника. Иначе операция ждёт — её автора или владельца.
     function tokenFor(op) {
@@ -270,7 +270,7 @@ export function createGateway({
               }
             }
             const changed = applyPull(db, res, { now: clock.now() })
-            // Сервер отдал аптеку целиком — просьба «нужно всё заново» выполнена. Отказ,
+            // Сервер отдал магазин целиком — просьба «нужно всё заново» выполнена. Отказ,
             // пришедший в этом же ответе, сюда входит: данные сняты с того же состояния
             if (res.full) setMeta(db, 'needFull', '0')
             return [...new Set([...changed, ...stale])]
@@ -379,7 +379,7 @@ export function createGateway({
     }
   }
 
-  // Каким сотрудником аптеки подписывать документы (см. snapshot.mjs)
+  // Каким сотрудником магазина подписывать документы (см. snapshot.mjs)
   function docUser(ph, acc) {
     if (!ph.users.has(acc.login)) {
       // Номер сообщает сервер при обмене. Запасной путь — посмотреть в документах,
@@ -413,14 +413,14 @@ export function createGateway({
       return
     }
     if (res.status === 403) {
-      // Сервер закрыл работу аптеки. Запоминаем, чтобы и без связи касса не работала
+      // Сервер закрыл работу магазина. Запоминаем, чтобы и без связи касса не работала
       const text = String(res.data?.message || '')
       if (/приостановлен/i.test(text)) setSubscription(core, acc.pharmacyCode, { status: 'suspended' })
       else if (/Подписка закончилась/.test(text)) setSubscription(core, acc.pharmacyCode, { status: 'expired' })
     }
   }
 
-  // Что сервер сказал о сотруднике и его аптеке — запомнить для работы без связи
+  // Что сервер сказал о сотруднике и его магазине — запомнить для работы без связи
   function remember(user, extra = {}) {
     const acc = saveAccount(core, user, { now: clock.now(), ...extra })
     if (acc && user.subscription) {
@@ -506,7 +506,7 @@ export function createGateway({
 
     const user = res.data?.user
     if (res.status >= 200 && res.status < 300 && typeof res.data?.token === 'string' && res.data.token && user?.id) {
-      // Владелец сервиса в программу не входит: она для аптеки. Его ключ не храним —
+      // Владелец сервиса в программу не входит: она для магазина. Его ключ не храним —
       // окно само покажет объяснение (client/src/db/auth.js)
       if (user.role === 'superadmin' || !user.pharmacy?.code) {
         return { ...res, data: { ...res.data, token: DESKTOP_TOKEN } }
@@ -728,7 +728,7 @@ export function createGateway({
     return res
   }
 
-  // Открыть аптеку вошедшего и начать обмен. База не открылась — входа нет: работать
+  // Открыть магазин вошедшего и начать обмен. База не открылась — входа нет: работать
   // не с чем, и оставлять человека «за кассой» без базы нельзя
   function enter(acc) {
     try {
@@ -773,7 +773,7 @@ export function createGateway({
     request,
     deviceId,
 
-    // Программа запущена: если кто-то был за кассой — открываем его аптеку
+    // Программа запущена: если кто-то был за кассой — открываем его магазин
     // и начинаем обмен с сервером
     resume() {
       const acc = activeAccount()
@@ -785,10 +785,10 @@ export function createGateway({
       try {
         openPharmacy(acc.pharmacyCode).sync.start().catch(() => {})
       } catch (e) {
-        // База аптеки не открылась: файл занят, диск недоступен, база от более новой
+        // База магазина не открылась: файл занят, диск недоступен, база от более новой
         // версии. Программа всё равно должна запуститься — человек увидит экран входа,
         // а не окно с ошибкой; при входе база откроется ещё раз
-        log.error('база аптеки не открылась при запуске', e)
+        log.error('база магазина не открылась при запуске', e)
         session.deactivate()
         return false
       }
@@ -847,12 +847,12 @@ export function createGateway({
     syncNow: () => (pharmacy ? pharmacy.sync.run() : Promise.resolve({ ok: false, changed: [] })),
 
     // Загрузить всё заново: забыть отметку «докуда получили» и спросить у сервера
-    // всю аптеку. Сделанное здесь и не отправленное при этом не теряется — оно, как
+    // весь магазин. Сделанное здесь и не отправленное при этом не теряется — оно, как
     // всегда, сначала уходит на сервер и накладывается поверх свежих данных
     resync() {
       if (!pharmacy || !activeAccount()) return Promise.resolve({ ok: false, changed: [] })
       // Обмен, который идёт прямо сейчас, дописал бы прежнюю отметку обратно — и вместо
-      // всей аптеки пришли бы одни изменения. Поэтому кроме отметки ставим пометку
+      // всего магазина пришли бы одни изменения. Поэтому кроме отметки ставим пометку
       // «нужно всё»: она снимется, только когда полный ответ ляжет в базу
       setMeta(pharmacy.db, 'needFull', '1')
       setMeta(pharmacy.db, 'cursor', '')
@@ -889,7 +889,7 @@ export function createGateway({
     // Есть ли у вошедшего право (любое из перечисленных). Владелец может всё
     activeCan: (...keys) => hasPerm(activeAccount(), ...keys),
 
-    // Открытая база аптеки — для резервной копии
+    // Открытая база магазина — для резервной копии
     pharmacyFile: () => (pharmacy ? { name: pharmacy.name, db: pharmacy.db } : null),
 
     // Раз в минуту: не вышел ли срок работы без связи, пока программа просто стояла

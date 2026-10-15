@@ -25,7 +25,7 @@ const URLS = [
   'postgresql://u:p%40word@host:5432/db?schema=admin',
 ]
 
-const CODES = ['shifo', 'Аптека Салом', 'shifo-2', '  ', 'ОЧЕНЬ-длинный-код-аптеки-который-никто-не-станет-набирать-руками']
+const CODES = ['shifo', 'Магазин Салом', 'shifo-2', '  ', 'ОЧЕНЬ-длинный-код-магазина-который-никто-не-станет-набирать-руками']
 
 test('обе копии формулы дают одинаковый адрес схемы', async () => {
   const mjs = await import(mjsPath)
@@ -36,7 +36,7 @@ test('обе копии формулы дают одинаковый адрес 
   assert.equal(mjs.ADMIN_SCHEMA, ts.ADMIN_SCHEMA, 'разные имена схемы панели')
 })
 
-test('обе копии одинаково превращают код аптеки в имя схемы', async () => {
+test('обе копии одинаково превращают код магазина в имя схемы', async () => {
   const mjs = await import(mjsPath)
   for (const code of CODES) {
     assert.equal(mjs.schemaNameFor(code), ts.schemaNameFor(code), `schemaNameFor разошлись на «${code}»`)
@@ -57,7 +57,7 @@ test('уже указанная схема заменяется, а не доб�
   assert.deepEqual(all, ['tenant_shifo'], 'в адресе оказалось несколько схем: ' + all.join(', '))
 })
 
-test('имя схемы аптеки безопасно для Postgres', () => {
+test('имя схемы магазина безопасно для Postgres', () => {
   // Кириллица, пробелы и дефисы в имени схемы пришлось бы экранировать в каждом
   // запросе — включая те шесть мест, где в проекте написан сырой SQL
   for (const code of CODES) {

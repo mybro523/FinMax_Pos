@@ -4,7 +4,7 @@ export class CreateUserDto {
   @IsString() name: string
   @IsString() @MinLength(6) password: string
   @IsOptional() @IsIn(['founder', 'cashier']) role?: string
-  // Роль аптеки или 'owner' — владелец. Не указана — системная роль кассира
+  // Роль магазина или 'owner' — владелец. Не указана — системная роль кассира
   @IsOptional() @IsString() roleId?: string
 }
 

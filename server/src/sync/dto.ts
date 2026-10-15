@@ -1,7 +1,7 @@
 import { Type } from 'class-transformer'
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator'
 
-// Номер кассы и номера операций создаёт программа на компьютере аптеки. Это
+// Номер кассы и номера операций создаёт программа на компьютере магазина. Это
 // обычные UUID; проверяем вид, чтобы в базу не попало ничего, кроме букв, цифр и дефисов
 const ID = /^[A-Za-z0-9_:.-]{1,64}$/
 

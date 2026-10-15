@@ -29,7 +29,7 @@ const CFG = {
   region: 'auto',
 }
 const AT = new Date('2026-08-22T03:00:00.000Z')
-const BODY = Buffer.from('копия аптеки', 'utf8')
+const BODY = Buffer.from('копия магазина', 'utf8')
 
 test('заголовки запроса собраны так, как ждёт хранилище', () => {
   const { url, headers } = signPut(CFG, 'apteka/shifo/den-05.json.gz', BODY, 'application/gzip', AT)

@@ -1,21 +1,22 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { LuCircleDollarSign, LuPackagePlus, LuTruck } from 'react-icons/lu'
-import Layout from '../components/Layout'
 import { useToast } from '../components/ui'
 import { api } from '../db/api'
 import { money, onChanged } from '../db/store'
 import { useT } from '../lib/i18n'
-import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
 import { getUser } from '../db/auth'
 
 // ── Долги поставщикам ──
-// Сводка одним экраном: сколько аптека должна всего, сколько приходов оформлено
+// Вкладка раздела «Поставщики»: сколько должны всего, сколько приходов оформлено
 // в долг и кому сколько. Числа считает сервер (в программе без связи — сама касса
-// по своим данным), карточка ведёт в «Поставщиков», где долг гасится.
+// по своим данным); карточка открывает поставщика, где долг гасится.
+//
+// Это не отдельная страница: раньше «Поставщики» и «Долги поставщикам» были двумя
+// плитками меню про одно и то же, и люди искали оплату не там.
 
-export default function SupplierDebts() {
+export function useDolgiPostavshikam() {
   const t = useT()
   const toast = useToast()
   const [svodka, setSvodka] = useState(null)
@@ -34,7 +35,6 @@ export default function SupplierDebts() {
   useEffect(() => onChanged((keys) => keys.some((k) => ['suppliers', 'arrivals', 'supplierPayments'].includes(k)) && load()), [load])
 
   const s = svodka || { total: 0, arrivals: 0, suppliers: [] }
-
   const exCols = [
     { header: t('Поставщик'), key: 'name', width: 36 },
     { header: t('Долг'), key: 'debt', width: 16, money: true },
@@ -45,9 +45,16 @@ export default function SupplierDebts() {
   const exportExcel = () =>
     skachatXlsx({ fayl: t('Долги поставщикам'), zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Долги поставщикам')}`, podzag: `${t('Всего должны')}: ${money(s.total)}`, cols: exCols, rows: exRows, itogi: exItogi })
 
+  return { svodka, s, exCols, exRows, exItogi, exportExcel }
+}
+
+// onOpen(p) — открыть поставщика (его карточку с оплатой)
+export default function SupplierDebtsPanel({ dolgi, onOpen }) {
+  const t = useT()
+  const { svodka, s, exCols, exRows, exItogi } = dolgi
+
   return (
-    <Layout title={t('Долги поставщикам')} subtitle={`${t('Всего должны')}: ${money(s.total)}`}
-      actions={<ExportPechat onExcel={exportExcel} />}>
+    <>
       <PrintSheet zagolovok={t('Долги поставщикам')} podzag={`${t('Всего должны')}: ${money(s.total)}`} cols={exCols} rows={exRows} itogi={exItogi} />
       <div className="mini-cards supd-cards" data-tour="supd.cards">
         <div className="mini-card">
@@ -71,19 +78,19 @@ export default function SupplierDebts() {
         )}
         <div className="supd-grid">
           {s.suppliers.map((p) => (
-            <Link key={p.id} to="/suppliers" className="supd-card" title={t('Открыть поставщиков')}>
+            <button key={p.id} type="button" className="supd-card" onClick={() => onOpen?.(p)} title={t('Открыть поставщика')}>
               <span className="supd-name">{p.name}</span>
               <b className="supd-debt">{money(p.debt)}</b>
               <span className="tag-cat">{p.arrivals} {t('приход(ов)')}</span>
-            </Link>
+            </button>
           ))}
         </div>
         {s.suppliers.length > 0 && (
           <div className="tag-cat" style={{ marginTop: 12 }}>
-            {t('Долг гасится в разделе «Поставщики» — кнопкой «Оплатить» у поставщика.')}
+            {t('Нажмите на карточку — откроется поставщик, где долг гасится кнопкой «Записать оплату».')}
           </div>
         )}
       </div>
-    </Layout>
+    </>
   )
 }

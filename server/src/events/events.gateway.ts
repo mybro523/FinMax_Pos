@@ -14,19 +14,19 @@ import { ChangeStamp } from './change-stamp.service'
 // событие не оставит после себя выдуманную запись, а лишь отложит обновление.
 //
 // ── Две комнаты ──
-// Аптека слышит только своё: комната по имени её схемы. Раньше сигнал уходил всем
-// подключённым сразу — чужих данных это не открывало, но продажа в одной аптеке
+// Магазин слышит только своё: комната по имени её схемы. Раньше сигнал уходил всем
+// подключённым сразу — чужих данных это не открывало, но продажа в одном магазине
 // заставляла перезапрашивать данные все остальные.
 //
-// Владелец сервиса слышит своё: комната «service». Ему нужно другое — что аптеку
+// Владелец сервиса слышит своё: комната «service». Ему нужно другое — что магазин
 // завели, продлили, приостановили, и кто из клиентов сейчас за кассой.
 //
 // ── Что ходит по связи ──
-//   changed      — раздел устарел, перезапроси (в аптеку)
-//   subscription — состояние подписки изменилось, переспроси «кто я» (в аптеку)
-//   suspended    — работа приостановлена, вот объяснение (в аптеку, перед обрывом)
+//   changed      — раздел устарел, перезапроси (в магазин)
+//   subscription — состояние подписки изменилось, переспроси «кто я» (в магазин)
+//   suspended    — работа приостановлена, вот объяснение (в магазин, перед обрывом)
 //   service      — в панели что-то изменилось (владельцу сервиса)
-//   presence     — кто из аптек сейчас на связи (владельцу сервиса)
+//   presence     — кто из магазинов сейчас на связи (владельцу сервиса)
 
 const RECHECK_MS = 60_000
 const SERVICE_ROOM = 'service'
@@ -49,7 +49,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
 
   // Кто сейчас на связи: сотрудник -> его открытые соединения (ПК кассы и телефон)
   private readonly live = new Map<string, Set<Live>>()
-  // Сколько устройств у каждой аптеки — из этого складывается «кто сейчас работает»
+  // Сколько устройств у каждого магазина — из этого складывается «кто сейчас работает»
   private readonly online = new Map<string, number>()
   private timer: NodeJS.Timeout | null = null
 
@@ -93,12 +93,12 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         client.data.warm = payload.sch
         this.markOnline(client.data.code, payload.sch, +1)
       }
-      // Мы дошли до сюда — значит доступ действует и аптека не приостановлена.
+      // Мы дошли до сюда — значит доступ действует и магазин не приостановлен.
       // Для того, у кого на экране висит объявление о приостановке, это и есть
       // разрешение работать дальше: он заплатил, пока смотрел на объявление.
       client.emit('resumed')
     } else {
-      // Своей аптеки нет — это владелец сервиса
+      // Своего магазина нет — это владелец сервиса
       client.join(SERVICE_ROOM)
       client.data.service = true
       // Сразу рассказываем, кто на связи: панель открылась и должна это увидеть,
@@ -126,8 +126,8 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   }
 
   // ── Кто сейчас работает ──
-  // Считаем устройства, а не людей: у аптеки бывает ПК кассы и телефон, и уход
-  // одного не означает, что аптека закрылась.
+  // Считаем устройства, а не людей: у магазина бывает ПК кассы и телефон, и уход
+  // одного не означает, что магазин закрылся.
   private markOnline(code: string, schema: string | undefined, delta: number) {
     const was = this.online.get(code) || 0
     const now = was + delta
@@ -139,7 +139,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       if (now > 0) this.pool.keepWarm(schema)
       else this.pool.letCool(schema)
     }
-    // Панель обновляем, только когда аптека появилась или пропала целиком:
+    // Панель обновляем, только когда магазин появился или пропал целиком:
     // переподключение телефона её дёргать не должно
     if ((was === 0) !== (now === 0)) this.toService('presence', { online: [...this.online.keys()] })
   }
@@ -149,7 +149,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   }
 
   // Действует ли ещё доступ. Учётные записи живут в панели управления, там же
-  // видно и состояние аптеки: приостановленная не должна оставаться на связи.
+  // видно и состояние магазина: приостановленный не должен оставаться на связи.
   private async stillAllowed(accountId: string, tokenIat: number): Promise<boolean> {
     const acc = await this.admin.account.findUnique({
       where: { id: accountId },
@@ -170,7 +170,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     this.live.delete(accountId)
   }
 
-  // ── Приостановка аптеки ──
+  // ── Приостановка магазина ──
   // Сначала объяснение, потом обрыв. Наоборот нельзя: кассир увидел бы просто
   // пропавшую связь и решил, что виноват интернет, — а через минуту упёрся бы
   // в отказ посреди продажи, так и не поняв причины.
@@ -184,7 +184,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         /* соединений уже нет — тем лучше */
       }
     }, GOODBYE_MS).unref?.()
-    this.log.log(`Аптека «${schema}»: соединения закрыты после приостановки`)
+    this.log.log(`Магазин «${schema}»: соединения закрыты после приостановки`)
   }
 
   // Подписка изменилась: продлили, возобновили, поправили срок. Устройство
@@ -195,7 +195,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   }
 
   // ── Владельцу сервиса ──
-  // what: 'pharmacies' — список изменился; 'activity' — в аптеке шла работа
+  // what: 'pharmacies' — список изменился; 'activity' — в магазине шла работа
   toService(what: string, payload: any = {}) {
     if (!this.server) return
     this.server.to(SERVICE_ROOM).emit(what === 'presence' ? 'presence' : 'service', { what, ...payload })
@@ -219,14 +219,14 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     }
   }
 
-  // Вызывается после успешной записи в базу. Аптеку берём из контекста запроса —
+  // Вызывается после успешной записи в базу. Магазин берём из контекста запроса —
   // того же, по которому запрос ходил в её схему.
   changed(...keys: string[]) {
     this.changedIn(currentTenantSchema(), ...keys)
   }
 
-  // То же, но с явно указанной аптекой — для работы вне запроса: почасового
-  // пересчёта просрочки и прочих обходов всех аптек подряд
+  // То же, но с явно указанным магазином — для работы вне запроса: почасового
+  // пересчёта просрочки и прочих обходов всех магазинов подряд
   changedIn(schema: string | undefined, ...keys: string[]) {
     if (!schema) return
     if (!this.server) {

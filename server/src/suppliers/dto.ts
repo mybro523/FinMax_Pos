@@ -7,7 +7,7 @@ export class CreateSupplierDto {
   @IsString() @MinLength(1) @MaxLength(120) name: string
   @IsOptional() @IsString() @MaxLength(60) phone?: string
   @IsOptional() @IsString() @MaxLength(500) note?: string
-  // Долг на момент заведения — то, что аптека задолжала до появления раздела.
+  // Долг на момент заведения — то, что магазин задолжал до появления раздела.
   // Учитывается только у владельца: кассир заводит поставщика ради прихода
   @IsOptional() @IsNumber() @Min(0) @Max(MAX_MONEY) openingDebt?: number
 }

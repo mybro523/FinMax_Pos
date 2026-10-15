@@ -6,9 +6,9 @@ import { currentTenantSchema } from '../prisma/tenant-context'
 
 // ── Не отдавать одно и то же дважды ──
 //
-// Список товаров у настоящей аптеки — тысячи наименований, и меняется он редко:
+// Список товаров у настоящего магазина — тысячи наименований, и меняется он редко:
 // приход бывает раз в день. А забирался заново при каждом обновлении экрана и при
-// каждом восстановлении связи. Для аптеки на восемь тысяч позиций это мегабайты
+// каждом восстановлении связи. Для магазина на восемь тысяч позиций это мегабайты
 // по сети, их разбор в браузере кассы — и всё ради того же самого списка.
 //
 // Теперь браузер присылает отметку прошлого ответа. Совпала — отвечаем «то же
@@ -43,7 +43,7 @@ export class FreshnessInterceptor implements NestInterceptor {
     if (!key) return next.handle()
 
     const schema = currentTenantSchema()
-    if (!schema) return next.handle() // вне аптеки отмечать нечего
+    if (!schema) return next.handle() // вне магазина отмечать нечего
 
     const res = ctx.switchToHttp().getResponse()
     const tag = this.stamp.tag(schema, key, req.originalUrl || req.url)

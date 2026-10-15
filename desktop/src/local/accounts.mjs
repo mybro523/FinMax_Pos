@@ -59,7 +59,7 @@ export function deviceIdOf(db) {
 }
 
 // ── Ключ этого компьютера ──
-// Номер кассы знают все сотрудники аптеки: он стоит в сменах, а смены получает каждая
+// Номер кассы знают все сотрудники магазина: он стоит в сменах, а смены получает каждая
 // касса. Чтобы под этим номером не мог заговорить кто-то другой, касса при первом
 // обмене называет серверу ещё и ключ; дальше сервер принимает под этим номером только
 // его. Ключ создаётся вместе с номером и лежит рядом: потерять одно без другого нельзя.
@@ -76,7 +76,7 @@ export function deviceKeyOf(db) {
 export const accountById = (db, id) => q(db, 'SELECT * FROM accounts WHERE id = ?').get(id) || null
 export const accountByLogin = (db, login) => q(db, 'SELECT * FROM accounts WHERE login = ?').get(login) || null
 
-// Запомнить то, что сервер сказал о сотруднике: кто он, из какой аптеки, что с подпиской.
+// Запомнить то, что сервер сказал о сотруднике: кто он, из какого магазина, что с подпиской.
 // user — ответ сервера на вход или на «кто я». verifier — уже зашифрованный отпечаток;
 // undefined означает «прежний не трогать» (при «кто я» пароля у нас нет).
 export function saveAccount(db, user, { verifier, now }) {
@@ -118,7 +118,7 @@ export function saveAccount(db, user, { verifier, now }) {
 // Без интернета под ним больше не войти — до следующего удачного входа через сервер.
 export const dropVerifier = (db, id) => q(db, 'UPDATE accounts SET verifier = NULL WHERE id = ?').run(id)
 
-// Что сервер сказал о подписке этой аптеки. Касается всех её сотрудников сразу
+// Что сервер сказал о подписке этого магазина. Касается всех её сотрудников сразу
 export function setSubscription(db, pharmacyCode, { status, paidUntil }) {
   q(db, 'UPDATE accounts SET subStatus = COALESCE(?, subStatus), paidUntil = COALESCE(?, paidUntil) WHERE pharmacyCode = ?').run(
     status ?? null,
@@ -156,7 +156,7 @@ export function subscriptionMessage(v) {
       return 'Работа приостановлена. Обратитесь к поставщику программы.'
     case 'expired':
       return (
-        'Подписка закончилась ' + tjMoment(v.paidUntil) + '. Данные аптеки сохранены — ' +
+        'Подписка закончилась ' + tjMoment(v.paidUntil) + '. Данные магазина сохранены — ' +
         'работа продолжится сразу после оплаты. Обратитесь к поставщику программы.'
       )
     case 'trial':
@@ -306,10 +306,10 @@ export async function offlineLogin(db, { name, password }, { now, open }) {
     throw new ApiError(401, 'Неверное имя или пароль')
   }
 
-  // Пароль верный, но работать аптеке нельзя — говорим прямо, как сервер: человек
+  // Пароль верный, но работать магазину нельзя — говорим прямо, как сервер: человек
   // должен понять, что дело не в пароле
   const sub = subscriptionOf(acc, now)
-  if (sub?.status === 'suspended') throw new ApiError(401, 'Работа аптеки приостановлена. Обратитесь к поставщику программы.')
+  if (sub?.status === 'suspended') throw new ApiError(401, 'Работа магазина приостановлен. Обратитесь к поставщику программы.')
   if (sub?.status === 'expired') throw new ApiError(401, sub.message)
 
   throttle.success(db, [nameKey(login), DEVICE_KEY])

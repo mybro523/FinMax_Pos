@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo, useDeferredValue, lazy, Suspense } from 'react'
 import {
   LuCamera, LuShoppingCart, LuPlus, LuMinus, LuTrash2, LuCheck, LuPrinter, LuScanLine, LuClock,
-  LuTriangleAlert, LuX,
+  LuTriangleAlert, LuX, LuKeyboard, LuLock, LuUserRound,
 } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { Modal, useToast, useDialog, PAYMENTS } from '../components/ui'
@@ -11,7 +11,7 @@ const CameraScanner = lazy(() => import('../components/CameraScanner'))
 import KassaCatalog, { LIMIT } from '../components/KassaCatalog'
 import Lightbox from '../components/Lightbox'
 import { useCollection, useFirstLoading, money, db, stockText, realId } from '../db/store'
-import { useAuth, useCan } from '../db/auth'
+import { useAuth, useCan, logout } from '../db/auth'
 import { isVesovoy, kgText, KG, gramsOfKg,
   uppOf, isDivisible as isDiv, lineUnits, lineGross, lineNet,
   sellableUnits, expiredUnits, hasExpired, stockUnits,
@@ -19,7 +19,7 @@ import { isVesovoy, kgText, KG, gramsOfKg,
 } from '../lib/units'
 import {
   MAX_CHEKOV, klyuch, chitat, pisat, razobrat, novyChek, svobodnyNomer,
-  osvezhit, sdacha, kupyury, pohozheNaKod, estBukva,
+  osvezhit, sdacha, kupyury, pohozheNaKod, estBukva, raspredelit,
 } from '../lib/cheki'
 import { findByBarcode, checkout } from '../db/ops'
 import { productPayload } from '../components/ProductForm'
@@ -38,6 +38,7 @@ import { usePechat } from '../components/PrintDialog'
 import { getRekvizity } from '../lib/rekvizity'
 import { useCategories, categoryNames } from '../lib/categories'
 import NumberInput from '../components/NumberInput'
+import VirtualKeyboard from '../components/VirtualKeyboard'
 
 // ── Хелперы штучной продажи ──
 // Сама арифметика упаковок и штук живёт в lib/units — одна на всю программу.
@@ -47,7 +48,7 @@ const availUnits = (p) => sellableUnits(p)
 // ── Строка чека: числа обязаны сходиться ──
 // Покупатель умножает то, что видит. Раньше в строке стояло количество упаковок,
 // а рядом цена ОДНОЙ ШТУКИ: «1 уп × 7,5 сомони», итог 150. Для товара, который
-// делится на двадцать таблеток, это выглядело как ошибка кассы — и объяснить
+// делится на двадцать штук, это выглядело как ошибка кассы — и объяснить
 // её у прилавка было нечем.
 //
 // Поэтому показываем то, что перемножается: целые упаковки — по цене упаковки,
@@ -61,7 +62,7 @@ const VSE = '\u0000vse'
 // и касса будет считать экран широким, пока на нём показан переключатель
 const UZKO = '(max-width: 1279px)'
 // Один сравниватель на всю кассу. localeCompare с указанием языка заводит его заново
-// на каждое сравнение, а каталог в настоящей аптеке — это тысячи названий
+// на каждое сравнение, а каталог в настоящем магазине — это тысячи названий
 const poAlfavitu = new Intl.Collator('ru').compare
 
 export default function Pos() {
@@ -87,8 +88,8 @@ export default function Pos() {
 
   // ── Открытые чеки ──
   // Чек больше не живёт в памяти страницы: он хранится на устройстве и переживает
-  // уход в другой раздел и перезагрузку. Состояние помнит, чьей аптеки эти чеки, —
-  // чтобы при смене аптеки в том же браузере не записать чужие под новый ключ.
+  // уход в другой раздел и перезагрузку. Состояние помнит, чьего магазина эти чеки, —
+  // чтобы при смене магазина в том же браузере не записать чужие под новый ключ.
   const [cheki, setCheki] = useState(() => ({ code: phCode, ...chitat(phCode) }))
   useEffect(() => {
     if (cheki.code !== phCode) setCheki({ code: phCode, ...chitat(phCode) })
@@ -127,6 +128,18 @@ export default function Pos() {
   const setReceived = (v) => patch({ received: v })
   const setPayVia = (v) => patch({ payVia: v })
 
+  // ── Скидка на весь чек ──
+  // Одна цифра на чек — сумма или процент. Сами скидки по-прежнему лежат в строках:
+  // raspredelit раскладывает названную скидку по ним, а снятие обнуляет строки.
+  // Пока скидка задана на чек, строки для правки закрыты — иначе две скидки спорили бы
+  const obshchaya = !!chek.discValue
+  const setDiscMode = (m) => patch({ discMode: m })
+  const setObshchaya = (v) => {
+    const val = String(v ?? '')
+    if (val === '') patch((c) => ({ discValue: '', cart: c.cart.map((i) => (i.discount ? { ...i, discount: 0 } : i)) }))
+    else patch({ discValue: val })
+  }
+
   const [code, setCode] = useState('')
   // Список считается от текущих товаров, а не запоминается в момент набора.
   // Раньше это было состояние: наберёшь название, пока список ещё едет
@@ -143,6 +156,7 @@ export default function Pos() {
   const [cat, setCat] = useState(VSE)
   const [hi, setHi] = useState(0) // подсвеченная строка каталога
   const [pane, setPane] = useState('check') // на узком экране: 'check' | 'catalog'
+  const [kb, setKb] = useState(false) // экранная клавиатура
   const [izm, setIzm] = useState(null) // что изменилось в чеке, пока он лежал: { id, text }
   const inputRef = useRef(null)
   const receivedRef = useRef(null)
@@ -152,6 +166,16 @@ export default function Pos() {
   }, [cart])
   const chekRef = useRef(chek)
   chekRef.current = chek
+
+  // Скидка на чек пересчитывается при любом изменении строк: добавили товар,
+  // поменяли количество, сверка с базой подняла цену — доли остаются верными
+  const grossSig = cart.map((i) => i.productId + ':' + lineGross(i)).join('|')
+  useEffect(() => {
+    if (!obshchaya) return
+    const c = chekRef.current
+    const r = raspredelit(c.cart, c.discMode, c.discValue)
+    if (r.changed) setCart(r.cart)
+  }, [grossSig, obshchaya, chek.discMode, chek.discValue, setCart])
 
   // ── Чек или каталог на узком экране ──
   // Кассир начал набирать название, а на экране чек — подходящих товаров он не
@@ -476,7 +500,7 @@ export default function Pos() {
         setCode('')
       } else {
         // Не добавился (нет на складе) — набранное не стираем: рядом в списке
-        // другие формы того же лекарства, и искать их заново кассиру незачем
+        // другие формы того же товара, и искать их заново кассиру незачем
         beepError()
       }
       focusScanner()
@@ -601,7 +625,7 @@ export default function Pos() {
       return
     }
 
-    // Свои короткие коды (четыре-пять цифр) аптеки тоже заводят. Если такого кода
+    // Свои короткие коды (четыре-пять цифр) магазина тоже заводят. Если такого кода
     // нет ни у одного товара даже частью, это не поиск, а новый код
     const korotkiyKod = /^\d+$/.test(val) && !rows.length
     if (pohozheNaKod(val) || korotkiyKod) {
@@ -675,7 +699,7 @@ export default function Pos() {
     pieces = fit.pieces
     if (fit.capped) {
       // Отказ не должен быть тупиком. Остаток — последняя пачка, она уже в корзине,
-      // а кассиру нужны три таблетки из неё: штук на складе хватает, места не хватает
+      // а кассиру нужны три штуки из неё: штук на складе хватает, места не хватает
       // только из-за упаковки. Раньше он видел просто «максимум 5 шт» и не понимал,
       // что делать, — а сделать было и правда нечего.
       toast(
@@ -731,6 +755,7 @@ export default function Pos() {
   // Скидка (сомони) на позицию — не больше суммы позиции
   function setDiscount(productId, value) {
     if (looksLikeScan(value)) return bailOutScan()
+    if (obshchaya) return toast(t('Скидка задана на весь чек — снимите её, чтобы править по строкам'), 'err')
     const it = cart.find((i) => i.productId === productId)
     // Предупреждаем, если скидку урезали: иначе позиция молча уходила бы в ноль
     if (it && Number(value) > lineGross(it)) {
@@ -754,10 +779,19 @@ export default function Pos() {
   const remove = (id) => setCart((c) => c.filter((i) => i.productId !== id))
   // «Очистить корзину» — покупатель передумал. Сам чек остаётся открытым, пустым
   const ochistit = () => {
-    patch({ cart: [], received: '' })
+    patch({ cart: [], received: '', discValue: '' })
     setIzm(null)
     focusScanner()
   }
+
+  // ── Блокировка ──
+  // Кассир отошёл от прилавка: экран закрывается страницей входа. Открытые чеки
+  // остаются на устройстве — после входа касса откроется с тем же чеком
+  const zablokirovat = () => {
+    pisat(cheki.code, cheki)
+    logout()
+  }
+  const roleName = auth?.roleName || (auth?.role === 'founder' ? t('Владелец') : t('Кассир'))
   const total = cart.reduce((s, i) => s + lineNet(i), 0)
   const discountTotal = cart.reduce((s, i) => s + Math.min(i.discount || 0, lineGross(i)), 0)
   // Весовые позиции в сводке — килограммами, остальные — упаковками и штуками
@@ -1061,8 +1095,17 @@ export default function Pos() {
   // ── Горячие клавиши ──
   // Обработчик один на всю жизнь страницы, а действия берутся из ссылки, которая
   // обновляется на каждой отрисовке: так клавиши всегда видят текущий чек.
+  // F3 — поле скидки на чек. F2 при заданной скидке на чек ведёт туда же:
+  // строки закрыты, и курсор в закрытом поле только сбивал бы с толку
+  const focusChekDiscount = () => {
+    const el = document.querySelector('.inp-chek-discount')
+    if (!el) return toast(t('Скидка на чек вам не разрешена'), 'err')
+    el.focus()
+    el.select?.()
+  }
+  const skidka = () => (obshchaya ? focusChekDiscount() : focusCell('inp-discount'))
   const keys = useRef({})
-  keys.current = { novyyChek, kOplate, focusCell, moveSel, changeSel, removeSel, focusScanner }
+  keys.current = { novyyChek, kOplate, focusCell, moveSel, changeSel, removeSel, focusScanner, skidka, focusChekDiscount }
   useEffect(() => {
     const onKey = (e) => {
       if (e.defaultPrevented) return
@@ -1070,7 +1113,8 @@ export default function Pos() {
       // клавиши принадлежат им, а не кассе
       if (document.querySelector('.overlay, .tur-root')) return
       const k = keys.current
-      if (e.key === 'F2') { e.preventDefault(); k.focusCell('inp-discount'); return }
+      if (e.key === 'F2') { e.preventDefault(); k.skidka(); return }
+      if (e.key === 'F3') { e.preventDefault(); k.focusChekDiscount(); return }
       if (e.key === 'F4') { e.preventDefault(); k.focusCell('inp-pieces', 'inp-ves'); return }
       if (e.key === 'F8') { e.preventDefault(); k.novyyChek(); return }
       if (e.key === 'F9') { e.preventDefault(); k.kOplate(); return }
@@ -1107,6 +1151,7 @@ export default function Pos() {
 
   return (
     <Layout fill title={t('Касса')} subtitle={t('Продажа по сканеру штрихкода · упаковками и поштучно')}>
+      <div className="kassa-wrap">
       <div className={'kassa pane-' + pane}>
         {/* ── Сканер и каталог ──
             В разметке стоят первыми: на телефоне поле сканера должно быть сверху
@@ -1141,7 +1186,7 @@ export default function Pos() {
             </div>
             <div className="scan-hint">
               <span className="ic"><LuScanLine size={15} /></span>
-              {t('USB-сканер работает как клавиатура · для деления на таблетки укажите «штук в упаковке» в карточке товара')}
+              {t('USB-сканер работает как клавиатура · для продажи поштучно укажите «штук в упаковке» в карточке товара')}
             </div>
           </div>
 
@@ -1315,7 +1360,8 @@ export default function Pos() {
                               onKeyDown={(e) => onCellKey(e, i.productId)}
                               onFocus={() => snapLine(i.productId)}
                               placeholder="0"
-                              title={t('Скидка на позицию, сомони')}
+                              readOnly={obshchaya}
+                              title={obshchaya ? t('Скидка задана на весь чек') : t('Скидка на позицию, сомони')}
                               aria-label={t('Скидка')}
                             />
                           ) : (
@@ -1344,6 +1390,7 @@ export default function Pos() {
               <span><kbd className="kbd">+</kbd><kbd className="kbd">−</kbd> {t('упаковки')}</span>
               <span><kbd className="kbd">Del</kbd> {t('убрать')}</span>
               <span><kbd className="kbd">F2</kbd> {t('скидка')}</span>
+              <span><kbd className="kbd">F3</kbd> {t('скидка на чек')}</span>
               <span><kbd className="kbd">F4</kbd> {t('штуки')}</span>
             </div>
           </div>
@@ -1351,6 +1398,29 @@ export default function Pos() {
           <div className="cart-panel">
             {/* Итог виден издалека — и кассиру, и покупателю */}
             <div className="kassa-itogo" data-tour="pos.total">
+              {can('pos.discount') && (
+                <div className="chek-skidka" data-tour="pos.chek-discount">
+                  <span className="cs-label">{t('Скидка на чек')}</span>
+                  <NumberInput
+                    className="cs-input inp-chek-discount"
+                    value={chek.discValue}
+                    onChange={(e) => setObshchaya(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); focusScanner() } }}
+                    placeholder="0"
+                    aria-label={t('Скидка на чек')}
+                    title={t('Скидка на весь чек: сумма или процент. Разложится по строкам')}
+                  />
+                  <div className="cs-mode" role="group" aria-label={t('Сумма или процент')}>
+                    <button type="button" className={chek.discMode === 'sum' ? 'active' : ''} onClick={() => { setDiscMode('sum'); focusScanner() }}>{t('сомони')}</button>
+                    <button type="button" className={chek.discMode === 'pct' ? 'active' : ''} onClick={() => { setDiscMode('pct'); focusScanner() }}>%</button>
+                  </div>
+                  {obshchaya && (
+                    <button type="button" className="cs-x" onClick={() => { setObshchaya(''); focusScanner() }} title={t('Снять скидку с чека')} aria-label={t('Снять скидку с чека')}>
+                      <LuX size={14} />
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="total-row"><span>{t('Сумма')}</span><span>{money(total + discountTotal)}</span></div>
               <div className="total-row"><span>{t('Скидка')}</span><span>{discountTotal > 0 ? '−' : ''}{money(discountTotal)}</span></div>
               <div className="total-row"><span>{t('Товаров')}</span><span>{cart.length ? countText : '0'}</span></div>
@@ -1453,6 +1523,23 @@ export default function Pos() {
             )}
           </div>
         </div>
+      </div>
+      {/* ── Подвал кассы: кто работает, экранная клавиатура, блокировка ── */}
+      {kb && <VirtualKeyboard fallbackRef={inputRef} onClose={() => { setKb(false); focusScanner() }} />}
+      <div className="kassa-foot" data-tour="pos.foot">
+        <span className="kf-user">
+          <span className="ic"><LuUserRound size={15} /></span>
+          {t('Кассир')}: <b>{auth?.name || '—'}</b> <span className="kf-role">({roleName})</span>
+        </span>
+        <div className="kf-actions">
+          <button type="button" className={'btn ghost sm kf-kb' + (kb ? ' on' : '')} onClick={() => setKb((v) => !v)} aria-pressed={kb} data-tour="pos.keyboard">
+            <span className="ic"><LuKeyboard size={15} /></span> {t('Клавиатура')}
+          </button>
+          <button type="button" className="btn ghost sm" onClick={zablokirovat} data-tour="pos.lock">
+            <span className="ic"><LuLock size={15} /></span> {t('Блокировка')}
+          </button>
+        </div>
+      </div>
       </div>
 
       {analogFor && (
@@ -1563,7 +1650,7 @@ function Receipt({ sale, onClose }) {
   const auth = useAuth()
   const customers = useCollection('customers')
   const { print, dialog } = usePechat()
-  // После продажи в долг покупатель видит в чеке, сколько он теперь должен аптеке
+  // После продажи в долг покупатель видит в чеке, сколько он теперь должен магазину
   const dolg = sale.payment === 'debt' ? (customers.find((c) => c.id === (sale.customer?.id || sale.customerId))?.debt ?? null) : null
   const ticket = saleTicket(sale, {
     t: tr,

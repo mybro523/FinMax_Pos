@@ -90,7 +90,7 @@ test('отметка зашифрована: в файле базы её не п
   assert.equal(licenceOf(db, 'apteka-1', NOW, fakeSeal).expired, true)
 })
 
-test('запись соседней аптеки, переложенная в чужую строку, не годится', () => {
+test('запись соседнего магазина, переложенная в чужую строку, не годится', () => {
   const db = core()
   confirmLicence(db, 'oplachena', { now: NOW + 20 * DAY, days: 30 }, fakeSeal)
   confirmLicence(db, 'dolzhnik', { now: NOW, days: 7 }, fakeSeal)

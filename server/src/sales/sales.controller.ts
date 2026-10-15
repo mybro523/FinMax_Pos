@@ -19,7 +19,7 @@ export class SalesController {
   @Post()
   @Perm('pos.sell')
   checkout(@Body() dto: CheckoutDto, @CurrentUser() u: any) {
-    // Скидка и продажа в долг — отдельные права: ими кассир распоряжается деньгами аптеки
+    // Скидка и продажа в долг — отдельные права: ими кассир распоряжается деньгами магазина
     if (dto.payment === 'debt' && !hasPerm(u, 'pos.debt')) throw new ForbiddenException('Нет права продавать в долг')
     if ((dto.items || []).some((i) => (i.discount || 0) > 0) && !hasPerm(u, 'pos.discount')) {
       throw new ForbiddenException('Нет права давать скидку')

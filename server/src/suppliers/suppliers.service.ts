@@ -9,8 +9,8 @@ import { lockShift, openShiftFor } from '../shifts/till'
 import { CreateSupplierDto, PaySupplierDto, UpdateSupplierDto } from './dto'
 
 // ── Поставщики и долги перед ними ──
-// Аптека берёт товар у дистрибьюторов в долг. Приход записывался, а кому и сколько
-// аптека должна — нигде, и владелец считал это на бумажке. Теперь долг ведётся у
+// Магазин берёт товар у дистрибьюторов в долг. Приход записывался, а кому и сколько
+// магазин должен — нигде, и владелец считал это на бумажке. Теперь долг ведётся у
 // поставщика готовой суммой: начальный + неоплаченная часть приходов − оплаты.
 //
 // Оплата поставщику — это не расход: товар уже учтён при продаже по закупочной цене,
@@ -25,7 +25,7 @@ export const PAYMENT_SHIFT_CLOSED = 'Смена этой оплаты уже з�
 
 type Tx = Prisma.TransactionClient
 
-// Кассиру поставщики нужны ради прихода — без долгов: деньги аптеки не его дело
+// Кассиру поставщики нужны ради прихода — без долгов: деньги магазина не его дело
 export const supplierBrief = (s: { id: string; name: string; phone: string; note: string; createdAt: Date }) => ({
   id: s.id,
   name: s.name,
@@ -149,8 +149,8 @@ export class SuppliersService {
         const supplier = await lockSupplier(tx, id)
         if (!supplier) throw new NotFoundException('Поставщик не найден')
         const amount = D(dto.amount).toDecimalPlaces(2)
-        // Переплаты не бывает: аптека платит долг, а не вперёд. Иначе долг ушёл бы в
-        // минус и числился бы «поставщик должен аптеке»
+        // Переплаты не бывает: магазин платит долг, а не вперёд. Иначе долг ушёл бы в
+        // минус и числился бы «поставщик должен магазину»
         if (amount.gt(supplier.debt)) {
           throw new BadRequestException(`Сумма больше долга поставщика (${supplier.debt.toFixed(2)})`)
         }

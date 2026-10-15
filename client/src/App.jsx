@@ -37,8 +37,7 @@ const WriteOffs = lazy(() => import('./pages/WriteOffs'))
 const Inventory = lazy(() => import('./pages/Inventory'))
 const Expenses = lazy(() => import('./pages/Expenses'))
 const Suppliers = lazy(() => import('./pages/Suppliers'))
-const SupplierDebts = lazy(() => import('./pages/SupplierDebts'))
-// Панель владельца сервиса: он обслуживает аптеки, но своей у него нет
+// Панель владельца сервиса: он обслуживает магазины, но своего у него нет
 const Admin = lazy(() => import('./pages/Admin'))
 
 // ── Остальные разделы докачиваем в тишине ──
@@ -48,7 +47,7 @@ const Admin = lazy(() => import('./pages/Admin'))
 // момент, когда человек уже нажал и смотрит на экран.
 //
 // Поэтому, отрисовав первый экран, тихо докачиваем остальное в свободное время
-// браузера — по одному куску, чтобы не забивать слабую связь аптеки. Отчёты идут
+// браузера — по одному куску, чтобы не забивать слабую связь магазина. Отчёты идут
 // последними: они тянут за собой рисование графиков, самый тяжёлый кусок из всех.
 const AHEAD = [
   () => import('./pages/Pos'),
@@ -71,7 +70,6 @@ const AHEAD_FOUNDER = [
   () => import('./pages/Roles'),
   () => import('./pages/Expenses'),
   () => import('./pages/Suppliers'),
-  () => import('./pages/SupplierDebts'),
   () => import('./pages/Reports'),
 ]
 
@@ -123,23 +121,23 @@ function Allowed({ user, perm, owner, children }) {
 
 function AuthedApp({ user }) {
   // Владелец сервиса работает с другим приложением: у него нет ни кассы, ни склада,
-  // ни смен — есть список аптек. Общее меню ему показывать нечего, а разделы аптеки
+  // ни смен — есть список магазинов. Общее меню ему показывать нечего, а разделы магазина
   // сервер ему и не отдаст: его учётная запись не привязана ни к одной.
   const isService = user?.role === 'superadmin'
   usePrefetchPages(user?.role)
 
   // ── Чья тема и чей язык ──
-  // У панели владельца сервиса своя настройка, у аптеки своя. Переключаем до
+  // У панели владельца сервиса своя настройка, у магазина своя. Переключаем до
   // отрисовки (useLayoutEffect, а не useEffect), иначе браузер успел бы показать
-  // чужую тему и моргнуть. Вход «как аптека» сюда приходит с ролью аптеки —
-  // и получает аптечный вид, как и должен: владелец смотрит глазами клиента.
+  // чужую тему и моргнуть. Вход «как магазин» сюда приходит с ролью магазина —
+  // и получает вид магазина, как и должен: владелец смотрит глазами клиента.
   const side = isService ? 'admin' : 'apteka'
   useLayoutEffect(() => {
     setThemeScope(side)
     setLangScope(side)
   }, [side])
 
-  // ── Первый вход новой аптеки ──
+  // ── Первый вход нового магазина ──
   // Человек видит программу впервые и не знает, с чего начать. Сразу запускаем
   // общий тур: подсветка по меню и главным местам. Один раз на устройстве —
   // закрыл, пропустил или прошёл, и больше тур сам не выскакивает; снова его
@@ -150,9 +148,9 @@ function AuthedApp({ user }) {
 
   // ── Постоянное соединение держат все ──
   // Раньше панель управления работала без него: считалось, что владельцу сервиса
-  // нечего слушать. На деле слушать есть что — какие аптеки сейчас за кассой и что
+  // нечего слушать. На деле слушать есть что — какие магазины сейчас за кассой и что
   // в них происходит, — а главное, соединение нужно ему самому, чтобы его решения
-  // доходили до аптек сразу. Опрос остаётся страховкой от потерянного события.
+  // доходили до магазинов сразу. Опрос остаётся страховкой от потерянного события.
   useEffect(() => {
     startPolling()
     startRealtime()
@@ -200,7 +198,8 @@ function AuthedApp({ user }) {
           <Route path="/discounts" element={guarded('discounts.view', <Discounts />)} />
           <Route path="/expenses" element={guarded('expenses.view', <Expenses />)} />
           <Route path="/suppliers" element={guarded('suppliers.view', <Suppliers />)} />
-          <Route path="/supplier-debts" element={guarded('suppliers.view', <SupplierDebts />)} />
+          {/* Прежний адрес «Долги поставщикам» — теперь это вкладка в «Поставщиках» */}
+          <Route path="/supplier-debts" element={<Navigate to="/suppliers?tab=debts" replace />} />
           <Route path="/reports" element={guarded('reports.view', <Reports />)} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/obuchenie" element={<Obuchenie />} />

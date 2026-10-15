@@ -107,7 +107,7 @@ export default function Employees() {
   return (
     <Layout
       title={t('Сотрудники')}
-      subtitle={t('Кто работает в аптеке и с какой ролью')}
+      subtitle={t('Кто работает в магазине и с какой ролью')}
       actions={
         <button className="btn" data-tour="emp.add" onClick={() => setAdding(true)}>
           <span className="ic"><LuUserPlus size={16} /></span> {t('Добавить сотрудника')}

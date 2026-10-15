@@ -1,4 +1,4 @@
-// ── Подписка: когда аптека работает, а когда останавливается ──
+// ── Подписка: когда магазин работает, а когда останавливается ──
 //
 // Состояние считается из даты оплаты, а не хранится: хранимое пришлось бы обновлять
 // по расписанию, и в первый же день, когда задача не отработала, оно разошлось бы
@@ -11,7 +11,7 @@
 // Отсрочка сверху сделала бы назначенное время пустым обещанием.
 //
 // Отсюда главное, что здесь проверяется: граница проходит по МОМЕНТУ, а не по
-// концу суток. Ошибка в одну сторону — аптека отключена раньше срока и владелец
+// концу суток. Ошибка в одну сторону — магазин отключён раньше срока и владелец
 // принимает звонок разъярённого клиента. В другую — неплательщик работает лишние
 // полдня, и назначенное время ничего не значит.
 //
@@ -28,7 +28,7 @@ const paidIn = (ms) => new Date(NOW.getTime() + ms)
 const DAY = 86400000
 const MIN = 60000
 
-test('оплаченная аптека работает и не тревожит зря', () => {
+test('оплаченный магазин работает и не тревожит зря', () => {
   const v = subscriptionOf({ paidUntil: paidIn(30 * DAY), trial: false }, NOW)
   assert.equal(v.status, 'active')
   assert.equal(v.canWrite, true)
@@ -44,7 +44,7 @@ test('за несколько дней до конца появляется пр
 })
 
 // ── Граница ──
-test('за минуту до срока аптека ещё работает', () => {
+test('за минуту до срока магазин ещё работает', () => {
   const v = subscriptionOf({ paidUntil: paidIn(MIN), trial: false }, NOW)
   assert.equal(v.status, 'active')
   assert.equal(v.canWrite, true, 'отключить раньше назначенного — потерять клиента')
@@ -103,7 +103,7 @@ test('кончившийся пробный останавливает рабо�
 
 // ── Сколько осталось ──
 test('дни округляются вверх — пока идёт последний день, он ещё есть', () => {
-  // «Осталось 0 дней» у работающей аптеки выглядит как ошибка счёта
+  // «Осталось 0 дней» у работающего магазина выглядит как ошибка счёта
   assert.equal(subscriptionOf({ paidUntil: paidIn(1), trial: false }, NOW).daysLeft, 1, 'миллисекунда — уже день')
   assert.equal(subscriptionOf({ paidUntil: paidIn(DAY), trial: false }, NOW).daysLeft, 1)
   assert.equal(subscriptionOf({ paidUntil: paidIn(DAY + 1), trial: false }, NOW).daysLeft, 2)
@@ -119,7 +119,7 @@ test('до момента отключения известно с точнос�
 test('сообщение объясняет причину и не выглядит поломкой', () => {
   const expired = subscriptionMessage(subscriptionOf({ paidUntil: paidIn(-DAY), trial: false }, NOW), 'Шифо')
   assert.match(expired, /Подписка закончилась/)
-  assert.match(expired, /данные аптеки сохранены/i, 'человек должен знать, что не потерял свою аптеку')
+  assert.match(expired, /данные магазина сохранены/i, 'человек должен знать, что не потерял свой магазин')
   assert.match(expired, /поставщику программы/, 'и что делать дальше')
 
   const stopped = subscriptionMessage(subscriptionOf({ paidUntil: paidIn(DAY), trial: false, blocked: true }, NOW))
@@ -174,7 +174,7 @@ test('срок работы кассы без связи: неделя по ум
   const { offlineDaysOf } = require('../dist/admin/subscription')
   assert.equal(offlineDaysOf({ offlineDays: 7 }), 7)
   assert.equal(offlineDaysOf({ offlineDays: 14 }), 14)
-  // Аптека, заведённая до появления настройки, и прочее «не задано» — неделя
+  // Магазин, заведённый до появления настройки, и прочее «не задано» — неделя
   assert.equal(offlineDaysOf({}), 7)
   assert.equal(offlineDaysOf({ offlineDays: null }), 7)
   assert.equal(offlineDaysOf(null), 7)

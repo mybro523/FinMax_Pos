@@ -9,7 +9,7 @@
 //
 // Здесь каждая жалоба браузера на правила считается провалом.
 //
-// Запуск:  APP_USER=<логин аптеки> APP_PASS=<пароль> npx playwright test e2e-ui/csp.spec.mjs
+// Запуск:  APP_USER=<логин магазина> APP_PASS=<пароль> npx playwright test e2e-ui/csp.spec.mjs
 import { test, expect } from '@playwright/test'
 
 const USER = process.env.APP_USER || 'admin'
@@ -38,7 +38,7 @@ async function signIn(page, complaints) {
   expect(complaints, 'браузер пожаловался уже на входе').toEqual([])
 }
 
-test('страницы аптеки открываются без жалоб браузера', async ({ page }) => {
+test('страницы магазины открываются без жалоб браузера', async ({ page }) => {
   test.setTimeout(180_000)
   const complaints = watch(page)
   await signIn(page, complaints)

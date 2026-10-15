@@ -14,7 +14,7 @@ import { CreateArrivalDto, UpdateArrivalDto } from './dto'
 export class ArrivalsController {
   constructor(private readonly arrivals: ArrivalsService) {}
 
-  // Журнал приходов — закупочные цены аптеки: только тем, кому открыт раздел
+  // Журнал приходов — закупочные цены магазина: только тем, кому открыт раздел
   @Get()
   @Perm('arrivals.view')
   findAll(@Query() q: PeriodQuery) {
@@ -32,7 +32,7 @@ export class ArrivalsController {
   @Post()
   @Perm('arrivals.create')
   create(@Body() dto: CreateArrivalDto, @CurrentUser() u: any) {
-    // Приход в долг поставщику — отдельное право: это обязательство аптеки
+    // Приход в долг поставщику — отдельное право: это обязательство магазина
     if ((dto.debt || 0) > 0 && !hasPerm(u, 'arrivals.debt')) throw new ForbiddenException('Нет права оформлять приход в долг')
 
     return this.arrivals.create(dto, u?.tenantUserId)

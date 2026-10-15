@@ -8,7 +8,7 @@ import { RolesModule } from '../roles/roles.module'
   imports: [RolesModule],
   controllers: [UsersController],
   providers: [UsersService],
-  // Заведение аптеки создаёт её владельца тем же кодом: запись в две базы
+  // Заведение магазина создаёт его владельца тем же кодом: запись в две базы
   // с бронью логина написана один раз и проверена
   exports: [UsersService],
 })

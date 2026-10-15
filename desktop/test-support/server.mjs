@@ -34,7 +34,7 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
     calls: [],
     users: new Map(),
     tokens: new Map(),
-    pharmacy: { code: 'apteka-1', name: 'Аптека №1', paidUntil: '2026-11-01T12:00:00.000Z', status: 'active' },
+    pharmacy: { code: 'apteka-1', name: 'Магазин №1', paidUntil: '2026-11-01T12:00:00.000Z', status: 'active' },
     data: Object.fromEntries(KEYS.map((k) => [k, []])),
     seq: 0,
     // Журнал изменений: что и когда менялось — по нему отдаётся «с прошлого раза»
@@ -270,7 +270,7 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
     if (!u) return json(401, { statusCode: 401, message: 'Требуется вход в систему' }, date)
     if (!u.active) return json(401, { statusCode: 401, message: 'Сессия недействительна' }, date)
     if (s.pharmacy.status === 'suspended') {
-      return json(403, { statusCode: 403, message: 'Работа аптеки приостановлена. Обратитесь к поставщику программы.' }, date)
+      return json(403, { statusCode: 403, message: 'Работа магазина приостановлен. Обратитесь к поставщику программы.' }, date)
     }
 
     if (route === '/auth/me') return json(200, { ...view(u), impersonatedBy: null }, date)

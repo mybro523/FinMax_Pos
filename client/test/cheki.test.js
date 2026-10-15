@@ -10,10 +10,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   MAX_CHEKOV, klyuch, novyChek, svobodnyNomer, razobrat, chitat, pisat,
-  osvezhit, sdacha, kupyury, pohozheNaKod, estBukva,
+  osvezhit, sdacha, kupyury, pohozheNaKod, estBukva, raspredelit,
 } from '../src/lib/cheki.js'
 
-// Пачка из 20 таблеток по 200 сомони, на складе 3 упаковки и 5 штук
+// Пачка из 20 штук по 200 сомони, на складе 3 упаковки и 5 штук
 const pill = { id: 'p1', name: 'Парацетамол', price: 200, cost: 120, unitsPerPack: 20, unit: 'уп', stock: 3, looseUnits: 5 }
 // Неделимый бинт
 const bint = { id: 'p2', name: 'Бинт', price: 40, cost: 18, unitsPerPack: 1, unit: 'шт', stock: 10, looseUnits: 0 }
@@ -25,10 +25,10 @@ const line = (p, extra = {}) => ({
 
 // ── Хранение ──
 
-test('у каждой аптеки свой ключ — чеки одной не видны другой в том же браузере', () => {
+test('у каждого магазина свой ключ — чеки одного не видны другому в том же браузере', () => {
   assert.notEqual(klyuch('alfa'), klyuch('beta'))
   assert.equal(klyuch('alfa'), 'apteka_cheki_alfa')
-  // Код неизвестен (вход ещё не завершён) — всё равно не общий ключ с аптекой
+  // Код неизвестен (вход ещё не завершён) — всё равно не общий ключ с магазином
   assert.equal(klyuch(''), 'apteka_cheki_net')
 })
 
@@ -116,7 +116,7 @@ test('запись и чтение через хранилище браузер�
     // Лишнее поле состояния в хранилище не пишется
     assert.equal(JSON.parse(store.get('apteka_cheki_alfa')).code, undefined)
     assert.deepEqual(chitat('alfa').list[0].cart, c.cart)
-    // У другой аптеки своих чеков нет
+    // У другого магазина своих чеков нет
     assert.deepEqual(chitat('beta').list[0].cart, [])
   } finally {
     delete globalThis.localStorage
@@ -345,4 +345,60 @@ test('граница узкого экрана одна и та же в стил
   assert.equal(kassa[1], blok[1], 'касса и стили по-разному понимают «узкий экран»')
   assert.equal(tur[1], blok[1], 'тур и стили по-разному понимают «узкий экран»')
   assert.equal(Number(shiroko[1]), Number(blok[1]) + 1, 'между «узко» и «широко» в стилях щель или нахлёст')
+})
+
+// ── Скидка на весь чек ──
+// Кассир называет одну сумму или процент, а в чеке скидка лежит по строкам.
+// Доли пропорциональны сумме строк, итог сходится до дирама.
+const сумма = (cart) => Math.round(cart.reduce((s, i) => s + i.discount, 0) * 100) / 100
+
+test('скидка суммой раскладывается пропорционально строкам и сходится ровно', () => {
+  // 200 + 40 = 240; скидка 24 → 20 и 4
+  const r = raspredelit([line(pill), line(bint)], 'sum', '24')
+  assert.deepEqual(r.cart.map((i) => i.discount), [20, 4])
+  assert.equal(r.total, 24)
+  assert.ok(r.changed)
+})
+
+test('скидка процентом считается от суммы чека', () => {
+  const r = raspredelit([line(pill), line(bint)], 'pct', '10')
+  assert.deepEqual(r.cart.map((i) => i.discount), [20, 4])
+  assert.equal(r.total, 24)
+})
+
+test('остаток округления уходит в самую крупную строку, итог равен названной сумме', () => {
+  // три строки по 10: скидка 10 → 3.33 + 3.33 + 3.33 = 9.99, диарам достаётся первой крупной
+  const a = { ...line(bint), productId: 'a', price: 10 }
+  const b = { ...line(bint), productId: 'b', price: 10 }
+  const c = { ...line(bint), productId: 'c', price: 10 }
+  const r = raspredelit([a, b, c], 'sum', '10')
+  assert.equal(сумма(r.cart), 10)
+  assert.ok(r.cart.every((i) => i.discount <= 10))
+})
+
+test('скидка не больше суммы чека и не больше 100%', () => {
+  const r1 = raspredelit([line(bint)], 'sum', '999')
+  assert.equal(r1.total, 40)
+  const r2 = raspredelit([line(bint)], 'pct', '150')
+  assert.equal(r2.total, 40)
+})
+
+test('пустая или нулевая скидка обнуляет строки, мусор не роняет', () => {
+  const r = raspredelit([line(pill, { discount: 5 })], 'sum', '')
+  assert.equal(r.cart[0].discount, 0)
+  assert.ok(r.changed)
+  assert.equal(raspredelit([line(pill)], 'sum', 'abc').total, 0)
+  assert.equal(raspredelit([], 'sum', '10').total, 0)
+})
+
+test('ничего не изменилось — корзина возвращается той же самой', () => {
+  const cart = [line(pill, { discount: 20 }), line(bint, { discount: 4 })]
+  const r = raspredelit(cart, 'sum', '24')
+  assert.equal(r.cart, cart)
+  assert.equal(r.changed, false)
+})
+
+test('запятая в сумме принимается как точка', () => {
+  const r = raspredelit([line(bint)], 'sum', '2,5')
+  assert.equal(r.total, 2.5)
 })

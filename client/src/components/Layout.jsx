@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { LuCircleDollarSign,
+import {
   LuLayoutDashboard, LuShoppingCart, LuPill, LuPackagePlus, LuLayoutGrid,
   LuClipboardList, LuReceipt, LuTrendingUp, LuSettings, LuClock, LuTag, LuCalculator, LuWifiOff,
   LuUsers, LuCalendarClock, LuUndo2, LuTrash2, LuClipboardCheck, LuTriangleAlert,
@@ -22,7 +22,7 @@ import emblem from '../assets/brand/emblem-64.png'
 // по нему строятся плитки, маршруты, туры и обучение.
 //
 // perm — право, без которого раздел закрыт (плитка серая, адрес уводит на главный
-// экран). owner — только владелец аптеки. main — главное действие, золотая плитка.
+// экран). owner — только владелец магазина. main — главное действие, золотая плитка.
 export const NAV = [
   { section: 'Продажи' },
   { to: '/dashboard', label: 'Панель управления', Icon: LuLayoutDashboard, perm: 'dashboard.view' },
@@ -41,7 +41,6 @@ export const NAV = [
   { to: '/debts', label: 'Долги клиентов', Icon: LuReceipt, perm: 'debts.view' },
   { to: '/discounts', label: 'История скидок', Icon: LuTag, perm: 'discounts.view' },
   { to: '/suppliers', label: 'Поставщики', Icon: LuTruck, perm: 'suppliers.view' },
-  { to: '/supplier-debts', label: 'Долги поставщикам', Icon: LuCircleDollarSign, perm: 'suppliers.view' },
   { to: '/expenses', label: 'Расходы', Icon: LuHandCoins, perm: 'expenses.view' },
   { to: '/reports', label: 'Отчёты', Icon: LuTrendingUp, perm: 'reports.view' },
   { section: 'Управление' },
@@ -65,8 +64,8 @@ export default function Layout({ title, subtitle, actions, fill, hub, children }
   const t = useT()
   const location = useLocation()
   const navigate = useNavigate()
-  // Владелец сервиса смотрит эту аптеку от имени её владельца. Показываем крупно
-  // и постоянно: перепутать чужую аптеку со своей — самая дорогая из возможных
+  // Владелец сервиса смотрит этот магазин от имени его владельца. Показываем крупно
+  // и постоянно: перепутать чужой магазин со своим — самая дорогая из возможных
   // ошибок поддержки.
   const support = user?.impersonatedBy
 
@@ -91,7 +90,7 @@ export default function Layout({ title, subtitle, actions, fill, hub, children }
         {support && (
           <div className="conn-banner support">
             <span className="ic"><LuTriangleAlert size={15} /></span>
-            {t('Вы смотрите чужую аптеку от имени владельца')} — {user?.pharmacy?.name || user?.name}
+            {t('Вы смотрите чужой магазин от имени владельца')} — {user?.pharmacy?.name || user?.name}
             <button className="back" onClick={() => leavePharmacy()}>{t('вернуться к себе')}</button>
           </div>
         )}

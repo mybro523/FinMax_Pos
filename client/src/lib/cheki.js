@@ -6,7 +6,7 @@
 // обновишь страницу — и набранное пропало. Теперь чеки хранятся на устройстве.
 //
 // Хранятся именно на устройстве, а не на сервере: покупатель возвращается к тому
-// же прилавку, и другой кассе его чек не нужен. Ключ свой у каждой аптеки, чтобы
+// же прилавку, и другой кассе его чек не нужен. Ключ свой у каждого магазина, чтобы
 // чеки одной не показались другой в том же браузере. При выходе из программы они
 // остаются — сменщик за тем же компьютером увидит отложенный чек.
 //
@@ -26,7 +26,9 @@ export const klyuch = (code) => 'apteka_cheki_' + (code || 'net')
 let seq = 0
 const newId = () => 'c' + Date.now().toString(36) + (seq++).toString(36) + Math.random().toString(36).slice(2, 6)
 
-export const novyChek = (n) => ({ id: newId(), n, cart: [], payment: 'cash', customerId: '', received: '', payVia: '' })
+// discMode/discValue — скидка на весь чек (сумма или процент), см. raspredelit.
+// Пустое discValue — скидки на чек нет, строки живут со своими скидками
+export const novyChek = (n) => ({ id: newId(), n, cart: [], payment: 'cash', customerId: '', received: '', payVia: '', discMode: 'sum', discValue: '' })
 
 // Номер нового чека — наименьший свободный: «Чек 2» читается у прилавка быстрее, чем «Чек 17»
 export function svobodnyNomer(list) {
@@ -75,6 +77,8 @@ export function razobrat(raw) {
       customerId: typeof c.customerId === 'string' ? c.customerId : '',
       received: typeof c.received === 'string' ? c.received : '',
       payVia: typeof c.payVia === 'string' ? c.payVia : '',
+      discMode: c.discMode === 'pct' ? 'pct' : 'sum',
+      discValue: typeof c.discValue === 'string' ? c.discValue : '',
     })
   }
   if (!list.length) list.push(novyChek(1))
@@ -179,6 +183,50 @@ export function osvezhit(cart, products, mapId = (id) => id) {
   }
 
   return { cart: changed ? next : cart, notes, changed }
+}
+
+// ── Скидка на весь чек ──
+//
+// Кассир называет одну сумму («скину десятку») или процент на весь чек. А в чеке,
+// в отчётах, в смене и в программе без связи скидка по-прежнему лежит по строкам —
+// менять всё это ради одной цифры нельзя. Поэтому скидку на чек раскладываем по
+// строкам пропорционально их сумме, до дирама. Остаток округления уходит в самые
+// крупные строки, чтобы итог сошёлся ровно с названной суммой.
+//
+// mode: 'sum' — сумма в сомони, 'pct' — процент. Больше суммы чека и больше 100%
+// скидка не бывает: лишнее молча урезается. Возвращает корзину с новыми скидками
+// (ту же самую, если ничего не изменилось) и саму сумму скидки.
+const kop = (x) => Math.round(x * 100) / 100
+
+export function raspredelit(cart, mode, value) {
+  const gross = cart.map((i) => Math.max(0, kop(lineGross(i))))
+  const summa = kop(gross.reduce((s, g) => s + g, 0))
+  const v = Number(String(value ?? '').trim().replace(',', '.'))
+  let target = 0
+  if (Number.isFinite(v) && v > 0 && summa > 0) {
+    target = mode === 'pct' ? (summa * Math.min(v, 100)) / 100 : Math.min(v, summa)
+  }
+  target = kop(target)
+
+  // Доля каждой строки — вниз до дирама; что не разошлось, докладываем крупным строкам
+  const disc = gross.map((g) => (summa > 0 ? Math.floor((target * g) / summa * 100 + 1e-9) / 100 : 0))
+  let rest = kop(target - disc.reduce((s, d) => s + d, 0))
+  const poRazmeru = gross.map((g, i) => i).sort((a, b) => gross[b] - gross[a])
+  for (const i of poRazmeru) {
+    if (rest <= 0) break
+    const mesto = kop(gross[i] - disc[i])
+    const add = Math.min(mesto, rest)
+    disc[i] = kop(disc[i] + add)
+    rest = kop(rest - add)
+  }
+
+  let changed = false
+  const next = cart.map((i, k) => {
+    if ((num(i.discount) || 0) === disc[k]) return i
+    changed = true
+    return { ...i, discount: disc[k] }
+  })
+  return { cart: changed ? next : cart, total: kop(disc.reduce((s, d) => s + d, 0)), changed }
 }
 
 // ── Сдача ──

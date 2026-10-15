@@ -220,12 +220,12 @@ test('приход в долг: поставщик из справочника, 
   // Справочник — как его отдаёт сервер: владельцу с долгами, кассиру без
   assert.deepEqual(suppliersList(db, true), [
     { id: 'sup-2', name: 'Авиценна-трейд', phone: '', note: 'по вторникам', createdAt: '2026-09-01T08:00:00.000Z', openingDebt: 0, debt: 0 },
-    { id: 'sup-1', name: 'Фарм-опт', phone: '+992 900 11 22 33', note: '', createdAt: '2026-09-01T08:00:00.000Z', openingDebt: 500, debt: 500 },
+    { id: 'sup-1', name: 'Опт-Маркет', phone: '+992 900 11 22 33', note: '', createdAt: '2026-09-01T08:00:00.000Z', openingDebt: 500, debt: 500 },
   ])
   assert.deepEqual(Object.keys(suppliersList(db, false)[0]), ['id', 'name', 'phone', 'note', 'createdAt'])
 
   const a = createArrival(c, { supplierId: 'sup-1', debt: 120, items: [{ productId: 'nur', qty: 2, cost: 100, expiryDate: EXP }] })
-  assert.deepEqual([a.supplier, a.supplierId, a.debt, a.total, a.userId, a.user], ['Фарм-опт', 'sup-1', 120, 200, 'user-1', { id: 'user-1', name: 'kassir' }])
+  assert.deepEqual([a.supplier, a.supplierId, a.debt, a.total, a.userId, a.user], ['Опт-Маркет', 'sup-1', 120, 200, 'user-1', { id: 'user-1', name: 'kassir' }])
   const op = opOf(db, 'arrival')
   assert.deepEqual([op.payload.arrival.supplierId, op.payload.arrival.debt], ['sup-1', 120])
   assert.equal(debtOf(db, 'sup-1'), 620, 'неотправленный приход в долг должен быть виден в долге сразу')
@@ -267,10 +267,10 @@ test('приход в долг: поставщик из справочника, 
 test('поставщики и сервисы перевода приходят с сервера; обмен кассира долги владельца не стирает', () => {
   const db = apteka()
   // Кассир получил поставщиков без долгов — то, что знал владелец, остаётся
-  const changed = delta(db, { suppliers: up({ id: 'sup-1', name: 'Фарм-опт ООО', phone: '', note: '', createdAt: '2026-09-01T08:00:00.000Z' }) })
+  const changed = delta(db, { suppliers: up({ id: 'sup-1', name: 'Опт-Маркет ООО', phone: '', note: '', createdAt: '2026-09-01T08:00:00.000Z' }) })
   assert.ok(changed.includes('suppliers'), 'окно должно перечитать поставщиков: ' + changed)
   const sup = suppliersList(db, true).find((s) => s.id === 'sup-1')
-  assert.deepEqual([sup.name, sup.debt, sup.openingDebt], ['Фарм-опт ООО', 500, 500])
+  assert.deepEqual([sup.name, sup.debt, sup.openingDebt], ['Опт-Маркет ООО', 500, 500])
   // Новый поставщик, которого получал только кассир: долг неизвестен, а не ноль
   delta(db, { suppliers: up({ id: 'sup-3', name: 'Новый', phone: '', note: '', createdAt: '2026-10-01T08:00:00.000Z' }) }, '110')
   assert.equal(suppliersList(db, true).find((s) => s.id === 'sup-3').debt, null)
@@ -333,8 +333,8 @@ test('поставщики и сервисы — всем, оплаты пост
     assert.ok(found, `${method} ${path} должен обслуживаться локально`)
     return found.handler({ ...ctx(db, user ? { user } : {}), query: found.query, params: found.params, body })
   }
-  assert.deepEqual(call('GET', '/suppliers', CASHIER).map((s) => [s.name, s.debt]), [['Авиценна-трейд', undefined], ['Фарм-опт', undefined]])
-  assert.deepEqual(call('GET', '/suppliers').map((s) => [s.name, s.debt]), [['Авиценна-трейд', 0], ['Фарм-опт', 500]])
+  assert.deepEqual(call('GET', '/suppliers', CASHIER).map((s) => [s.name, s.debt]), [['Авиценна-трейд', undefined], ['Опт-Маркет', undefined]])
+  assert.deepEqual(call('GET', '/suppliers').map((s) => [s.name, s.debt]), [['Авиценна-трейд', 0], ['Опт-Маркет', 500]])
   assert.deepEqual(call('GET', '/pay-services', CASHIER).map((s) => s.name), ['Alif', 'DC', 'Эсхата'])
   refused(() => call('GET', '/supplier-payments', CASHIER), 403, 'Недостаточно прав')
   assert.deepEqual(call('GET', '/supplier-payments'), [])

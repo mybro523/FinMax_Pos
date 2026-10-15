@@ -34,8 +34,8 @@ import { AppController } from './app.controller'
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
-    // База панели управления: аптеки-клиенты, учётные записи, оплаты.
-    // Данные самой аптеки лежат отдельно, в своей схеме — см. prisma/admin/schema.prisma
+    // База панели управления: магазины-клиенты, учётные записи, оплаты.
+    // Данные самого магазина лежат отдельно, в своей схеме — см. prisma/admin/schema.prisma
     AdminModule,
     AuthModule,
     UsersModule,
@@ -73,7 +73,7 @@ import { AppController } from './app.controller'
   ],
 })
 export class AppModule implements NestModule {
-  // Схема аптеки объявляется до всего остального: guard, перехватчики и сам
+  // Схема магазина объявляется до всего остального: guard, перехватчики и сам
   // обработчик должны работать уже внутри неё. Промежуточный слой — единственное
   // место, которое оборачивает собой всю дальнейшую обработку целиком.
   configure(consumer: MiddlewareConsumer) {

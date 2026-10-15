@@ -84,7 +84,7 @@ export default function Dashboard() {
   const sales = useCollection('sales')
   const products = useCollection('products')
   const customers = useCollection('customers')
-  // Долги поставщикам — рядом с долгами клиентов: это деньги, которые аптеке ещё платить
+  // Долги поставщикам — рядом с долгами клиентов: это деньги, которые магазину ещё платить
   const suppliers = useCollection('suppliers')
   // Возвраты и списания за сегодня — иначе выручка и прибыль на панели завышены
   const returns = useCollection('returns')
@@ -423,7 +423,7 @@ export default function Dashboard() {
   }
 
   return (
-    <Layout title={t('Панель управления')} subtitle={t('Обзор аптеки (время таджикское, UTC+5)')}
+    <Layout title={t('Панель управления')} subtitle={t('Обзор магазина (время таджикское, UTC+5)')}
       actions={can('pos.sell') && <Link to="/pos" className="btn" data-tour="dash.open-pos"><span className="ic"><LuShoppingCart size={16} /></span> {t('Открыть кассу')}</Link>}>
 
       {stats.expiring > 0 && (

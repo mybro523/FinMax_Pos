@@ -6,7 +6,7 @@ import { LuCamera, LuImage, LuTriangleAlert, LuScanLine, LuZoomIn, LuFlashlight 
 import { overlayHost, useBackdropClose } from './ui'
 
 // Надёжные форматы (без ITF/Codabar — они дают ложные/обрезанные чтения).
-// DATA_MATRIX и QR_CODE — двумерные коды на упаковках лекарств: их печатают вместо
+// DATA_MATRIX и QR_CODE — двумерные коды на упаковках товаров: их печатают вместо
 // обычного штрихкода или рядом с ним. QR раньше отсутствовал в списке, поэтому камера
 // его физически не искала и не распознавала.
 const ZXING_FORMATS = [

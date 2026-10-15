@@ -6,7 +6,7 @@ import { TenantPool } from './tenant-pool.service'
 @Module({
   providers: [TenantPool, PrismaService],
   // TenantPool наружу нужен тем, кто работает вне запроса и выбирает схему сам:
-  // заведение аптеки, обход всех аптек в фоновых задачах, миграции
+  // заведение магазина, обход всех магазинов в фоновых задачах, миграции
   exports: [PrismaService, TenantPool],
 })
 export class PrismaModule {}

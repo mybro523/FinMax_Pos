@@ -78,8 +78,8 @@ test('возврат: чем вернули деньги, примечание �
 test('приход: поставщик (если назван) и что пришло, по какой цене', () => {
   setLang('ru')
   const lines = [{ name: 'Нурофен', qty: 3, cost: 90 }, { name: 'Парацетамол', qty: 1, cost: 110.5 }]
-  const named = rejectedDetail({ type: 'arrival', detail: { supplier: 'Фарм-Опт', lines } }, translate, money)
-  assert.deepEqual(pairs(named), [['Поставщик', 'Фарм-Опт']])
+  const named = rejectedDetail({ type: 'arrival', detail: { supplier: 'Опт-Маркет', lines } }, translate, money)
+  assert.deepEqual(pairs(named), [['Поставщик', 'Опт-Маркет']])
   assert.deepEqual(rows(named), [['Нурофен', '3 уп × 90.00 с.'], ['Парацетамол', '1 уп × 110.50 с.']])
   // Со сроком годности, если касса его записала: без него приход заново не оформить
   const dated = rejectedDetail(

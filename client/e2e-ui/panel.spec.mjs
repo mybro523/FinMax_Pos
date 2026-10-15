@@ -1,12 +1,12 @@
 // ── Панель владельца сервиса: путь целиком, настоящим браузером ──
 //
 // Проверяется то, чего не видно ни расчётами, ни запросами к API. Именно здесь
-// пряталась ошибка, которую поймал живой человек: заведение аптеки идёт около
+// пряталась ошибка, которую поймал живой человек: заведение магазина идёт около
 // пятнадцати секунд, а браузерный код обрывал ожидание ровно на пятнадцатой —
-// и показывал «Сервер не отвечает», хотя аптека к тому моменту уже создавалась.
+// и показывал «Сервер не отвечает», хотя магазин к тому моменту уже создавался.
 // Через API это не находится: срок ожидания живёт в браузере, а не на сервере.
 //
-// Прогон проходит весь путь как человек: вход, заведение аптеки, ожидание,
+// Прогон проходит весь путь как человек: вход, заведение магазина, ожидание,
 // логин с паролем, вход этим владельцем, работа в кассе, уборка за собой.
 //
 // Запуск:  npm run test:ui  (в папке client)
@@ -38,28 +38,28 @@ async function signIn(page, name, password) {
 
 test.describe.configure({ mode: 'serial' })
 
-test.describe('Владелец сервиса заводит аптеку и она работает', () => {
+test.describe('Владелец сервиса заводит магазин и она работает', () => {
   test('вход владельцем сервиса открывает панель, а не кассу', async ({ page }) => {
     await signIn(page, USER, PASS)
-    await expect(page.locator('.topbar h1')).toHaveText('Аптеки')
-    // У владельца сервиса своей аптеки нет — бокового меню кассы быть не должно
+    await expect(page.locator('.topbar h1')).toHaveText('Магазины')
+    // У владельца сервиса своего магазина нет — бокового меню кассы быть не должно
     await expect(page.locator('.sidebar')).toHaveCount(0)
   })
 
   // Заведение и ожидание — одна проверка, и это не лень. Запрос идёт в фоне той
   // самой вкладки: закончи проверка здесь, Playwright закрыл бы её и оборвал работу.
-  // Первый прогон так и сделал — аптека не создалась вовсе.
+  // Первый прогон так и сделал — магазин не создалась вовсе.
   test('окно закрывается сразу, работа идёт в фоне, пароль всплывает сам', async ({ page }) => {
     test.setTimeout(240_000)
     await signIn(page, USER, PASS)
 
-    await page.getByRole('button', { name: /Завести аптеку/ }).click()
-    const form = page.locator('.modal', { hasText: 'Новая аптека' })
+    await page.getByRole('button', { name: /Завести магазин/ }).click()
+    const form = page.locator('.modal', { hasText: 'Новый магазин' })
     await expect(form).toBeVisible()
 
     const field = (label) => form.locator('.field', { hasText: label }).locator('input').first()
-    await field('Код аптеки').fill(CODE)
-    await field('Название').fill(`Аптека ${TAG}`)
+    await field('Код магазина').fill(CODE)
+    await field('Название').fill(`Магазин ${TAG}`)
     await field('Владелец').fill('Проверка')
     await field('Телефон').fill('+992 900 11 22 33')
     await field('Город').fill('Душанбе')
@@ -71,7 +71,7 @@ test.describe('Владелец сервиса заводит аптеку и о
 
     // ── Главное в этой проверке ──
     // Окно обязано закрыться мгновенно. Раньше оно висело до пятнадцатой секунды
-    // и заканчивалось красной полосой «Сервер не отвечает» — при том, что аптека
+    // и заканчивалось красной полосой «Сервер не отвечает» — при том, что магазин
     // создавалась. Три секунды здесь — с огромным запасом на медленную машину.
     await expect(form).toBeHidden({ timeout: 3000 })
     const closedIn = Date.now() - clickedAt
@@ -82,14 +82,14 @@ test.describe('Владелец сервиса заводит аптеку и о
 
     // Видно, что команда принята: строка «заводится…» в списке.
     // Ищем именно строку, а не «где-нибудь в таблице»: таблиц на странице две —
-    // сверху отдельно те аптеки, что требуют внимания сегодня.
+    // сверху отдельно те магазины, что требуют внимания сегодня.
     await expect(page.getByText('заводится…')).toBeVisible()
     await expect(page.locator('tbody tr', { hasText: CODE }).first()).toBeVisible()
 
     // ── Ждём, не трогая вкладку ──
-    // Когда аптека готова, окно с логином и паролем открывается само: пароль
+    // Когда магазин готов, окно с логином и паролем открывается само: пароль
     // показывается один раз, и потерять его из-за того, что человек отвлёкся, нельзя
-    const done = page.locator('.modal', { hasText: 'Аптека заведена' })
+    const done = page.locator('.modal', { hasText: 'Магазин заведён' })
     await expect(done).toBeVisible({ timeout: 180_000 })
     await expect(done).toContainText(OWNER_LOGIN)
     await expect(done).toContainText(OWNER_PASS)
@@ -100,9 +100,9 @@ test.describe('Владелец сервиса заводит аптеку и о
     const row = page.locator('tbody tr', { hasText: CODE })
     await expect(row.first()).toBeVisible()
 
-    // Карточка открывается щелчком — значит аптека настоящая, а не пометка
+    // Карточка открывается щелчком — значит магазин настоящая, а не пометка
     await row.first().click()
-    const card = page.locator('.modal', { hasText: `Аптека ${TAG}` }).first()
+    const card = page.locator('.modal', { hasText: `Магазин ${TAG}` }).first()
     await expect(card).toBeVisible()
     await expect(card).toContainText('Пробный период')
     await expect(card).toContainText('Проверка')
@@ -112,26 +112,26 @@ test.describe('Владелец сервиса заводит аптеку и о
     const { token } = await res.json()
     const list = await (await page.request.get(`${API}/admin/pharmacies`, { headers: { Authorization: `Bearer ${token}` } })).json()
     state.pharmacyId = list.find((p) => p.code === CODE)?.id
-    expect(state.pharmacyId, 'аптека не найдена на сервере').toBeTruthy()
+    expect(state.pharmacyId, 'магазин не найден на сервере').toBeTruthy()
   })
 
-  test('владелец новой аптеки входит и попадает в свою кассу', async ({ page }) => {
+  test('владелец нового магазина входит и попадает в свою кассу', async ({ page }) => {
     await signIn(page, OWNER_LOGIN, OWNER_PASS)
-    // У аптеки боковое меню есть — в отличие от панели
+    // У магазина боковое меню есть — в отличие от панели
     await expect(page.locator('.sidebar')).toBeVisible()
     await expect(page.locator('.side-user .su-name')).toHaveText(OWNER_LOGIN)
     await expect(page.locator('.side-user .su-role')).toHaveText('Основатель')
   })
 
-  test('новая аптека начинает с пустого склада и своими категориями', async ({ page }) => {
+  test('новый магазин начинает с пустого склада и своими категориями', async ({ page }) => {
     await signIn(page, OWNER_LOGIN, OWNER_PASS)
     await page.locator('.sidebar').getByRole('link', { name: /Товары/ }).first().click()
     await expect(page.locator('.topbar h1')).toHaveText('Товары')
-    // Ни одного товара: аптека новая, и чужих данных в ней быть не может
+    // Ни одного товара: магазин новая, и чужих данных в ней быть не может
     await expect(page.locator('tbody')).toContainText('Ничего не найдено')
   })
 
-  test('в новой аптеке проходит настоящая продажа', async ({ page }) => {
+  test('в новом магазине проходит настоящая продажа', async ({ page }) => {
     test.setTimeout(120_000)
     await signIn(page, OWNER_LOGIN, OWNER_PASS)
 
@@ -167,19 +167,19 @@ test.describe('Владелец сервиса заводит аптеку и о
     await expect(page.locator('.modal')).toContainText(/Чек|Итого/i, { timeout: 30_000 })
   })
 
-  test('уборка: аптека прогона удалена вместе со схемой', async ({ page }) => {
+  test('уборка: магазин прогона удалён вместе со схемой', async ({ page }) => {
     test.setTimeout(120_000)
     await signIn(page, USER, PASS)
     const row = page.locator('tbody tr', { hasText: CODE })
     await expect(row.first()).toBeVisible()
     await row.first().click()
 
-    const card = page.locator('.modal', { hasText: `Аптека ${TAG}` }).first()
+    const card = page.locator('.modal', { hasText: `Магазин ${TAG}` }).first()
     await card.getByRole('button', { name: /Удалить/ }).click()
 
-    // Подтверждение — набрать код аптеки: перепутать строку в списке легко,
+    // Подтверждение — набрать код магазина: перепутать строку в списке легко,
     // набрать чужой код руками уже нет
-    const ask = page.locator('.modal', { hasText: 'Удалить аптеку?' })
+    const ask = page.locator('.modal', { hasText: 'Удалить магазин?' })
     await expect(ask).toBeVisible()
     await ask.locator('input').first().fill(CODE)
     await ask.getByRole('button', { name: /^Удалить$/ }).click()
@@ -194,9 +194,9 @@ test.describe('Владелец сервиса заводит аптеку и о
 // работу гарантированно, каждый раз. Теперь, когда база стоит рядом с сервером,
 // те же полторы сотни запросов укладываются в несколько секунд.
 //
-// На этой же аптеке проверяется вход под владельцем: он подменяет токен,
-// и ошибка тут означала бы, что владелец сервиса застрял в чужой аптеке.
-test.describe('Аптека с демо-данными и вход под её владельцем', () => {
+// На этом же магазине проверяется вход под владельцем: он подменяет токен,
+// и ошибка тут означала бы, что владелец сервиса застрял в чужом магазине.
+test.describe('Магазин с демо-данными и вход под её владельцем', () => {
   const CODE2 = TAG + '-d'
   const state2 = { id: null }
 
@@ -214,7 +214,7 @@ test.describe('Аптека с демо-данными и вход под её �
         headers: { Authorization: `Bearer ${token}` },
       })
     } catch {
-      console.log(`  ВНИМАНИЕ: не удалось убрать аптеку ${CODE2}`)
+      console.log(`  ВНИМАНИЕ: не удалось убрать магазин ${CODE2}`)
     }
   })
 
@@ -222,10 +222,10 @@ test.describe('Аптека с демо-данными и вход под её �
     test.setTimeout(300_000)
     await signIn(page, USER, PASS)
 
-    await page.getByRole('button', { name: /Завести аптеку/ }).click()
-    const form = page.locator('.modal', { hasText: 'Новая аптека' })
+    await page.getByRole('button', { name: /Завести магазин/ }).click()
+    const form = page.locator('.modal', { hasText: 'Новый магазин' })
     const field = (label) => form.locator('.field', { hasText: label }).locator('input').first()
-    await field('Код аптеки').fill(CODE2)
+    await field('Код магазина').fill(CODE2)
     await field('Название').fill(`Показ ${TAG}`)
     await field('Логин владельца').fill(CODE2 + '-hoz')
     await field('Пароль').fill(OWNER_PASS)
@@ -236,7 +236,7 @@ test.describe('Аптека с демо-данными и вход под её �
     // Пометка честно говорит, что работа длиннее обычной
     await expect(page.getByText('заводится с демо-данными…')).toBeVisible()
 
-    const done = page.locator('.modal', { hasText: 'Аптека заведена' })
+    const done = page.locator('.modal', { hasText: 'Магазин заведён' })
     await expect(done).toBeVisible({ timeout: 240_000 })
     await done.getByRole('button', { name: /Записал/ }).click()
 
@@ -244,7 +244,7 @@ test.describe('Аптека с демо-данными и вход под её �
     const { token } = await res.json()
     const list = await (await page.request.get(`${API}/admin/pharmacies`, { headers: { Authorization: `Bearer ${token}` } })).json()
     state2.id = list.find((p) => p.code === CODE2)?.id
-    expect(state2.id, 'аптека с демо-данными не найдена').toBeTruthy()
+    expect(state2.id, 'магазин с демо-данными не найден').toBeTruthy()
   })
 
   test('в карточке видно, что демо-данные легли в её схему', async ({ page }) => {
@@ -268,7 +268,7 @@ test.describe('Аптека с демо-данными и вход под её �
     }
 
     // Двадцать товаров и продажи за десять дней — иначе показывать клиенту нечего.
-    // Счётчики приезжают отдельным запросом: за ними надо идти в схему самой аптеки,
+    // Счётчики приезжают отдельным запросом: за ними надо идти в схему самого магазина,
     // и держать из-за них весь экран было бы неправильно. Поэтому дожидаемся.
     await expect
       .poll(() => value('Товаров'), { message: 'демо-товары не легли в схему', timeout: 30_000 })
@@ -278,7 +278,7 @@ test.describe('Аптека с демо-данными и вход под её �
       .toBeGreaterThan(0)
   })
 
-  test('срок работы кассы без связи задаётся в карточке аптеки', async ({ page }) => {
+  test('срок работы кассы без связи задаётся в карточке магазина', async ({ page }) => {
     await signIn(page, USER, PASS)
     await page.locator('tbody tr', { hasText: CODE2 }).first().click()
     const card = page.locator('.modal', { hasText: `Показ ${TAG}` }).first()
@@ -287,7 +287,7 @@ test.describe('Аптека с демо-данными и вход под её �
     await expect(row).toContainText('7 дн.')
 
     await card.getByRole('button', { name: /Изменить/ }).click()
-    const form = page.locator('.modal', { hasText: 'Изменить аптеку' }).last()
+    const form = page.locator('.modal', { hasText: 'Изменить магазин' }).last()
     const days = form.getByTestId('offline-days')
     await expect(days).toHaveValue('7')
     // Негодное число сервер отвергает с объяснением, а не молча обрезает
@@ -301,7 +301,7 @@ test.describe('Аптека с демо-данными и вход под её �
     await expect(form).toBeHidden()
     await expect(row).toContainText('14 дн.')
 
-    // И аптека получает это число: с ним её касса и будет считать срок без связи
+    // И магазин получает это число: с ним её касса и будет считать срок без связи
     const owner = await page.request.post(`${API}/auth/login`, { data: { name: CODE2 + '-hoz', password: OWNER_PASS } })
     expect((await owner.json()).user.subscription.offlineDays).toBe(14)
   })
@@ -313,20 +313,20 @@ test.describe('Аптека с демо-данными и вход под её �
     const card = page.locator('.modal', { hasText: `Показ ${TAG}` }).first()
     await card.getByRole('button', { name: /Войти под владельцем/ }).click()
 
-    const ask = page.locator('.modal', { hasText: 'Войти под владельцем аптеки?' })
+    const ask = page.locator('.modal', { hasText: 'Войти под владельцем магазина?' })
     await expect(ask).toBeVisible()
     await ask.getByRole('button', { name: /^Войти$/ }).click()
 
-    // Попали в чужую аптеку — и это видно постоянной полосой поверх всего
+    // Попали в чужой магазин — и это видно постоянной полосой поверх всего
     await expect(page.locator('.sidebar')).toBeVisible({ timeout: 30_000 })
     const banner = page.locator('.conn-banner.support')
     await expect(banner).toBeVisible()
-    await expect(banner).toContainText('чужую аптеку')
+    await expect(banner).toContainText('чужой магазин')
     await expect(page.locator('.topbar h1')).toBeVisible()
 
     // Возврат к себе — одним нажатием, без повторного ввода пароля
     await banner.getByRole('button', { name: /вернуться к себе/ }).click()
-    await expect(page.locator('.topbar h1')).toHaveText('Аптеки', { timeout: 30_000 })
+    await expect(page.locator('.topbar h1')).toHaveText('Магазины', { timeout: 30_000 })
     await expect(page.locator('.conn-banner.support')).toHaveCount(0)
   })
 })
@@ -347,9 +347,9 @@ test.afterAll(async () => {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` },
     })
-    console.log(`  уборка: аптека ${CODE} удалена — прогон не убрал её сам`)
+    console.log(`  уборка: магазин ${CODE} удалён — прогон не убрал её сам`)
   } catch (e) {
-    console.log(`  ВНИМАНИЕ: не удалось убрать аптеку ${CODE} — ${e.message}`)
+    console.log(`  ВНИМАНИЕ: не удалось убрать магазин ${CODE} — ${e.message}`)
   }
 })
 
@@ -417,14 +417,14 @@ test.describe('Аналитика в панели', () => {
     const totalBefore = await read()
 
     // Заводим клиента и убеждаемся, что сводка это заметила
-    await page.getByRole('button', { name: /Завести аптеку/ }).click()
-    const form = page.locator('.modal', { hasText: 'Новая аптека' })
+    await page.getByRole('button', { name: /Завести магазин/ }).click()
+    const form = page.locator('.modal', { hasText: 'Новый магазин' })
     const field = (label) => form.locator('.field', { hasText: label }).locator('input').first()
-    await field('Код аптеки').fill(CODE3)
+    await field('Код магазина').fill(CODE3)
     await field('Название').fill(`Аналитика ${TAG}`)
     await field('Пароль').fill('proverka-2026')
     await form.getByRole('button', { name: /^Завести$/ }).click()
-    const done = page.locator('.modal', { hasText: 'Аптека заведена' })
+    const done = page.locator('.modal', { hasText: 'Магазин заведён' })
     await expect(done).toBeVisible({ timeout: 180_000 })
     await done.getByRole('button', { name: /Записал/ }).click()
 
@@ -523,20 +523,20 @@ test.describe('Панель на узком экране', () => {
       expect(экран.элементы, `${w}px: за край вылезает ${экран.элементы.join(', ')}`).toEqual([])
       expect(экран.вбок, `${w}px: страница листается вбок на ${экран.вбок}px`).toBe(0)
 
-      // Карточка аптеки — самое плотное окно панели, и оно рисуется порталом
+      // Карточка магазина — самое плотное окно панели, и оно рисуется порталом
       // в <body>, куда правила страницы не достают. Проверяем отдельно.
       await page.locator('tbody tr').first().click()
       await expect(page.locator('.modal').first()).toBeVisible({ timeout: 30_000 })
       await page.waitForTimeout(600)
       const окно = await вылезло(page)
-      expect(окно.элементы, `${w}px, карточка аптеки: вылезает ${окно.элементы.join(', ')}`).toEqual([])
-      expect(окно.вбок, `${w}px, карточка аптеки: листается вбок на ${окно.вбок}px`).toBe(0)
+      expect(окно.элементы, `${w}px, карточка магазина: вылезает ${окно.элементы.join(', ')}`).toEqual([])
+      expect(окно.вбок, `${w}px, карточка магазина: листается вбок на ${окно.вбок}px`).toBe(0)
       await page.keyboard.press('Escape')
       await page.waitForTimeout(300)
     }
   })
 
-  test('таблица аптек на телефоне становится карточками с подписями', async ({ page }) => {
+  test('таблица магазинов на телефоне становится карточками с подписями', async ({ page }) => {
     // Без подписей значения были бы безымянными: заголовок таблицы на узком
     // экране не показывается, и «26.08.2026» ничего бы не значило
     test.setTimeout(120_000)
@@ -555,15 +555,15 @@ test.describe('Панель на узком экране', () => {
 
 // ── Тема и язык панели ──
 //
-// Хранились в одном месте с аптечными. Владелец, посмотрев аптеку в том же
+// Хранились в одном месте с торговыми. Владелец, посмотрев магазин в том же
 // браузере, получал в панели её тему — а сменить её из панели было нечем.
 test.describe('Настройки панели', () => {
-  test('тема и язык панели не связаны с аптечными', async ({ page }) => {
+  test('тема и язык панели не связаны с торговыми', async ({ page }) => {
     test.setTimeout(120_000)
     await signIn(page, USER, PASS)
     await expect(page.locator('.admin-app')).toBeVisible({ timeout: 30_000 })
 
-    // Аптека этого браузера «выбрала» тёмную и таджикский
+    // Магазин этого браузера «выбрала» тёмную и таджикский
     await page.evaluate(() => {
       localStorage.setItem('apteka_theme', 'dark')
       localStorage.setItem('apteka_lang', 'tg')
@@ -572,29 +572,29 @@ test.describe('Настройки панели', () => {
     await expect(page.locator('.admin-app')).toBeVisible({ timeout: 30_000 })
 
     const тема = () => page.evaluate(() => document.documentElement.getAttribute('data-theme'))
-    expect(await тема(), 'панель унаследовала аптечную тему').toBe('light')
-    await expect(page.locator('.topbar h1'), 'панель унаследовала аптечный язык').toHaveText('Аптеки')
+    expect(await тема(), 'панель унаследовала торговую тему').toBe('light')
+    await expect(page.locator('.topbar h1'), 'панель унаследовала торговый язык').toHaveText('Магазины')
 
-    // Меняем в панели — аптечная настройка должна остаться нетронутой
+    // Меняем в панели — торговая настройка должна остаться нетронутой
     await page.getByTitle('Настройки панели').click()
     const modal = page.locator('.modal', { hasText: 'Настройки панели' })
     await expect(modal).toBeVisible()
     await modal.getByRole('button', { name: 'Тёмная' }).click()
     await expect.poll(тема, { message: 'тема панели не переключилась' }).toBe('dark')
     await modal.getByRole('button', { name: 'Тоҷикӣ' }).click()
-    await expect(page.locator('.topbar h1'), 'язык панели не переключился').toHaveText('Дорухонаҳо')
+    await expect(page.locator('.topbar h1'), 'язык панели не переключился').toHaveText('Мағозаҳо')
 
     const чужое = await page.evaluate(() => ({
       тема: localStorage.getItem('apteka_theme'),
       язык: localStorage.getItem('apteka_lang'),
     }))
-    expect(чужое, 'панель переписала аптечную настройку').toEqual({ тема: 'dark', язык: 'tg' })
+    expect(чужое, 'панель переписала торговую настройку').toEqual({ тема: 'dark', язык: 'tg' })
 
     // Возвращаем панели русский и светлую, чтобы следующие проверки шли с чистого.
     // Окно ищем заново и без опоры на заголовок: он уже по-таджикски
     const окно = page.locator('.modal').first()
     await окно.getByRole('button', { name: 'Русский' }).click()
-    await expect(page.locator('.topbar h1')).toHaveText('Аптеки')
+    await expect(page.locator('.topbar h1')).toHaveText('Магазины')
     await окно.getByRole('button', { name: 'Светлая' }).click()
     await expect
       .poll(тема, { message: 'панель не вернулась к светлой теме' })

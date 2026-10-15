@@ -3,8 +3,8 @@ import { AuthService } from './auth.service'
 import { Public, CurrentUser, ServiceWide } from './decorators'
 import { LoginDto, ChangePasswordDto } from './dto'
 
-// Все разделы здесь — про саму учётную запись, а не про аптеку: ими пользуются
-// и сотрудники аптек, и владелец сервиса, у которого аптеки нет вовсе
+// Все разделы здесь — про саму учётную запись, а не про магазин: ими пользуются
+// и сотрудники магазинов, и владелец сервиса, у которого магазина нет вовсе
 @ServiceWide()
 @Controller('auth')
 export class AuthController {

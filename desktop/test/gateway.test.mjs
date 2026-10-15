@@ -378,7 +378,7 @@ test('«кто я» с интернетом — ответ сервера; бе�
     assert.equal(me.status, 200, 'сбой связи выкинул бы человека из программы посреди смены')
     assert.equal(me.data.name, 'kassir')
     assert.equal(me.data.role, 'founder')
-    assert.deepEqual(me.data.pharmacy, { code: 'apteka-1', name: 'Аптека №1' })
+    assert.deepEqual(me.data.pharmacy, { code: 'apteka-1', name: 'Магазин №1' })
     assert.equal(me.data.subscription.paidUntil, '2026-11-01T12:00:00.000Z')
   }
 })
@@ -404,7 +404,7 @@ test('подписка закончилась, пока интернета не 
 
   // Срок вышел
   t.time.now = Date.parse('2026-11-01T12:00:01.000Z')
-  const text = 'Подписка закончилась 01.11.2026 в 17:00. Данные аптеки сохранены — работа продолжится сразу после оплаты. Обратитесь к поставщику программы.'
+  const text = 'Подписка закончилась 01.11.2026 в 17:00. Данные магазина сохранены — работа продолжится сразу после оплаты. Обратитесь к поставщику программы.'
   const me = await t.req('GET', '/auth/me')
   assert.equal(me.status, 403)
   assert.equal(me.data.message, text)
@@ -420,7 +420,7 @@ test('подписка закончилась, пока интернета не 
   assert.equal(again.data.message, text)
 })
 
-test('сервер приостановил аптеку — без интернета она тоже не работает', async (tt) => {
+test('сервер приостановил магазин — без интернета он тоже не работает', async (tt) => {
   const t = await loggedIn()
   tt.after(() => t.gw.close())
   t.srv.state.pharmacy.status = 'suspended'
@@ -915,7 +915,7 @@ test('списания, сделанные, пока за кассой рабо�
   t.srv.reset()
   await t.gw.syncNow()
   const pull = t.srv.state.calls.find((c) => c.route === '/sync/pull').path
-  assert.match(pull, /[?&]cursor=\d+/, 'владельцу незачем грузить всю аптеку заново')
+  assert.match(pull, /[?&]cursor=\d+/, 'владельцу незачем грузить весь магазин заново')
   assert.match(pull, /[?&]wcursor=\d+/)
   assert.deepEqual(await seen(), ['w-2'], 'списание, оформленное при кассире, до владельца не дошло (или удалённое осталось)')
 })
@@ -924,7 +924,7 @@ test('обмен сообщает, под каким номером записы
   const t = await loggedIn()
   tt.after(() => t.gw.close())
   const sale = await sell(t, 1)
-  assert.equal(sale.data.userId, 'tenant-kassir', 'номер сотрудника в базе аптеки сообщил сервер')
+  assert.equal(sale.data.userId, 'tenant-kassir', 'номер сотрудника в базе магазина сообщил сервер')
 
   // Подписку продлили — касса узнаёт об этом при первом же обмене, без «кто я»
   t.srv.state.pharmacy.paidUntil = '2027-01-01T00:00:00.000Z'
@@ -966,13 +966,13 @@ test('недопустимая просьба окна не выполняетс
   assert.equal(t.srv.state.calls.length, 0)
 })
 
-test('аптеки не смешиваются: у каждой свой файл базы', async (tt) => {
+test('магазины не смешиваются: у каждой свой файл базы', async (tt) => {
   const t = await loggedIn()
   tt.after(() => t.gw.close())
   await t.req('POST', '/sales', { payment: 'cash', items: [{ productId: 'nur', qty: 1 }] })
   assert.deepEqual(fs.readdirSync(t.dataDir).filter((f) => f.endsWith('.db')), ['pharmacy-apteka-1.db'])
 
-  // На том же компьютере вошёл сотрудник другой аптеки
+  // На том же компьютере вошёл сотрудник другого магазина
   t.gw.logout()
   t.srv.state.pharmacy = { code: 'apteka-2', name: 'Вторая', paidUntil: '2026-12-01T00:00:00.000Z', status: 'active' }
   t.srv.addUser('drugoj', 'drugoj-parol-1')
@@ -981,11 +981,11 @@ test('аптеки не смешиваются: у каждой свой фай�
   assert.equal((await t.login('drugoj', 'drugoj-parol-1')).status, 201)
   await t.gw.syncNow()
   assert.deepEqual((await t.req('GET', '/products')).data.map((p) => p.name), ['Чужой товар'])
-  assert.deepEqual((await t.req('GET', '/sales?days=60')).data, [], 'чек первой аптеки виден во второй')
+  assert.deepEqual((await t.req('GET', '/sales?days=60')).data, [], 'чек первого магазина виден во втором')
   assert.deepEqual(fs.readdirSync(t.dataDir).filter((f) => f.endsWith('.db')).sort(), ['pharmacy-apteka-1.db', 'pharmacy-apteka-2.db'])
 })
 
-// ── Расходы аптеки ──
+// ── Расходы магазина ──
 
 test('расход из кассы, внесённый без связи: сразу уменьшает наличные в смене, доходит до сервера и не считается дважды', async (tt) => {
   const t = await loggedIn()
@@ -1171,7 +1171,7 @@ test('расходы, внесённые, пока за кассой работ�
   t.srv.reset()
   await t.gw.syncNow()
   const pull = t.srv.state.calls.find((c) => c.route === '/sync/pull').path
-  assert.match(pull, /[?&]cursor=\d+/, 'владельцу незачем грузить всю аптеку заново')
+  assert.match(pull, /[?&]cursor=\d+/, 'владельцу незачем грузить весь магазин заново')
   assert.match(pull, /[?&]wcursor=\d+/)
   assert.deepEqual(await seen(), ['e-2'], 'расход, внесённый при кассире, до владельца не дошёл (или удалённый остался)')
   assert.ok((await t.req('GET', '/expense-categories')).data.some((c) => c.name === 'Охрана'), 'статья, заведённая при кассире, не дошла')
@@ -1278,7 +1278,7 @@ test('сколько дней работать без связи, назнача
 
   t.srv.state.online = false
   t.time.now += 10 * DAY_MS
-  assert.equal((await sell(t, 1)).status, 201, 'этой аптеке дано две недели')
+  assert.equal((await sell(t, 1)).status, 201, 'этому магазину дано две недели')
 
   // Владелец сервиса сократил срок — касса узнаёт при первом же обмене
   t.srv.state.online = true
@@ -1322,9 +1322,9 @@ test('постоянное соединение оборвалось — кас�
   assert.equal(kicks().length, 0)
 })
 
-// ── База аптеки не открывается ──
+// ── База магазина не открывается ──
 
-// Основная часть, у которой файл базы аптеки «занят другой программой», пока busy.on
+// Основная часть, у которой файл базы магазина «занят другой программой», пока busy.on
 function withBusyFile(t, busy) {
   return createGateway({
     apiUrl: API,
@@ -1343,11 +1343,11 @@ function withBusyFile(t, busy) {
   })
 }
 
-test('файл базы аптеки занят: программа запускается, входа нет, человек видит объяснение — а потом входит', async (tt) => {
+test('файл базы магазина занят: программа запускается, входа нет, человек видит объяснение — а потом входит', async (tt) => {
   const t = await loggedIn()
   t.gw.close()
 
-  // «Перезапуск»: человек был за кассой, но базу его аптеки открыть не удаётся
+  // «Перезапуск»: человек был за кассой, но базу его магазина открыть не удаётся
   const busy = { on: true }
   const again = withBusyFile(t, busy)
   tt.after(() => again.close())
@@ -1594,7 +1594,7 @@ test('«загрузить всё заново», нажатое посреди 
   await Promise.all([running, reload])
   const pulls = t.srv.state.calls.filter((c) => c.route === '/sync/pull')
   assert.ok(pulls.length >= 1)
-  assert.equal(new URLSearchParams(pulls.at(-1).path.split('?')[1]).has('cursor'), false, 'идущий обмен вернул прежнюю отметку, и вместо всей аптеки пришли бы одни изменения')
+  assert.equal(new URLSearchParams(pulls.at(-1).path.split('?')[1]).has('cursor'), false, 'идущий обмен вернул прежнюю отметку, и вместо всего магазина пришли бы одни изменения')
   // Дальше — снова только изменения
   t.srv.reset()
   await t.gw.syncNow()
@@ -1620,7 +1620,7 @@ test('сервер отверг закрытие смены: касса берё
   t.events.length = 0
   await t.gw.syncNow()
   assert.equal(t.gw.status().rejected, 1)
-  // Тем же обменом касса забрала аптеку целиком — без отметки «докуда получили»
+  // Тем же обменом касса забрала магазин целиком — без отметки «докуда получили»
   assert.equal(pullsOf(t).at(-1).has('cursor'), false)
   // На сервере смена открыта — и на кассе она снова открыта. Раньше её не было вовсе:
   // касса открывала новую, сервер отвергал и её («уже открыта другая») — и так по кругу
@@ -1734,7 +1734,7 @@ test('отвергнутые приход, списание, возврат, п�
   assert.equal(local(t, 'SELECT state FROM outbox WHERE id = ?', id)[0].state, 'dismissed')
 })
 
-test('отказ пришёл, а забрать аптеку целиком не успели (связь пропала, программу закрыли) — после запуска касса делает это первым делом', async (tt) => {
+test('отказ пришёл, а забрать магазин целиком не успели (связь пропала, программу закрыли) — после запуска касса делает это первым делом', async (tt) => {
   const t = await loggedIn()
   t.srv.state.rejectIf = (op) => (op.type === 'sale' ? 'Суммы чека не сходятся с его позициями' : null)
   await sell(t, 1)
@@ -1774,7 +1774,7 @@ test('сервер отверг закрытие смены, а связь ту�
 
   t.srv.state.rejectIf = (op) => (op.type === 'shift.close' ? 'Недопустимая дата: закрытие смены' : null)
   assert.equal((await t.req('POST', '/shifts/close', { countedCash: 250 })).status, 201)
-  // Отказ дошёл, а забрать аптеку заново не вышло: связь пропала
+  // Отказ дошёл, а забрать магазин заново не вышло: связь пропала
   t.srv.state.override = async (method, route) => (route === '/sync/pull' ? { throw: true } : null)
   await t.gw.syncNow()
   t.srv.state.online = false
@@ -1818,7 +1818,7 @@ test('сервер ответил, что такой смены у него не
     t.srv.state.data.shifts = t.srv.state.data.shifts.filter((x) => x.id !== opened.data.id)
     t.srv.state.rejectIf = (op) => (op.type === 'shift.close' && op.payload.shift.id === opened.data.id ? reason : null)
     assert.equal((await t.req('POST', '/shifts/close', { countedCash: 250 })).status, 201)
-    // Отказ дошёл, а забрать аптеку заново не вышло: связь пропала
+    // Отказ дошёл, а забрать магазин заново не вышло: связь пропала
     t.srv.state.override = async (method, route) => (route === '/sync/pull' ? { throw: true } : null)
     await t.gw.syncNow()
     t.srv.state.online = false
@@ -1958,7 +1958,7 @@ test('приход в долг без связи: долг поставщика 
   assert.equal(await debt(), 500)
   const arrival = await t.req('POST', '/arrivals', { supplierId: 'sup-1', debt: 120, items: [{ productId: 'nur', qty: 2, cost: 100, expiryDate: '2028-01-31' }] })
   assert.equal(arrival.status, 201)
-  assert.deepEqual([arrival.data.supplier, arrival.data.debt], ['Фарм-опт', 120])
+  assert.deepEqual([arrival.data.supplier, arrival.data.debt], ['Опт-Маркет', 120])
   assert.equal(await debt(), 620)
   // Завести поставщика, открыть карточку, заплатить — только с интернетом
   for (const [method, path, body] of [['POST', '/suppliers', { name: 'Новый' }], ['GET', '/suppliers/sup-1'], ['POST', '/suppliers/sup-1/pay', { amount: 1 }]]) {

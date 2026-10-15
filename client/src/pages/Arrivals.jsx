@@ -599,7 +599,7 @@ function SupplierPick({ suppliers, value, onChange, dialog, toast, tour }) {
     const r = await dialog.prompt({
       title: tr('Новый поставщик'),
       fields: [
-        { name: 'name', label: tr('Название'), placeholder: tr('Напр. Фарм-опт') },
+        { name: 'name', label: tr('Название'), placeholder: tr('Напр. Опт-Маркет') },
         { name: 'phone', label: tr('Телефон') },
       ],
       confirmText: tr('Добавить'),

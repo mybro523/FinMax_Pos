@@ -21,7 +21,7 @@ export async function addCategoryDialog({ dialog, toast, options, onPicked }) {
   if (same) return onPicked(same)
   try {
     // Новая категория из формы товара — без слежки за сроком: так подходит
-    // и хлебу, и шампуню; для лекарств отметку меняют в настройках
+    // и хлебу, и шампуню; для товаров отметку меняют в настройках
     await db.push('categories', { name, noExpiry: true })
     onPicked(name)
     toast(tr('Категория добавлена — она появилась и в настройках'))

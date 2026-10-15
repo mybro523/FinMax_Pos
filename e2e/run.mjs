@@ -28,24 +28,24 @@ async function makeProduct(over = {}) {
 
 const productById = async (id) => (await get('/products')).find((p) => p.id === id)
 
-// ── Своя аптека на каждый прогон ──
+// ── Свой магазин на каждый прогон ──
 // Раньше проверки работали в единственной базе и убирали за собой поштучно. Теперь
-// у каждой аптеки своя схема, поэтому прогон заводит собственную: задеть работающую
-// аптеку он не может даже при обрыве посередине, а в конце схема удаляется целиком —
+// у каждого магазина своя схема, поэтому прогон заводит собственную: задеть работающую
+// магазин он не может даже при обрыве посередине, а в конце схема удаляется целиком —
 // вместе с чеками, которые поштучно удалить нельзя, да и не нужно.
 //
-// Если вошли не владельцем сервиса, а сотрудником аптеки, работаем в ней, как раньше:
-// так прогон можно направить на конкретную аптеку.
+// Если вошли не владельцем сервиса, а сотрудником магазина, работаем в ней, как раньше:
+// так прогон можно направить на конкретный магазин.
 async function ownPharmacy(serviceUser) {
   if (serviceUser.role !== 'superadmin') {
-    console.log('  вход сотрудником аптеки — работаю в её базе')
+    console.log('  вход сотрудником магазина — работаю в её базе')
     return null
   }
   const code = TAG.toLowerCase()
   const password = 'e2e-' + Math.random().toString(36).slice(2, 10)
-  const ph = await post('/admin/pharmacies', { code, name: TAG + ' Аптека', ownerPassword: password })
+  const ph = await post('/admin/pharmacies', { code, name: TAG + ' Магазин', ownerPassword: password })
   setToken(await loginAs(ph.ownerLogin, password))
-  console.log(`  завёл аптеку «${code}» и вошёл её владельцем`)
+  console.log(`  завёл магазин «${code}» и вошёл её владельцем`)
   return ph
 }
 
@@ -53,7 +53,7 @@ async function main() {
   console.log(`\x1b[1mСквозной прогон\x1b[0m  ${API}\n  метка: ${TAG}`)
   const user = await login()
   console.log(`  вошли как: ${user.name} (${user.role})`)
-  // Токен владельца сервиса держим отдельно: им в конце удаляется аптека прогона,
+  // Токен владельца сервиса держим отдельно: им в конце удаляется магазин прогона,
   // а основной токен к тому моменту принадлежит уже её владельцу
   const serviceToken = getToken()
   const temp = await ownPharmacy(user)
@@ -126,7 +126,7 @@ async function main() {
     eqMoney(pill.cost, 150, 'средневзвешенная из 100 и 200')
   })
 
-  await check('лекарству без срока годности приёмка отказывает', async () => {
+  await check('товару без срока годности приёмка отказывает', async () => {
     await rejects(
       () => post('/arrivals', { supplier: TAG, items: [{ productId: pill.id, qty: 1, cost: 100 }] }),
       /срок годности/i,
@@ -157,7 +157,7 @@ async function main() {
       payment: 'cash',
       clientId: TAG + '-sale2',
     })
-    eqMoney(s.total, 50, '5 таблеток по 10')
+    eqMoney(s.total, 50, '5 штук по 10')
     pill = await productById(pill.id)
     eq(pill.stock, 17, 'упаковок осталось')
     eq(pill.looseUnits, 15, 'во вскрытой упаковке')
@@ -331,7 +331,7 @@ async function main() {
   group('Инвентаризация')
 
   // Своя категория, чтобы лист пересчёта содержал только наши товары,
-  // а не весь склад аптеки
+  // а не весь склад магазина
   const catName = TAG + '-kat'
   let sheet
   let counted
@@ -554,7 +554,7 @@ async function main() {
   let kassaGoods
   let kassaCursor
 
-  await check('первый обмен отдаёт кассе всю аптеку: товары, партии и отметку «докуда»', async () => {
+  await check('первый обмен отдаёт кассе весь магазин: товары, партии и отметку «докуда»', async () => {
     kassaGoods = await makeProduct({ name: 'Касса', cost: 60, price: 100 })
     await post('/arrivals', { supplier: TAG, items: [{ productId: kassaGoods.id, qty: 5, cost: 60, expiryDate: daysFromNow(400) }] })
     kassaGoods = await productById(kassaGoods.id)
@@ -967,7 +967,7 @@ async function main() {
     eq((await pull(mine, ahead.cursor)).full, false, 'после полной загрузки обмен снова частичный')
 
     // А отметка старше выданной — обычное дело: прошлый ответ до кассы не дошёл.
-    // Она спрашивает с прежнего места и получает изменения, а не всю аптеку
+    // Она спрашивает с прежнего места и получает изменения, а не весь магазин
     const lost = await pull(mine, first.cursor)
     eq(lost.full, false, 'потерянный ответ — не повод отдавать всё заново')
     assert(lost.data.products.upsert.some((p) => p.id === later.id), 'изменения с прежней отметки на месте')
@@ -998,7 +998,7 @@ async function main() {
     eq(r.results[0].status, 'ok', 'чек с разницей в дирам принят: ' + (r.results[0].error || ''))
     eqMoney((await get('/sales')).find((x) => x.id === id).total, 3.33, 'и записан с суммой кассы — той, что напечатана на чеке')
     const left = await productById(frac.id)
-    eq(left.stock * 3 + left.looseUnits, 13, 'две таблетки списаны')
+    eq(left.stock * 3 + left.looseUnits, 13, 'две штуки списаны')
 
     // Закупочная цена 33,333 за упаковку: три упаковки — 99,999, то есть 100.00
     const arrId = randomUUID()
@@ -1497,7 +1497,7 @@ async function main() {
   // ────────────────────────────────────────────────────────────
   group('Расходы')
 
-  // Расходы — деньги аптеки помимо закупки товара. Из них и из прибыли от продаж
+  // Расходы — деньги магазина помимо закупки товара. Из них и из прибыли от продаж
   // отчёты считают чистую прибыль. Расход «из кассы» ещё и уменьшает наличные,
   // которые ждут в смене: денег в ящике уже нет.
   const READY = ['Аренда', 'Зарплата', 'Коммунальные услуги', 'Налоги', 'Транспорт', 'Реклама', 'Хозяйственные нужды', 'Другое']
@@ -1772,12 +1772,12 @@ async function main() {
   // ── Поставщики ──
   let distributor
   await check('поставщики: заводятся с начальным долгом, не задваиваются, кассиру — без долгов', async () => {
-    distributor = await post('/suppliers', { name: `  ${TAG} Фарм-опт  `, phone: '+992 900 11 22 33', note: 'до обеда', openingDebt: 500 })
+    distributor = await post('/suppliers', { name: `  ${TAG} Опт-Маркет  `, phone: '+992 900 11 22 33', note: 'до обеда', openingDebt: 500 })
     created.suppliers.push(distributor.id)
-    eq(distributor.name, `${TAG} Фарм-опт`, 'пробелы по краям обрезаны')
+    eq(distributor.name, `${TAG} Опт-Маркет`, 'пробелы по краям обрезаны')
     eqMoney(distributor.openingDebt, 500, 'начальный долг записан')
     eqMoney(distributor.debt, 500, 'и это весь долг на старте')
-    await rejects(() => post('/suppliers', { name: `${TAG} Фарм-опт` }), /уже есть/i, 'второй поставщик с тем же названием')
+    await rejects(() => post('/suppliers', { name: `${TAG} Опт-Маркет` }), /уже есть/i, 'второй поставщик с тем же названием')
     await rejects(() => post('/suppliers', { name: '   ' }), /назван|заполн|пуст/i, 'поставщик без названия')
 
     // Кассир видит список (ему оформлять приход), но не долги; заводит — без долга
@@ -1790,8 +1790,8 @@ async function main() {
     await rejects(() => get('/suppliers/' + distributor.id, kassaCashier.token), /прав/i, 'карточка поставщика кассиру закрыта')
     await rejects(() => patch('/suppliers/' + distributor.id, { name: 'x' }, kassaCashier.token), /прав/i, 'правка кассиру закрыта')
 
-    const renamed = await patch('/suppliers/' + distributor.id, { name: `${TAG} Фарм-опт 2`, phone: '' })
-    eq(renamed.name, `${TAG} Фарм-опт 2`, 'переименован')
+    const renamed = await patch('/suppliers/' + distributor.id, { name: `${TAG} Опт-Маркет 2`, phone: '' })
+    eq(renamed.name, `${TAG} Опт-Маркет 2`, 'переименован')
     distributor = renamed
     await rejects(() => del('/suppliers/' + distributor.id), /есть долг/i, 'поставщика с долгом не удалить')
     eq((await del('/suppliers/' + byCashier.id)).ok, true, 'поставщик без долга и оплат удаляется')
@@ -1807,7 +1807,7 @@ async function main() {
       items: [{ productId: creditGoods.id, qty: 10, cost: 20, expiryDate: daysFromNow(400) }],
     })
     eq(credit.supplierId, distributor.id, 'приход помнит поставщика')
-    eq(credit.supplier, `${TAG} Фарм-опт 2`, 'и его название — снимком')
+    eq(credit.supplier, `${TAG} Опт-Маркет 2`, 'и его название — снимком')
     eqMoney(credit.total, 200, 'сумма прихода')
     eqMoney(credit.debt, 200, 'в долг нельзя больше суммы прихода — срезано до неё')
     assert(credit.user?.name || credit.userId, 'кто принял — записано')
@@ -2236,7 +2236,7 @@ async function main() {
   // ────────────────────────────────────────────────────────────
   // ────────────────────────────────────────────────────────────
   // Самая важная проверка сервиса. Ошибка здесь ничего не роняет и ничего не пишет
-  // в журнал — она просто показывает одной аптеке товары, закупочные цены и долги
+  // в журнал — она просто показывает одному магазину товары, закупочные цены и долги
   // другой. Заметить такое можно только глазами клиента, и одного раза достаточно,
   // чтобы сервису перестали доверять.
   group('Пароли и заголовки')
@@ -2293,7 +2293,7 @@ async function main() {
   })
 
   // ────────────────────────────────────────────────────────────
-  group('Аптеки не видят друг друга')
+  group('Магазины не видят друг друга')
 
   let neighbour = null
   let neighbourToken = ''
@@ -2302,50 +2302,50 @@ async function main() {
   const sharedBarcode = bc(77)
 
   if (temp) {
-    // Владелец сервиса живёт вне аптек, и это не должно мешать ему быть собой.
+    // Владелец сервиса живёт вне магазинов, и это не должно мешать ему быть собой.
     // Первый же живой запуск показал, чем это кончается: раздел «кто я» отвечал
     // отказом, клиент опрашивает его при каждом запуске — и вход срабатывал, а
     // сразу за ним следовал выход.
     await check('владелец сервиса может спросить «кто я»', async () => {
       const me = await get('/auth/me', serviceToken)
       eq(me.role, 'superadmin', 'роль владельца сервиса')
-      eq(me.pharmacy, null, 'у владельца сервиса своей аптеки нет')
+      eq(me.pharmacy, null, 'у владельца сервиса своего магазина нет')
     })
 
-    await check('владелец сервиса в разделы аптеки не попадает', async () => {
-      await rejects(() => get('/products', serviceToken), /не привязана|прав/i, 'товары аптеки')
-      await rejects(() => get('/sales', serviceToken), /не привязана|прав/i, 'чеки аптеки')
+    await check('владелец сервиса в разделы магазина не попадает', async () => {
+      await rejects(() => get('/products', serviceToken), /не привязана|прав/i, 'товары магазина')
+      await rejects(() => get('/sales', serviceToken), /не привязана|прав/i, 'чеки магазина')
     })
 
-    await check('владелец аптеки в панель управления не попадает', async () => {
-      await rejects(() => get('/admin/pharmacies'), /прав/i, 'список аптек')
+    await check('владелец магазина в панель управления не попадает', async () => {
+      await rejects(() => get('/admin/pharmacies'), /прав/i, 'список магазинов')
     })
 
-    await check('вторая аптека заводится и начинает с пустого склада', async () => {
+    await check('второй магазин заводится и начинает с пустого склада', async () => {
       const code = TAG.toLowerCase() + '-2'
       const password = 'e2e-' + Math.random().toString(36).slice(2, 10)
       neighbour = await post('/admin/pharmacies', { code, name: TAG + ' Соседняя', ownerPassword: password }, serviceToken)
       neighbourToken = await loginAs(neighbour.ownerLogin, password)
 
       const theirs = await get('/products', neighbourToken)
-      eq(theirs.length, 0, 'у новой аптеки не должно быть ни одного товара')
+      eq(theirs.length, 0, 'у нового магазина не должно быть ни одного товара')
     })
 
-    await check('соседняя аптека не видит наших товаров и продаж', async () => {
+    await check('соседний магазин не видит наших товаров и продаж', async () => {
       const ours = await get('/products')
-      assert(ours.length > 0, 'в нашей аптеке товары есть — иначе проверка ничего не значит')
+      assert(ours.length > 0, 'в нашем магазине товары есть — иначе проверка ничего не значит')
 
       const theirProducts = await get('/products', neighbourToken)
       const leaked = theirProducts.filter((p) => String(p.name).startsWith(TAG))
-      eq(leaked.length, 0, `в соседнюю аптеку протекли товары: ${leaked.map((p) => p.name).join(', ')}`)
+      eq(leaked.length, 0, `в соседний магазин протекли товары: ${leaked.map((p) => p.name).join(', ')}`)
 
       const theirSales = await get('/sales?days=0', neighbourToken)
-      eq(theirSales.length, 0, 'в соседнюю аптеку протекли чеки')
+      eq(theirSales.length, 0, 'в соседний магазин протекли чеки')
     })
 
-    await check('один и тот же штрихкод заводится в обеих аптеках', async () => {
-      // Штрихкод уникален внутри аптеки. Если бы данные лежали вместе, второй
-      // аптеке отказали бы: «товар с таким штрихкодом уже существует»
+    await check('один и тот же штрихкод заводится в обоих магазинах', async () => {
+      // Штрихкод уникален внутри магазина. Если бы данные лежали вместе, второй
+      // магазине отказали бы: «товар с таким штрихкодом уже существует»
       const shared = sharedBarcode
       await post('/products', { name: TAG + ' Общий', barcode: shared, category: 'Таблетки', price: 10 })
       const mine = (await get('/products')).find((p) => p.barcode === shared)
@@ -2360,24 +2360,24 @@ async function main() {
       assert(theirs.id !== mine.id, 'вернулась одна и та же запись — значит база общая')
     })
 
-    await check('цена в соседней аптеке своя и на нашу не влияет', async () => {
+    await check('цена в соседнем магазине своя и на нашу не влияет', async () => {
       const mine = (await get('/products')).find((p) => p.barcode === sharedBarcode)
       const theirs = (await get('/products', neighbourToken)).find((p) => p.barcode === sharedBarcode)
-      assert(mine && theirs, 'товар с общим штрихкодом не нашёлся в обеих аптеках')
+      assert(mine && theirs, 'товар с общим штрихкодом не нашёлся в обоих магазинах')
       eqMoney(mine.price, 10, 'наша цена')
       eqMoney(theirs.price, 99, 'цена соседей')
     })
 
-    await check('сотрудник соседней аптеки не попадает в наши разделы по своему токену', async () => {
+    await check('сотрудник соседнего магазина не попадает в наши разделы по своему токену', async () => {
       // Один и тот же адрес, разные токены — и каждый обязан остаться у себя
       const theirCustomers = await get('/customers', neighbourToken)
       const leaked = theirCustomers.filter((c) => String(c.name).startsWith(TAG))
-      eq(leaked.length, 0, 'в соседнюю аптеку протекли клиенты')
+      eq(leaked.length, 0, 'в соседний магазин протекли клиенты')
     })
 
-    await check('соседняя аптека удалена вместе со схемой', async () => {
+    await check('соседний магазин удалён вместе со схемой', async () => {
       await del(`/admin/pharmacies/${neighbour.id}?confirm=${neighbour.code}`, serviceToken)
-      await rejects(() => get('/products', neighbourToken), /.*/, 'токен удалённой аптеки')
+      await rejects(() => get('/products', neighbourToken), /.*/, 'токен удалённого магазина')
     })
   }
 
@@ -2394,7 +2394,7 @@ async function main() {
 
     await check('продление сдвигает срок и заканчивает пробный период', async () => {
       const before = (await get('/admin/pharmacies', serviceToken)).find((p) => p.id === temp.id)
-      assert(before.trial, 'новая аптека должна начинаться с пробного периода')
+      assert(before.trial, 'новый магазин должен начинаться с пробного периода')
 
       await post(`/admin/pharmacies/${temp.id}/extend`, { months: 3, amount: 450, method: 'cash' }, serviceToken)
 
@@ -2410,24 +2410,24 @@ async function main() {
       eq(list[0].months, 3, 'число месяцев')
     })
 
-    await check('приостановленная аптека не работает и это ей понятно объясняют', async () => {
+    await check('приостановленный магазин не работает и это ей понятно объясняют', async () => {
       const code = TAG.toLowerCase() + '-3'
       const password = 'e2e-' + Math.random().toString(36).slice(2, 10)
       victim = await post('/admin/pharmacies', { code, name: TAG + ' Должник', ownerPassword: password }, serviceToken)
       victimToken = await loginAs(victim.ownerLogin, password)
-      assert(Array.isArray(await get('/products', victimToken)), 'до приостановки аптека работает')
+      assert(Array.isArray(await get('/products', victimToken)), 'до приостановки магазин работает')
 
       await post(`/admin/pharmacies/${victim.id}/block`, {}, serviceToken)
 
       const e = await rejects(() => get('/products', victimToken), /приостановлена/i, 'работа после приостановки')
       assert(/поставщик/i.test(e.message), 'в отказе не сказано, к кому обращаться')
-      await rejects(() => loginAs(victim.ownerLogin, password), /приостановлена/i, 'вход в приостановленную аптеку')
+      await rejects(() => loginAs(victim.ownerLogin, password), /приостановлена/i, 'вход в приостановленный магазин')
     })
 
     await check('возобновление возвращает работу', async () => {
       await post(`/admin/pharmacies/${victim.id}/unblock`, {}, serviceToken)
       const fresh = await loginAs(victim.ownerLogin, victim.ownerPassword)
-      assert(Array.isArray(await get('/products', fresh)), 'аптека не заработала после возобновления')
+      assert(Array.isArray(await get('/products', fresh)), 'магазин не заработал после возобновления')
     })
 
     // ── Срок значит срок ──
@@ -2443,7 +2443,7 @@ async function main() {
 
       const e = await rejects(() => get('/products'), /Подписка закончилась/, 'просмотр товаров')
       eq(e.status, 403, 'отказ по подписке')
-      assert(/сохранены/i.test(e.message), 'человек должен знать, что не потерял свою аптеку')
+      assert(/сохранены/i.test(e.message), 'человек должен знать, что не потерял свой магазин')
       assert(/поставщику программы/i.test(e.message), 'и что делать дальше')
 
       await rejects(
@@ -2455,7 +2455,7 @@ async function main() {
 
     await check('войти заново тоже нельзя, и отказ объясняет причину', async () => {
       // Сказать «неверный пароль» было бы враньём: пароль верный. Человек набирал бы
-      // его снова, пока не упёрся в защиту от подбора, и решил бы, что потерял аптеку.
+      // его снова, пока не упёрся в защиту от подбора, и решил бы, что потерял магазин.
       const e = await rejects(
         () => loginAs(temp.ownerLogin, temp.ownerPassword),
         /Подписка закончилась/,
@@ -2468,7 +2468,7 @@ async function main() {
       // Клиент отключён, но помогать ему всё ещё надо: посмотреть, снять копию,
       // разобраться. Отказать поддержке значило бы отобрать инструмент у того, кто чинит.
       const support = await post(`/admin/pharmacies/${temp.id}/enter`, {}, serviceToken)
-      assert(Array.isArray(await get('/products', support.token)), 'поддержка не попала в отключённую аптеку')
+      assert(Array.isArray(await get('/products', support.token)), 'поддержка не попала в отключённую магазин')
     })
 
     await check('оплата возвращает работу', async () => {
@@ -2487,10 +2487,10 @@ async function main() {
       const me = await get('/auth/me')
       const back = new Date(me.subscription.paidUntil).getTime()
       assert(Math.abs(back - inTwoMin.getTime()) < 1000, `час срока потерян: ${me.subscription.paidUntil}`)
-      eq(me.subscription.status, 'active', 'через две минуты после назначения аптека ещё работает')
+      eq(me.subscription.status, 'active', 'через две минуты после назначения магазин ещё работает')
       assert(me.subscription.leftMs > 0 && me.subscription.leftMs <= 2 * 60 * 1000, 'осталось не то время')
 
-      // Возвращаем срок обратно, чтобы дальнейшие проверки шли на живой аптеке
+      // Возвращаем срок обратно, чтобы дальнейшие проверки шли на живом магазине
       await post(`/admin/pharmacies/${temp.id}/extend`, { months: 1, amount: 150 }, serviceToken)
     })
 
@@ -2500,10 +2500,10 @@ async function main() {
       const viaSync = await get(`/sync/pull?deviceId=${KASSA_A}&cursor=${kassaCursor}`)
       eq(viaSync.me.subscription.offlineDays, 7, 'касса узнаёт срок при каждом обмене')
 
-      // Горное село: связь пропадает на недели — этой аптеке ставят больше
+      // Горное село: связь пропадает на недели — этому магазину ставят больше
       const saved = await patch(`/admin/pharmacies/${temp.id}`, { offlineDays: 14 }, serviceToken)
-      eq(saved.offlineDays, 14, 'число сохранено в карточке аптеки')
-      eq((await get('/auth/me')).subscription.offlineDays, 14, 'аптека видит новый срок сразу, без перезахода')
+      eq(saved.offlineDays, 14, 'число сохранено в карточке магазина')
+      eq((await get('/auth/me')).subscription.offlineDays, 14, 'магазин видит новый срок сразу, без перезахода')
       eq((await get(`/sync/pull?deviceId=${KASSA_A}&cursor=${viaSync.cursor}`)).me.subscription.offlineDays, 14, 'и касса тоже')
       const journal = await get('/admin/audit?limit=50', serviceToken)
       assert(journal.some((a) => a.pharmacyCode === temp.code && a.action === 'set-offline-days'), 'смена срока не записана в журнал панели')
@@ -2514,22 +2514,22 @@ async function main() {
         eq(e.status, 400, `срок «${bad}» должен быть отвергнут`)
       }
       eq((await get('/auth/me')).subscription.offlineDays, 14, 'негодные значения ничего не поменяли')
-      // Владелец аптеки сам себе срок не назначит
-      await rejects(() => patch(`/admin/pharmacies/${temp.id}`, { offlineDays: 30 }), /прав|доступ/i, 'правка срока владельцем аптеки')
+      // Владелец магазина сам себе срок не назначит
+      await rejects(() => patch(`/admin/pharmacies/${temp.id}`, { offlineDays: 30 }), /прав|доступ/i, 'правка срока владельцем магазина')
       await patch(`/admin/pharmacies/${temp.id}`, { offlineDays: 7 }, serviceToken)
     })
 
     // ── Вход под владельцем ──
-    await check('владелец сервиса может посмотреть аптеку глазами владельца', async () => {
+    await check('владелец сервиса может посмотреть магазин глазами владельца', async () => {
       const res = await post(`/admin/pharmacies/${temp.id}/enter`, {}, serviceToken)
       assert(res.token, 'токен не выдан')
 
       const me = await get('/auth/me', res.token)
-      eq(me.role, 'founder', 'вошли не владельцем аптеки')
-      eq(me.pharmacy.code, temp.code, 'попали не в ту аптеку')
+      eq(me.role, 'founder', 'вошли не владельцем магазина')
+      eq(me.pharmacy.code, temp.code, 'попали не в тот магазин')
       assert(me.impersonatedBy, 'не помечено, что это поддержка, — интерфейс не сможет предупредить')
 
-      assert(Array.isArray(await get('/products', res.token)), 'данные аптеки не видны')
+      assert(Array.isArray(await get('/products', res.token)), 'данные магазина не видны')
     })
 
     await check('вход под владельцем попадает в журнал', async () => {
@@ -2538,9 +2538,9 @@ async function main() {
       assert(entry, 'вход под чужим владельцем не записан — а это первое, что должно быть видно')
     })
 
-    await check('приостановка соседней аптеки не задевает нашу', async () => {
+    await check('приостановка соседнего магазина не задевает нашу', async () => {
       await post(`/admin/pharmacies/${victim.id}/block`, {}, serviceToken)
-      assert(Array.isArray(await get('/products')), 'наша аптека перестала работать из-за чужой приостановки')
+      assert(Array.isArray(await get('/products')), 'наш магазин перестал работать из-за чужой приостановки')
       await del(`/admin/pharmacies/${victim.id}?confirm=${victim.code}`, serviceToken)
     })
   }
@@ -2555,7 +2555,7 @@ async function main() {
   // обслуживание сервиса и уборка. Вход им не нужен.
   group('Подбор пароля')
 
-  await check('сервер видит настоящий адрес аптеки, а не прокси хостинга', async () => {
+  await check('сервер видит настоящий адрес магазина, а не прокси хостинга', async () => {
     // От этого зависит вся защита входа: она считает промахи по адресу устройства.
     //
     // Так и было на живом сервере: адресом считался прокси Railway, а их два на весь
@@ -2569,7 +2569,7 @@ async function main() {
     if (!temp) return
     const c = await get('/admin/schema/client', serviceToken)
     assert(c.real, 'прокси не прислал настоящий адрес — сверять не с чем')
-    eq(c.ip, c.real, 'сервер считает адресом устройства прокси хостинга, а не аптеку')
+    eq(c.ip, c.real, 'сервер считает адресом устройства прокси хостинга, а не магазин')
   })
 
   const victimName = TAG + '-perebor'
@@ -2606,7 +2606,7 @@ async function main() {
     // Дыру нашёл живой человек. Пять раз промахнулся под «admin» — вход под этим
     // именем закрыт, а под соседним пробуй сколько хочешь: строго считалось только
     // имя, а по устройству стоял мягкий порог в тридцать попыток. Имена здесь
-    // угадываются легко — логин обычно совпадает с кодом аптеки.
+    // угадываются легко — логин обычно совпадает с кодом магазина.
     //
     // Проверяем чужим, заведомо существующим именем и ПРАВИЛЬНЫМ паролем: если бы
     // счёт шёл только по имени, такой вход прошёл бы как ни в чём не бывало.
@@ -2616,9 +2616,9 @@ async function main() {
   })
 
   await check('первая блокировка короткая — забывчивый кассир не ждёт четверть часа', async () => {
-    // В аптеке все устройства выходят в сеть через один адрес: касса, компьютер
+    // В магазине все устройства выходят в сеть через один адрес: касса, компьютер
     // владельца, телефон. Четверть часа за пять опечаток означала бы, что один
-    // кассир закрывает работу всей аптеке. Поэтому первая ступень — минута.
+    // кассир закрывает работу всему магазину. Поэтому первая ступень — минута.
     const at = Date.now()
     let opened = 0
     // Ждём до полутора минут, проверяя раз в пять секунд
@@ -2652,18 +2652,18 @@ async function main() {
   group('Обслуживание сервиса')
 
   if (temp) {
-    await check('схемы всех аптек в актуальном состоянии', async () => {
+    await check('схемы всех магазинов в актуальном состоянии', async () => {
       const st = await get('/admin/schema', serviceToken)
       assert(st.target, 'сервер не знает, какая версия схемы нужна')
-      eq(st.outdated, 0, `аптек со старой схемой: ${st.outdated}`)
+      eq(st.outdated, 0, `магазинов со старой схемой: ${st.outdated}`)
       const mine = st.pharmacies.find((p) => p.code === temp.code)
-      assert(mine && mine.upToDate, 'наша аптека осталась на старой схеме')
+      assert(mine && mine.upToDate, 'наш магазин остался на старой схеме')
     })
 
     await check('обновление схем можно запустить вручную и оно не ломает работающие', async () => {
       const r = await post('/admin/schema/update', {}, serviceToken)
       eq(r.failed.length, 0, `не обновились: ${r.failed.join(', ')}`)
-      assert(Array.isArray(await get('/products')), 'после обновления схем аптека перестала работать')
+      assert(Array.isArray(await get('/products')), 'после обновления схем магазин перестал работать')
     })
 
     await check('сводка для владельца сервиса считается и сходится с базой', async () => {
@@ -2736,7 +2736,7 @@ async function main() {
 
   await check('тестовые расходы и статьи убраны', async () => {
     // Расход из кассы закрытой смены не удаляется — и правильно: он в её отчёте.
-    // Такие уходят вместе со схемой аптеки прогона
+    // Такие уходят вместе со схемой магазина прогона
     for (const id of created.expenses) await del('/expenses/' + id).catch(() => {})
     for (const id of created.expenseCategories) await del('/expense-categories/' + id).catch(() => {})
     const left = (await get('/expense-categories')).filter((c) => c.name.startsWith(TAG))
@@ -2744,7 +2744,7 @@ async function main() {
   })
 
   await check('тестовые поставщики и сервисы убраны', async () => {
-    // Поставщик с долгом не удаляется — и правильно; он уходит вместе со схемой аптеки прогона
+    // Поставщик с долгом не удаляется — и правильно; он уходит вместе со схемой магазина прогона
     for (const id of created.suppliers) await del('/suppliers/' + id).catch(() => {})
     for (const id of created.payServices) await del('/pay-services/' + id).catch(() => {})
     const left = (await get('/pay-services')).filter((c) => c.name.startsWith(TAG))
@@ -2761,12 +2761,12 @@ async function main() {
 
   // Схема прогона удаляется целиком: это единственный способ убрать чеки,
   // возвраты и списания, которые через обычную работу удалить нельзя — и правильно,
-  // что нельзя: история аптеки не должна стираться по кнопке.
+  // что нельзя: история магазина не должна стираться по кнопке.
   if (temp) {
-    await check('временная аптека удалена вместе со схемой', async () => {
+    await check('временная магазин удалён вместе со схемой', async () => {
       await del(`/admin/pharmacies/${temp.id}?confirm=${temp.code}`, serviceToken)
       const left = (await get('/admin/pharmacies', serviceToken)).filter((p) => p.code === temp.code)
-      eq(left.length, 0, 'аптека прогона не убралась')
+      eq(left.length, 0, 'магазин прогона не убралась')
     })
   }
 

@@ -4,10 +4,10 @@ import { SetMetadata, createParamDecorator, ExecutionContext } from '@nestjs/com
 export const PUBLIC_KEY = 'isPublic'
 export const Public = () => SetMetadata(PUBLIC_KEY, true)
 
-// ── Раздел относится к сервису, а не к конкретной аптеке ──
-// Обычный раздел работает с данными аптеки, поэтому учётная запись обязана быть
-// к аптеке привязана: у владельца сервиса схемы нет, и запрос ушёл бы мимо всех
-// аптек сразу. Но есть разделы про саму учётную запись — «кто я» и смена пароля, —
+// ── Раздел относится к сервису, а не к конкретному магазину ──
+// Обычный раздел работает с данными магазина, поэтому учётная запись обязана быть
+// к магазину привязана: у владельца сервиса схемы нет, и запрос ушёл бы мимо всех
+// магазинов сразу. Но есть разделы про саму учётную запись — «кто я» и смена пароля, —
 // и они нужны всем без исключения. Плюс сама панель управления.
 export const SERVICE_WIDE_KEY = 'serviceWide'
 export const ServiceWide = () => SetMetadata(SERVICE_WIDE_KEY, true)
@@ -17,7 +17,7 @@ export const ROLES_KEY = 'roles'
 export const Roles = (...roles: string[]) => SetMetadata(ROLES_KEY, roles)
 
 // Право из списка src/auth/permissions.ts. Несколько ключей — достаточно любого.
-// Владелец аптеки проходит всегда
+// Владелец магазина проходит всегда
 export const PERM_KEY = 'perms'
 export const Perm = (...keys: string[]) => SetMetadata(PERM_KEY, keys)
 

@@ -20,7 +20,7 @@ import { createWriteOff } from '../src/local/ops/writeoff.mjs'
 import { applySnapshot } from '../src/local/snapshot.mjs'
 import { SUPPLIERS, ctx, customer, day, NOW, pharmacy, product, refused, row, rows } from '../test-support/pharmacy.mjs'
 
-// Аптека с тремя товарами: делимый (20 таблеток в пачке), неделимый и бинт без срока
+// Магазин с тремя товарами: делимый (20 штук в пачке), неделимый и бинт без срока
 function apteka(extra = {}) {
   const par = product({ id: 'par', name: 'Парацетамол', unitsPerPack: 20, price: 200, cost: 120, stock: 9 })
   const nur = product({ id: 'nur', name: 'Нурофен', price: 150, cost: 100, stock: 5 })
@@ -48,7 +48,7 @@ test('продажа: суммы, скидка, остаток в штуках, 
       { productId: 'nur', qty: 2 },
     ],
   })
-  // Пачка и пять таблеток: 200/20 × 25 = 250, минус скидка 10. Две пачки нурофена — 300
+  // Пачка и пять штук: 200/20 × 25 = 250, минус скидка 10. Две пачки нурофена — 300
   assert.equal(sale.total, 540)
   assert.equal(sale.cost, 350)
   assert.equal(sale.profit, 190)
@@ -96,7 +96,7 @@ test('продажа: повтор с тем же ключом не списыв
 })
 
 test('продажа: копейки сходятся с сервером даже там, где «точный» счёт дал бы другое', () => {
-  // 3 таблетки из пачки в 12 штук по 2,50: сервер получает 0,62, а не 0,63
+  // 3 штуки из пачки в 12 штук по 2,50: сервер получает 0,62, а не 0,63
   const melok = product({ id: 'melok', unitsPerPack: 12, price: 2.5, cost: 1, stock: 1 })
   const db = pharmacy({ products: [melok] })
   const sale = checkout(ctx(db), { payment: 'cash', items: [{ productId: 'melok', qty: 0, pieces: 3 }] })
@@ -201,7 +201,7 @@ function sold(payment = 'cash', customerId) {
 test('возврат: деньги — сколько реально заплатили за штуку, товар — обратно на полку', () => {
   const { db, sale } = sold()
   const ret = createReturn(ctx(db), { saleId: sale.id, clientId: 'ret_1', items: [{ productId: 'par', units: 5 }] })
-  // За 25 таблеток заплатили 240 (со скидкой): 9,60 за штуку, пять штук — 48
+  // За 25 штук заплатили 240 (со скидкой): 9,60 за штуку, пять штук — 48
   assert.equal(ret.total, 48)
   assert.equal(ret.refund, 'cash', 'деньги возвращаются тем же способом, каким платили')
   assert.equal(ret.saleId, sale.id)
@@ -211,7 +211,7 @@ test('возврат: деньги — сколько реально запла�
     [['Парацетамол', 5, 20, 200, 120, 48, true, true]],
   )
   assert.deepEqual(Object.keys(ret), ['id', 'clientId', 'date', 'saleId', 'userId', 'shiftId', 'refund', 'refundVia', 'total', 'note', 'items', 'user'])
-  assert.deepEqual(stockOf(db, 'par'), [8, 0], 'пять таблеток вернулись: 155 + 5 = 160 штук')
+  assert.deepEqual(stockOf(db, 'par'), [8, 0], 'пять штук вернулись: 155 + 5 = 160 штук')
   // Возвращённое легло в ту же партию — новых партий не появилось
   assert.equal(rows(db, "SELECT * FROM batches WHERE productId = 'par'").length, 1)
 
@@ -438,14 +438,14 @@ test('приход: партия со сроком, средневзвешенн
   const { db } = apteka()
   // На полке 9 пачек парацетамола по 120. Привезли 3 по 130 и ещё 1 по 150 с другим сроком
   const arrival = createArrival(ctx(db), {
-    supplier: 'Фарм-Опт',
+    supplier: 'Опт-Маркет',
     items: [
       { productId: 'par', qty: 3, cost: 130, expiryDate: '2028-01-31' },
       { productId: 'par', qty: 1, cost: 150, expiryDate: '2028-06-30' },
       { productId: 'bint', qty: 10, cost: 5 },
     ],
   })
-  assert.equal(arrival.supplier, 'Фарм-Опт')
+  assert.equal(arrival.supplier, 'Опт-Маркет')
   assert.equal(arrival.total, 590)
   assert.deepEqual(
     arrival.items.map((i) => [i.name, i.qty, i.cost, i.arrivalId === arrival.id]),

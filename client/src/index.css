@@ -363,7 +363,7 @@ input::placeholder { color: var(--muted-2); }
 
 /* ───────── Касса ─────────
    Чек слева, сканер с каталогом справа — как на кассовых аппаратах, к которым
-   привыкли аптекари. В разметке сканер стоит первым: на телефоне он обязан быть
+   привыкли продавцы. В разметке сканер стоит первым: на телефоне он обязан быть
    сверху. На широком экране сетка сама ставит его вправо.                      */
 .kassa { min-width: 0; }
 .kassa-receipt, .kassa-side { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
@@ -892,12 +892,12 @@ input::placeholder { color: var(--muted-2); }
   .admin-app .topbar { flex-wrap: wrap; gap: 10px; row-gap: 10px; }
   .admin-app .topbar-left { flex: 1 1 100%; }
   .admin-app .topbar-actions { flex: 1 1 100%; justify-content: flex-start; gap: 6px; flex-wrap: wrap; }
-  /* Подписи у кнопок прячем, остаются значки — иначе «Завести аптеку» одна
+  /* Подписи у кнопок прячем, остаются значки — иначе «Завести магазин» одна
      занимает всю строку. Смысл кнопки остаётся в подсказке title. */
   .admin-app .topbar-actions .btn-text { display: none; }
   .admin-app .topbar-actions .btn .ic { margin: 0; }
   .admin-app .topbar-actions .btn { padding: 9px 11px; }
-  /* «Завести аптеку» — главное действие, ему подпись оставляем целиком.
+  /* «Завести магазин» — главное действие, ему подпись оставляем целиком.
      Ставим её последней (order): иначе, когда она не помещается в строку,
      переносился бы «Выход» и висел бы третьей строкой сам по себе. Теперь
      переносится сама кнопка и растягивается на всю ширину. */
@@ -1021,7 +1021,7 @@ input::placeholder { color: var(--muted-2); }
 
   /* ── Окна панели ──
      Окна рендерятся порталом в <body>, и класс страницы .admin-app до них
-     не достаёт — поэтому у них своя метка. Плитки внутри карточки аптеки
+     не достаёт — поэтому у них своя метка. Плитки внутри карточки магазина
      («Состояние», «Оплачено до», «Принёс за всё время») на 320 пикселях
      рвались посреди слова. */
   .admin-modal .mini-cards { grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -1254,12 +1254,12 @@ tbody tr.clickable { cursor: pointer; }
 }
 .conn-banner .ic { display: inline-flex; }
 /* Предупреждение об оплате. Красный здесь неуместен: пока идут дни отсрочки,
-   аптека работает как обычно, и пугать кассира нечем — это забота владельца. */
+   магазин работает как обычно, и пугать кассира нечем — это забота владельца. */
 .conn-banner.pay { background: var(--warn); }
 /* А вот когда продажи уже закрыты — тон другой */
 .conn-banner.pay.stop { background: #8d241d; }
-/* Вход под владельцем аптеки. Цвет намеренно чужой для программы: смотреть чужую
-   аптеку можно, но забыть об этом нельзя ни на минуту. */
+/* Вход под владельцем магазина. Цвет намеренно чужой для программы: смотреть чужую
+   магазин можно, но забыть об этом нельзя ни на минуту. */
 .conn-banner.support { background: #4a3a86; }
 .conn-banner .back {
   margin-left: 4px; background: rgba(255,255,255,0.18); color: #fff; border: 0;
@@ -1486,7 +1486,7 @@ tbody tr.clickable { cursor: pointer; }
 .login-logo.stop { background: #8d241d; }
 .suspended-card .suspended-text { font-size: 14px; color: var(--muted); margin: 12px 0 22px; line-height: 1.5; }
 
-/* «Сейчас за кассой»: аптека на связи прямо в эту минуту */
+/* «Сейчас за кассой»: магазин на связи прямо в эту минуту */
 .live-dot {
   display: inline-block; width: 8px; height: 8px; margin-left: 7px; border-radius: 50%;
   background: var(--green); vertical-align: middle;
@@ -1565,36 +1565,48 @@ tbody tr.clickable { cursor: pointer; }
 }
 
 /* ═════════ Главный экран: плитки разделов ═════════
-   Как на кассовом аппарате: крупные плитки по группам. Касса золотая — главное
-   действие. Серая плитка — раздел закрыт для этой роли: он виден, но не нажимается. */
-.hub { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 26px; }
+   Как на кассовом аппарате: квадратные плитки по группам, у каждой объёмная
+   картинка раздела в правом нижнем углу и название в левом верхнем. Касса
+   золотая и вдвое шире — главное действие. Серая плитка — раздел закрыт для этой
+   роли: он виден, но не нажимается, картинка приглушена. */
+.hub { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 26px; }
 .hub-group { display: flex; flex-direction: column; gap: 12px; }
 .hub-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); padding-left: 2px; }
-.hub-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(188px, 1fr)); gap: 12px; }
+.hub-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); grid-auto-flow: dense; gap: 12px; }
 .hub-tile {
-  position: relative; display: flex; flex-direction: column; justify-content: space-between; gap: 18px;
-  min-height: 112px; padding: 16px 16px 14px; border-radius: 14px;
-  background: var(--sidebar); color: #fff; text-decoration: none;
+  position: relative; display: flex; flex-direction: column; align-items: flex-start; overflow: hidden;
+  aspect-ratio: 1 / 1; min-height: 150px; padding: 14px 14px 12px; border-radius: 16px;
+  background: linear-gradient(160deg, var(--sidebar-2) 0%, var(--sidebar) 68%); color: #fff; text-decoration: none;
   border: 1px solid var(--tile-line); box-shadow: var(--shadow-sm);
   transition: background 0.14s, transform 0.1s, box-shadow 0.14s, border-color 0.14s;
 }
-.hub-tile:hover { background: var(--sidebar-2); border-color: var(--gold); box-shadow: var(--shadow); }
+.hub-tile:hover { border-color: var(--gold); box-shadow: var(--shadow); }
+.hub-tile:hover .hub-pic { transform: scale(1.06) rotate(-2deg); }
 .hub-tile:active { transform: scale(0.985); }
-.hub-tile .hub-ic { display: inline-flex; color: var(--gold); }
-.hub-tile .hub-name { font-size: 23px; font-weight: 700; line-height: 1.2; letter-spacing: -0.01em; }
-.hub-tile.gold { background: var(--gold); border-color: var(--gold); color: var(--on-gold); }
-.hub-tile.gold:hover { background: var(--gold-dark); }
-.hub-tile.gold .hub-ic { color: var(--on-gold); }
+.hub-tile .hub-name { position: relative; z-index: 1; font-size: 20px; font-weight: 700; line-height: 1.15; letter-spacing: -0.01em; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); max-width: 100%; }
+.hub-tile .hub-pic {
+  position: absolute; right: -4%; bottom: -5%; width: 62%; height: auto; aspect-ratio: 1 / 1; object-fit: contain;
+  pointer-events: none; user-select: none; filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.35));
+  transition: transform 0.18s ease;
+}
+/* Касса: золотая и на две колонки; картинка стоит справа, надпись — крупнее */
+.hub-tile.wide { grid-column: span 2; aspect-ratio: auto; }
+.hub-tile.wide .hub-pic { width: 42%; right: 2%; bottom: -8%; }
+.hub-tile.gold { background: linear-gradient(160deg, #ffd65a 0%, var(--gold) 55%, var(--gold-dark) 100%); border-color: var(--gold-dark); color: var(--on-gold); }
+.hub-tile.gold .hub-name { font-size: 26px; text-shadow: none; }
+.hub-tile.gold:hover { border-color: var(--on-gold); }
 .hub-tile.off { background: var(--track); border-color: var(--border-strong); color: var(--muted-2); box-shadow: none; cursor: not-allowed; }
-.hub-tile.off .hub-ic { color: var(--muted-2); }
-.hub-tile.off:hover { background: var(--track); box-shadow: none; }
+.hub-tile.off .hub-name { text-shadow: none; }
+.hub-tile.off .hub-pic { filter: grayscale(1) opacity(0.45); }
+.hub-tile.off:hover { background: var(--track); box-shadow: none; border-color: var(--border-strong); }
+.hub-tile.off:hover .hub-pic { transform: none; }
 .hub-badge {
-  position: absolute; top: 12px; right: 12px; min-width: 22px; height: 22px; padding: 0 7px;
-  border-radius: 11px; background: rgba(255, 255, 255, 0.16); color: #fff;
-  font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums;
+  position: absolute; top: 12px; right: 12px; z-index: 1; min-width: 24px; height: 24px; padding: 0 8px;
+  border-radius: 12px; background: rgba(255, 255, 255, 0.18); color: #fff;
+  font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums;
 }
 .hub-badge.warn { background: var(--gold); color: var(--on-gold); }
-.hub-lock { position: absolute; top: 14px; right: 14px; display: inline-flex; color: var(--muted-2); }
+.hub-lock { position: absolute; top: 14px; right: 14px; z-index: 1; display: inline-flex; color: var(--muted-2); }
 /* Кто вошёл, тема, выход */
 .hub-user {
   display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
@@ -1604,14 +1616,26 @@ tbody tr.clickable { cursor: pointer; }
 .hub-user-role { font-size: 12.5px; color: var(--muted); }
 .hub-user-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .hub-user-actions .btn .ic { display: inline-flex; }
+@media (max-width: 1100px) {
+  .hub-grid { grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); }
+  .hub-tile { min-height: 136px; }
+  .hub-tile .hub-name { font-size: 18px; }
+  .hub-tile.gold .hub-name { font-size: 23px; }
+}
 @media (max-width: 600px) {
   .hub { gap: 20px; }
   .hub-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
-  .hub-tile { min-height: 96px; padding: 13px 12px 12px; gap: 12px; border-radius: 12px; }
-  .hub-tile .hub-name { font-size: 17px; }
+  .hub-tile { min-height: 118px; padding: 12px 12px 10px; border-radius: 14px; }
+  .hub-tile .hub-name { font-size: 16px; }
+  .hub-tile.gold .hub-name { font-size: 20px; }
+  .hub-tile.wide .hub-pic { width: 36%; }
   .hub-user { padding: 12px 14px; }
   .hub-user-actions { width: 100%; }
   .hub-user-actions .btn { flex: 1 1 auto; justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hub-tile .hub-pic, .hub-tile { transition: none; }
+  .hub-tile:hover .hub-pic { transform: none; }
 }
 
 /* ═════════ Роли и права ═════════ */
@@ -1649,3 +1673,89 @@ tbody tr.clickable { cursor: pointer; }
   .role-item { width: auto; flex: 1 1 160px; }
   .roles-list h2 { width: 100%; }
 }
+
+/* ═════════ Касса: скидка на чек, подвал, экранная клавиатура ═════════ */
+/* Итоги крупнее и жирнее: их читают с расстояния вытянутой руки, в том числе покупатель */
+.kassa-itogo .total-row { font-size: 16.5px; font-weight: 600; margin: 4px 0; }
+.kassa-itogo .total-row span:last-child { font-weight: 700; font-size: 17.5px; }
+.kassa-itogo .total-row.big { font-size: 36px; }
+.kassa-itogo .total-row.big span:first-child { font-size: 13px; }
+/* Скидка на весь чек: поле и переключатель «сомони | %» на тёмной плашке итога */
+.chek-skidka { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-bottom: 9px; margin-bottom: 6px; border-bottom: 1px dashed var(--sidebar-line); }
+.chek-skidka .cs-label { font-size: 13.5px; font-weight: 600; color: var(--sidebar-text); flex: 1 0 100%; }
+.chek-skidka .cs-input {
+  width: 88px; min-height: 36px; padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08); color: #fff; font-size: 16px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums;
+}
+.chek-skidka .cs-input::placeholder { color: var(--sidebar-muted); font-weight: 500; }
+.chek-skidka .cs-input:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px rgba(239, 189, 36, 0.25); }
+.chek-skidka .cs-mode { display: inline-flex; padding: 3px; border-radius: 8px; background: rgba(255, 255, 255, 0.08); }
+.chek-skidka .cs-mode button { min-height: 30px; padding: 0 11px; border-radius: 6px; border: 0; background: none; color: var(--sidebar-text); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.chek-skidka .cs-mode button.active { background: var(--gold); color: var(--on-gold); }
+.chek-skidka .cs-x { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.18); background: none; color: var(--sidebar-text); cursor: pointer; }
+.chek-skidka .cs-x:hover { color: #fff; border-color: #fff; }
+/* Строка чека закрыта для правки, пока скидка задана на весь чек */
+.kassa-table .disc-input:read-only { color: var(--muted); background: var(--track); cursor: not-allowed; }
+
+/* ── Подвал кассы: кто работает, клавиатура, блокировка ── */
+.kassa-wrap { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.kassa-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap;
+  padding: 8px 14px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm);
+  font-size: 13.5px; color: var(--muted);
+}
+.kassa-foot .kf-user { display: inline-flex; align-items: center; gap: 7px; min-width: 0; flex-wrap: wrap; }
+.kassa-foot .kf-user .ic { display: inline-flex; color: var(--accent); }
+.kassa-foot .kf-user b { color: var(--text); font-weight: 600; }
+.kassa-foot .kf-role { color: var(--muted-2); }
+.kassa-foot .kf-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.kassa-foot .kf-kb.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+/* ── Экранная клавиатура ──
+   Закреплена внизу окна поверх всего, включая открытые окна форм: кассир печатает
+   и в поле сканера, и в карточку нового товара. Страница и окна отдают ей место снизу
+   (html.kb-open), чтобы кнопка оплаты и кнопки форм не прятались под клавишами */
+.vkb {
+  position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 120;
+  width: min(1180px, calc(100vw - 32px)); box-sizing: border-box;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 10px; border-radius: 14px;
+  background: var(--sidebar); border: 1px solid var(--tile-line); box-shadow: var(--shadow-lg); user-select: none;
+}
+html.kb-open .content { padding-bottom: 290px !important; }
+html.kb-open .overlay { align-items: start; padding: 20px 20px 290px; overflow-y: auto; }
+html.kb-open .modal { max-height: calc(100vh - 320px); }
+.vkb-rows { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.vkb-row { display: flex; gap: 6px; }
+.vkb-key {
+  flex: 1 1 0; min-width: 0; height: 42px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.12); color: #fff; font: inherit; font-size: 18px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; touch-action: manipulation;
+  transition: background 0.08s, transform 0.08s;
+}
+.vkb-key:hover { background: rgba(255, 255, 255, 0.2); }
+.vkb-key:active { background: rgba(255, 255, 255, 0.3); transform: scale(0.95); }
+.vkb-key.fn { background: rgba(255, 255, 255, 0.06); color: var(--sidebar-text); font-size: 13.5px; }
+.vkb-key.fn.on { border-color: var(--gold); color: var(--gold); background: rgba(239, 189, 36, 0.14); }
+.vkb-key.wide { flex: 1.6 1 0; }
+.vkb-key.space { flex: 6 1 0; font-size: 13.5px; color: var(--sidebar-text); }
+.vkb-key.enter { background: var(--gold); color: var(--on-gold); border-color: var(--gold-dark); }
+.vkb-key.enter:hover { background: var(--gold-dark); }
+.vkb-num { display: grid; grid-template-columns: repeat(3, 54px); grid-auto-rows: 42px; gap: 6px; align-content: start; }
+.vkb-num .vkb-key { height: auto; }
+.vkb-num .num-enter { grid-column: span 2; }
+/* Без физической клавиатуры обходятся на кассовом ПК; телефон и планшет носят свою */
+@media (max-width: 1279px) {
+  .kassa-foot .kf-kb, .vkb { display: none; }
+}
+/* На широком экране касса занимает окно целиком: подвал и клавиатура не растягивают
+   страницу, а отнимают высоту у чека — он листается внутри себя. Если высоты всё же
+   не хватает, листается содержимое целиком */
+@media (min-width: 1280px) and (min-height: 600px) {
+  .kassa-wrap { height: 100%; gap: 10px; }
+  .kassa-wrap .kassa { flex: 1 1 auto; height: auto; }
+  .kassa-foot { flex-shrink: 0; }
+}
+
+/* ── Поставщики: вкладки «Поставщики | Долги поставщикам» ── */
+.chip .chip-badge { margin-left: 7px; font-weight: 700; opacity: 0.9; font-variant-numeric: tabular-nums; }
+button.supd-card { font: inherit; text-align: left; cursor: pointer; width: 100%; }

@@ -6,7 +6,7 @@
 //
 // Проверяем две вещи, каждая из которых уже была бы бедой:
 //   рассылка при смене состояния — иначе предупреждение опаздывает на сутки;
-//   молчание, когда ничего не изменилось — иначе каждый час дёргаются все аптеки.
+//   молчание, когда ничего не изменилось — иначе каждый час дёргаются все магазины.
 //
 // Запуск: npm test (в папке server).
 process.env.DATABASE_URL = 'postgresql://u:p@localhost:5432/apteka'
@@ -58,7 +58,7 @@ function watcher(rows, events, accounts = fakeAccounts()) {
 }
 
 test('первый проход после запуска молчит — он только запоминает', async () => {
-  // Иначе каждый перезапуск сервера рассылал бы всем аптекам их же состояние
+  // Иначе каждый перезапуск сервера рассылал бы всем магазинам их же состояние
   const e = fakeEvents()
   const ph = pharmacy({ paidUntil: new Date(Date.now() - 40 * DAY) }) // давно просрочена
   const changed = await watcher([ph], e).tick()
@@ -66,8 +66,8 @@ test('первый проход после запуска молчит — он 
   assert.deepEqual(e.subs, [], 'разослал состояние, которое никто не менял')
 })
 
-test('срок вышел — аптеку отключают, а не предупреждают', async () => {
-  // Прежде здесь начиналась отсрочка и аптека получала предупреждение. Теперь
+test('срок вышел — магазин отключают, а не предупреждают', async () => {
+  // Прежде здесь начиналась отсрочка и магазин получал предупреждение. Теперь
   // срок значит срок: связь рвётся, а перед обрывом уходит объяснение.
   const e = fakeEvents()
   const ph = pharmacy({ paidUntil: new Date(Date.now() + 1 * DAY) })
@@ -78,14 +78,14 @@ test('срок вышел — аптеку отключают, а не пред�
 
   const changed = await w.tick(new Date(Date.now() + 2 * DAY))
   assert.equal(changed, 1)
-  assert.equal(e.suspended.length, 1, 'аптеку не отключили по истечении срока')
+  assert.equal(e.suspended.length, 1, 'магазин не отключили по истечении срока')
   assert.equal(e.suspended[0].schema, 'tenant_shifo')
   assert.match(e.suspended[0].message, /Подписка закончилась/, 'человеку не объяснили причину')
-  assert.match(e.suspended[0].message, /данные аптеки сохранены/i, 'человек решит, что потерял аптеку')
+  assert.match(e.suspended[0].message, /данные магазина сохранены/i, 'человек решит, что потерял магазин')
 
   // И панель узнаёт: список «кому звонить сегодня» пересобирается сам
   assert.deepEqual(e.panel, [{ what: 'pharmacies', code: 'shifo' }])
-  // И память сторожа сброшена — иначе аптека ещё десять секунд работала бы
+  // И память сторожа сброшена — иначе магазин ещё десять секунд работал бы
   assert.deepEqual(w.accounts_.dropped, [ph.id])
 })
 
@@ -95,7 +95,7 @@ test('пока ничего не меняется, никого не дёрга�
   await w.tick()
   await w.tick()
   await w.tick()
-  assert.deepEqual(e.subs, [], 'аптеку дёргают каждый час без причины')
+  assert.deepEqual(e.subs, [], 'магазин дёргают каждый час без причины')
 })
 
 test('продление отменяет отключение', async () => {
@@ -108,16 +108,16 @@ test('продление отменяет отключение', async () => {
 
   ph.paidUntil = new Date(Date.now() + 40 * DAY) // продлили
   const changed = await w.tick(new Date(Date.now() + 2 * DAY))
-  assert.equal(changed, 0, 'состояние не менялось — аптека как была оплачена, так и осталась')
-  assert.deepEqual(e.suspended, [], 'продлённую аптеку отключать нельзя')
+  assert.equal(changed, 0, 'состояние не менялось — магазин как был оплачен, так и остался')
+  assert.deepEqual(e.suspended, [], 'продлённый магазин отключать нельзя')
 })
 
-test('удалённая аптека не остаётся в памяти навсегда', async () => {
+test('удалённый магазин не остаётся в памяти навсегда', async () => {
   const e = fakeEvents()
   const rows = [pharmacy()]
   const w = new SubscriptionWatchService({ pharmacy: { findMany: async () => rows } }, e)
   await w.tick()
-  rows.length = 0 // аптеку удалили
+  rows.length = 0 // магазин удалили
   await w.tick()
   assert.equal(w.seen.size, 0, 'память растёт вместе с забытыми кодами')
 })

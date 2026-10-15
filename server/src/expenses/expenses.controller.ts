@@ -4,7 +4,7 @@ import { CurrentUser, Perm } from '../auth/decorators'
 import { PeriodQuery } from '../common/period'
 import { CreateExpenseCategoryDto, CreateExpenseDto, UpdateExpenseDto } from './dto'
 
-// Расходы — это деньги аптеки и её чистая прибыль: раздел только для основателя,
+// Расходы — это деньги магазина и его чистая прибыль: раздел только для основателя,
 // как отчёты и списания
 @Controller('expenses')
 

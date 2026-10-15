@@ -165,7 +165,7 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', hi
             </button>
           </div>
           {isInternalBarcode(value.barcode) && (
-            <div className="tag-cat">{t('Внутренний код аптеки — распечатайте этикетку')}</div>
+            <div className="tag-cat">{t('Внутренний код магазина — распечатайте этикетку')}</div>
           )}
         </div>
         <div className="field" style={{ flex: 1 }} data-tour="pf.category">
@@ -208,8 +208,8 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', hi
 
       <div className="row">
         <div className="field" style={{ flex: 1 }} data-tour="pf.dosage">
-          <label>{t('Дозировка')}</label>
-          <input value={value.dosage} onChange={(e) => set('dosage', e.target.value)} placeholder="напр. 500 мг" />
+          <label>{t('Фасовка / объём')}</label>
+          <input value={value.dosage} onChange={(e) => set('dosage', e.target.value)} placeholder={t('напр. 500 мг, 1 л')} />
         </div>
         <div className="field" style={{ flex: 1 }} data-tour="pf.expiry">
           <label>{t('Срок годности')}</label>
@@ -252,7 +252,7 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', hi
               value={value.unitsPerPack}
               onChange={(e) => set('unitsPerPack', e.target.value)}
               placeholder="1"
-              title="Для деления на таблетки. 1 = продаётся только целиком"
+              title="Для продажи поштучно. 1 = продаётся только целиком"
             />
           </div>
           {!hideStock && <div className="field" style={{ flex: 1 }} data-tour="pf.loose">

@@ -23,7 +23,7 @@ function disk(initial) {
     writeFileSync: (f, text) => files.set(f, text),
   }
 }
-const FOLDER = process.platform === 'win32' ? 'D:\\Копии аптеки' : '/mnt/kopii'
+const FOLDER = process.platform === 'win32' ? 'D:\\Копии магазина' : '/mnt/kopii'
 
 test('нет файла, мусор в файле, чужие поля — настройки по умолчанию', () => {
   assert.deepEqual(createSettings({ file: 'settings.json', fs: disk() }).get(), { backupDir: '', version: '', print: PRINT_DEFAULTS })

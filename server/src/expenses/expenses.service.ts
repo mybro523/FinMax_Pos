@@ -10,8 +10,8 @@ import { withDeviceNames } from '../shifts/shifts.service'
 import { lockShift, NO_OPEN_SHIFT, openShiftFor, SHIFT_CLOSED } from '../shifts/till'
 import { CreateExpenseCategoryDto, CreateExpenseDto, UpdateExpenseDto } from './dto'
 
-// ── Расходы аптеки ──
-// Всё, на что аптека тратит деньги помимо закупки товара: аренда, зарплата, свет,
+// ── Расходы магазина ──
+// Всё, на что магазин тратит деньги помимо закупки товара: аренда, зарплата, свет,
 // налоги. Из них и из прибыли от продаж отчёты считают чистую прибыль.
 //
 // Расход бывает оплачен наличными из кассы. Тогда он привязан к открытой смене и

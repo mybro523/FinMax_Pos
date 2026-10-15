@@ -67,7 +67,7 @@ export class ChangeEventsInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap(() => {
         this.events.changed(...keys)
-        // Владельцу сервиса — что в этой аптеке шла работа. Если у него открыта
+        // Владельцу сервиса — что в этом магазине шла работа. Если у него открыта
         // её карточка, счётчики обновятся сами; в списке видно, что клиент живой.
         const code = req?.user?.code
         if (code) this.events.toService('activity', { code })

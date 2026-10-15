@@ -7,7 +7,7 @@ import { CloseDeviceShiftDto, PullQuery, PushDto, RenameDeviceDto } from './dto'
 // Сайту эти адреса не нужны: он всегда на связи и пишет прямо в свои разделы.
 // Ими пользуется программа для Windows — присылает сделанное без связи и забирает
 // изменившееся. Подписка и доступ проверяются общим сторожем, как у любого раздела:
-// каждый обмен — это и проверка, что аптеке ещё можно работать.
+// каждый обмен — это и проверка, что магазину ещё можно работать.
 @Controller('sync')
 export class SyncController {
   constructor(private readonly sync: SyncService) {}
@@ -29,7 +29,7 @@ export class SyncController {
     return this.sync.saleForReturn(id)
   }
 
-  // Кассы аптеки: какие есть и когда выходили на связь
+  // Кассы магазина: какие есть и когда выходили на связь
   @Get('devices')
   @Perm('settings.devices')
   devices() {

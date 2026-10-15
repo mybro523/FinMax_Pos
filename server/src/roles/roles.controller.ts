@@ -3,7 +3,7 @@ import { RolesService } from './roles.service'
 import { CurrentUser, Roles } from '../auth/decorators'
 import { CreateRoleDto, UpdateRoleDto } from './dto'
 
-// Роли и права видит и меняет только владелец аптеки: никто другой не должен
+// Роли и права видит и меняет только владелец магазина: никто другой не должен
 // иметь возможности выдать себе лишнее
 @Roles('founder')
 @Controller('roles')

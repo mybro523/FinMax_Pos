@@ -16,12 +16,12 @@ import { useTheme, setTheme } from '../lib/theme'
 import emblem from '../assets/brand/emblem-64.png'
 
 // Библиотека диаграмм весит около 370 КБ — грузим её после того, как показаны
-// числа и список аптек
+// числа и список магазинов
 const RevenueChart = lazy(() => import('../components/RevenueChart'))
 
 // ── Настройки панели ──
-// Тема и язык у панели свои, отдельные от аптечных: владелец может держать
-// панель на русском и в тёмной, а аптеке показывать таджикский и светлую.
+// Тема и язык у панели свои, отдельные от магазина: владелец может держать
+// панель на русском и в тёмной, а магазину показывать таджикский и светлую.
 // Настройка помнится на этом устройстве — в браузере, не на сервере.
 function Nastroyki({ onClose }) {
   const t = useT()
@@ -54,7 +54,7 @@ function Nastroyki({ onClose }) {
       </div>
 
       <div className="tag-cat" style={{ marginTop: 4 }}>
-        {t('Настройка запоминается на этом устройстве и не влияет на то, что видят аптеки')}
+        {t('Настройка запоминается на этом устройстве и не влияет на то, что видят магазины')}
       </div>
 
       <div className="modal-actions">
@@ -65,11 +65,11 @@ function Nastroyki({ onClose }) {
 }
 
 // ── Панель владельца сервиса ──
-// Здесь обслуживают аптеки-клиентов. У этой страницы своё оформление, а не общее
-// с аптекой: там боковое меню кассы, склада и смен, и владельцу сервиса нечего
-// в нём делать — своей аптеки у него нет вовсе.
+// Здесь обслуживают магазины-клиентов. У этой страницы своё оформление, а не общее
+// с магазином: там боковое меню кассы, склада и смен, и владельцу сервиса нечего
+// в нём делать — своего магазина у него нет вовсе.
 //
-// Главный экран отвечает на один вопрос: кому сегодня звонить. Поэтому аптеки
+// Главный экран отвечает на один вопрос: кому сегодня звонить. Поэтому магазины
 // с заканчивающейся или просроченной оплатой стоят отдельно и первыми, а не тонут
 // в общем списке.
 
@@ -103,7 +103,7 @@ function statusOf(p) {
   return { key: 'Оплачена', cls: 'ok', left, urgent: false }
 }
 
-// Сколько дней аптека не пробивала чеков. null — сервер ещё не успел посмотреть
+// Сколько дней магазин не пробивал чеков. null — сервер ещё не успел посмотреть
 function silentDays(p) {
   if (!p.lastSaleSeen) return null
   if (!p.lastSaleAt) return null
@@ -129,10 +129,10 @@ export default function Admin() {
 
   const [list, setList] = useState([])
   // Сводка по сервису: деньги и клиенты. Считается на сервере одним запросом
-  // к базе панели, без походов в схемы аптек.
+  // к базе панели, без походов в схемы магазинов.
   const [sum, setSum] = useState(null)
   // Какая карточка сводки раскрыта и платежи для её расшифровки. Платежи тянем
-  // только когда понадобились: список аптек нужен всегда, а они — по нажатию.
+  // только когда понадобились: список магазинов нужен всегда, а они — по нажатию.
   const [pick, setPick] = useState(null)
   const [payments, setPayments] = useState([])
   const [loading, setLoading] = useState(true)
@@ -141,14 +141,14 @@ export default function Admin() {
   const [openId, setOpenId] = useState(null) // открытая карточка
   const [journal, setJournal] = useState(null) // журнал по всему сервису
   const [nastroyki, setNastroyki] = useState(false) // тема и язык панели
-  // Аптеки, которые прямо сейчас заводятся. Создание идёт около пятнадцати секунд —
+  // Магазины, которые прямо сейчас заводятся. Создание идёт около пятнадцати секунд —
   // это настоящая работа базы, двадцать таблиц с индексами, — и всё это время
   // владелец сервиса не должен сидеть перед замершим окном.
   const [pending, setPending] = useState([])
-  // Кто из аптек сейчас за кассой. Приходит по связи и меняется сам —
+  // Кто из магазинов сейчас за кассой. Приходит по связи и меняется сам —
   // это единственный способ увидеть, живой клиент или молчит вторую неделю.
   const [online, setOnline] = useState(() => onlineCodes())
-  // Счётчик работы в открытой аптеке: пробили чек — карточка обновилась сама
+  // Счётчик работы в открытом магазине: пробили чек — карточка обновилась сама
   const [beat, setBeat] = useState(0)
 
   const load = useCallback(async () => {
@@ -171,7 +171,7 @@ export default function Admin() {
 
   // ── Панель обновляется сама ──
   // Владелец сервиса держит её открытой весь день. Раньше список показывал то,
-  // что было на момент загрузки: аптеку завели с другого устройства — не видно,
+  // что было на момент загрузки: магазин завели с другого устройства — не видно,
   // клиент заплатил и его разблокировали — не видно. Кнопка «Обновить» осталась,
   // но нажимать её больше незачем.
   const openRow = useMemo(() => list.find((p) => p.id === openId), [list, openId])
@@ -181,14 +181,14 @@ export default function Admin() {
       onService((e) => {
         if (e.what === 'presence') setOnline(e.online || [])
         else if (e.what === 'pharmacies') load()
-        // Работа идёт в открытой карточке — обновим её счётчики. Остальные аптеки
+        // Работа идёт в открытой карточке — обновим её счётчики. Остальные магазины
         // торгуют весь день, и дёргать из-за них страницу незачем.
         else if (e.what === 'activity' && e.code && e.code === openCode) setBeat((n) => n + 1)
       }),
     [load, openCode],
   )
 
-  // ── Пока аптека заводится, уходить со страницы нельзя ──
+  // ── Пока магазин заводится, уходить со страницы нельзя ──
   // Пароль владельца приходит только вместе с ответом сервера и показывается один
   // раз. Закрыл вкладку на пятнадцатой секунде — пароль потерян навсегда, и его
   // придётся задавать заново. Раньше об этом можно было не думать: окно висело
@@ -213,13 +213,13 @@ export default function Admin() {
     }
   }, [list])
 
-  // Заведение аптеки — единственное место в панели, где работа идёт долго:
+  // Заведение магазина — единственное место в панели, где работа идёт долго:
   // создать схему, прогнать миграции, настроить, завести владельца. Держать окно
   // открытым всё это время незачем — оно закрывается сразу, а работа продолжается.
   //
   // Раньше запрос обрывался на пятнадцатой секунде и показывал «Сервер не отвечает»,
-  // хотя аптека к тому моменту уже создавалась. Худший вид ошибки: она врёт, а
-  // повторное нажатие даёт «аптека с таким кодом уже заведена».
+  // хотя магазин к тому моменту уже создавался. Худший вид ошибки: она врёт, а
+  // повторное нажатие даёт «магазин с таким кодом уже заведён».
   function startCreate() {
     const body = {
       code: form.code.trim().toLowerCase(),
@@ -248,7 +248,7 @@ export default function Admin() {
       })
       .catch((e) => {
         setPending((list) => list.filter((x) => x.key !== mark.key))
-        toast(`${t('Аптеку завести не удалось')}: ${e.message}`, 'err')
+        toast(`${t('Магазин завести не удалось')}: ${e.message}`, 'err')
       })
   }
 
@@ -271,7 +271,7 @@ export default function Admin() {
     </tr>
   )
 
-  // Строка аптеки, которая сейчас заводится. По ней не щёлкнуть: карточки ещё нет.
+  // Строка магазина, который сейчас заводится. По ней не щёлкнуть: карточки ещё нет.
   const pendingRows = () =>
     pending.map((p) => (
       <tr key={p.key} style={{ opacity: 0.65 }}>
@@ -340,14 +340,14 @@ export default function Admin() {
 
   return (
     // admin-app: у панели своя разметка без бокового меню, и правила для узких
-    // экранов ей нужны свои — общие написаны под разделы аптеки
+    // экранов ей нужны свои — общие написаны под разделы магазина
     <div className="app admin-app">
       <div className="main" style={{ marginLeft: 0 }}>
         <header className="topbar">
           <div className="topbar-left">
             <img src={emblem} alt="" width="34" height="34" className="admin-emblem" />
             <div>
-              <h1>{t('Аптеки')}</h1>
+              <h1>{t('Магазины')}</h1>
               <div className="sub">{list.length} {t('в обслуживании')} · {me?.name}</div>
             </div>
           </div>
@@ -359,8 +359,8 @@ export default function Admin() {
             <button className="btn ghost icon" onClick={() => setNastroyki(true)} title={t('Настройки панели')}>
               <LuSettings size={16} />
             </button>
-            <button className="btn" onClick={() => setForm({ ...emptyNew })} title={t('Завести аптеку')}>
-              <span className="ic"><LuPlus size={16} /></span> <span className="btn-text">{t('Завести аптеку')}</span>
+            <button className="btn" onClick={() => setForm({ ...emptyNew })} title={t('Завести магазин')}>
+              <span className="ic"><LuPlus size={16} /></span> <span className="btn-text">{t('Завести магазин')}</span>
             </button>
             <button className="btn ghost icon" onClick={logout} title={t('Выйти')}><LuLogOut size={16} /></button>
           </div>
@@ -411,7 +411,7 @@ export default function Admin() {
                 {pendingRows()}
                 {rows(rest)}
                 {!loading && list.length === 0 && pending.length === 0 && (
-                  <tr><td colSpan="6" className="empty">{t('Аптек пока нет. Нажмите «Завести аптеку».')}</td></tr>
+                  <tr><td colSpan="6" className="empty">{t('Магазинов пока нет. Нажмите «Завести магазин».')}</td></tr>
                 )}
               </tbody>
             </table>
@@ -452,13 +452,13 @@ export default function Admin() {
       {form && <NewPharmacy form={form} setForm={setForm} onStart={startCreate} toast={toast} t={t} />}
 
       {created && (
-        <Modal className="admin-modal" title={t('Аптека заведена')} onClose={() => setCreated(null)}>
+        <Modal className="admin-modal" title={t('Магазин заведён')} onClose={() => setCreated(null)}>
           <div className="note err" style={{ display: 'flex', gap: 9, marginBottom: 16 }}>
             <LuTriangleAlert size={16} style={{ flexShrink: 0, marginTop: 2 }} />
             <span>{t('Запишите пароль сейчас. Он больше нигде не показывается — потом его можно только задать заново.')}</span>
           </div>
           <div className="mini-cards" style={{ marginBottom: 16 }}>
-            <div className="mini-card"><div className="m-label">{t('Аптека')}</div><div className="m-value sm">{created.name}</div></div>
+            <div className="mini-card"><div className="m-label">{t('Магазин')}</div><div className="m-value sm">{created.name}</div></div>
             <div className="mini-card"><div className="m-label">{t('Логин')}</div><div className="m-value sm">{created.ownerLogin}</div></div>
             <div className="mini-card">
               <div className="m-label"><LuKeyRound size={11} style={{ verticalAlign: '-1px' }} /> {t('Пароль')}</div>
@@ -475,13 +475,13 @@ export default function Admin() {
         <Modal className="admin-modal" title={t('Журнал действий')} onClose={() => setJournal(null)} wide>
           <div style={{ maxHeight: '60vh', overflow: 'auto' }}>
             <table className="table-cards">
-              <thead><tr><th>{t('Время')}</th><th>{t('Кто')}</th><th>{t('Аптека')}</th><th>{t('Что сделал')}</th></tr></thead>
+              <thead><tr><th>{t('Время')}</th><th>{t('Кто')}</th><th>{t('Магазин')}</th><th>{t('Что сделал')}</th></tr></thead>
               <tbody>
                 {journal.map((a) => (
                   <tr key={a.id}>
                     <td className="tag-cat" data-label={t('Время')} style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(a.createdAt)}</td>
                     <td data-label={t('Кто')}>{a.accountName || '—'}</td>
-                    <td data-label={t('Аптека')}>{a.pharmacyCode || '—'}</td>
+                    <td data-label={t('Магазин')}>{a.pharmacyCode || '—'}</td>
                     <td className="cell-main" data-label={t('Что сделал')}>{a.detail || a.action}</td>
                   </tr>
                 ))}
@@ -495,7 +495,7 @@ export default function Admin() {
   )
 }
 
-// ── Заведение новой аптеки ──
+// ── Заведение нового магазина ──
 function NewPharmacy({ form, setForm, onStart, toast, t }) {
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 
@@ -505,23 +505,23 @@ function NewPharmacy({ form, setForm, onStart, toast, t }) {
   function submit() {
     const code = form.code.trim().toLowerCase()
     if (!CODE_RE.test(code)) {
-      return toast(t('Код аптеки: латинские буквы, цифры и дефис, от 2 до 31 символа. Например: shifo'), 'err')
+      return toast(t('Код магазина: латинские буквы, цифры и дефис, от 2 до 31 символа. Например: shifo'), 'err')
     }
-    if (!form.name.trim()) return toast(t('Укажите название аптеки'), 'err')
+    if (!form.name.trim()) return toast(t('Укажите название магазина'), 'err')
     const pw = form.ownerPassword.trim()
     if (pw && pw.length < 6) return toast(t('Пароль слишком короткий (минимум 6 символов)'), 'err')
     onStart()
   }
   return (
-    <Modal className="admin-modal" title={t('Новая аптека')} onClose={() => setForm(null)}>
+    <Modal className="admin-modal" title={t('Новый магазин')} onClose={() => setForm(null)}>
       <div className="row">
         <div className="field" style={{ flex: 1 }}>
-          <label>{t('Код аптеки')}</label>
+          <label>{t('Код магазина')}</label>
           <input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="shifo" autoFocus />
         </div>
         <div className="field" style={{ flex: 2 }}>
           <label>{t('Название')}</label>
-          <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Аптека Шифо" />
+          <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Магазин Шифо" />
         </div>
       </div>
       <div className="row">
@@ -538,7 +538,7 @@ function NewPharmacy({ form, setForm, onStart, toast, t }) {
       </div>
 
       <div className="note info" style={{ marginBottom: 14 }}>
-        {t('Под этим логином войдёт владелец аптеки. Пароль можно не задавать — он придумается и покажется один раз.')}
+        {t('Под этим логином войдёт владелец магазина. Пароль можно не задавать — он придумается и покажется один раз.')}
       </div>
       <div className="row">
         <div className="field" style={{ flex: 1 }}><label>{t('Логин владельца')}</label>
@@ -553,7 +553,7 @@ function NewPharmacy({ form, setForm, onStart, toast, t }) {
       </label>
 
       <div className="note info" style={{ marginBottom: 14, fontSize: 12.5 }}>
-        {t('Заведение занимает около полуминуты — окно закроется сразу, работа пойдёт в фоне. Логин и пароль появятся, когда аптека будет готова.')}
+        {t('Заведение занимает около полуминуты — окно закроется сразу, работа пойдёт в фоне. Логин и пароль появятся, когда магазин будет готов.')}
       </div>
 
       <div className="modal-actions">
@@ -564,11 +564,11 @@ function NewPharmacy({ form, setForm, onStart, toast, t }) {
   )
 }
 
-// ── Карточка аптеки ──
+// ── Карточка магазина ──
 // Всё про одного клиента на одном экране: чем он живёт, сколько платил, кто у него
-// за кассой и что мы с этой аптекой делали. Перед звонком клиенту открывают её.
+// за кассой и что мы с этим магазином делали. Перед звонком клиенту открывают её.
 // Карточки, уже открывавшиеся за этот заход. Панель открыта весь день, и одну и ту же
-// аптеку смотрят по нескольку раз — второй раз она обязана открываться мгновенно.
+// магазин смотрят по нескольку раз — второй раз он обязана открываться мгновенно.
 const seenCards = new Map()
 const seenUsage = new Map()
 
@@ -596,7 +596,7 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
   }, [id, toast, onClose])
 
   // ── Счётчики отдельным запросом ──
-  // За ними надо идти в схему самой аптеки, и если та давно не работала —
+  // За ними надо идти в схему самого магазина, и если тот давно не работал —
   // подключение к ней открывается заново. Держать из-за этого весь экран нельзя.
   const loadUsage = useCallback(async () => {
     try {
@@ -612,7 +612,7 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
     load()
   }, [load])
 
-  // beat — в этой аптеке только что шла работа: перезапросим счётчики продаж
+  // beat — в этом магазине только что шла работа: перезапросим счётчики продаж
   useEffect(() => {
     loadUsage()
   }, [loadUsage, beat])
@@ -635,10 +635,10 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
   async function toggleBlock() {
     const stop = !ph.blocked
     const ok = await dialog.confirm({
-      title: stop ? t('Приостановить работу аптеки?') : t('Возобновить работу аптеки?'),
+      title: stop ? t('Приостановить работу магазина?') : t('Возобновить работу магазина?'),
       message: stop
         ? `${ph.name}: ${t('касса перестанет работать до возобновления. Данные останутся на месте.')}`
-        : `${ph.name}: ${t('аптека снова сможет продавать.')}`,
+        : `${ph.name}: ${t('магазин снова сможет продавать.')}`,
       danger: stop,
       confirmText: stop ? t('Приостановить') : t('Возобновить'),
     })
@@ -665,14 +665,14 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
 
   async function enter() {
     const ok = await dialog.confirm({
-      title: t('Войти под владельцем аптеки?'),
-      message: t('Вы увидите аптеку его глазами, включая закупочные цены и выручку. Вход записывается в журнал, а вернуться можно одним нажатием.'),
+      title: t('Войти под владельцем магазина?'),
+      message: t('Вы увидите магазин его глазами, включая закупочные цены и выручку. Вход записывается в журнал, а вернуться можно одним нажатием.'),
       confirmText: t('Войти'),
     })
     if (!ok) return
     try {
       await enterPharmacy(id)
-      // Дальше приложение само покажет аптеку: в токене уже её владелец
+      // Дальше приложение само покажет магазин: в токене уже её владелец
     } catch (e) {
       toast(e.message, 'err')
     }
@@ -680,19 +680,19 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
 
   async function removeIt() {
     const r = await dialog.prompt({
-      title: t('Удалить аптеку?'),
-      message: `${t('Будут стёрты все её данные: товары, продажи, долги, история. Восстановить их можно только из копии, которую делал сам владелец. Наберите код аптеки')}: ${ph.code}`,
-      fields: [{ name: 'code', label: t('Код аптеки') }],
+      title: t('Удалить магазин?'),
+      message: `${t('Будут стёрты все её данные: товары, продажи, долги, история. Восстановить их можно только из копии, которую делал сам владелец. Наберите код магазина')}: ${ph.code}`,
+      fields: [{ name: 'code', label: t('Код магазина') }],
       danger: true,
       confirmText: t('Удалить'),
     })
     if (!r || r.code.trim() !== ph.code) return
     try {
-      // Удаление стирает схему со всем содержимым — на большой аптеке это не мгновение
+      // Удаление стирает схему со всем содержимым — на большом магазине это не мгновение
       await api.del(`/admin/pharmacies/${id}?confirm=${encodeURIComponent(r.code.trim())}`, {
         timeout: LONG_TIMEOUT_MS,
       })
-      toast(t('Аптека удалена'))
+      toast(t('Магазин удалён'))
       onClose()
       await onChanged()
     } catch (e) {
@@ -703,7 +703,7 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
   // Строки списка не оказалось — так бывает разве что при переходе по прямой ссылке.
   // Тогда ждать всё-таки придётся.
   if (!ph.id) {
-    return <Modal className="admin-modal" title={t('Аптека')} onClose={onClose}><div className="empty">{t('Загрузка…')}</div></Modal>
+    return <Modal className="admin-modal" title={t('Магазин')} onClose={onClose}><div className="empty">{t('Загрузка…')}</div></Modal>
   }
 
   const s = statusOf(ph)
@@ -828,7 +828,7 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
       </Section>
 
       {ph.audit.length > 0 && (
-        <Section title={t('Что делали с этой аптекой')}>
+        <Section title={t('Что делали с этим магазином')}>
           <table className="table-cards">
             <tbody>
               {ph.audit.map((a) => (
@@ -893,7 +893,7 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
       )}
 
       {edit && (
-        <Modal className="admin-modal" title={t('Изменить аптеку')} onClose={() => setEdit(null)}>
+        <Modal className="admin-modal" title={t('Изменить магазин')} onClose={() => setEdit(null)}>
           <div className="field"><label>{t('Название')}</label>
             <input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} autoFocus /></div>
           <div className="row">
@@ -912,7 +912,7 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
                 <input type="time" style={{ width: 110 }} value={edit.paidTime}
                   onChange={(e) => setEdit({ ...edit, paidTime: e.target.value })} />
               </div>
-              <div className="tag-cat">{t('В этот момент работа аптеки прекратится')}</div>
+              <div className="tag-cat">{t('В этот момент работа магазина прекратится')}</div>
             </div>
           </div>
           <div className="field"><label>{t('Примечание')}</label>

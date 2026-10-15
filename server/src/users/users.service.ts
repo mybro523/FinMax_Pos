@@ -9,17 +9,17 @@ import { AccountCache } from '../admin/account-cache.service'
 import { CreateUserDto, UpdateUserDto } from './dto'
 import { RolesService } from '../roles/roles.service'
 
-// ── Сотрудники аптеки ──
+// ── Сотрудники магазина ──
 // Запись идёт в две базы сразу, и общей транзакции между ними нет. В панели живёт
-// доступ: логин, пароль, роль, блокировка. В схеме аптеки — имя, на которое
+// доступ: логин, пароль, роль, блокировка. В схеме магазина — имя, на которое
 // ссылаются чеки, смены, возвраты и списания.
 //
 // Порядок обязателен: сначала бронируем логин в панели. Он уникален на весь сервис,
 // и занят он или нет — знает только она. Пойди мы с другого конца, сотрудник
-// появился бы в аптеке, а войти под ним было бы нельзя.
+// появился бы в магазине, а войти под ним было бы нельзя.
 //
 // Если второй шаг не удался, бронь снимается. Остаться может разве что запись в
-// аптеке без доступа — под ней просто нельзя войти, и владелец увидит это в списке.
+// магазине без доступа — под ней просто нельзя войти, и владелец увидит это в списке.
 
 type AccountRow = {
   id: string
@@ -68,7 +68,7 @@ export class UsersService {
   }
 
   // Роль для новой записи: владелец — без роли (он может всё), остальные — выбранная
-  // или системная роль кассира. Чужую роль (другой аптеки) назначить нельзя
+  // или системная роль кассира. Чужую роль (другого магазина) назначить нельзя
   private async resolveRole(pharmacyId: string, wantsOwner: boolean, roleId?: string) {
     if (wantsOwner) return { role: 'founder', roleId: null as string | null }
     const cashier = await this.roles.ensure(pharmacyId)
@@ -94,13 +94,13 @@ export class UsersService {
     } catch (e) {
       if (isTaken(e)) {
         throw new BadRequestException(
-          `Логин «${name}» уже занят. Он должен быть свободен среди всех аптек — добавьте к нему что-нибудь своё.`,
+          `Логин «${name}» уже занят. Он должен быть свободен среди всех магазинов — добавьте к нему что-нибудь своё.`,
         )
       }
       throw e
     }
 
-    // Шаг второй: сам сотрудник в схеме аптеки
+    // Шаг второй: сам сотрудник в схеме магазина
     try {
       const user = await this.prisma.user.create({ data: { name, role } })
       await this.admin.account.update({ where: { id: acc.id }, data: { tenantUserId: user.id } })
@@ -134,7 +134,7 @@ export class UsersService {
     if (name) data.login = name
     if (dto.active !== undefined) data.active = dto.active
     // Смена роли. Последнего владельца разжаловать нельзя, себя — тоже: иначе
-    // аптека осталась бы без того, кто может всё
+    // магазин остался бы без того, кто может всё
     let roleChanged = false
     if (dto.roleId !== undefined) {
       const wantsOwner = dto.roleId === 'owner'
@@ -171,7 +171,7 @@ export class UsersService {
       throw e
     }
 
-    // Имя в аптеке приводим к логину: под ним сотрудник значится в чеках и сменах
+    // Имя в магазине приводим к логину: под ним сотрудник значится в чеках и сменах
     if (name && name !== acc.login && acc.tenantUserId) {
       try {
         await this.prisma.user.update({ where: { id: acc.tenantUserId }, data: { name } })
@@ -179,7 +179,7 @@ export class UsersService {
         // Возвращаем логин обратно: расхождение имён хуже, чем несостоявшееся
         // переименование — в чеках значился бы один человек, в списке другой
         await this.admin.account.update({ where: { id }, data: { login: acc.login } }).catch(() => {})
-        throw new BadRequestException(`Сотрудник с именем «${name}» в этой аптеке уже есть`)
+        throw new BadRequestException(`Сотрудник с именем «${name}» в этом магазине уже есть`)
       }
     }
     if (dto.active !== undefined && acc.tenantUserId) {

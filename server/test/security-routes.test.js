@@ -42,7 +42,7 @@ test('всё в admin/ — только владельцу сервиса', () =
   const offenders = controllers
     .filter((p) => rel(p).startsWith('admin/'))
     .filter((p) => !read(p).includes("@Roles('superadmin')"))
-  assert.deepEqual(offenders.map(rel), [], 'контроллер панели без @Roles(superadmin) открыт любой аптеке')
+  assert.deepEqual(offenders.map(rel), [], 'контроллер панели без @Roles(superadmin) открыт любому магазину')
 })
 
 test('чувствительные разделы закрыты правами (@Perm)', () => {
@@ -56,7 +56,7 @@ test('чувствительные разделы закрыты правами 
     const code = read(p)
     const classPerm = /@Perm\([^)]*\)\s*(?:@[A-Za-z]+\([^)]*\)\s*)*export class/.test(code) || /@Controller\([^)]*\)\s*(?:@[A-Za-z()'",.\s]+)*@Perm\(/.test(code)
     if (classPerm || code.includes('@Roles(')) continue
-    // Каждый ИЗМЕНЯЮЩИЙ метод обязан нести @Perm. Чтение своей аптеки остаётся
+    // Каждый ИЗМЕНЯЮЩИЙ метод обязан нести @Perm. Чтение своего магазина остаётся
     // за глобальным guard: список категорий, к примеру, нужен кассиру на кассе
     const mutators = [...code.matchAll(/@(Post|Patch|Delete)\(/g)].length
     const perms = [...code.matchAll(/@Perm\(/g)].length
@@ -65,9 +65,9 @@ test('чувствительные разделы закрыты правами 
   assert.deepEqual(offenders, [], 'метод без @Perm в чувствительном разделе')
 })
 
-test('схема аптеки нигде не берётся из параметров запроса', () => {
+test('схема магазина нигде не берётся из параметров запроса', () => {
   // Схему диктует ТОЛЬКО подписанный токен (TenantContextMiddleware).
-  // Любое runInTenant с чем-то из req — дыра между аптеками.
+  // Любое runInTenant с чем-то из req — дыра между магазинами.
   const offenders = []
   ;(function walk(dir) {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

@@ -10,7 +10,7 @@ export class ArrivalItemDto {
   // Штуки (граммы) сверх целых упаковок
   @IsOptional() @IsInt() @Min(0) @Max(99_999) pieces?: number
   @IsNumber() @Min(0) cost: number
-  // Срок годности партии: обязателен для лекарств, необязателен для приборов и расходников
+  // Срок годности партии: обязателен для товаров, необязателен для приборов и расходников
   @IsOptional() @IsString() expiryDate?: string
 }
 

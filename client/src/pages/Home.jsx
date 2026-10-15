@@ -9,9 +9,11 @@ import { useTheme, toggleTheme } from '../lib/theme'
 import { isDesktop, bridge } from '../lib/desktop'
 
 // ── Главный экран ──
-// Открывается после входа вместо бокового меню: плитки по группам, как на кассовом
-// аппарате. Раздел, на который у сотрудника нет права, остаётся на месте, но серый:
-// человек видит, что такой раздел есть, и понимает, что его открывает владелец.
+// Открывается после входа вместо бокового меню: квадратные плитки по группам с
+// объёмными картинками, как на кассовом аппарате. Касса — главное действие: золотая
+// и вдвое шире остальных. Раздел, на который у сотрудника нет права, остаётся на
+// месте, но серый: человек видит, что такой раздел есть, и понимает, что его
+// открывает владелец.
 //
 // Внизу — кто вошёл, тема и выход. В программе для Windows ещё «Закрыть программу»:
 // у кассы часто нет мыши с крестиком под рукой.
@@ -51,11 +53,13 @@ export default function Home() {
               {g.items.map((n) => {
                 const ok = allowedNav(user, n)
                 const badge = n.badge && deferred.length > 0 ? deferred.length : n.expiryBadge && expiring > 0 ? expiring : 0
-                const cls = 'hub-tile' + (n.main ? ' gold' : '') + (ok ? '' : ' off')
+                const cls = 'hub-tile' + (n.main ? ' gold wide' : '') + (ok ? '' : ' off')
                 const inner = (
                   <>
-                    <span className="hub-ic"><n.Icon size={26} /></span>
                     <span className="hub-name">{t(n.label)}</span>
+                    {/* Объёмная картинка раздела: как на кассовых аппаратах, к которым
+                        привыкли продавцы, — раздел узнаётся по картинке, а не по надписи */}
+                    <img className="hub-pic" src={`/menu/${n.to.slice(1)}.png`} alt="" width="256" height="256" loading="lazy" draggable="false" />
                     {badge > 0 && <span className={'hub-badge' + (n.expiryBadge ? ' warn' : '')}>{badge}</span>}
                     {!ok && <span className="hub-lock" aria-hidden="true"><LuLock size={14} /></span>}
                   </>

@@ -7,7 +7,7 @@ import { CreateSupplierDto, PaySupplierDto, UpdateSupplierDto } from './dto'
 
 // ── Кто что может с поставщиками ──
 // Список и заведение открыты всем: приход оформляет и кассир, а привезти может новый
-// поставщик. Долги, оплаты и правка — дело владельца: это деньги аптеки.
+// поставщик. Долги, оплаты и правка — дело владельца: это деньги магазина.
 @Controller('suppliers')
 export class SuppliersController {
   constructor(private readonly suppliers: SuppliersService) {}

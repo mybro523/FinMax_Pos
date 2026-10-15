@@ -283,7 +283,7 @@ test('список операций закрыт, а списание и рас�
   assert.equal(FOUNDER_ONLY.has('cash.move'), false)
   // На сайте списание закрыто для кассира. Касса без интернета не должна стать обходом
   assert.equal(FOUNDER_ONLY.has('writeoff'), true)
-  // Расходы — деньги аптеки: и на сайте, и на кассе их вносит только владелец
+  // Расходы — деньги магазина: и на сайте, и на кассе их вносит только владелец
   assert.equal(FOUNDER_ONLY.has('expense'), true)
   assert.equal(FOUNDER_ONLY.has('sale'), false)
 })

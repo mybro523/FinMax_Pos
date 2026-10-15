@@ -1,4 +1,4 @@
-// ── Права сотрудников аптеки ──
+// ── Права сотрудников магазина ──
 //
 // Раньше ролей было две: владелец и кассир, и всё, что не для кассира, помечалось
 // «только владелец». Теперь владелец сам решает, кому что можно: роль — это имя
@@ -111,7 +111,7 @@ export const CASHIER_DEFAULT: string[] = [
 export const ROLE_PRESETS: { name: string; description: string; permissions: string[] }[] = [
   {
     name: 'Заведующий',
-    description: 'Склад, финансы и настройки аптеки, кроме резервной копии и устройств',
+    description: 'Склад, финансы и настройки магазина, кроме резервной копии и устройств',
     permissions: ALL_PERMISSIONS.filter((k) => k !== 'settings.backup' && k !== 'settings.devices'),
   },
   {

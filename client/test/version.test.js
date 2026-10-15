@@ -6,7 +6,7 @@ import { entryFromHtml, blockUpdate, isUpdateHeld } from '../src/lib/version.js'
 
 test('имя сборки достаётся из настоящей страницы сайта', () => {
   const html = `<!doctype html><html lang="ru"><head><meta charset="UTF-8" />
-    <title>Аптека</title>
+    <title>Магазин</title>
     <script type="module" crossorigin src="/assets/index-DkVwnwae.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/react-DfJLc9lx.js">
     <link rel="stylesheet" crossorigin href="/assets/index-CWQEPmNz.css">

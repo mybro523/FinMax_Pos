@@ -8,7 +8,7 @@
 // Товары заводятся через сервер, а не через форму: проверяется касса, а не
 // карточка товара (её стережёт kassa.spec.mjs).
 //
-// Запуск:  APP_USER=<логин владельца аптеки> APP_PASS=<пароль> npx playwright test e2e-ui/kassa-cheki.spec.mjs
+// Запуск:  APP_USER=<логин владельца магазина> APP_PASS=<пароль> npx playwright test e2e-ui/kassa-cheki.spec.mjs
 import { test, expect } from '@playwright/test'
 import { login, goTo, moneyValue, tag, USER, PASS } from './helpers.mjs'
 
@@ -17,12 +17,12 @@ const TAG = tag()
 const kod = (n) => '277' + String(Date.now()).slice(-9) + n
 
 // Делимая пачка, неделимый бинт и товар, которого нет на складе
-const ALFA = { name: `${TAG} Альфа таблетки`, barcode: kod(1), price: 200, cost: 120, stock: 30, unitsPerPack: 20 }
+const ALFA = { name: `${TAG} Альфа штуки`, barcode: kod(1), price: 200, cost: 120, stock: 30, unitsPerPack: 20 }
 const BETA = { name: `${TAG} Бета бинт`, barcode: kod(2), price: 40, cost: 18, stock: 30, unitsPerPack: 1 }
 const GAMMA = { name: `${TAG} Гамма сироп`, barcode: kod(3), price: 75, cost: 50, stock: 0, unitsPerPack: 1 }
 
 let h = null // заголовок с ключом владельца
-let cats = [] // две категории аптеки: у «Альфы» и «Гаммы» первая, у «Беты» вторая
+let cats = [] // две категории магазина: у «Альфы» и «Гаммы» первая, у «Беты» вторая
 
 test.describe.configure({ mode: 'serial' })
 
@@ -34,7 +34,7 @@ async function api(request, method, path, data) {
 
 test.beforeAll(async ({ request }) => {
   const вход = await request.post(`${API}/auth/login`, { data: { name: USER, password: PASS } })
-  expect(вход.ok(), 'не удалось войти владельцем аптеки').toBe(true)
+  expect(вход.ok(), 'не удалось войти владельцем магазина').toBe(true)
   h = { Authorization: `Bearer ${(await вход.json()).token}` }
 
   const все = (await api(request, 'GET', '/categories')).map((c) => c.name)
@@ -97,7 +97,7 @@ test('каталог виден сразу, категория и поиск о�
   // Нажатие на плашку не уводит курсор из сканера
   await expect(scanInput(page)).toBeFocused()
 
-  // В выбранной категории такого нет, а в аптеке есть — «ничего не найдено» было бы враньём
+  // В выбранной категории такого нет, а в магазине есть — «ничего не найдено» было бы враньём
   await scanInput(page).fill(`${TAG} Альфа`)
   await expect(page.locator('.kc-note')).toContainText('показаны товары из других категорий')
   await expect(page.locator('.kc-row').first()).toContainText(ALFA.name)
@@ -125,7 +125,7 @@ test('нажатие на строку каталога кладёт товар 
   await page.locator('.kc-row', { hasText: GAMMA.name }).click()
   await expect(page.locator('.toast.err')).toContainText('нет на складе')
   await expect(rows(page)).toHaveCount(1)
-  // Набранное при этом не стёрлось: рядом в списке другие формы того же лекарства
+  // Набранное при этом не стёрлось: рядом в списке другие формы того же товара
   await expect(scanInput(page)).toHaveValue(`${TAG} Гамма`)
 })
 
@@ -154,7 +154,7 @@ test('поиск по названию: Enter берёт первый товар
   await expect(page.locator('.modal'), 'обрывок кода открыл форму нового товара').toHaveCount(0)
 
   // А короткий код, которого нет ни у одного товара даже частью, — это новый код:
-  // свои четырёх-пятизначные коды аптеки тоже заводят с кассы
+  // свои четырёх-пятизначные коды магазина тоже заводят с кассы
   await scanInput(page).fill('00000')
   await expect(page.locator('.kassa-catalog .empty')).toBeVisible()
   await scanInput(page).press('Enter')
@@ -181,7 +181,7 @@ test('клавиши: стрелки выбирают строку, + и − м�
   await page.keyboard.press('-')
   await expect(row(page, ALFA).locator('.qty-ctrl b')).toHaveText('1')
 
-  // F4 — штуки выбранной строки. 200 за пачку из 20: три таблетки — ещё 30
+  // F4 — штуки выбранной строки. 200 за пачку из 20: три штуки — ещё 30
   await page.keyboard.press('F4')
   await expect(row(page, ALFA).locator('.inp-pieces')).toBeFocused()
   await page.keyboard.type('3', { delay: 120 })

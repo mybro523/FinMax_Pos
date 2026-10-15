@@ -49,7 +49,7 @@ test('по сети: принтер выключен или адрес не то
   await assert.rejects(() => sendNetwork({ net: silent, host: '10.0.0.1', bytes: Buffer.from('x') }), /Принтер не отвечает/)
 })
 
-test('адрес принтера — только из сети аптеки: печать не должна стать дорогой в интернет', () => {
+test('адрес принтера — только из сети магазина: печать не должна стать дорогой в интернет', () => {
   // Внутренние сети — и сам этот компьютер
   for (const ok of ['192.168.1.50', '10.0.0.7', '172.16.0.1', '172.31.255.254', '169.254.10.20', '127.0.0.1']) {
     assert.equal(checkHost(ok), ok, ok)
@@ -126,7 +126,7 @@ test('очередь Windows по-настоящему: сценарий зап�
   const dir = fs.mkdtempSync(join(os.tmpdir(), 'apteka-print-'))
   const run = (script, env) => runPowerShell({ spawn, script, env })
   await assert.rejects(
-    () => sendWindows({ run, fs, tmpFile: join(dir, 'chek.bin'), printer: 'Аптека: такого принтера точно нет', bytes: Buffer.from([0x1b, 0x40]) }),
+    () => sendWindows({ run, fs, tmpFile: join(dir, 'chek.bin'), printer: 'Магазин: такого принтера точно нет', bytes: Buffer.from([0x1b, 0x40]) }),
     /Принтер с таким именем в Windows не найден/,
   )
 })

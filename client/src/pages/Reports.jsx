@@ -1,5 +1,5 @@
 import { useRef, useState, useMemo, useEffect } from 'react'
-import { LuWallet, LuTrendingUp, LuBoxes, LuReceipt, LuUndo2, LuHandCoins, LuPiggyBank, LuPrinter, LuTruck, LuUsers, LuCalculator } from 'react-icons/lu'
+import { LuWallet, LuTrendingUp, LuBoxes, LuReceipt, LuUndo2, LuHandCoins, LuPiggyBank, LuTruck, LuUsers, LuCalculator } from 'react-icons/lu'
 import { Link } from 'react-router-dom'
 import Layout from '../components/Layout'
 import Metric from '../components/Metric'
@@ -54,7 +54,7 @@ function SalesTable({ list }) {
 
 // ── Отчёт ОПУ (прибыли и убытки) ──
 // Карточки и таблица «Показатель — Сумма» — вид, к которому привыкли владельцы
-// магазинов. Формулы в lib/opu.js; кнопка «Печать» выводит лист с шапкой аптеки.
+// магазинов. Формулы в lib/opu.js; кнопка «Печать» выводит лист с шапкой магазина.
 // ── Модалка карточки ОПУ: из чего сложилось число и как оно считается ──
 function OpuModal({ kind, d, onClose }) {
   const t = useT()
@@ -255,7 +255,7 @@ function Opu({ onExcelRef }) {
 
   return (
     <div className="printable opu">
-      {/* Шапка видна только на бумаге: чья аптека и за какой период отчёт */}
+      {/* Шапка видна только на бумаге: чей магазин и за какой период отчёт */}
       <div className="opu-print-head">
         <b>{apt}</b>
         <div>{t('Отчёт ОПУ')} · {applied.from} — {applied.to}</div>
@@ -271,9 +271,6 @@ function Opu({ onExcelRef }) {
           <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
         </div>
         <button className="btn" data-tour="opu.show" onClick={() => setApplied({ from: fromDate, to: toDate })}>{t('Показать')}</button>
-        <button className="btn gold" data-tour="opu.print" onClick={() => window.print()}>
-          <span className="ic"><LuPrinter size={16} /></span> {t('Печать')}
-        </button>
       </div>
 
       {loadingOlder && <div className="note info no-print" style={{ marginBottom: 12 }}>{t('Загружаем историю за выбранный период…')}</div>}
@@ -326,8 +323,8 @@ export default function Reports() {
   // выручка и прибыль в отчёте завышены
   const returns = useCollection('returns')
   const writeOffs = useCollection('writeoffs')
-  // Расходы аптеки — аренда, зарплата и прочее. Без них видна только прибыль на
-  // товаре, а не то, что аптека заработала на самом деле
+  // Расходы магазина — аренда, зарплата и прочее. Без них видна только прибыль на
+  // товаре, а не то, что магазин заработал на самом деле
   const expenses = useCollection('expenses')
   const t = useT()
   // Вкладки: «Отчёт ОПУ» открывается первой, подробная аналитика — рядом.
@@ -520,10 +517,10 @@ export default function Reports() {
           )}
           <div className="total-row big"><span>{t('Осталось прибыли')}</span><span style={{ color: 'var(--green)' }}>{money(data.profit)}</span></div>
           <div className="total-row"><span>{t('Маржа')}</span><span>{data.margin}%</span></div>
-          {/* Чистая прибыль — отдельным итогом: прибыль на товаре минус всё, что аптека
+          {/* Чистая прибыль — отдельным итогом: прибыль на товаре минус всё, что магазин
               потратила помимо товара */}
           <div className="total-row">
-            <span>{t('Расходы аптеки')} <span className="tag-cat">· {data.expenseCount}</span></span>
+            <span>{t('Расходы магазина')} <span className="tag-cat">· {data.expenseCount}</span></span>
             <span style={{ color: data.expenses > 0 ? 'var(--danger)' : undefined }}>−{money(data.expenses)}</span>
           </div>
           <div className="total-row big">
@@ -533,7 +530,7 @@ export default function Reports() {
           <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6 }}>
             {t('За период')} {rangeLabel}: {data.count} {t('чек(ов)')}.{' '}
             {t('Товар, вернувшийся на полку, прибыль не уменьшает — потеряны только деньги за него.')}{' '}
-            {t('Чистая прибыль — это прибыль минус расходы аптеки: аренда, зарплата и прочее.')}
+            {t('Чистая прибыль — это прибыль минус расходы магазина: аренда, зарплата и прочее.')}
           </p>
         </Modal>
       )

@@ -7,11 +7,11 @@ import { backupTarget, BackupTarget } from './backup-storage'
 import { dayKeyTj } from '../common/time'
 
 // ── Копии, которые снимаются сами ──
-// Пока аптека одна, потеря данных — разговор с одним клиентом. Когда их тридцать,
-// это конец сервиса. Владелец аптеки делать копии руками не будет: он занят
-// аптекой, а не нами, и вспомнит о копии ровно тогда, когда она уже нужна.
+// Пока магазин один, потеря данных — разговор с одним клиентом. Когда их тридцать,
+// это конец сервиса. Владелец магазина делать копии руками не будет: он занят
+// магазином, а не нами, и вспомнит о копии ровно тогда, когда она уже нужна.
 //
-// Поэтому раз в сутки сервер обходит все аптеки сам.
+// Поэтому раз в сутки сервер обходит все магазины сам.
 //
 // ── Про час запуска ──
 // Ночь по Душанбе: касса закрыта, база свободна. Проверяем раз в час, а не ставим
@@ -47,7 +47,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
       this.log.warn(
         'АВТОМАТИЧЕСКИЕ КОПИИ ВЫКЛЮЧЕНЫ: не задано, куда их складывать. ' +
           'Укажите BACKUP_S3_* (внешнее хранилище) или BACKUP_DIR (подключённый том). ' +
-          'Сейчас данные аптек защищены только копиями, которые владельцы делают руками.',
+          'Сейчас данные магазинов защищены только копиями, которые владельцы делают руками.',
       )
       return
     }
@@ -87,7 +87,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // Обойти все аптеки и снять с каждой копию. По очереди: одновременные выгрузки
+  // Обойти все магазины и снять с каждой копию. По очереди: одновременные выгрузки
   // всех схем разом упрутся в предел подключений, а спешить ночью некуда.
   async runAll(): Promise<{ ok: string[]; failed: string[] }> {
     if (!this.target) throw new Error('Не задано, куда складывать копии')
@@ -101,7 +101,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
         select: { code: true, schemaName: true },
         orderBy: { code: 'asc' },
       })
-      this.log.log(`Снимаю копии: аптек ${list.length}`)
+      this.log.log(`Снимаю копии: магазинов ${list.length}`)
 
       for (const ph of list) {
         try {
@@ -123,7 +123,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
 
       this.last = { at: new Date().toISOString(), ok, failed }
       if (failed.length) this.log.error(`Копии сняты: ${ok.length}. НЕ УДАЛОСЬ: ${failed.join(', ')}`)
-      else this.log.log(`Копии сняты у всех аптек: ${ok.length}`)
+      else this.log.log(`Копии сняты у всех магазинов: ${ok.length}`)
       return { ok, failed }
     } finally {
       this.running = false

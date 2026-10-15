@@ -8,7 +8,7 @@
 // бы экран и ломал каждое нажатие. Первый вход здесь проверяется в чистом браузере,
 // ровно как у настоящего нового клиента.
 //
-// Запуск:  APP_USER=<логин владельца аптеки> APP_PASS=<пароль> npx playwright test e2e-ui/obuchenie.spec.mjs
+// Запуск:  APP_USER=<логин владельца магазина> APP_PASS=<пароль> npx playwright test e2e-ui/obuchenie.spec.mjs
 import { test, expect } from '@playwright/test'
 
 const USER = process.env.APP_USER || 'admin'
@@ -69,7 +69,7 @@ test.describe('Первый вход', () => {
   // Сбрасываем то, что настройки прогона кладут всем остальным проверкам
   test.use({ storageState: { cookies: [], origins: [] } })
 
-  test('новая аптека сразу получает общий тур, и после «Пропустить» он не повторяется', async ({ page }) => {
+  test('новый магазин сразу получает общий тур, и после «Пропустить» он не повторяется', async ({ page }) => {
     test.setTimeout(120_000)
     await signIn(page)
 

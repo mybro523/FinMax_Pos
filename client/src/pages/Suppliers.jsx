@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { LuTruck, LuPlus, LuPencil, LuTrash2, LuLock, LuBanknote, LuHandCoins, LuPackagePlus } from 'react-icons/lu'
+import { Link, useLocation } from 'react-router-dom'
+import { LuTruck, LuPlus, LuPencil, LuTrash2, LuLock, LuBanknote, LuHandCoins, LuPackagePlus, LuCircleDollarSign } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
@@ -12,15 +12,20 @@ import { fmtDate, fmtDateTime } from '../lib/time'
 import { useT } from '../lib/i18n'
 import { useCan } from '../db/auth'
 import { isDesktop } from '../lib/desktop'
+import ExportPechat from '../components/ExportPechat'
+import SupplierDebtsPanel, { useDolgiPostavshikam } from './SupplierDebts'
 
 // ── Поставщики и долги перед ними ──
-// Аптека берёт товар у дистрибьюторов в долг. Приход записывался, а кому и сколько
-// аптека должна — не было нигде. Здесь: список поставщиков с долгом, карточка с
+// Магазин берёт товар у дистрибьюторов в долг. Приход записывался, а кому и сколько
+// магазин должен — не было нигде. Здесь: список поставщиков с долгом, карточка с
 // историей (приходы в долг и оплаты) и сама оплата.
 //
 // Оплата поставщику — не расход: товар уже учтён при продаже по закупочной цене.
 // Но если деньги взяты из ящика кассы, смена обязана это знать — такая оплата
 // привязана к открытой смене и отменяется, только пока смена открыта.
+
+// Какая вкладка открыта — помнится на устройстве
+const VKLADKA = 'apteka_postavshiki_vkladka'
 
 const sourceName = (s, t) => (s.deviceId ? s.deviceName || t('Касса') : t('Касса сайта'))
 const defaultSource = (list) => (list.find((s) => !s.deviceId) || list[0])?.shiftId || ''
@@ -34,6 +39,28 @@ export default function Suppliers() {
   const [q, setQ] = useState('')
   const [form, setForm] = useState(null) // { id?, name, phone, note, openingDebt }
   const [cardId, setCardId] = useState(null)
+
+  // ── Вкладки: список поставщиков и сводка долгов ──
+  // Раньше это были две плитки меню про одно и то же. Адрес ?tab=debts ведёт сразу
+  // в сводку — по нему же работает прежняя ссылка «Долги поставщикам»
+  const { search } = useLocation()
+  const [tab, setTabRaw] = useState(() => {
+    if (new URLSearchParams(search).get('tab') === 'debts') return 'debts'
+    try {
+      return localStorage.getItem(VKLADKA) === 'debts' ? 'debts' : 'list'
+    } catch {
+      return 'list'
+    }
+  })
+  const setTab = (v) => {
+    setTabRaw(v)
+    try {
+      localStorage.setItem(VKLADKA, v)
+    } catch {
+      /* приватный режим */
+    }
+  }
+  const dolgi = useDolgiPostavshikam()
 
   const totalDebt = useMemo(() => suppliers.reduce((s, x) => s + (Number(x.debt) || 0), 0), [suppliers])
   const list = useMemo(() => {
@@ -73,13 +100,30 @@ export default function Suppliers() {
   return (
     <Layout
       title={t('Поставщики')}
-      subtitle={t('Кому и сколько должна аптека')}
+      subtitle={tab === 'debts' ? `${t('Всего должны')}: ${money(dolgi.s.total)}` : t('Кому и сколько должен магазин')}
       actions={
-        can('suppliers.edit') && <button className="btn" data-tour="sup.add" onClick={() => setForm({ name: '', phone: '', note: '', openingDebt: '' })}>
-          <span className="ic"><LuPlus size={16} /></span> {t('Добавить поставщика')}
-        </button>
+        tab === 'debts' ? (
+          <ExportPechat onExcel={dolgi.exportExcel} />
+        ) : (
+          can('suppliers.edit') && <button className="btn" data-tour="sup.add" onClick={() => setForm({ name: '', phone: '', note: '', openingDebt: '' })}>
+            <span className="ic"><LuPlus size={16} /></span> {t('Добавить поставщика')}
+          </button>
+        )
       }
     >
+      <div className="chips" data-tour="sup.tabs" style={{ marginBottom: 14 }}>
+        <button className={'chip ' + (tab === 'list' ? 'active' : '')} data-tour="sup.tab-list" onClick={() => setTab('list')}>
+          <LuTruck size={14} style={{ marginRight: 6, verticalAlign: -2 }} />{t('Поставщики')}
+        </button>
+        <button className={'chip ' + (tab === 'debts' ? 'active' : '')} data-tour="sup.tab-debts" onClick={() => setTab('debts')}>
+          <LuCircleDollarSign size={14} style={{ marginRight: 6, verticalAlign: -2 }} />{t('Долги поставщикам')}
+          {totalDebt > 0 && <span className="chip-badge">{money(totalDebt)}</span>}
+        </button>
+      </div>
+
+      {tab === 'debts' && <SupplierDebtsPanel dolgi={dolgi} onOpen={(p) => setCardId(p.id)} />}
+
+      {tab === 'list' && (<>
       <div className="note info" style={{ marginBottom: 16, maxWidth: 780 }}>
         {t('Как это работает: при приходе товара отметьте, сколько оплачено сразу, — остальное станет долгом перед поставщиком. Когда заплатите, запишите оплату здесь. На чистую прибыль долги не влияют: товар уже учтён при продаже.')}
       </div>
@@ -138,12 +182,13 @@ export default function Suppliers() {
         </div>
         <Pagination {...pg} />
       </div>
+      </>)}
 
       {form && (
         <Modal title={form.id ? t('Изменить поставщика') : t('Новый поставщик')} onClose={() => setForm(null)}>
           <div className="field">
             <label htmlFor="supName">{t('Название')}</label>
-            <input id="supName" value={form.name} maxLength={120} autoFocus onChange={(e) => setForm({ ...form, name: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && save()} placeholder={t('Напр. Фарм-опт')} />
+            <input id="supName" value={form.name} maxLength={120} autoFocus onChange={(e) => setForm({ ...form, name: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && save()} placeholder={t('Напр. Опт-Маркет')} />
           </div>
           <div className="row">
             <div className="field" style={{ flex: 1 }}>
@@ -159,7 +204,7 @@ export default function Suppliers() {
           </div>
           {!form.id && (
             <div className="tag-cat" style={{ marginTop: -6, marginBottom: 12 }}>
-              {t('Сколько аптека уже должна этому поставщику. Дальше долг растёт с приходами в долг и уменьшается оплатами.')}
+              {t('Сколько магазин уже должен этому поставщику. Дальше долг растёт с приходами в долг и уменьшается оплатами.')}
             </div>
           )}
           <div className="field">

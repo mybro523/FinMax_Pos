@@ -142,7 +142,7 @@ export default function Roles() {
   return (
     <Layout
       title={t('Роли и права')}
-      subtitle={t('Кому что можно в аптеке')}
+      subtitle={t('Кому что можно в магазине')}
       actions={
         <button className="btn" data-tour="roles.new" onClick={create}>
           <span className="ic"><LuPlus size={16} /></span> {t('Новая роль')}

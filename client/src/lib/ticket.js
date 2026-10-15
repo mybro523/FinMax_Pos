@@ -28,11 +28,11 @@ function payLabel(payment, t) {
   return t('Наличные')
 }
 
-// Шапка одна на все бумаги: название аптеки, затем адрес и телефон, если владелец
+// Шапка одна на все бумаги: название магазина, затем адрес и телефон, если владелец
 // вписал их в Настройках (lib/rekvizity.js)
 function shapka(pharmacy, rekvizity, t) {
   const r = rekvizity || {}
-  return [pharmacy || t('Аптека'), ...(r.address ? [r.address] : []), ...(r.phone ? [`${t('Тел.')} ${r.phone}`] : [])]
+  return [pharmacy || t('Магазин'), ...(r.address ? [r.address] : []), ...(r.phone ? [`${t('Тел.')} ${r.phone}`] : [])]
 }
 
 // Подвал тоже один: кассир, подпись владельца («Будьте здоровы!» и т.п.) и имя
@@ -50,14 +50,14 @@ function podval(who, rekvizity, t, spasibo) {
 // ── Чек продажи ──
 // rekvizity — адрес/телефон/подпись с этого устройства; nomer — номер чека из даты
 // (lib/time.js, chekNomer); customerDebt — долг клиента после продажи в долг:
-// покупатель видит в чеке, сколько он теперь должен аптеке
+// покупатель видит в чеке, сколько он теперь должен магазину
 export function saleTicket(sale, { t, money, when, pharmacy = '', cashier = '', rekvizity = null, nomer = '', customerDebt = null }) {
   const items = Array.isArray(sale?.items) ? sale.items : []
   const discount = items.reduce((s, i) => s + (i.discount || 0), 0)
   const totals = []
   if (discount > 0) totals.push({ label: t('Скидка'), value: '−' + money(discount) })
   totals.push({ label: t('Итого'), value: money(sale.total), big: true })
-  // У перевода — через какой сервис: по нему покупатель и аптека ищут платёж
+  // У перевода — через какой сервис: по нему покупатель и магазин ищут платёж
   totals.push({ label: t('Оплата'), value: payLabel(sale.payment, t) + (sale.payment === 'transfer' && sale.payVia ? ` · ${sale.payVia}` : '') })
   // Покупатель сверяет сдачу по чеку: сколько дал и сколько ему вернули
   if (sale.received !== null && sale.received !== undefined) {
@@ -140,7 +140,7 @@ export function shiftTicket(shift, totals, { t, money, when, pharmacy = '', rekv
   rows.push({ label: t('Касса на старте'), value: money(shift.openingCash) })
   if ((shift.cashIn || 0) > 0) rows.push({ label: t('Внесено в кассу'), value: '+' + money(shift.cashIn) })
   if ((shift.refundCash || 0) > 0) rows.push({ label: t('Выдано за возвраты (нал.)'), value: '−' + money(shift.refundCash) })
-  // Деньги, взятые из ящика на расходы аптеки: без этой строки «ожидалось» не сходится
+  // Деньги, взятые из ящика на расходы магазина: без этой строки «ожидалось» не сходится
   // с продажами на бумаге
   if ((shift.expenseCash || 0) > 0) rows.push({ label: t('Расходы из кассы'), value: '−' + money(shift.expenseCash) })
   if ((shift.supplierCash || 0) > 0) rows.push({ label: t('Оплачено поставщикам (нал.)'), value: '−' + money(shift.supplierCash) })

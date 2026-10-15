@@ -9,7 +9,7 @@ import { login, goTo, addProduct, removeProducts, waitForProducts, scan, withSer
 const TAG = tag()
 const NAME = TAG + ' Амоксициллин'
 const CODE = barcode()
-const SUPPLIER = TAG + ' Фарм-опт'
+const SUPPLIER = TAG + ' Опт-Маркет'
 
 test.describe.configure({ mode: 'serial' })
 

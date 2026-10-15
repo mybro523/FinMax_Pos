@@ -50,7 +50,7 @@ contextBridge.exposeInMainWorld('apteka', {
     status: () => ipcRenderer.invoke('sync:status'),
     // Обменяться с сервером прямо сейчас
     now: () => ipcRenderer.invoke('sync:now'),
-    // Загрузить всю аптеку с сервера заново
+    // Загрузить весь магазин с сервера заново
     resync: () => ipcRenderer.invoke('sync:resync'),
     // Что сервер не принял (видит только владелец) и «разобрался»
     rejected: () => ipcRenderer.invoke('sync:rejected'),

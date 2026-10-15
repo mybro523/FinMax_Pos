@@ -28,7 +28,7 @@ export class TenantSchemaService {
 
   constructor(private admin: AdminDbService) {}
 
-  // Последняя миграция в наборе — её имя запоминается у аптеки, чтобы потом было
+  // Последняя миграция в наборе — её имя запоминается у магазина, чтобы потом было
   // видно, какие схемы уже обновлены, а какие ещё нет
   latestMigration(): string {
     if (!existsSync(MIGRATIONS_DIR)) return ''
@@ -53,26 +53,26 @@ export class TenantSchemaService {
   }
 
   // Убрать схему со всем содержимым. Вызывается только тогда, когда заведение
-  // аптеки не удалось и надо убрать за собой: у работающей аптеки это стёрло бы
+  // магазина не удалось и надо убрать за собой: у работающего магазина это стёрло бы
   // всё — товары, продажи, долги — и восстановить их было бы неоткуда.
   async dropSchema(schema: string): Promise<void> {
     this.assertSafe(schema)
     await this.admin.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`)
   }
 
-  // Привести схему аптеки к текущему набору миграций.
+  // Привести схему магазина к текущему набору миграций.
   //
   // Запускаем prisma migrate deploy отдельным процессом, а не выполняем SQL сами.
   // Своими руками пришлось бы вести и учёт применённого — с контрольными суммами
   // и порядком, — а это ровно та часть, ошибка в которой обнаруживается позже
-  // всего и стоит дороже всего. Две секунды на аптеку того стоят; там, где схем
+  // всего и стоит дороже всего. Две секунды на магазин того стоят; там, где схем
   // сотни, это делается фоновой задачей, а не при обращении.
   async migrate(schema: string): Promise<void> {
     this.assertSafe(schema)
     try {
       const { stdout, stderr } = await run(process.execPath, [PRISMA_CLI, 'migrate', 'deploy'], {
         timeout: 180000,
-        // Схема аптеки подставляется в тот же DATABASE_URL, из которого Prisma
+        // Схема магазина подставляется в тот же DATABASE_URL, из которого Prisma
         // берёт адрес: своей переменной у неё нет
         env: { ...process.env, DATABASE_URL: withSchema(process.env.DATABASE_URL || '', schema) },
       })
@@ -81,7 +81,7 @@ export class TenantSchemaService {
     } catch (e: any) {
       const out = (e?.stdout || '') + (e?.stderr || '') || e?.message || String(e)
       this.log.error(`Миграции схемы «${schema}» не прошли: ${out}`)
-      throw new InternalServerErrorException(`Не удалось подготовить базу аптеки: ${out.slice(0, 300)}`)
+      throw new InternalServerErrorException(`Не удалось подготовить базу магазина: ${out.slice(0, 300)}`)
     }
   }
 }

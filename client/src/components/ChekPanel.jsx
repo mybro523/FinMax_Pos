@@ -6,7 +6,7 @@ import { getRekvizity, saveRekvizity } from '../lib/rekvizity'
 import { useT } from '../lib/i18n'
 
 // ── Данные чека ──
-// Что печатается на чеке под названием аптеки: адрес, телефон и подпись внизу.
+// Что печатается на чеке под названием магазина: адрес, телефон и подпись внизу.
 // Название приходит с сервера само, а эти строки владелец вписывает один раз.
 // Хранятся они на этом устройстве: чек печатает касса, и у каждой кассы они свои
 // (обычно касса одна-две, и строки совпадают).
@@ -27,7 +27,7 @@ export default function ChekPanel() {
     <div className="panel mt" style={{ maxWidth: 640 }} data-tour="set.chek">
       <h2><span className="h2-title"><span className="ic"><LuReceiptText size={17} /></span>{t('Данные чека')}</span></h2>
       <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7, marginBottom: 12 }}>
-        {t('Эти строки печатаются на каждом чеке этой кассы под названием аптеки. Название добавляется само.')}
+        {t('Эти строки печатаются на каждом чеке этой кассы под названием магазина. Название добавляется само.')}
       </p>
       <div className="field">
         <label htmlFor="chk-address">{t('Адрес на чеке')}</label>
