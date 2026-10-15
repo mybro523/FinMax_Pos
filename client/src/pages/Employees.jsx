@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { LuUserPlus, LuTrash2, LuKeyRound, LuShieldCheck } from 'react-icons/lu'
+import { LuUserPlus, LuTrash2, LuKeyRound, LuShieldCheck, LuPencil, LuUserCog } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { Modal, PasswordInput, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
+import NumberInput from '../components/NumberInput'
 import { api } from '../db/api'
-import { onChanged } from '../db/store'
+import { onChanged, money } from '../db/store'
 import { useAuth } from '../db/auth'
 import { fmtDate } from '../lib/time'
 import { useT } from '../lib/i18n'
@@ -15,6 +16,11 @@ import { OWNER_ROLE_ID } from '../lib/permissions'
 // Каждому сотруднику назначается роль из раздела «Роли и права»: по ней видны
 // разделы и кнопки. Владелец — тоже роль, особая: ему можно всё, и единственного
 // владельца нельзя ни разжаловать, ни заблокировать.
+//
+// У сотрудника есть и данные для зарплаты: ФИО, оклад и бонус — процент от суммы
+// его продаж за месяц. По ним раздел «Расходы» сам считает зарплату к выдаче.
+
+const pct = (v) => `${String(Number(v) || 0).replace('.', ',')}%`
 
 export default function Employees() {
   const toast = useToast()
@@ -25,6 +31,7 @@ export default function Employees() {
   const [roles, setRoles] = useState([])
   const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState(null)
   const pg = usePagination(list, 10)
 
   const load = useCallback(async () => {
@@ -80,7 +87,7 @@ export default function Employees() {
   async function remove(u) {
     const ok = await dialog.confirm({
       title: t('Удалить сотрудника?'),
-      message: `«${u.name}» будет удалён. История его продаж сохранится (кассир станет «—»).`,
+      message: `«${u.name}» ${t('будет удалён. История его продаж сохранится (кассир станет «—»).')}`,
       danger: true,
       confirmText: t('Удалить'),
     })
@@ -104,6 +111,13 @@ export default function Employees() {
     load()
   }
 
+  function saved(u) {
+    setList((ls) => ls.map((x) => (x.id === u.id ? { ...x, ...u } : x)))
+    setEditing(null)
+    toast(t('Данные сотрудника сохранены'))
+    load()
+  }
+
   return (
     <Layout
       title={t('Сотрудники')}
@@ -115,46 +129,58 @@ export default function Employees() {
       }
     >
       <div className="panel" data-tour="emp.list" style={{ padding: 0 }}>
-        <table>
-          <thead><tr><th>{t('Имя')}</th><th>{t('Роль')}</th><th>{t('Добавлен')}</th><th>{t('Статус')}</th><th></th></tr></thead>
-          <tbody>
-            {pg.slice.map((u) => (
-              <tr key={u.id}>
-                <td><b>{u.name}</b>{u.id === me?.id && <span className="tag-cat"> · {t('это вы')}</span>}</td>
-                <td>
-                  {/* Свою роль владелец не меняет — иначе остался бы без прав посреди работы */}
-                  {u.id === me?.id ? (
-                    <span>{roleName(u)}</span>
-                  ) : (
-                    <select
-                      className="role-select"
-                      data-tour="emp.role"
-                      value={u.roleId || ''}
-                      onChange={(e) => changeRole(u, e.target.value)}
-                      aria-label={`${t('Роль')}: ${u.name}`}
-                    >
-                      {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                    </select>
-                  )}
-                </td>
-                <td className="tag-cat">{u.createdAt ? fmtDate(u.createdAt) : '—'}</td>
-                <td>{u.active ? <span className="badge ok">{t('активен')}</span> : <span className="badge debt">{t('заблокирован')}</span>}</td>
-                <td className="num" style={{ whiteSpace: 'nowrap' }}>
-                  <button className="btn ghost sm" data-tour="emp.password" onClick={() => resetPw(u)}><LuKeyRound size={14} /> {t('Пароль')}</button>{' '}
-                  {u.id !== me?.id && (
-                    <>
-                      <button className="btn ghost sm" data-tour="emp.block" onClick={() => toggleActive(u)}>{u.active ? t('Блокировать') : t('Разблок.')}</button>{' '}
-                      {u.role !== 'founder' && (
-                        <button className="btn ghost sm icon" data-tour="emp.delete" onClick={() => remove(u)} title={t('Удалить')} aria-label={`${t('Удалить')}: ${u.name}`}><LuTrash2 size={15} /></button>
-                      )}
-                    </>
-                  )}
-                </td>
+        <div style={{ overflowX: 'auto' }}>
+          <table>
+            <thead>
+              <tr>
+                <th>{t('Логин')}</th><th>{t('ФИО')}</th><th>{t('Роль')}</th>
+                <th className="num">{t('Оклад')}</th><th className="num">{t('Бонус')}</th>
+                <th>{t('Добавлен')}</th><th>{t('Статус')}</th><th></th>
               </tr>
-            ))}
-            {!loading && list.length === 0 && <tr><td colSpan="5" className="empty">{t('Нет сотрудников')}</td></tr>}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {pg.slice.map((u) => (
+                <tr key={u.id}>
+                  <td><b>{u.name}</b>{u.id === me?.id && <span className="tag-cat"> · {t('это вы')}</span>}</td>
+                  <td>{u.fullName || <span className="tag-cat">—</span>}</td>
+                  <td>
+                    {/* Свою роль владелец не меняет — иначе остался бы без прав посреди работы */}
+                    {u.id === me?.id ? (
+                      <span>{roleName(u)}</span>
+                    ) : (
+                      <select
+                        className="role-select"
+                        data-tour="emp.role"
+                        value={u.roleId || ''}
+                        onChange={(e) => changeRole(u, e.target.value)}
+                        aria-label={`${t('Роль')}: ${u.name}`}
+                      >
+                        {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                    )}
+                  </td>
+                  <td className="num" data-tour="emp.salary">{Number(u.salary) > 0 ? money(u.salary) : <span className="tag-cat">—</span>}</td>
+                  <td className="num">{Number(u.bonusPercent) > 0 ? pct(u.bonusPercent) : <span className="tag-cat">—</span>}</td>
+                  <td className="tag-cat">{u.createdAt ? fmtDate(u.createdAt) : '—'}</td>
+                  <td>{u.active ? <span className="badge ok">{t('активен')}</span> : <span className="badge debt">{t('заблокирован')}</span>}</td>
+                  <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                    <button className="btn ghost sm" data-tour="emp.edit" onClick={() => setEditing(u)} title={t('ФИО, оклад и бонус')}><LuPencil size={14} /> {t('Изменить')}</button>{' '}
+                    <button className="btn ghost sm" data-tour="emp.password" onClick={() => resetPw(u)}><LuKeyRound size={14} /> {t('Пароль')}</button>{' '}
+                    {u.id !== me?.id && (
+                      <>
+                        <button className="btn ghost sm" data-tour="emp.block" onClick={() => toggleActive(u)}>{u.active ? t('Блокировать') : t('Разблок.')}</button>{' '}
+                        {u.role !== 'founder' && (
+                          <button className="btn ghost sm icon" data-tour="emp.delete" onClick={() => remove(u)} title={t('Удалить')} aria-label={`${t('Удалить')}: ${u.name}`}><LuTrash2 size={15} /></button>
+                        )}
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {!loading && list.length === 0 && <tr><td colSpan="8" className="empty">{t('Нет сотрудников')}</td></tr>}
+            </tbody>
+          </table>
+        </div>
         <Pagination {...pg} />
       </div>
       <div className="note info" style={{ marginTop: 16, maxWidth: 680, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -163,28 +189,70 @@ export default function Employees() {
       </div>
 
       {adding && <AddEmployee roles={roles} onDone={added} onClose={() => setAdding(false)} />}
+      {editing && <EditEmployee user={editing} onDone={saved} onClose={() => setEditing(null)} />}
     </Layout>
   )
 }
 
+// Оклад и бонус — общие поля обеих форм
+function PayFields({ salary, setSalary, bonus, setBonus, idPrefix }) {
+  const t = useT()
+  return (
+    <>
+      <div className="row">
+        <div className="field" style={{ flex: 1 }}>
+          <label htmlFor={`${idPrefix}-salary`}>{t('Оклад в месяц (сомони)')}</label>
+          <NumberInput id={`${idPrefix}-salary`} value={salary} placeholder="0" onChange={(e) => setSalary(e.target.value)} />
+        </div>
+        <div className="field" style={{ flex: 1 }}>
+          <label htmlFor={`${idPrefix}-bonus`}>{t('Бонус от продажи, %')}</label>
+          <NumberInput id={`${idPrefix}-bonus`} value={bonus} placeholder="0" onChange={(e) => setBonus(e.target.value)} />
+        </div>
+      </div>
+      <div className="tag-cat" style={{ marginTop: -6, marginBottom: 12 }}>
+        {t('Бонус — процент от суммы его продаж за месяц. Зарплату к выдаче программа посчитает сама в разделе «Расходы».')}
+      </div>
+    </>
+  )
+}
+
+const payProblem = (salary, bonus, t) => {
+  if (Number(bonus) > 100) return t('Бонус — не больше 100%')
+  if (Number(salary) < 0 || Number(bonus) < 0) return t('Оклад и бонус не бывают меньше нуля')
+  return ''
+}
+
 // ── Новый сотрудник ──
-// Имя, пароль и роль сразу: без роли сотрудник получил бы права кассира по
-// умолчанию, и владелец узнал бы об этом только когда тот не смог открыть раздел
+// Логин, пароль и роль сразу: без роли сотрудник получил бы права кассира по
+// умолчанию, и владелец узнал бы об этом только когда тот не смог открыть раздел.
+// ФИО, оклад и бонус — для зарплаты; их можно вписать и позже
 function AddEmployee({ roles, onDone, onClose }) {
   const t = useT()
   const toast = useToast()
   const cashier = roles.find((r) => r.system === 'cashier')
   const [name, setName] = useState('')
+  const [fullName, setFullName] = useState('')
   const [password, setPassword] = useState('')
   const [roleId, setRoleId] = useState(cashier?.id || roles.find((r) => r.id !== OWNER_ROLE_ID)?.id || '')
+  const [salary, setSalary] = useState('')
+  const [bonus, setBonus] = useState('')
   const [saving, setSaving] = useState(false)
 
   async function submit() {
-    if (!name.trim()) return toast(t('Введите имя'), 'err')
+    if (!name.trim()) return toast(t('Введите логин'), 'err')
     if (password.length < 6) return toast(t('Пароль — не короче 6 символов'), 'err')
+    const bad = payProblem(salary, bonus, t)
+    if (bad) return toast(bad, 'err')
     setSaving(true)
     try {
-      const u = await api.post('/users', { name: name.trim(), password, roleId })
+      const u = await api.post('/users', {
+        name: name.trim(),
+        password,
+        roleId,
+        fullName: fullName.trim(),
+        salary: Number(salary) || 0,
+        bonusPercent: Number(bonus) || 0,
+      })
       onDone(u)
     } catch (e) {
       toast(e.message, 'err')
@@ -196,8 +264,12 @@ function AddEmployee({ roles, onDone, onClose }) {
   return (
     <Modal title={<><span className="ic"><LuUserPlus size={18} /></span>{t('Новый сотрудник')}</>} onClose={onClose}>
       <div className="field">
-        <label htmlFor="emp-name">{t('Имя (логин для входа)')}</label>
+        <label htmlFor="emp-name">{t('Логин (для входа)')}</label>
         <input id="emp-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus autoComplete="off" />
+      </div>
+      <div className="field">
+        <label htmlFor="emp-fio">{t('ФИО сотрудника')}</label>
+        <input id="emp-fio" value={fullName} maxLength={120} onChange={(e) => setFullName(e.target.value)} placeholder={t('напр. Каримов Фарход Аминович')} autoComplete="off" />
       </div>
       <div className="field">
         <label htmlFor="emp-pw">{t('Пароль (минимум 6 символов)')}</label>
@@ -209,9 +281,52 @@ function AddEmployee({ roles, onDone, onClose }) {
           {roles.map((r) => <option key={r.id} value={r.id}>{r.name}{r.description ? ` — ${r.description}` : ''}</option>)}
         </select>
       </div>
+      <PayFields salary={salary} setSalary={setSalary} bonus={bonus} setBonus={setBonus} idPrefix="emp" />
       <div className="modal-actions">
         <button className="btn ghost" onClick={onClose} disabled={saving}>{t('Отмена')}</button>
         <button className="btn" onClick={submit} disabled={saving}>{saving ? t('Сохранение…') : t('Добавить')}</button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── ФИО, оклад и бонус уже заведённого сотрудника ──
+function EditEmployee({ user, onDone, onClose }) {
+  const t = useT()
+  const toast = useToast()
+  const [fullName, setFullName] = useState(user.fullName || '')
+  const [salary, setSalary] = useState(Number(user.salary) > 0 ? String(user.salary) : '')
+  const [bonus, setBonus] = useState(Number(user.bonusPercent) > 0 ? String(user.bonusPercent) : '')
+  const [saving, setSaving] = useState(false)
+
+  async function submit() {
+    const bad = payProblem(salary, bonus, t)
+    if (bad) return toast(bad, 'err')
+    setSaving(true)
+    try {
+      const u = await api.patch(`/users/${user.id}`, {
+        fullName: fullName.trim(),
+        salary: Number(salary) || 0,
+        bonusPercent: Number(bonus) || 0,
+      })
+      onDone(u)
+    } catch (e) {
+      toast(e.message, 'err')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={<><span className="ic"><LuUserCog size={18} /></span>{t('Сотрудник')} — {user.name}</>} onClose={onClose}>
+      <div className="field">
+        <label htmlFor="emp-edit-fio">{t('ФИО сотрудника')}</label>
+        <input id="emp-edit-fio" value={fullName} maxLength={120} autoFocus onChange={(e) => setFullName(e.target.value)} placeholder={t('напр. Каримов Фарход Аминович')} />
+      </div>
+      <PayFields salary={salary} setSalary={setSalary} bonus={bonus} setBonus={setBonus} idPrefix="emp-edit" />
+      <div className="modal-actions">
+        <button className="btn ghost" onClick={onClose} disabled={saving}>{t('Отмена')}</button>
+        <button className="btn" onClick={submit} disabled={saving}>{saving ? t('Сохранение…') : t('Сохранить')}</button>
       </div>
     </Modal>
   )

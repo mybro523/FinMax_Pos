@@ -11,7 +11,7 @@ import { useT } from '../lib/i18n'
 import { useCategories, needsExpiry } from '../lib/categories'
 import NumberInput from '../components/NumberInput'
 import VesInput from '../components/VesInput'
-import { uppOf, lineUnits as soldUnits, isVesovoy, kgText } from '../lib/units'
+import { uppOf, lineUnits as soldUnits, isVesovoy, kgText, edinica } from '../lib/units'
 import { returnTicket } from '../lib/ticket'
 import TicketView from '../components/TicketView'
 import { usePechat } from '../components/PrintDialog'
@@ -248,7 +248,7 @@ export default function Returns() {
                     <b>{l.name}</b>
                     {l.deleted && <div className="tag-cat" style={{ color: 'var(--warn)' }}>{t('товар удалён из базы')}</div>}
                   </td>
-                  <td className="num">{l.deleted ? '—' : l.ves ? `${kgText(l.max)} ${t('кг')}` : l.max}</td>
+                  <td className="num">{l.deleted ? '—' : l.ves ? `${kgText(l.max)} ${t(edinica(l))}` : l.max}</td>
                   <td data-tour="ret.lines">
                     {l.ves ? (
                       <VesInput
@@ -370,7 +370,11 @@ export default function Returns() {
                 <td>{fmtDateTime(r.date)}</td>
                 <td>
                   {r.items
-                    .map((i) => `${i.name} ×${i.unit === 'кг' || isVesovoy(products.find((p) => p.id === i.productId)) ? `${kgText(i.units)} ${t('кг')}` : i.units}`)
+                    .map((i) => {
+                      const prod = products.find((p) => p.id === i.productId)
+                      const drob = isVesovoy({ unit: i.unit }) || isVesovoy(prod)
+                      return `${i.name} ×${drob ? `${kgText(i.units)} ${t(isVesovoy({ unit: i.unit }) ? i.unit : edinica(prod))}` : i.units}`
+                    })
                     .join(', ')
                     .slice(0, 60)}
                   {r.items.some((i) => !i.restock) && (

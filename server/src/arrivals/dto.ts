@@ -12,6 +12,9 @@ export class ArrivalItemDto {
   @IsNumber() @Min(0) cost: number
   // Срок годности партии: обязателен для товаров, необязателен для приборов и расходников
   @IsOptional() @IsString() expiryDate?: string
+  // Новая цена продажи товара: владелец назначил её наценкой на закуп этого прихода.
+  // Не прислана — цена товара остаётся прежней
+  @IsOptional() @IsNumber() @Min(0) @Max(MAX_MONEY) price?: number
 }
 
 export class CreateArrivalDto {

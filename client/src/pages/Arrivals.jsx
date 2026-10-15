@@ -1,7 +1,8 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { LuBanknote, LuCreditCard, LuClock, LuCalculator, LuPlus, LuTrash2, LuScanLine, LuPackagePlus, LuPencil } from 'react-icons/lu'
 import Layout from '../components/Layout'
-import { isVesovoy, kgText, gramsOfKg } from '../lib/units'
+import { isVesovoy, kgText, gramsOfKg, edinica } from '../lib/units'
+import { priceFromMarkup, markupOf } from '../lib/pricing'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { JournalFilter, JournalCount, useJournalFilter } from '../components/JournalFilter'
@@ -24,6 +25,9 @@ import { getUser } from '../db/auth'
 export default function Arrivals() {
   const arrivals = useCollection('arrivals')
   const products = useCollection('products')
+  // Единица дробной строки прихода (кг, л, м). Товар удалён — считаем килограммами,
+  // как было, пока дробным бывал только килограмм
+  const drobUnit = (id) => { const pr = products.find((x) => x.id === id); return isVesovoy(pr) ? edinica(pr) : 'кг' }
   const suppliers = useCollection('suppliers')
   const t = useT()
   const toast = useToast()
@@ -178,7 +182,7 @@ export default function Arrivals() {
               {view.items.map((i, n) => (
                 <tr key={n}>
                   <td>{i.name}</td>
-                  <td className="num">{i.pieces > 0 ? `${kgText(i.qty * 1000 + i.pieces)} ${t('кг')}` : i.qty}</td>
+                  <td className="num">{i.pieces > 0 ? `${kgText(i.qty * 1000 + i.pieces)} ${t(drobUnit(i.productId))}` : i.qty}</td>
                   <td className="num">{money(i.cost)}</td>
                   <td className="num">{money(i.cost * (i.qty + (i.pieces || 0) / 1000))}</td>
                 </tr>
@@ -304,7 +308,12 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
       setFocusId(p.id)
       return false
     }
-    setLines((ls) => [...ls, { productId: p.id, name: p.name, qty: 1, cost: p.cost, expiryDate: '', category: p.category, ves: isVesovoy(p) }])
+    // Цена продажи в строке — нынешняя цена товара. Поменяют её (или наценку) —
+    // после проведения прихода у товара будет новая цена
+    setLines((ls) => [...ls, {
+      productId: p.id, name: p.name, qty: 1, cost: p.cost, expiryDate: '', category: p.category, ves: isVesovoy(p), unit: edinica(p),
+      price: String(Number(p.price) || ''), price0: Number(p.price) || 0, mk: null,
+    }])
     setFocusId(p.id)
     beepOk()
     return true
@@ -338,6 +347,13 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
   }
 
   const upd = (id, k, v) => setLines((ls) => ls.map((l) => (l.productId === id ? { ...l, [k]: v } : l)))
+  // Наценка в строке: процент к закупу этого прихода — цена продажи считается сама
+  const setLineMarkup = (id, v) =>
+    setLines((ls) => ls.map((l) => {
+      if (l.productId !== id) return l
+      const p = priceFromMarkup(l.cost, v)
+      return { ...l, mk: v, ...(p !== null ? { price: String(p) } : {}) }
+    }))
   const rm = (id) => setLines((ls) => ls.filter((l) => l.productId !== id))
 
   // В поле количества мог «выстрелить» сканер: для количества и цены таких чисел не бывает.
@@ -424,9 +440,12 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
       supplierId: sup?.id || '',
       debt,
       items: lines.map((l) => {
-        if (!l.ves) return l
+        // Новую цену шлём, только если её поменяли: иначе приход затёр бы цену,
+        // которую за это время поправили в карточке товара
+        const price = Number(l.price) > 0 && Number(l.price) !== l.price0 ? Number(l.price) : undefined
+        if (!l.ves) return { ...l, price }
         const g = gramsOfKg(l.qty)
-        return { ...l, qty: Math.floor(g / 1000), pieces: g % 1000 }
+        return { ...l, qty: Math.floor(g / 1000), pieces: g % 1000, price }
       }),
     })
   }
@@ -507,7 +526,7 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
               </div>
               <div className="arr-fields">
                 <label className="arr-f">
-                  <span>{l.ves ? tr('Кг') : tr('Кол-во')}</span>
+                  <span>{tr('Кол-во')}, {tr(l.unit || 'уп')}</span>
                   {/* Именно NumberInput, а не обычное поле: в остальной программе
                       минус и буквы в числа не попадают физически, а здесь стояло
                       обычное поле с нерабочим признаком integer — браузер такой
@@ -529,6 +548,30 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
                     value={l.cost}
                     onChange={(e) => updNum(l.productId, 'cost', e.target.value)}
                     onKeyDown={onCellKey}
+                  />
+                </label>
+                {/* Цена продажи наценкой: вписали процент — цена посчиталась от закупа
+                    этого прихода; вписали цену — процент пересчитался */}
+                <label className="arr-f" data-tour="af.markup">
+                  <span>{tr('Наценка, %')}</span>
+                  <NumberInput
+                    className="arr-mk"
+                    value={l.mk ?? markupOf(l.cost, l.price)}
+                    onChange={(e) => setLineMarkup(l.productId, e.target.value)}
+                    onBlur={() => upd(l.productId, 'mk', null)}
+                    onKeyDown={onCellKey}
+                    disabled={!(Number(l.cost) > 0)}
+                    placeholder="—"
+                  />
+                </label>
+                <label className="arr-f">
+                  <span>{tr('Цена продажи')}</span>
+                  <NumberInput
+                    className={'arr-price' + (Number(l.price) !== l.price0 ? ' changed' : '')}
+                    value={l.price}
+                    onChange={(e) => setLines((ls) => ls.map((x) => (x.productId === l.productId ? { ...x, price: e.target.value, mk: null } : x)))}
+                    onKeyDown={onCellKey}
+                    title={Number(l.price) !== l.price0 ? `${tr('Было')}: ${money(l.price0)}` : undefined}
                   />
                 </label>
                 <label className="arr-f">
@@ -726,7 +769,7 @@ function EditArrival({ arrival, suppliers, t, onClose, onSave }) {
   const [paid, setPaid] = useState(String(Math.max(0, Number(arrival.total) - Number(arrival.debt || 0))))
   const [lines, setLines] = useState(() =>
     arrival.items.map((i) => {
-      const ves = i.unit === 'кг'
+      const ves = isVesovoy({ unit: i.unit })
       return {
         id: i.id,
         name: i.name,

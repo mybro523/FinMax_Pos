@@ -29,9 +29,15 @@ type AccountRow = {
   createdAt: Date
   roleId?: string | null
   roleRef?: { name: string } | null
+  tenantUserId?: string | null
 }
-const SELECT = { id: true, login: true, role: true, active: true, createdAt: true, roleId: true, roleRef: { select: { name: true } } } as const
-const view = (a: AccountRow) => ({
+// Данные для зарплаты живут в схеме магазина, рядом с именем сотрудника
+type Profile = { fullName: string; salary: unknown; bonusPercent: unknown }
+const SELECT = {
+  id: true, login: true, role: true, active: true, createdAt: true, roleId: true, tenantUserId: true, roleRef: { select: { name: true } },
+} as const
+const PROFILE = { id: true, fullName: true, salary: true, bonusPercent: true } as const
+const view = (a: AccountRow, p?: Profile | null) => ({
   id: a.id,
   name: a.login,
   role: a.role,
@@ -39,7 +45,21 @@ const view = (a: AccountRow) => ({
   roleName: a.role === 'founder' ? 'Владелец' : a.roleRef?.name || 'Кассир',
   active: a.active,
   createdAt: a.createdAt,
+  // Сотрудник в схеме магазина: на него ссылаются чеки — по нему считается бонус
+  userId: a.tenantUserId ?? null,
+  fullName: p?.fullName || '',
+  salary: Number(p?.salary ?? 0) || 0,
+  bonusPercent: Number(p?.bonusPercent ?? 0) || 0,
 })
+
+// ФИО, оклад и бонус из запроса — только то, что прислали
+function profileData(dto: { fullName?: string; salary?: number; bonusPercent?: number }) {
+  const data: { fullName?: string; salary?: number; bonusPercent?: number } = {}
+  if (dto.fullName !== undefined) data.fullName = String(dto.fullName || '').trim().slice(0, 120)
+  if (dto.salary !== undefined) data.salary = Math.round(Math.max(0, Number(dto.salary) || 0) * 100) / 100
+  if (dto.bonusPercent !== undefined) data.bonusPercent = Math.round(Math.min(100, Math.max(0, Number(dto.bonusPercent) || 0)) * 100) / 100
+  return data
+}
 
 const isTaken = (e: unknown) => e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002'
 
@@ -64,7 +84,11 @@ export class UsersService {
       orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
       select: SELECT,
     })
-    return rows.map(view)
+    // ФИО, оклад и бонус — из схемы магазина, одним запросом на весь список
+    const ids = rows.map((r) => r.tenantUserId).filter(Boolean) as string[]
+    const profiles = ids.length ? await this.prisma.user.findMany({ where: { id: { in: ids } }, select: PROFILE }) : []
+    const byId = new Map(profiles.map((p) => [p.id, p]))
+    return rows.map((r) => view(r, r.tenantUserId ? byId.get(r.tenantUserId) : null))
   }
 
   // Роль для новой записи: владелец — без роли (он может всё), остальные — выбранная
@@ -100,10 +124,13 @@ export class UsersService {
       throw e
     }
 
-    // Шаг второй: сам сотрудник в схеме магазина
+    // Шаг второй: сам сотрудник в схеме магазина — с ФИО, окладом и бонусом
+    let profile: Profile | null = null
     try {
-      const user = await this.prisma.user.create({ data: { name, role } })
+      const user = await this.prisma.user.create({ data: { name, role, ...profileData(dto) } })
+      profile = user
       await this.admin.account.update({ where: { id: acc.id }, data: { tenantUserId: user.id } })
+      acc = { ...acc, tenantUserId: user.id }
     } catch (e) {
       await this.admin.account.delete({ where: { id: acc.id } }).catch(() => {})
       this.log.error(`Сотрудник «${name}» не заведён, бронь логина снята: ${(e as any)?.message || e}`)
@@ -113,7 +140,7 @@ export class UsersService {
     // Все открытые списки сотрудников перечитываются — без этого экран жил бы
     // своими догадками и после обрыва связи показывал бы призрачные строки
     this.events.changed('users')
-    return view(acc)
+    return view(acc, profile)
   }
 
   async update(id: string, dto: UpdateUserDto, currentAccountId: string, pharmacyId: string) {
@@ -185,6 +212,17 @@ export class UsersService {
     if (dto.active !== undefined && acc.tenantUserId) {
       await this.prisma.user.update({ where: { id: acc.tenantUserId }, data: { active: dto.active } }).catch(() => {})
     }
+    // ФИО, оклад и бонус — в схеме магазина. Ошибку здесь не глотаем: владелец
+    // должен узнать, что оклад не сохранился, а не увидеть «изменено»
+    const profile = profileData(dto)
+    let saved: Profile | null = null
+    if (acc.tenantUserId) {
+      saved = Object.keys(profile).length
+        ? await this.prisma.user.update({ where: { id: acc.tenantUserId }, data: profile, select: PROFILE })
+        : await this.prisma.user.findUnique({ where: { id: acc.tenantUserId }, select: PROFILE })
+    } else if (Object.keys(profile).length) {
+      throw new BadRequestException('У сотрудника нет записи в магазине — оклад сохранить некуда')
+    }
     if (roleChanged) {
       if (acc.tenantUserId && data.role) {
         await this.prisma.user.update({ where: { id: acc.tenantUserId }, data: { role: data.role } }).catch(() => {})
@@ -204,7 +242,7 @@ export class UsersService {
     // Сторож помнит сотрудника несколько секунд — но не тогда, когда мы сами
     // только что отобрали доступ или сменили пароль. Такое обязано действовать сразу.
     this.accounts.drop(id)
-    return view(updated)
+    return view(updated, saved)
   }
 
   async remove(id: string, currentAccountId: string, pharmacyId: string) {

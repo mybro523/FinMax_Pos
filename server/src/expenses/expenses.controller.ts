@@ -25,6 +25,14 @@ export class ExpensesController {
     return this.expenses.cashSources()
   }
 
+  // Сотрудники с окладом и бонусом — для расхода «Зарплата». Оклады видят только те,
+  // кто вносит или правит расходы
+  @Get('staff')
+  @Perm('expenses.create', 'expenses.edit')
+  staff() {
+    return this.expenses.staff()
+  }
+
   @Post()
   @Perm('expenses.create')
   create(@Body() dto: CreateExpenseDto, @CurrentUser() u: any) {

@@ -8,7 +8,7 @@ import { useEffect, useSyncExternalStore } from 'react'
 import { api } from './api.js'
 import { dayKey } from '../lib/time.js'
 import { blockUpdate } from '../lib/version.js'
-import { isDivisible, isVesovoy, kgText, stockUnits } from '../lib/units.js'
+import { isDivisible, isVesovoy, kgText, stockUnits, edinica } from '../lib/units.js'
 
 const EMPTY = []
 // «returns» и «writeoffs» — журналы возвратов и списаний. Они нужны, чтобы деньги
@@ -24,10 +24,13 @@ const EMPTY = []
 // сервисы перевода для кассы.
 const COLLECTIONS = [
   'products', 'sales', 'arrivals', 'customers', 'deferred', 'shifts', 'payments', 'returns', 'writeoffs', 'categories',
-  'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices',
+  'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'productTypes',
 ]
 // Адрес раздела на сервере — там, где он не совпадает с названием раздела здесь
-const PATHS = { expenseCategories: 'expense-categories', supplierPayments: 'supplier-payments', cashMoves: 'cash-moves', payServices: 'pay-services' }
+const PATHS = {
+  expenseCategories: 'expense-categories', supplierPayments: 'supplier-payments', cashMoves: 'cash-moves', payServices: 'pay-services',
+  productTypes: 'product-types',
+}
 export const pathOf = (key) => '/' + (PATHS[key] || key)
 // ── Кэш принадлежит своему магазину ──
 // Раньше ключ был общий на всю программу. Пока магазин был один, это ничего
@@ -505,7 +508,8 @@ export { uppOf as unitsPerPack, isDivisible, stockUnits as totalUnits, unitPrice
 // Человекочитаемый остаток: «N уп» или «N уп + M шт» (для делимых)
 export function stockText(p) {
   // Весовой товар: один вес в килограммах, без «упаковок и штук»
-  if (isVesovoy(p)) return `${kgText(stockUnits(p))} кг`
+  // Дробный товар: одно число в своей единице — «12,35 кг», «4,5 л»
+  if (isVesovoy(p)) return `${kgText(stockUnits(p))} ${edinica(p)}`
   const unit = p?.unit || 'уп'
   const packs = Number(p?.stock) || 0
   if (!isDivisible(p)) return `${packs} ${unit}`

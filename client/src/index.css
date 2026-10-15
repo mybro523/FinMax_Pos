@@ -1764,3 +1764,64 @@ html.kb-open .modal { max-height: calc(100vh - 320px); }
 /* ── Поставщики: вкладки «Поставщики | Долги поставщикам» ── */
 .chip .chip-badge { margin-left: 7px; font-weight: 700; opacity: 0.9; font-variant-numeric: tabular-nums; }
 button.supd-card { font: inherit; text-align: left; cursor: pointer; width: 100%; }
+
+/* ═════════ Каталог кассы — тёмно-синяя плашка, как табло «Итого» ═════════
+   Категории и список товаров стоят на той же плашке, что и итог справа внизу:
+   касса читается единым прилавком, а цены и остатки видны издалека. */
+.kassa-catalog { background: var(--sidebar); border-color: var(--sidebar-line); color: #e6ebf7; }
+.kassa-catalog .kc-cats { border-bottom-color: rgba(255, 255, 255, 0.08); }
+.kassa-catalog .kc-cats .chip { background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.14); color: var(--sidebar-text); }
+.kassa-catalog .kc-cats .chip:hover { border-color: rgba(255, 255, 255, 0.34); color: #fff; }
+.kassa-catalog .kc-cats .chip.active { background: var(--gold); border-color: var(--gold); color: var(--on-gold); }
+.kassa-catalog .kc-row { color: #e6ebf7; border-bottom-color: rgba(255, 255, 255, 0.07); }
+.kassa-catalog .kc-row:hover { background: rgba(255, 255, 255, 0.06); }
+.kassa-catalog .kc-row:active { background: rgba(255, 255, 255, 0.1); }
+.kassa-catalog .kc-row.hi { background: rgba(239, 189, 36, 0.14); box-shadow: inset 3px 0 0 var(--gold); }
+.kassa-catalog .kc-name .tag-cat, .kassa-catalog .kc-right .tag-cat { color: var(--sidebar-muted); }
+.kassa-catalog .kc-price { color: #fff; }
+.kassa-catalog .kc-row.net .kc-name b, .kassa-catalog .kc-row.net .kc-price { color: rgba(255, 255, 255, 0.42); }
+.kassa-catalog .badge.ok { background: rgba(79, 208, 142, 0.16); color: #74e6ab; }
+.kassa-catalog .badge.low, .kassa-catalog .badge.debt { background: rgba(255, 107, 107, 0.18); color: #ffa3a3; }
+.kassa-catalog .kc-exp { color: #ffa3a3; }
+.kassa-catalog .kc-note { background: rgba(255, 255, 255, 0.05); color: var(--sidebar-text); border-color: rgba(255, 255, 255, 0.08); }
+.kassa-catalog .empty { color: var(--sidebar-muted); }
+.kassa-catalog .kc-foto { border-color: rgba(255, 255, 255, 0.3); }
+.kassa-catalog .kc-cats, .kassa-catalog .kc-list { scrollbar-color: rgba(255, 255, 255, 0.25) transparent; }
+.kassa-catalog :focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+
+/* ═════════ Карточка товара: наценка между закупкой и ценой ═════════ */
+.pf-prices .pf-markup { flex: 0 0 112px; }
+.pf-prices label .tag-cat { white-space: nowrap; }
+.pf-prices .pf-markup input:disabled { background: var(--track); color: var(--muted-2); cursor: not-allowed; }
+label .tag-cat { font-weight: 400; }
+
+/* Строка прихода: новая цена продажи подсвечена — видно, что цена товара поменяется */
+.arr-f input.arr-mk { width: 96px; }
+.arr-f input.arr-price.changed { border-color: var(--gold); background: var(--gold-soft); }
+
+/* ═════════ Период: быстрые кнопки и даты ═════════ */
+.period { display: flex; align-items: flex-end; gap: 10px 16px; flex-wrap: wrap; }
+.period .chips { align-self: center; }
+.period-dates { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.period-f { display: flex; flex-direction: column; gap: 5px; }
+.period-f > span { font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+.period-f input { min-width: 150px; }
+
+/* ═════════ Таблицы закупок и отчётов ═════════ */
+.zak-table td { vertical-align: top; }
+.zak-pay td { background: color-mix(in srgb, var(--green-soft) 55%, transparent); }
+.zak-pay-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--green); flex-wrap: wrap; }
+tfoot .zak-total td { font-weight: 700; border-top: 2px solid var(--border-strong); background: var(--soft); font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) {
+  tfoot .zak-total td { display: block; text-align: right; }
+  tfoot .zak-total td:empty { display: none; }
+}
+
+/* ═════════ Зарплата в расходах ═════════ */
+.salary-pick { margin-bottom: 4px; padding: 12px 14px 4px; border: 1px dashed var(--border-strong); border-radius: var(--radius); background: var(--soft); margin-top: 2px; margin-bottom: 14px; }
+.salary-calc { font-size: 13.5px; line-height: 1.7; color: var(--text); margin: -4px 0 10px; font-variant-numeric: tabular-nums; }
+.salary-calc .salary-total b { color: var(--accent); font-size: 15px; }
+.exp-emp { font-weight: 600; color: var(--accent); }
+
+/* Отметка «есть / нет» в настройках типов */
+.btn.ghost.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }

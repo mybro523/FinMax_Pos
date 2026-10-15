@@ -29,6 +29,8 @@ model Product {
   // сама по себе, без единой операции на складе.
   expiredUnits Int           @default(0)
   analogIds    String[]      @default([]) // id взаимозаменяемых товаров (аналоги)
+  // Тип товара названием (медицинский, продукты…), как категория. Пусто — не выбран
+  type         String        @default("")
   createdAt    DateTime      @default(now())
   saleItems    SaleItem[]
   arrivalItems ArrivalItem[]
@@ -330,6 +332,10 @@ model User {
   name      String   @unique // имя сотрудника, оно же логин в панели
   role      String   @default("cashier") // founder | cashier
   active    Boolean  @default(true)
+  // Для зарплаты: ФИО, оклад и бонус — процент от суммы его продаж за месяц
+  fullName     String  @default("")
+  salary       Decimal @default(0) @db.Decimal(12, 2)
+  bonusPercent Decimal @default(0) @db.Decimal(5, 2)
   createdAt DateTime @default(now())
   shifts       Shift[]
   sales        Sale[]
@@ -402,6 +408,9 @@ model Expense {
   shiftId   String? // смена, из кассы которой взяты деньги
   userId    String? // кто внёс
   user      User?    @relation(fields: [userId], references: [id])
+  // Зарплата: кому выдана. Имя — снимком, история не меняется задним числом
+  employeeId   String?
+  employeeName String   @default("")
   createdAt DateTime @default(now())
 
   @@index([date])
@@ -409,6 +418,15 @@ model Expense {
 }
 
 // Статьи расходов. Готовый список заводит миграция, свои владелец добавляет в настройках
+// Тип товара: медицинский, продукты, бытовая химия… Отметка «analogs» — показывать
+// в карточке поле «Аналоги» (у лекарства замены ищут, у шампуня — нет)
+model ProductType {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  analogs   Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
 model ExpenseCategory {
   id        String   @id @default(cuid())
   name      String   @unique

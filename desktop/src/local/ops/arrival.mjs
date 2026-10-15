@@ -5,7 +5,7 @@
 // партия со своим сроком годности; закупочная цена товара после прихода становится
 // средневзвешенной между тем, что лежало, и тем, что привезли.
 import { bodyOf, checker, expiryOk, MAX_MONEY, sumOk, unitsOk } from '../check.mjs'
-import { bad, inTx, newId } from '../db.mjs'
+import { bad, inTx, newId, q } from '../db.mjs'
 import { enqueue, putDoc } from '../docs.mjs'
 import { D, fromCents, toCents } from '../money.mjs'
 import { myOpenShift } from '../docs.mjs'
@@ -33,6 +33,8 @@ export function createArrival(ctx, raw) {
     pieces: it?.pieces === undefined || it?.pieces === null ? 0 : c.int(it.pieces, `items.${n}.pieces`, { min: 0, max: 99999 }),
     cost: c.num(it?.cost, `items.${n}.cost`),
     expiryDate: c.str(it?.expiryDate, `items.${n}.expiryDate`, { optional: true }),
+    // Новая цена продажи, назначенная наценкой в приходе. Нет — цена прежняя
+    price: it?.price === undefined || it?.price === null ? null : c.num(it.price, `items.${n}.price`, { max: MAX_MONEY }),
   }))
   c.done()
 
@@ -151,6 +153,12 @@ export function createArrival(ctx, raw) {
         cost: fromCents(toCents(l.cost)),
       })),
     }
+    // Новая цена продажи — сразу в карточке: касса продаёт по ней, не дожидаясь связи.
+    // Один товар может стоять в приходе дважды — решает последняя строка
+    const newPrice = new Map()
+    items.forEach((it) => { if (it.price !== null && it.price !== undefined) newPrice.set(it.productId, toCents(D(it.price))) })
+    for (const [pid, priceC] of newPrice) q(db, 'UPDATE products SET priceC = ? WHERE id = ?').run(priceC, pid)
+
     putDoc(db, 'arrival', body, { sync: 'pending', deviceId: ctx.deviceId })
     enqueue(db, {
       id: opId,
@@ -160,7 +168,14 @@ export function createArrival(ctx, raw) {
         // Закупочную цену в документе храним до дирама, а сумма прихода посчитана по
         // цене, как её ввели: 33,333 × 3 = 100.00, а не 99.99. Сервер пересчитывает
         // сумму сам и сверяет с нашей — поэтому цену он получает неокруглённой
-        arrival: { ...body, items: body.items.map((it, n) => ({ ...it, cost: lines[n].cost.toNumber() })) },
+        arrival: {
+          ...body,
+          items: body.items.map((it, n) => ({
+            ...it,
+            cost: lines[n].cost.toNumber(),
+            ...(items[n].price !== null && items[n].price !== undefined ? { price: items[n].price } : {}),
+          })),
+        },
         // Срок годности в самом документе не хранится — он у партии. Серверу его
         // надо передать отдельно, построчно
         expiry,

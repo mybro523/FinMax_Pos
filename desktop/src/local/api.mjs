@@ -11,7 +11,7 @@
 // пересчёт остатков, настройки, правка прихода и расхода, оплата поставщику,
 // история движения товара. Такой запрос уходит на сервер.
 import { hasPerm } from './accounts.mjs'
-import { categoriesList, customersList, deferredList, productByBarcode, productsList, productView1 } from './catalog.mjs'
+import { categoriesList, productTypesList, customersList, deferredList, productByBarcode, productsList, productView1 } from './catalog.mjs'
 import { forbidden, q } from './db.mjs'
 import { listDocs, listShifts, WINDOW_DAYS } from './docs.mjs'
 import { createArrival } from './ops/arrival.mjs'
@@ -100,6 +100,7 @@ const ROUTES = [
     },
   ],
   ['GET', /^\/categories$/, (ctx) => categoriesList(ctx.db)],
+  ['GET', /^\/product-types$/, (ctx) => productTypesList(ctx.db)],
   ['GET', /^\/customers$/, (ctx) => customersList(ctx.db)],
   ['GET', /^\/deferred$/, (ctx) => deferredList(ctx.db)],
   ['GET', /^\/shifts$/, (ctx) => listShifts(ctx.db, ctx.deviceId).map((s) => shiftView(ctx.db, s))],

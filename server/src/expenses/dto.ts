@@ -14,6 +14,8 @@ export class CreateExpenseDto {
   // Из какой кассы взяты деньги (её открытая смена). Не указана — смена сайта
   @IsOptional() @IsString() @MaxLength(64) shiftId?: string
   @IsOptional() @IsString() @MaxLength(100) clientId?: string // защита от задвоения при повторе
+  // Зарплата: кому выдана (сотрудник в схеме магазина). Имя сервер берёт сам
+  @IsOptional() @IsString() @MaxLength(64) employeeId?: string
 }
 
 // Отметку «из кассы» и смену задним числом не меняют: это уже другая операция.
@@ -23,6 +25,8 @@ export class UpdateExpenseDto {
   @IsOptional() @IsNumber() @Min(0.01) @Max(MAX_MONEY) amount?: number
   @IsOptional() @IsString() @MaxLength(500) note?: string
   @IsOptional() @IsString() @MaxLength(40) date?: string
+  // Пустая строка — убрать сотрудника; не прислано — оставить как было
+  @IsOptional() @IsString() @MaxLength(64) employeeId?: string
 }
 
 export class CreateExpenseCategoryDto {

@@ -79,6 +79,27 @@ export class ExpensesService {
     return name
   }
 
+  // Кому выдана зарплата: сотрудник должен быть в этом магазине. Имя запоминаем
+  // снимком — ФИО, а если его нет, логин
+  private async employeeOf(tx: Tx, raw?: string | null) {
+    const id = String(raw || '').trim()
+    if (!id) return { employeeId: null as string | null, employeeName: '' }
+    const u = await tx.user.findUnique({ where: { id }, select: { id: true, name: true, fullName: true } })
+    if (!u) throw new BadRequestException('Сотрудник не найден — обновите страницу')
+    return { employeeId: u.id, employeeName: (u.fullName || '').trim() || u.name }
+  }
+
+  // ── Кому можно выдать зарплату ──
+  // Сотрудники магазина с окладом и бонусом: форма расхода считает «оклад + бонус»
+  staff() {
+    return this.prisma.user
+      .findMany({
+        orderBy: [{ active: 'desc' }, { name: 'asc' }],
+        select: { id: true, name: true, fullName: true, role: true, active: true, salary: true, bonusPercent: true },
+      })
+      .then((rows) => rows.map((u) => ({ ...u, salary: Number(u.salary) || 0, bonusPercent: Number(u.bonusPercent) || 0 })))
+  }
+
   async create(dto: CreateExpenseDto, userId?: string) {
     const { clientId } = dto
     if (clientId) {
@@ -91,6 +112,7 @@ export class ExpensesService {
     return this.prisma
       .$transaction(async (tx) => {
         const category = await this.categoryOf(tx, dto.category)
+        const employee = await this.employeeOf(tx, dto.employeeId)
         // Смена под замок — и только потом читается (см. shifts/till.ts): «расход попал
         // в уже закрытую смену» не бывает
         const shiftId = fromCash ? await openShiftFor(tx, dto.shiftId) : null
@@ -105,6 +127,7 @@ export class ExpensesService {
             fromCash,
             shiftId,
             userId: userId ?? null,
+            ...employee,
           },
           include: withUser,
         })
@@ -142,6 +165,7 @@ export class ExpensesService {
       if (dto.note !== undefined) data.note = dto.note.trim()
       // Дата расхода из кассы — это время в смене, её не переносят
       if (dto.date !== undefined && !expense.fromCash) data.date = expenseDate(dto.date)
+      if (dto.employeeId !== undefined) Object.assign(data, await this.employeeOf(tx, dto.employeeId))
       const updated = await tx.expense.update({ where: { id }, data, include: withUser })
       if (expense.fromCash && expense.shiftId) await setExpenseCash(tx, expense.shiftId)
       return updated

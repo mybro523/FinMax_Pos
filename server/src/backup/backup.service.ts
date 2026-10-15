@@ -20,7 +20,8 @@ import { forgetCountedAfter } from '../common/counted'
 
 // 3 — категории и восстановление сотрудников; 4 — расходы и их статьи;
 // 5 — поставщики и оплаты им, внесение/изъятие наличных, сервисы перевода, правки остатка
-const FORMAT = 5
+// 6 — типы товаров, ФИО/оклад/бонус сотрудников, кому выдана зарплата
+const FORMAT = 6
 
 @Injectable()
 export class BackupService {
@@ -30,7 +31,7 @@ export class BackupService {
   async dump() {
     const [
       products, customers, sales, arrivals, shifts, payments, users, deferred, returns, writeOffs, batches, inventories, categories, expenses, expenseCategories,
-      suppliers, supplierPayments, cashMoves, payServices, stockEdits,
+      suppliers, supplierPayments, cashMoves, payServices, stockEdits, productTypes,
     ] = await Promise.all([
         this.prisma.product.findMany(),
         this.prisma.customer.findMany(),
@@ -38,7 +39,9 @@ export class BackupService {
         this.prisma.arrival.findMany({ include: { items: true } }),
         this.prisma.shift.findMany(),
         this.prisma.debtPayment.findMany(),
-        this.prisma.user.findMany({ select: { id: true, name: true, role: true, active: true, createdAt: true } }),
+        this.prisma.user.findMany({
+          select: { id: true, name: true, role: true, active: true, createdAt: true, fullName: true, salary: true, bonusPercent: true },
+        }),
         this.prisma.deferredBarcode.findMany(),
         this.prisma.saleReturn.findMany({ include: { items: true } }),
         this.prisma.writeOff.findMany({ include: { items: true } }),
@@ -57,6 +60,7 @@ export class BackupService {
         this.prisma.cashMove.findMany(),
         this.prisma.payService.findMany(),
         this.prisma.stockEdit.findMany(),
+        this.prisma.productType.findMany(),
       ])
 
     return {
@@ -75,7 +79,7 @@ export class BackupService {
       },
       data: {
         categories, products, customers, sales, arrivals, shifts, payments, users, deferred, returns, writeOffs, batches, inventories, expenses, expenseCategories,
-        suppliers, supplierPayments, cashMoves, payServices, stockEdits,
+        suppliers, supplierPayments, cashMoves, payServices, stockEdits, productTypes,
       },
     }
   }
@@ -135,6 +139,11 @@ export class BackupService {
         await tx.category.deleteMany({})
         await tx.category.createMany({ data: strip(d.categories), skipDuplicates: true })
       }
+      // Типы товаров — как категории: список заменяем, только если он есть в копии
+      if (d.productTypes?.length) {
+        await tx.productType.deleteMany({})
+        await tx.productType.createMany({ data: strip(d.productTypes), skipDuplicates: true })
+      }
 
       // ── Сотрудники ──
       // Восстанавливаем только имена: доступ к программе живёт не здесь, а в панели
@@ -167,6 +176,9 @@ export class BackupService {
             role: u.role === 'founder' ? 'founder' : 'cashier',
             active: false,
             createdAt: u.createdAt ? new Date(u.createdAt) : undefined,
+            fullName: typeof u.fullName === 'string' ? u.fullName.slice(0, 120) : '',
+            salary: Math.max(0, Number(u.salary) || 0),
+            bonusPercent: Math.min(100, Math.max(0, Number(u.bonusPercent) || 0)),
           },
         })
         userIds.add(u.id)

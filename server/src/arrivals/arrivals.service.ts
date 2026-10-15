@@ -38,7 +38,8 @@ export class ArrivalsService {
   findAll(q: PeriodQuery = {}) {
     return this.prisma.arrival.findMany({
       where: periodFilter(q, 180),
-      include: { items: true },
+      // Кто принял — для таблицы «Закупки и оплаты» в разделе «Поставщики»
+      include: { items: true, user: { select: { id: true, name: true } } },
       orderBy: { date: 'desc' },
       take: MAX_ROWS,
     })
@@ -172,6 +173,16 @@ export class ArrivalsService {
           addValue: a.value,
         })
         await tx.product.update({ where: { id: pid }, data: { cost: weighted } })
+      }
+
+      // Новая цена продажи из строк прихода: владелец назначил её наценкой на новый
+      // закуп. Один товар может стоять в приходе дважды — решает последняя строка
+      const newPrice = new Map<string, Prisma.Decimal>()
+      for (const it of items) {
+        if (it.price !== undefined && it.price !== null) newPrice.set(it.productId, D(it.price).toDecimalPlaces(2))
+      }
+      for (const [pid, price] of newPrice) {
+        if (!D(byId.get(pid)!.price).equals(price)) await tx.product.update({ where: { id: pid }, data: { price } })
       }
 
       let total = D(0)

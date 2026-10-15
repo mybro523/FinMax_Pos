@@ -12,7 +12,7 @@ import KassaCatalog, { LIMIT } from '../components/KassaCatalog'
 import Lightbox from '../components/Lightbox'
 import { useCollection, useFirstLoading, money, db, stockText, realId } from '../db/store'
 import { useAuth, useCan, logout } from '../db/auth'
-import { isVesovoy, kgText, KG, gramsOfKg,
+import { isVesovoy, kgText, KG, gramsOfKg, edinica, isKg,
   uppOf, isDivisible as isDiv, lineUnits, lineGross, lineNet,
   sellableUnits, expiredUnits, hasExpired, stockUnits,
   fitLine,
@@ -325,11 +325,11 @@ export default function Pos() {
       const ex = cartRef.current.find((i) => i.productId === p.id)
       const used = ex ? lineUnits(ex) : 0
       if (avail <= used || avail <= 0) {
-        toast(`${t('Максимум на складе')}: ${kgText(avail)} ${t('кг')}`, 'err')
+        toast(`${t('Максимум на складе')}: ${kgText(avail)} ${t(edinica(p))}`, 'err')
         return false
       }
       const add = Math.min(Math.max(1, Math.trunc(grams) || 0), avail - used)
-      if (add < grams) toast(`${t('Максимум на складе')}: ${kgText(avail)} ${t('кг')}`, 'err')
+      if (add < grams) toast(`${t('Максимум на складе')}: ${kgText(avail)} ${t(edinica(p))}`, 'err')
       setCart((c) => {
         const e = c.find((i) => i.productId === p.id)
         if (e) return c.map((i) => (i.productId === p.id ? { ...i, qty: 0, pieces: lineUnits(i) + add } : i))
@@ -422,7 +422,7 @@ export default function Pos() {
         const wp = productPoVesKodu(products, ves.code)
         if (wp && addWeight(wp, ves.grams)) {
           beepOk()
-          toast(`${wp.name}: ${kgText(ves.grams)} ${t('кг')} ${t('добавлен в корзину')}`)
+          toast(`${wp.name}: ${kgText(ves.grams)} ${t(edinica(wp))} ${t('добавлен в корзину')}`)
         } else {
           beepError()
           if (!wp) toast(`${t('Весовой товар с кодом')} ${ves.code} ${t('не найден — впишите этот код в штрихкод весового товара')}`, 'err')
@@ -704,7 +704,7 @@ export default function Pos() {
       // что делать, — а сделать было и правда нечего.
       toast(
         isVesovoy(item)
-          ? `${t('Максимум на складе')}: ${kgText(avail)} ${t('кг')}`
+          ? `${t('Максимум на складе')}: ${kgText(avail)} ${t(edinica(item))}`
           : fit.blockedByPacks
             ? `${t('Максимум на складе')}: ${avail} ${t('шт')}. ${t('Уберите упаковку кнопкой «−», чтобы продать штуками')}`
             : `${t('Максимум на складе')}: ${avail} ${t('шт')}`,
@@ -794,15 +794,21 @@ export default function Pos() {
   const roleName = auth?.roleName || (auth?.role === 'founder' ? t('Владелец') : t('Кассир'))
   const total = cart.reduce((s, i) => s + lineNet(i), 0)
   const discountTotal = cart.reduce((s, i) => s + Math.min(i.discount || 0, lineGross(i)), 0)
-  // Весовые позиции в сводке — килограммами, остальные — упаковками и штуками
-  const obychnye = cart.filter((i) => !isVesovoy(i))
-  const packsCount = obychnye.reduce((s, i) => s + i.qty, 0)
-  const piecesCount = obychnye.reduce((s, i) => s + (i.pieces || 0), 0)
-  const vesCount = cart.filter(isVesovoy).reduce((s, i) => s + lineUnits(i), 0)
+  // Сводка «Товаров»: каждая единица своим числом — «3 уп + 2 рулон + 5 шт + 1,5 кг».
+  // Килограммы с литрами, как и упаковки с рулонами, в одно число не складываются
+  const poEdinicam = new Map()
+  const dobavit = (u, n) => poEdinicam.set(u, (poEdinicam.get(u) || 0) + n)
+  let piecesCount = 0
+  for (const i of cart) {
+    if (isVesovoy(i)) dobavit(edinica(i), lineUnits(i))
+    else {
+      if (i.qty) dobavit(edinica(i), i.qty)
+      piecesCount += i.pieces || 0
+    }
+  }
   const countText = [
-    packsCount || !cart.length || obychnye.length ? `${packsCount} ${t('уп')}` : '',
+    ...[...poEdinicam].map(([u, n]) => (isVesovoy({ unit: u }) ? `${kgText(n)} ${t(u)}` : `${n} ${t(u)}`)),
     piecesCount ? `${piecesCount} ${t('шт')}` : '',
-    vesCount ? `${kgText(vesCount)} ${t('кг')}` : '',
   ]
     .filter(Boolean)
     .join(' + ') || `0 ${t('уп')}`
@@ -1303,14 +1309,14 @@ export default function Pos() {
                           <b>{i.name}</b>
                           <div className="tag-cat">
                             {money(i.price)}
-                            {isVesovoy(i) ? ` / ${t('кг')}` : isDiv(i) && ` · ${money(i.price / uppOf(i))}/${t('шт')}`}
+                            {isVesovoy(i) ? ` / ${t(edinica(i))}` : isDiv(i) && ` · ${money(i.price / uppOf(i))}/${t('шт')}`}
                             {/* На телефоне колонки «В уп.» нет — число переезжает сюда */}
                             {!isVesovoy(i) && isDiv(i) && <span className="kt-upp-m"> · {t('в уп.')} {uppOf(i)}</span>}
                           </div>
                         </td>
-                        <td className="num kt-upp">{isVesovoy(i) ? <span className="tag-cat">{t('кг')}</span> : isDiv(i) ? uppOf(i) : <span className="tag-cat">—</span>}</td>
+                        <td className="num kt-upp">{isVesovoy(i) ? <span className="tag-cat">{t(edinica(i))}</span> : isDiv(i) ? uppOf(i) : <span className="tag-cat">—</span>}</td>
                         {/* data-label — подпись поля на телефоне: заголовка таблицы там нет */}
-                        <td className="kt-qty" data-label={isVesovoy(i) ? t('Вес, кг') : t('Упаковок')}>
+                        <td className="kt-qty" data-label={isVesovoy(i) ? (isKg(i) ? t('Вес, кг') : `${t('Кол-во')}, ${t(edinica(i))}`) : t('Упаковок')}>
                           {isVesovoy(i) ? (
                             <NumberInput
                               className="disc-input inp-ves"
@@ -1320,8 +1326,8 @@ export default function Pos() {
                               onFocus={() => { snapLine(i.productId); setVesDraft({ id: i.productId, val: String(lineUnits(i) / KG || '') }) }}
                               onBlur={() => setVesDraft(null)}
                               placeholder="0.000"
-                              title={t('Вес в килограммах, до грамма')}
-                              aria-label={t('Вес, кг')}
+                              title={isKg(i) ? t('Вес в килограммах, до грамма') : `${t('Количество')}, ${t(edinica(i))}`}
+                              aria-label={isKg(i) ? t('Вес, кг') : `${t('Кол-во')}, ${t(edinica(i))}`}
                             />
                           ) : (
                             <div className="qty-ctrl" data-tour="pos.qty">

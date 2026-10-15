@@ -222,6 +222,8 @@ export function parseArrival(p: any, now?: number) {
       // Штуки (у весового товара — граммы) сверх целых упаковок
       pieces: i.pieces === undefined || i.pieces === null ? 0 : int(i.pieces, 'штуки', 0),
       cost: money(i.cost, 'закупочная цена'),
+      // Новая цена продажи, назначенная в приходе наценкой. Нет — цена остаётся прежней
+      price: i.price === undefined || i.price === null || i.price === '' ? null : money(i.price, 'цена продажи'),
     }
     if (row.qty <= 0 && row.pieces <= 0) throw new Reject('Пустая позиция прихода')
     return row
@@ -315,6 +317,8 @@ export function parseExpense(p: any, now?: number) {
     note: text(e.note, 500),
     fromCash: e.fromCash === true,
     shiftId: idOrNull(e.shiftId, 'смена'),
+    // Зарплата: кому выдана. Нет — расход без сотрудника
+    employeeId: idOrNull(e.employeeId, 'сотрудник'),
   }
 }
 

@@ -918,6 +918,13 @@ export class SyncService {
       await tx.product.update({ where: { id: productId }, data: { cost: weighted } })
     }
 
+    // Новая цена продажи, назначенная в приходе наценкой (решает последняя строка товара)
+    const newPrice = new Map<string, Prisma.Decimal>()
+    for (const it of p.items) if (it.price !== null && it.price !== undefined) newPrice.set(it.productId, D(it.price).toDecimalPlaces(2))
+    for (const [productId, price] of newPrice) {
+      if (!D(byId.get(productId)!.price).equals(price)) await tx.product.update({ where: { id: productId }, data: { price } })
+    }
+
     // Поставщик и неоплаченная часть. Поставщика могли удалить, пока касса была без
     // связи: приход остаётся (товар принят), а долг записать некому — владелец увидит
     // приход без поставщика
@@ -1043,8 +1050,15 @@ export class SyncService {
     // остаётся: деньги потрачены, и пропасть из отчётов из-за смены он не должен —
     // просто смена у него не указана
     const shiftId = p.fromCash ? await this.shiftRef(tx, p.shiftId, ctx) : null
+    // Кому выдана зарплата: сотрудника могли удалить, пока касса была без связи, —
+    // расход остаётся, просто без имени
+    const emp = p.employeeId ? await tx.user.findUnique({ where: { id: p.employeeId }, select: { id: true, name: true, fullName: true } }) : null
     await tx.expense.create({
-      data: { id: p.id, date: p.date, category: p.category, amount: D(p.amount), note: p.note, fromCash: p.fromCash, shiftId, userId: ctx.tenantUserId },
+      data: {
+        id: p.id, date: p.date, category: p.category, amount: D(p.amount), note: p.note, fromCash: p.fromCash, shiftId, userId: ctx.tenantUserId,
+        employeeId: emp?.id ?? null,
+        employeeName: emp ? (emp.fullName || '').trim() || emp.name : '',
+      },
     })
     if (shiftId) {
       await setExpenseCash(tx, shiftId)
@@ -1238,6 +1252,7 @@ export class SyncService {
       products: all(await tx.product.findMany({ orderBy: { name: 'asc' } })),
       batches: all(await tx.batch.findMany({ where: { units: { gt: 0 } } })),
       categories: all(await tx.category.findMany({ orderBy: { name: 'asc' } })),
+      productTypes: all(await tx.productType.findMany({ orderBy: { name: 'asc' } })),
       customers: all(await tx.customer.findMany({ orderBy: { createdAt: 'desc' } })),
       deferred: all(await tx.deferredBarcode.findMany({ orderBy: { createdAt: 'desc' } })),
       shifts: all(await withDeviceNames(tx, await tx.shift.findMany({ orderBy: { openedAt: 'desc' }, include: { user: { select: { id: true, name: true } } } }))),
@@ -1298,6 +1313,7 @@ export class SyncService {
       products: await load('Product', (part) => tx.product.findMany({ where: inIds(part) })),
       batches: await load('Batch', (part) => tx.batch.findMany({ where: inIds(part) })),
       categories: await load('Category', (part) => tx.category.findMany({ where: inIds(part) })),
+      productTypes: await load('ProductType', (part) => tx.productType.findMany({ where: inIds(part) })),
       customers: await load('Customer', (part) => tx.customer.findMany({ where: inIds(part) })),
       deferred: await load('DeferredBarcode', (part) => tx.deferredBarcode.findMany({ where: inIds(part) })),
       shifts: await load('Shift', async (part) =>

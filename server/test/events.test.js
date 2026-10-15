@@ -25,6 +25,8 @@ test('деньги в смене: оплата поставщику, внесе�
   // Открытие и закрытие смены — как раньше
   assert.deepEqual(collectionsFor('POST', '/api/shifts/open'), ['shifts', 'sales'])
   assert.deepEqual(collectionsFor('POST', '/api/pay-services'), ['payServices'])
+  // Переименование типа переносит товары — их список тоже устарел
+  assert.deepEqual(collectionsFor('PATCH', '/api/product-types/x'), ['productTypes', 'products'])
 })
 
 test('возврат задевает возвраты, склад, чеки и долги', () => {

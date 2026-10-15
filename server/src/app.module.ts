@@ -24,6 +24,7 @@ import { SyncModule } from './sync/sync.module'
 import { ExpensesModule } from './expenses/expenses.module'
 import { SuppliersModule } from './suppliers/suppliers.module'
 import { PayServicesModule } from './payservices/pay-services.module'
+import { ProductTypesModule } from './producttypes/product-types.module'
 import { ChangeEventsInterceptor } from './events/change-events.interceptor'
 import { FreshnessInterceptor } from './events/freshness.interceptor'
 import { AuthGuard } from './auth/auth.guard'
@@ -57,6 +58,7 @@ import { AppController } from './app.controller'
     ExpensesModule,
     SuppliersModule,
     PayServicesModule,
+    ProductTypesModule,
     // Обмен с кассами, которые работают без интернета (программа для Windows)
     SyncModule,
     SeedModule,

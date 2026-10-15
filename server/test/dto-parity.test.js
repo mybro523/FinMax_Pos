@@ -22,6 +22,7 @@ const roles = require('../dist/roles/dto')
 const users = require('../dist/users/dto')
 const admin = require('../dist/admin/dto')
 const arrivals = require('../dist/arrivals/dto')
+const productTypes = require('../dist/producttypes/dto')
 
 const fieldsOf = (cls) =>
   [...new Set(getMetadataStorage().getTargetValidationMetadatas(cls, null, false, false).map((m) => m.propertyName))]
@@ -30,6 +31,7 @@ const fieldsOf = (cls) =>
 const PAIRS = [
   { name: 'товар', create: products.CreateProductDto, update: products.UpdateProductDto, только_при_создании: {} },
   { name: 'категория', create: categories.CreateCategoryDto, update: categories.UpdateCategoryDto, только_при_создании: {} },
+  { name: 'тип товара', create: productTypes.CreateProductTypeDto, update: productTypes.UpdateProductTypeDto, только_при_создании: {} },
   { name: 'роль', create: roles.CreateRoleDto, update: roles.UpdateRoleDto, только_при_создании: {} },
   {
     name: 'поставщик',

@@ -179,6 +179,8 @@ export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash
   const arrItems = items.map((i) => ({
     productId: i.productId, name: i.name, qty: Number(i.qty), pieces: Math.max(0, Number(i.pieces) || 0), cost: Number(i.cost),
     expiryDate: i.expiryDate || '',
+    // Новая цена продажи, назначенная в приходе (наценкой). Нет — цена прежняя
+    ...(Number(i.price) > 0 ? { price: Math.round(Number(i.price) * 100) / 100 } : {}),
   }))
   // Цена за упаковку (за килограмм): граммы оплачиваются долей тысячной
   const total = arrItems.reduce((s, i) => s + i.cost * (i.qty + i.pieces / 1000), 0)
@@ -203,7 +205,7 @@ export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash
     // Граммы сверх целых килограммов складываются со вскрытым остатком и
     // перекладываются в целые — иначе «350 + 800 г» показывались бы как 1150 г
     const vsego = stockUnits(p) + it.qty * uppOf(p) + it.pieces
-    return { ...p, ...splitUnits(vsego, p) }
+    return { ...p, ...splitUnits(vsego, p), ...(it.price ? { price: it.price } : {}) }
   }))
   setCollection('arrivals', [tempArrival, ...prevA])
 
@@ -222,6 +224,7 @@ export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash
         cost: i.cost,
         // Пустую строку не шлём: у категорий без срока сервер ждёт именно её отсутствия
         ...(i.expiryDate ? { expiryDate: i.expiryDate } : {}),
+        ...(i.price ? { price: i.price } : {}),
       })),
     })
     .then((arrival) => {
@@ -533,12 +536,14 @@ const repeatKey = () => {
 // Расход из кассы меняет и наличные, которые ждут в смене, — смены перечитываем следом
 const afterExpense = (touchesShift) => refresh(...(touchesShift ? ['expenses', 'shifts'] : ['expenses']))
 
-export async function addExpense({ date, category, amount, note, fromCash, shiftId }) {
+export async function addExpense({ date, category, amount, note, fromCash, shiftId, employeeId }) {
   const body = {
     category,
     amount: Math.round(Number(amount) * 100) / 100,
     note: (note || '').trim(),
     clientId: repeatKey(),
+    // Зарплата: кому выдана. Имя сервер запомнит сам
+    ...(employeeId ? { employeeId } : {}),
     // У расхода из кассы дата всегда «сейчас» — её ставит сервер; смену называем сами,
     // чтобы деньги списались именно с той кассы, которую выбрал владелец
     ...(fromCash ? { fromCash: true, ...(shiftId ? { shiftId } : {}) } : date ? { date } : {}),

@@ -24,6 +24,7 @@ const WATCHED: { test: RegExp; key: string }[] = [
   { test: /^\/products(\/|$|\?)/, key: 'products' },
   { test: /^\/customers(\/|$|\?)/, key: 'customers' },
   { test: /^\/categories(\/|$|\?)/, key: 'categories' },
+  { test: /^\/product-types(\/|$|\?)/, key: 'productTypes' },
   { test: /^\/users(\/|$|\?)/, key: 'users' },
 ]
 

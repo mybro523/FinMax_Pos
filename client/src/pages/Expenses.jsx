@@ -13,6 +13,7 @@ import { addExpense, updateExpense, removeExpense } from '../db/ops'
 import { dayKey, fmtDate, fmtTime } from '../lib/time'
 import { useT } from '../lib/i18n'
 import { isDesktop } from '../lib/desktop'
+import SalaryPicker, { isZarplata, useStaff, staffName } from '../components/SalaryPicker'
 
 // ── Расходы магазина ──
 // Аренда, зарплата, свет, налоги — всё, на что магазин тратит деньги помимо закупки
@@ -47,6 +48,8 @@ export default function Expenses() {
   const [sourceId, setSourceId] = useState('')
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState(null)
+  // Зарплата: кому выдаём. Остальным статьям сотрудник не нужен
+  const [employeeId, setEmployeeId] = useState('')
 
   // ── Из какой кассы можно взять деньги ──
   // Открытые смены: сайта и касс с программой. Список держим у себя, а не в общем
@@ -81,7 +84,7 @@ export default function Expenses() {
   }, [tills, sources, sourceId])
 
   const journal = useJournalFilter('expenses', {
-    textOf: (e) => `${e.category} ${t(e.category)} ${e.note || ''} ${e.user?.name || ''}`,
+    textOf: (e) => `${e.category} ${t(e.category)} ${e.note || ''} ${e.user?.name || ''} ${e.employeeName || ''}`,
   })
   const [catFilter, setCatFilter] = useState('all')
   const journalRows = useMemo(
@@ -111,11 +114,15 @@ export default function Expenses() {
 
     setSaving(true)
     try {
-      await addExpense({ date, category, amount: sum, note, fromCash, shiftId: fromCash ? sourceId : null })
+      await addExpense({
+        date, category, amount: sum, note, fromCash, shiftId: fromCash ? sourceId : null,
+        ...(isZarplata(category) && employeeId ? { employeeId } : {}),
+      })
       journal.reload()
       setAmount('')
       setNote('')
       setFromCash(false)
+      setEmployeeId('')
       toast(t('Расход добавлен'))
     } catch (e) {
       toast(t(e.message), 'err')
@@ -152,7 +159,7 @@ export default function Expenses() {
   return (
     <Layout title={t('Расходы')} subtitle={t('Аренда, зарплата и другие траты магазина')}>
       <div className="note info" style={{ marginBottom: 16, maxWidth: 780 }}>
-        {t('Как это работает: вносите сюда всё, на что магазин тратит деньги помимо закупки товара. В «Отчётах» расходы вычитаются из прибыли — получается чистая прибыль.')}
+        {t('Как это работает: вносите сюда всё, на что магазин тратит деньги помимо закупки товара. В «Отчёте ОПУ» расходы вычитаются из прибыли — получается чистая прибыль.')}
       </div>
 
       {can('expenses.create') && <div className="panel" style={{ maxWidth: 900 }}>
@@ -182,6 +189,7 @@ export default function Expenses() {
             />
           </div>
         </div>
+        {isZarplata(category) && <SalaryPicker employeeId={employeeId} setEmployeeId={setEmployeeId} onAmount={setAmount} tour="exp.salary" />}
         <div className="field">
           <label htmlFor="expNote">{t('Примечание (необязательно)')}</label>
           <input
@@ -271,6 +279,7 @@ export default function Expenses() {
                 </td>
                 <td className="cell-main">
                   <b>{t(e.category)}</b>
+                  {e.employeeName ? <span className="exp-emp"> · {e.employeeName}</span> : null}
                   {e.fromCash && (
                     <span className="badge cash" style={{ marginLeft: 8, fontWeight: 500 }}>
                       <LuBanknote size={13} /> {t('из кассы')}{tillOf(e) ? ` · ${tillOf(e)}` : ''}
@@ -319,7 +328,9 @@ function EditExpense({ expense, categories, onSaved, onClose }) {
   const [category, setCategory] = useState(expense.category)
   const [amount, setAmount] = useState(String(expense.amount ?? ''))
   const [note, setNote] = useState(expense.note || '')
+  const [employeeId, setEmployeeId] = useState(expense.employeeId || '')
   const [saving, setSaving] = useState(false)
+  const { staff } = useStaff()
 
   // Статью могли убрать из списка — у этого расхода она остаётся
   const names = useMemo(() => [...new Set([expense.category, ...categories.map((c) => c.name)])].filter(Boolean), [expense.category, categories])
@@ -336,6 +347,9 @@ function EditExpense({ expense, categories, onSaved, onClose }) {
     if (sum !== Number(expense.amount)) patch.amount = Math.round(sum * 100) / 100
     if (note.trim() !== (expense.note || '')) patch.note = note.trim()
     if (!expense.fromCash && date && date !== dayKey(expense.date)) patch.date = date
+    // Сотрудник — только у зарплаты: сменили статью на другую — сотрудник снимается
+    const wantEmp = isZarplata(category) ? employeeId : ''
+    if (wantEmp !== (expense.employeeId || '')) patch.employeeId = wantEmp
     if (!Object.keys(patch).length) return onClose()
 
     setSaving(true)
@@ -373,6 +387,18 @@ function EditExpense({ expense, categories, onSaved, onClose }) {
           {names.map((n) => <option key={n} value={n}>{t(n)}</option>)}
         </select>
       </div>
+      {isZarplata(category) && (
+        <div className="field">
+          <label htmlFor="expEditEmp">{t('Кому выдана зарплата')}</label>
+          <select id="expEditEmp" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
+            <option value="">{t('— не указан —')}</option>
+            {expense.employeeId && !(staff || []).some((u) => u.id === expense.employeeId) && (
+              <option value={expense.employeeId}>{expense.employeeName || t('удалённый сотрудник')}</option>
+            )}
+            {(staff || []).map((u) => <option key={u.id} value={u.id}>{staffName(u)}</option>)}
+          </select>
+        </div>
+      )}
       <div className="field">
         <label htmlFor="expEditNote">{t('Примечание (необязательно)')}</label>
         <input id="expEditNote" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && save()} />

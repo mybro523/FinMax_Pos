@@ -14,7 +14,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import { join } from 'node:path'
 import { matchLocal } from '../src/local/api.mjs'
-import { getMeta, openDb, setMeta } from '../src/local/db.mjs'
+import { getMeta, openDb, q, setMeta } from '../src/local/db.mjs'
 import { listDocs, listShifts, myOpenShift } from '../src/local/docs.mjs'
 import { cashSources, createExpense, expenseCategoriesList, expenseDate, NO_OPEN_SHIFT, NO_SUCH_CATEGORY } from '../src/local/ops/expense.mjs'
 import { checkout } from '../src/local/ops/sale.mjs'
@@ -54,6 +54,9 @@ test('расход вносится без связи: ложится в жур�
     note: 'за октябрь',
     fromCash: false,
     shiftId: null,
+    // Зарплата: кому выдана. У аренды сотрудника нет; имя сервер ставит сам
+    employeeId: null,
+    employeeName: '',
     userId: 'user-1',
     createdAt: iso(NOW),
     user: { id: 'user-1', name: 'kassir' },
@@ -379,4 +382,13 @@ test('обновление программы с прежней версии: с
   db = openDb(file, PHARMACY_SCHEMA)
   assert.equal(getMeta(db, 'wcursor'), '600')
   db.close()
+})
+
+test('зарплата без связи: сотрудник уходит серверу вместе с расходом', () => {
+  const db = pharmacy({ products: [] })
+  q(db, "INSERT INTO expense_categories (id, name) VALUES ('z', 'Зарплата')").run()
+  const e = createExpense(ctx(db), { category: 'Зарплата', amount: 3900, date: '2026-10-01', clientId: 'zp_1', employeeId: 'user-7' })
+  assert.equal(e.employeeId, 'user-7')
+  const op = pendingOps(db, 100).find((o) => o.type === 'expense')
+  assert.equal(op.payload.expense.employeeId, 'user-7', 'сотрудник не должен теряться по дороге к серверу')
 })

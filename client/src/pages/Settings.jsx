@@ -2,7 +2,7 @@ import { useState } from 'react'
 import {
   LuShoppingCart, LuPackagePlus, LuCreditCard, LuClipboardList, LuTrendingUp, LuServer, LuRefreshCw,
   LuKeyRound, LuUser, LuPalette, LuLanguages, LuSun, LuMoon, LuDatabaseBackup, LuDownload, LuTriangleAlert,
-  LuTags, LuPlus, LuPencil, LuTrash2, LuUpload,
+  LuTags, LuPlus, LuPencil, LuTrash2, LuUpload, LuShapes,
   LuCalendarClock, LuHandCoins, LuQrCode, LuReceiptText, LuMonitorSmartphone, LuWallet,
 } from 'react-icons/lu'
 import Layout from '../components/Layout'
@@ -160,7 +160,7 @@ export default function Settings() {
   const razdely = [
     { id: 'profil', label: 'Профиль', Icon: LuUser, show: true },
     { id: 'chek', label: 'Чек и печать', Icon: LuReceiptText, show: can('settings.print') },
-    { id: 'kategorii', label: 'Категории товаров', Icon: LuTags, show: can('settings.categories') },
+    { id: 'kategorii', label: 'Категории и типы', Icon: LuTags, show: can('settings.categories') },
     { id: 'dengi', label: 'Деньги', Icon: LuWallet, show: can('settings.expenseCategories') || can('settings.payServices') },
     { id: 'ustroystva', label: 'Кассы и устройства', Icon: LuMonitorSmartphone, show: can('settings.devices') },
     { id: 'kopiya', label: 'Резервная копия', Icon: LuDatabaseBackup, show: can('settings.backup') },
@@ -284,7 +284,12 @@ export default function Settings() {
             </>
           )}
 
-          {active === 'kategorii' && can('settings.categories') && <CategoriesPanel />}
+          {active === 'kategorii' && can('settings.categories') && (
+            <>
+              <CategoriesPanel />
+              <ProductTypesPanel />
+            </>
+          )}
 
           {active === 'dengi' && (
             <>
@@ -720,6 +725,109 @@ function CategoriesPanel() {
             </tr>
           ))}
           {categories.length === 0 && <tr><td colSpan="4" className="empty">{t('Категорий пока нет')}</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ── Типы товаров ──
+// Медицинский, продукты, бытовая химия… Тип выбирают в карточке товара; там же его
+// можно завести кнопкой «+», и он появится здесь. Отметка «с аналогами» открывает
+// в карточке поле аналогов — у лекарства замены ищут, у шампуня нет.
+function ProductTypesPanel() {
+  const t = useT()
+  const toast = useToast()
+  const dialog = useDialog()
+  const types = useCollection('productTypes')
+  const products = useCollection('products')
+  const [name, setName] = useState('')
+  const [analogs, setAnalogs] = useState(false)
+
+  const countIn = (type) => products.filter((p) => p.type === type).length
+
+  function add() {
+    const value = name.trim()
+    if (!value) return toast(t('Укажите название типа товара'), 'err')
+    if (types.some((x) => x.name.toLowerCase() === value.toLowerCase())) return toast(t('Такой тип товара уже есть'), 'err')
+    db.push('productTypes', { name: value, analogs }).catch((e) => toast(t(e.message), 'err'))
+    setName('')
+    setAnalogs(false)
+    toast(t('Тип товара добавлен'))
+  }
+
+  async function rename(x) {
+    const r = await dialog.prompt({
+      title: t('Переименовать тип товара'),
+      message: `${t('Товаров этого типа')}: ${countIn(x.name)}. ${t('Они получат новое название типа автоматически.')}`,
+      fields: [{ name: 'name', label: t('Новое название'), defaultValue: x.name }],
+      confirmText: t('Переименовать'),
+    })
+    if (!r || !r.name.trim() || r.name.trim() === x.name) return
+    db.update('productTypes', x.id, { name: r.name.trim() }).catch((e) => toast(t(e.message), 'err'))
+    toast(t('Тип товара переименован'))
+  }
+
+  function toggleAnalogs(x) {
+    db.update('productTypes', x.id, { analogs: !x.analogs }).catch((e) => toast(t(e.message), 'err'))
+  }
+
+  async function remove(x) {
+    const used = countIn(x.name)
+    if (used > 0) return toast(`${t('Тип')} «${x.name}» ${t('стоит у')} ${used} ${t('товар(ов) — сначала смените им тип')}`, 'err')
+    const ok = await dialog.confirm({
+      title: t('Удалить тип товара?'),
+      message: `«${x.name}» ${t('будет удалён из списка.')}`,
+      danger: true,
+      confirmText: t('Удалить'),
+    })
+    if (!ok) return
+    db.remove('productTypes', x.id).catch((e) => toast(t(e.message), 'err'))
+    toast(t('Тип товара удалён'))
+  }
+
+  return (
+    <div className="panel mt" data-tour="set.types" style={{ maxWidth: 640 }}>
+      <h2><span className="h2-title"><span className="ic"><LuShapes size={17} /></span>{t('Типы товаров')}</span></h2>
+      <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7, marginBottom: 12 }}>
+        {t('Тип выбирают в карточке товара. Отметка «с аналогами» открывает в карточке поле «Аналоги» — для медицинских товаров и всего, у чего есть замены.')}
+      </p>
+
+      <div className="row" style={{ alignItems: 'flex-end' }}>
+        <div className="field" style={{ flex: 1 }}>
+          <label htmlFor="newProductType">{t('Новый тип товара')}</label>
+          <input id="newProductType" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder={t('Напр. Детские товары')} />
+        </div>
+        <button className="btn" onClick={add} style={{ marginBottom: 14 }}>
+          <span className="ic"><LuPlus size={16} /></span> {t('Добавить')}
+        </button>
+      </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, color: 'var(--muted)', marginBottom: 14 }}>
+        <input type="checkbox" checked={analogs} onChange={(e) => setAnalogs(e.target.checked)} style={{ width: 16, height: 16 }} />
+        {t('с аналогами — в карточке появится поле «Аналоги»')}
+      </label>
+
+      <table>
+        <thead>
+          <tr><th>{t('Тип товара')}</th><th className="num">{t('Товаров')}</th><th>{t('Аналоги')}</th><th></th></tr>
+        </thead>
+        <tbody>
+          {types.map((x) => (
+            <tr key={x.id}>
+              <td><b>{t(x.name)}</b></td>
+              <td className="num">{countIn(x.name)}</td>
+              <td>
+                <button className={'btn ghost sm' + (x.analogs ? ' on' : '')} onClick={() => toggleAnalogs(x)} title={t('Нажмите, чтобы изменить')} aria-pressed={!!x.analogs}>
+                  {x.analogs ? t('есть') : t('нет')}
+                </button>
+              </td>
+              <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                <button className="btn ghost sm icon" onClick={() => rename(x)} title={t('Переименовать')} aria-label={`${t('Переименовать')}: ${x.name}`}><LuPencil size={15} /></button>{' '}
+                <button className="btn ghost sm icon" onClick={() => remove(x)} title={t('Удалить')} aria-label={`${t('Удалить')}: ${x.name}`}><LuTrash2 size={15} /></button>
+              </td>
+            </tr>
+          ))}
+          {types.length === 0 && <tr><td colSpan="4" className="empty">{t('Типов пока нет')}</td></tr>}
         </tbody>
       </table>
     </div>

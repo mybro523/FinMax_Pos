@@ -13,7 +13,7 @@ import { useT } from '../lib/i18n'
 import { useCategories, categoryNames } from '../lib/categories'
 import NumberInput from '../components/NumberInput'
 import VesInput from '../components/VesInput'
-import { isVesovoy, kgText, splitUnits } from '../lib/units'
+import { isVesovoy, kgText, splitUnits, edinica } from '../lib/units'
 import {
   MAX_DIGITS, countOf, shownOf, retype, deltaOf, merged, settle, sameCounts, tally,
   readDraft, writeDraft, dropDraft, closeDraft, pruneDrafts,
@@ -427,8 +427,8 @@ export default function Inventory() {
   // Выгрузка и печать: открыт лист — выгружается ЛИСТ (с ним ходят по полкам);
   // иначе — история пересчётов
   const chisloEx = (i, n) => {
-    const ves = isVesovoy(products.find((p) => p.id === i.productId))
-    return ves ? `${kgText(n)} ${t('кг')}` : n
+    const prod = products.find((p) => p.id === i.productId)
+    return isVesovoy(prod) ? `${kgText(n)} ${t(edinica(prod))}` : n
   }
   const exList = open
     ? {
@@ -556,9 +556,10 @@ export default function Inventory() {
                   const raw = shownOf(i, typed)
                   const actual = countOf(raw)
                   // Весовой товар считается в килограммах: храним граммы, показываем кг
-                  const ves = isVesovoy(products.find((p) => p.id === i.productId))
+                  const prod = products.find((p) => p.id === i.productId)
+                  const ves = isVesovoy(prod)
                   const diff = actual === null ? null : actual - i.expectedUnits
-                  const chislo = (n) => (ves ? `${kgText(n)} ${t('кг')}` : n)
+                  const chislo = (n) => (ves ? `${kgText(n)} ${t(edinica(prod))}` : n)
                   return (
                     <tr key={i.id}>
                       <td><b>{i.name}</b></td>

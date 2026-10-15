@@ -539,7 +539,7 @@ export default function Reports() {
   }
 
   return (
-    <Layout title={t('Отчёты')} subtitle={t('Продажи, прибыль, выручка и склад')}
+    <Layout title={t('Отчёт ОПУ')} subtitle={t('Продажи, прибыль, выручка и склад')}
       actions={can('reports.export') && <span data-tour="rep.export" style={{ display: 'inline-flex', gap: 8 }}>
         <ExportPechat onExcel={tab === 'opu' ? opuExcelRef.current : exportExcel} />
       </span>}>

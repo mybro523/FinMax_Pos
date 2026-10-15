@@ -18,6 +18,8 @@ export class CreateProductDto {
   @IsOptional() @IsString() dosage?: string // дозировка
   @IsOptional() @IsString() expiryDate?: string // срок годности (ISO-дата или пусто)
   @IsOptional() @IsArray() @IsString({ each: true }) analogIds?: string[] // аналоги (id товаров)
+  // Тип товара названием (медицинский, продукты…). Пусто — не выбран
+  @IsOptional() @IsString() @MaxLength(40) type?: string
   // Фото: сжатый кадр data:image/…;base64 или пустая строка «фото убрали».
   // Предел длины согласован с клиентом (lib/foto.js) — крупнее сюда не присылают
   @IsOptional() @IsString() @MaxLength(200_000) @Matches(/^$|^data:image\/(jpeg|png|webp);base64,/) image?: string
@@ -39,6 +41,7 @@ export class UpdateProductDto {
   @IsOptional() @IsString() dosage?: string
   @IsOptional() @IsString() expiryDate?: string
   @IsOptional() @IsArray() @IsString({ each: true }) analogIds?: string[]
+  @IsOptional() @IsString() @MaxLength(40) type?: string
   // Фото: как при создании. Поле, забытое здесь, сервер выбрасывает МОЛЧА
   // (whitelist) — «товар обновлён», а фото пропало. Паритет полей создания и
   // правки прибит тестом products/dto.spec.ts

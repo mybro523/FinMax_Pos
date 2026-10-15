@@ -232,6 +232,20 @@ export const PHARMACY_SCHEMA = [
   -- NULL — сервер его не присылал (запись получал кассир, деньги не его)
   ALTER TABLE suppliers ADD COLUMN debtArrivals INTEGER;
   `,
+  // Тип товара (медицинский, продукты…) — названием, как категория, и список типов:
+  // карточка товара показывает тип и без связи. Отметки обмена сбрасываются: касса
+  // прежней версии ни типов, ни списка не брала, а по отметке «докуда получили» они
+  // уже прошли. Один раз касса получит всё заново
+  `
+  ALTER TABLE products ADD COLUMN type TEXT NOT NULL DEFAULT '';
+  CREATE TABLE product_types (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    analogs INTEGER NOT NULL DEFAULT 0,
+    createdAt TEXT NOT NULL DEFAULT ''
+  );
+  DELETE FROM meta WHERE key IN ('cursor', 'wcursor');
+  `,
 ]
 
 // ── Общая база программы ──

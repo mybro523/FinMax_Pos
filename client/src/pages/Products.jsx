@@ -110,6 +110,7 @@ export default function Products() {
       // Весовой товар правится в килограммах: 12 кг 350 г -> «12.35»
       stock: isVesovoy(p) ? String(stockUnits(p) / 1000) : String(p.stock),
       unit: p.unit || '',
+      type: p.type || '',
       unitsPerPack: String(p.unitsPerPack ?? 1), looseUnits: isVesovoy(p) ? '0' : String(p.looseUnits ?? 0),
       dosage: p.dosage || '',
       expiryDate: p.expiryDate ? String(p.expiryDate).slice(0, 10) : '',
@@ -127,6 +128,8 @@ export default function Products() {
     { header: t('Наименование'), key: 'name', width: 44 },
     { header: t('Штрихкод'), key: 'barcode', width: 17 },
     { header: t('Категория'), key: 'category', width: 18 },
+    { header: t('Тип'), key: 'type', width: 16 },
+    { header: t('Ед.'), key: 'unit', width: 9 },
     { header: t('Продажа'), key: 'price', width: 13, money: true },
     { header: t('Остаток'), key: 'ostatok', width: 13, num: true },
     { header: t('Годен до'), key: 'exp', width: 13 },
@@ -139,6 +142,8 @@ export default function Products() {
           name: p.name + (p.dosage ? ` (${p.dosage})` : ''),
           barcode: p.barcode || '',
           category: p.category || '—',
+          type: p.type || '—',
+          unit: p.unit || 'уп',
           price: Number(p.price) || 0,
           ostatok: stockText(p),
           exp: p.expiryDate ? String(p.expiryDate).slice(0, 10) : '—',
@@ -188,7 +193,7 @@ export default function Products() {
                     </span>
                   </td>
                   <td className="tag-cat">{p.barcode}</td>
-                  <td>{p.category}</td>
+                  <td>{p.category}{p.type ? <div className="tag-cat">{t(p.type)}</div> : null}</td>
                   <td className="num"><b>{money(p.price)}</b></td>
                   <td className="num">
                     <span className={'badge ' + (p.stock <= p.minStock ? 'low' : 'ok')}>{stockText(p)}</span>

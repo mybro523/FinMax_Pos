@@ -86,6 +86,8 @@ export function createExpense(ctx, raw) {
   const fromCash = c.bool(dto.fromCash, 'fromCash', { optional: true }) === true
   const askedShift = c.str(dto.shiftId, 'shiftId', { optional: true })
   const clientId = c.str(dto.clientId, 'clientId', { optional: true })
+  // Зарплата: кому выдана. Имя запомнит сервер — по своему списку сотрудников
+  const employeeId = c.str(dto.employeeId, 'employeeId', { optional: true })
   c.done()
 
   return inTx(db, () => {
@@ -121,6 +123,8 @@ export function createExpense(ctx, raw) {
       note: (note || '').trim(),
       fromCash,
       shiftId,
+      employeeId: employeeId || null,
+      employeeName: '',
       userId: ctx.user.id,
       createdAt: at,
       user: { id: ctx.user.id, name: ctx.user.name },
@@ -132,7 +136,10 @@ export function createExpense(ctx, raw) {
       accountId: ctx.user.accountId,
       payload: {
         // Серверу — только сам расход: кто его внёс, он знает по учётной записи
-        expense: { id: body.id, date: body.date, category, amount: body.amount, note: body.note, fromCash, shiftId },
+        expense: {
+          id: body.id, date: body.date, category, amount: body.amount, note: body.note, fromCash, shiftId,
+          ...(employeeId ? { employeeId } : {}),
+        },
         deviceId: ctx.deviceId,
       },
       now,

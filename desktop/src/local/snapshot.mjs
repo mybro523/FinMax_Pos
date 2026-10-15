@@ -85,10 +85,10 @@ function applyProducts(db, products, batches, full, now) {
   const upsertProduct = q(
     db,
     `INSERT INTO products
-       (id, ord, name, barcode, category, priceC, minStock, unit, unitsPerPack, dosage, image, analogIds, createdAt, sCostC, costC, sExpiry, expiryDate)
-     VALUES (@id, @ord, @name, @barcode, @category, @priceC, @minStock, @unit, @upp, @dosage, @image, @analogIds, @createdAt, @costC, @costC, @expiry, @expiry)
+       (id, ord, name, barcode, category, type, priceC, minStock, unit, unitsPerPack, dosage, image, analogIds, createdAt, sCostC, costC, sExpiry, expiryDate)
+     VALUES (@id, @ord, @name, @barcode, @category, @type, @priceC, @minStock, @unit, @upp, @dosage, @image, @analogIds, @createdAt, @costC, @costC, @expiry, @expiry)
      ON CONFLICT(id) DO UPDATE SET
-       name = excluded.name, barcode = excluded.barcode, category = excluded.category, priceC = excluded.priceC,
+       name = excluded.name, barcode = excluded.barcode, category = excluded.category, type = excluded.type, priceC = excluded.priceC,
        minStock = excluded.minStock, unit = excluded.unit, unitsPerPack = excluded.unitsPerPack, dosage = excluded.dosage,
        image = excluded.image,
        analogIds = excluded.analogIds, createdAt = excluded.createdAt, sCostC = excluded.sCostC, costC = excluded.costC,
@@ -105,6 +105,7 @@ function applyProducts(db, products, batches, full, now) {
       name,
       barcode: String(p.barcode ?? ''),
       category: String(p.category ?? 'Прочее'),
+      type: String(p.type ?? ''),
       priceC: toCents(p.price),
       minStock: wholeNonNeg(p.minStock),
       unit: String(p.unit ?? 'уп'),
@@ -197,6 +198,16 @@ function applySuppliers(db, sup, full) {
 }
 
 // Сервисы перевода — список сервера целиком, своих неотправленных не бывает
+// Типы товаров — как сервисы перевода: список целиком или изменения
+function applyProductTypes(db, list, full) {
+  if (full) q(db, 'DELETE FROM product_types').run()
+  const insert = q(db, 'INSERT OR REPLACE INTO product_types (id, name, analogs, createdAt) VALUES (?, ?, ?, ?)')
+  for (const x of list.upsert) {
+    if (x && typeof x.id === 'string') insert.run(x.id, String(x.name ?? ''), x.analogs ? 1 : 0, isoOrNull(x.createdAt) || '')
+  }
+  for (const id of list.remove) q(db, 'DELETE FROM product_types WHERE id = ?').run(id)
+}
+
 function applyPayServices(db, list, full) {
   if (full) q(db, 'DELETE FROM pay_services').run()
   const insert = q(db, 'INSERT OR REPLACE INTO pay_services (id, name, ord, createdAt) VALUES (?, ?, ?, ?)')
@@ -344,6 +355,13 @@ export function applyPull(db, res, { now }) {
       if (full || touched(p)) {
         applyPayServices(db, p, full)
         changed.push('payServices')
+      }
+    }
+    if (data.productTypes) {
+      const p = part(data.productTypes)
+      if (full || touched(p)) {
+        applyProductTypes(db, p, full)
+        changed.push('productTypes')
       }
     }
     // Статьи расходов сервер отдаёт только владельцу — как и сами расходы

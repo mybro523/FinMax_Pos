@@ -4,7 +4,7 @@ import {
   LuLayoutDashboard, LuShoppingCart, LuPill, LuPackagePlus, LuLayoutGrid,
   LuClipboardList, LuReceipt, LuTrendingUp, LuSettings, LuClock, LuTag, LuCalculator, LuWifiOff,
   LuUsers, LuCalendarClock, LuUndo2, LuTrash2, LuClipboardCheck, LuTriangleAlert,
-  LuGraduationCap, LuCircleHelp, LuHandCoins, LuTruck, LuShieldCheck,
+  LuGraduationCap, LuCircleHelp, LuHandCoins, LuTruck, LuShieldCheck, LuChartColumn, LuScale,
 } from 'react-icons/lu'
 import { useConnection } from '../db/store'
 import { useAuth, leavePharmacy } from '../db/auth'
@@ -42,7 +42,9 @@ export const NAV = [
   { to: '/discounts', label: 'История скидок', Icon: LuTag, perm: 'discounts.view' },
   { to: '/suppliers', label: 'Поставщики', Icon: LuTruck, perm: 'suppliers.view' },
   { to: '/expenses', label: 'Расходы', Icon: LuHandCoins, perm: 'expenses.view' },
-  { to: '/reports', label: 'Отчёты', Icon: LuTrendingUp, perm: 'reports.view' },
+  { to: '/reports', label: 'Отчёт ОПУ', Icon: LuTrendingUp, perm: 'reports.view' },
+  { to: '/sales-report', label: 'Отчёт продажи', Icon: LuChartColumn, perm: 'reports.view' },
+  { to: '/supplier-report', label: 'Отчёт поставщиков', Icon: LuScale, perm: 'suppliers.view' },
   { section: 'Управление' },
   { to: '/employees', label: 'Сотрудники', Icon: LuUsers, owner: true },
   { to: '/roles', label: 'Роли и права', Icon: LuShieldCheck, owner: true },

@@ -184,6 +184,11 @@ test('списание и приход', () => {
   // Срока может не быть (бинты, приборы) — и списка сроков тоже
   const noDate = parseArrival({ arrival: { id: ID, date: AT, total: 5, items: [{ id: ID + '-a', productId: 'p1', name: 'Бинт', qty: 1, cost: 5 }] } }, NOW)
   assert.equal(noDate.items[0].expiryDate, null)
+  // Новая цена продажи из прихода: есть — доходит, нет — null (цена прежняя), мусор — отказ
+  assert.equal(a.items[0].price, null)
+  const priced = parseArrival({ arrival: { id: ID, date: AT, total: 5, items: [{ id: ID + '-a', productId: 'p1', name: 'x', qty: 1, cost: 5, price: 6.25 }] } }, NOW)
+  assert.equal(priced.items[0].price, 6.25)
+  rejected(() => parseArrival({ arrival: { id: ID, date: AT, total: 5, items: [{ id: ID, productId: 'p1', name: 'x', qty: 1, cost: 5, price: 'дорого' }] } }, NOW))
   rejected(() => parseArrival({ arrival: { id: ID, date: AT, total: 5, items: [{ id: ID, productId: 'p1', name: 'x', qty: 0, cost: 5 }] } }, NOW))
   rejected(() => parseArrival({ arrival: { id: ID, date: AT, total: 5, items: [{ id: ID, productId: 'p1', name: 'x', qty: 1, cost: 5 }] }, expiry: ['не дата'] }, NOW))
   // Лишняя цифра в годе. Для программы это настоящая дата, но база её не хранит:
@@ -217,8 +222,10 @@ test('смена, долг, клиент, отложенный штрихкод'
 test('расход с кассы: сумма больше нуля, статья обязательна, «из кассы» — только явное «да»', () => {
   const expense = { id: ID, date: AT, category: ' Транспорт ', amount: 50, note: 'такси до склада', fromCash: true, shiftId: 'cmshift1' }
   assert.deepEqual(parseExpense({ expense }, NOW), {
-    id: ID, date: new Date(AT), category: 'Транспорт', amount: 50, note: 'такси до склада', fromCash: true, shiftId: 'cmshift1',
+    id: ID, date: new Date(AT), category: 'Транспорт', amount: 50, note: 'такси до склада', fromCash: true, shiftId: 'cmshift1', employeeId: null,
   })
+  // Зарплата с кассы: сотрудник доходит до сервера вместе с расходом
+  assert.equal(parseExpense({ expense: { ...expense, category: 'Зарплата', employeeId: 'cmuser7' } }, NOW).employeeId, 'cmuser7')
   // Обычный расход — без смены и без отметки
   const plain = parseExpense({ expense: { id: ID, date: AT, category: 'Аренда', amount: 3000 } }, NOW)
   assert.deepEqual([plain.fromCash, plain.shiftId, plain.note], [false, null, ''])

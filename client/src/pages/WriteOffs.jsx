@@ -5,7 +5,7 @@ import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { JournalFilter, JournalCount, useJournalFilter } from '../components/JournalFilter'
 import { useCollection, money, totalUnits, unitsPerPack, stockText } from '../db/store'
-import { expiredUnits, isVesovoy, kgText } from '../lib/units'
+import { expiredUnits, isVesovoy, kgText, edinica } from '../lib/units'
 import { writeOffGoods } from '../db/ops'
 import { fmtDateTime } from '../lib/time'
 import { useT } from '../lib/i18n'
@@ -71,7 +71,7 @@ export default function WriteOffs() {
         // рядом с негодной партией обычно лежит и годная, её убирать незачем.
         // Если сервер ещё не посчитал — берём весь остаток, как было раньше.
         const bad = expiredUnits(p)
-        setRows([{ productId: p.id, name: p.name, units: bad || totalUnits(p), max: totalUnits(p), ves: isVesovoy(p) }])
+        setRows([{ productId: p.id, name: p.name, units: bad || totalUnits(p), max: totalUnits(p), ves: isVesovoy(p), unit: edinica(p) }])
         setReason('expired')
       }
     } catch {
@@ -86,7 +86,7 @@ export default function WriteOffs() {
       setPick('')
       return toast(t('Этот товар уже добавлен'), 'err')
     }
-    setRows([...rows, { productId: p.id, name: p.name, units: isVesovoy(p) ? 1000 : 1, max: totalUnits(p), ves: isVesovoy(p) }])
+    setRows([...rows, { productId: p.id, name: p.name, units: isVesovoy(p) ? 1000 : 1, max: totalUnits(p), ves: isVesovoy(p), unit: edinica(p) }])
     setPick('')
   }
 
@@ -180,7 +180,7 @@ export default function WriteOffs() {
                 {rows.map((r, n) => (
                   <tr key={r.productId}>
                     <td><b>{r.name}</b></td>
-                    <td className="num">{r.ves ? `${kgText(r.max)} ${t('кг')}` : r.max}</td>
+                    <td className="num">{r.ves ? `${kgText(r.max)} ${t(r.unit || 'кг')}` : r.max}</td>
                     <td>
                       {r.ves ? (
                         <VesInput

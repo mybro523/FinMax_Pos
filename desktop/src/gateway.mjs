@@ -106,7 +106,7 @@ const offlineText = (route) => MESSAGES[OFFLINE_TEXT.find((x) => x.re.test(route
 // Разделы, которые лежат в локальной базе и обновляются обменом (см. snapshot.mjs)
 const LOCAL_SECTIONS = new Set([
   'products', 'categories', 'customers', 'deferred', 'shifts', 'sales', 'returns', 'arrivals', 'writeoffs', 'payments',
-  'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices',
+  'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'productTypes',
 ])
 
 // Имя файла из кода магазина. Код приходит с сервера, но в путь на диске попадает

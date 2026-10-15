@@ -9,7 +9,7 @@
 // задать префикс нужно один раз на каждой кассе — как и принтер.
 //
 // Расширение в пути указано намеренно: файл загружается и проверками, без сборщика.
-import { isVesovoy } from './units.js'
+import { isKg } from './units.js'
 
 const KEY = 'apteka_vesy'
 
@@ -61,7 +61,7 @@ export function productPoVesKodu(products, code) {
   const bezNuley = String(code).replace(/^0+/, '') || String(code)
   return (
     (products || []).find(
-      (p) => isVesovoy(p) && (String(p.barcode) === bezNuley || String(p.barcode) === String(code)),
+      (p) => isKg(p) && (String(p.barcode) === bezNuley || String(p.barcode) === String(code)),
     ) || null
   )
 }

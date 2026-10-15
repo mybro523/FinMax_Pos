@@ -37,6 +37,8 @@ const WriteOffs = lazy(() => import('./pages/WriteOffs'))
 const Inventory = lazy(() => import('./pages/Inventory'))
 const Expenses = lazy(() => import('./pages/Expenses'))
 const Suppliers = lazy(() => import('./pages/Suppliers'))
+const SalesReport = lazy(() => import('./pages/SalesReport'))
+const SupplierReport = lazy(() => import('./pages/SupplierReport'))
 // Панель владельца сервиса: он обслуживает магазины, но своего у него нет
 const Admin = lazy(() => import('./pages/Admin'))
 
@@ -71,6 +73,8 @@ const AHEAD_FOUNDER = [
   () => import('./pages/Expenses'),
   () => import('./pages/Suppliers'),
   () => import('./pages/Reports'),
+  () => import('./pages/SalesReport'),
+  () => import('./pages/SupplierReport'),
 ]
 
 // Пока человек набирает имя и пароль, качаем то, куда он попадёт сразу после входа:
@@ -201,6 +205,8 @@ function AuthedApp({ user }) {
           {/* Прежний адрес «Долги поставщикам» — теперь это вкладка в «Поставщиках» */}
           <Route path="/supplier-debts" element={<Navigate to="/suppliers?tab=debts" replace />} />
           <Route path="/reports" element={guarded('reports.view', <Reports />)} />
+          <Route path="/sales-report" element={guarded('reports.view', <SalesReport />)} />
+          <Route path="/supplier-report" element={guarded('suppliers.view', <SupplierReport />)} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/obuchenie" element={<Obuchenie />} />
           <Route path="/employees" element={ownerOnly(<Employees />)} />

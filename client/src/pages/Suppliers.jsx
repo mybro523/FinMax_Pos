@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { LuTruck, LuPlus, LuPencil, LuTrash2, LuLock, LuBanknote, LuHandCoins, LuPackagePlus, LuCircleDollarSign } from 'react-icons/lu'
+import { LuTruck, LuPlus, LuPencil, LuTrash2, LuLock, LuBanknote, LuHandCoins, LuPackagePlus, LuCircleDollarSign, LuReceipt, LuWallet } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
@@ -10,9 +10,12 @@ import { api } from '../db/api'
 import { paySupplier, removeSupplierPayment } from '../db/ops'
 import { fmtDate, fmtDateTime } from '../lib/time'
 import { useT } from '../lib/i18n'
-import { useCan } from '../db/auth'
+import { useCan, getUser } from '../db/auth'
 import { isDesktop } from '../lib/desktop'
-import ExportPechat from '../components/ExportPechat'
+import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import { PeriodPicker, presetPeriod, periodRange, periodText, useDeepPeriod } from '../components/Period'
+import { zakupkiIOplaty } from '../lib/otchety'
+import { skachatXlsx } from '../lib/excel'
 import SupplierDebtsPanel, { useDolgiPostavshikam } from './SupplierDebts'
 
 // ── Поставщики и долги перед ними ──
@@ -62,6 +65,76 @@ export default function Suppliers() {
   }
   const dolgi = useDolgiPostavshikam()
 
+  // ── Закупки и оплаты за период ──
+  // Одна таблица по датам: что у кого купили, сколько, почём, сколько оплатили
+  // сразу и сколько ушло в долг; погашения долга — отдельными строками
+  const arrivalsCached = useCollection('arrivals')
+  const paymentsCached = useCollection('supplierPayments')
+  const products = useCollection('products')
+  const [period, setPeriod] = useState(() => presetPeriod('month'))
+  const [supFilter, setSupFilter] = useState('')
+  const [hq, setHq] = useState('')
+  const range = useMemo(() => periodRange(period), [period])
+  const { deep, loading: loadingOlder } = useDeepPeriod(['arrivals', 'supplierPayments'], range)
+  const zak = useMemo(
+    () =>
+      zakupkiIOplaty({
+        arrivals: deep.arrivals || arrivalsCached,
+        supplierPayments: deep.supplierPayments || paymentsCached,
+        products,
+        from: range.from,
+        to: range.to,
+        supplierId: supFilter,
+        t,
+      }),
+    [deep, arrivalsCached, paymentsCached, products, range, supFilter, t],
+  )
+  const zakRows = useMemo(() => {
+    const needle = hq.trim().toLowerCase()
+    if (!needle) return zak.rows
+    return zak.rows.filter((r) => `${r.name} ${r.supplier}`.toLowerCase().includes(needle))
+  }, [zak.rows, hq])
+  const pgH = usePagination(zakRows, 15, `${hq}|${supFilter}|${period.from}|${period.to}`)
+  const zakItogo = useMemo(
+    () => zakRows.reduce((s, r) => ({ sum: s.sum + r.sum, paid: s.paid + r.paid, debt: s.debt + r.debt }), { sum: 0, paid: 0, debt: 0 }),
+    [zakRows],
+  )
+  const supName = (r) => r.supplier || (r.supplierId ? suppliers.find((s) => s.id === r.supplierId)?.name : '') || t('без поставщика')
+
+  const exCols = [
+    { header: t('Дата'), key: 'date', width: 17 },
+    { header: t('Поставщик'), key: 'supplier', width: 24 },
+    { header: t('Товар'), key: 'name', width: 36 },
+    { header: t('Кол-во'), key: 'qty', width: 14 },
+    { header: t('Цена'), key: 'price', width: 12, money: true },
+    { header: t('Сумма'), key: 'sum', width: 13, money: true },
+    { header: t('Оплачено'), key: 'paid', width: 13, money: true },
+    { header: t('Долг'), key: 'debt', width: 13, money: true },
+    { header: t('Принял'), key: 'user', width: 14 },
+  ]
+  const exRows = zakRows.map((r) => ({
+    date: fmtDateTime(r.date),
+    supplier: supName(r),
+    name: r.name,
+    qty: r.qty,
+    price: r.kind === 'buy' ? r.price : '',
+    sum: r.kind === 'buy' ? r.sum : '',
+    paid: r.paid,
+    debt: r.debt,
+    user: r.user || '',
+  }))
+  const exItogi = { date: t('Итого'), sum: Math.round(zakItogo.sum * 100) / 100, paid: Math.round(zakItogo.paid * 100) / 100, debt: Math.round(zakItogo.debt * 100) / 100 }
+  const exPodzag = `${periodText(period, t)}${supFilter ? ' · ' + (suppliers.find((s) => s.id === supFilter)?.name || '') : ''}`
+  const exportZakupki = () =>
+    skachatXlsx({
+      fayl: t('Закупки и оплаты'),
+      zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Закупки и оплаты поставщикам')}`,
+      podzag: exPodzag,
+      cols: exCols,
+      rows: exRows,
+      itogi: exItogi,
+    })
+
   const totalDebt = useMemo(() => suppliers.reduce((s, x) => s + (Number(x.debt) || 0), 0), [suppliers])
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -105,9 +178,12 @@ export default function Suppliers() {
         tab === 'debts' ? (
           <ExportPechat onExcel={dolgi.exportExcel} />
         ) : (
-          can('suppliers.edit') && <button className="btn" data-tour="sup.add" onClick={() => setForm({ name: '', phone: '', note: '', openingDebt: '' })}>
-            <span className="ic"><LuPlus size={16} /></span> {t('Добавить поставщика')}
-          </button>
+          <>
+            <ExportPechat onExcel={exportZakupki} />
+            {can('suppliers.edit') && <button className="btn" data-tour="sup.add" onClick={() => setForm({ name: '', phone: '', note: '', openingDebt: '' })}>
+              <span className="ic"><LuPlus size={16} /></span> {t('Добавить поставщика')}
+            </button>}
+          </>
         )
       }
     >
@@ -124,6 +200,7 @@ export default function Suppliers() {
       {tab === 'debts' && <SupplierDebtsPanel dolgi={dolgi} onOpen={(p) => setCardId(p.id)} />}
 
       {tab === 'list' && (<>
+      <PrintSheet zagolovok={t('Закупки и оплаты поставщикам')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />
       <div className="note info" style={{ marginBottom: 16, maxWidth: 780 }}>
         {t('Как это работает: при приходе товара отметьте, сколько оплачено сразу, — остальное станет долгом перед поставщиком. Когда заплатите, запишите оплату здесь. На чистую прибыль долги не влияют: товар уже учтён при продаже.')}
       </div>
@@ -137,10 +214,89 @@ export default function Suppliers() {
           <div className="value">{money(totalDebt)}</div>
           <div className="sub">{suppliers.filter((s) => (Number(s.debt) || 0) > 0).length} {t('поставщик(ов) с долгом')}</div>
         </div>
+        <div className="metric">
+          <div className="metric-head">
+            <div className="label">{t('Закуплено за период')}</div>
+            <div className="ic-box" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}><LuReceipt size={19} /></div>
+          </div>
+          <div className="value">{money(zakItogo.sum)}</div>
+          <div className="sub">{periodText(period, t)}</div>
+        </div>
+        <div className="metric">
+          <div className="metric-head">
+            <div className="label">{t('Оплачено за период')}</div>
+            <div className="ic-box" style={{ background: 'var(--green-soft, var(--accent-soft))', color: 'var(--green)' }}><LuWallet size={19} /></div>
+          </div>
+          <div className="value">{money(zakItogo.paid)}</div>
+          <div className="sub">{t('сразу при приходе и погашения долга')}</div>
+        </div>
+      </div>
+
+      <div className="panel" data-tour="sup.history" style={{ padding: 0, marginBottom: 16 }}>
+        <div style={{ padding: '16px 16px 0' }}>
+          <h2 style={{ marginBottom: 12 }}><span className="h2-title"><span className="ic"><LuReceipt size={17} /></span>{t('Закупки и оплаты')}</span>
+            {loadingOlder && <span className="tag-cat">{t('загружаем…')}</span>}
+          </h2>
+          <PeriodPicker value={period} onChange={setPeriod} tour="sup.period" />
+          <div className="toolbar" style={{ marginTop: 10 }}>
+            <input className="search" placeholder={t('Поиск по товару или поставщику…')} value={hq} onChange={(e) => setHq(e.target.value)} />
+            <select value={supFilter} onChange={(e) => setSupFilter(e.target.value)} aria-label={t('Поставщик')} style={{ maxWidth: 260 }}>
+              <option value="">{t('Все поставщики')}</option>
+              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="table-cards-wrap">
+          <table className="table-cards zak-table">
+            <thead>
+              <tr>
+                <th>{t('Дата')}</th><th>{t('Поставщик')}</th><th>{t('Товар')}</th><th className="num">{t('Кол-во')}</th>
+                <th className="num">{t('Цена')}</th><th className="num">{t('Сумма')}</th><th className="num">{t('Оплачено')}</th><th className="num">{t('Долг')}</th><th>{t('Принял')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pgH.slice.map((r) => (
+                <tr key={r.id} className={r.kind === 'pay' ? 'zak-pay' : ''}>
+                  <td data-label={t('Дата')} style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.date)}</td>
+                  <td data-label={t('Поставщик')}>{supName(r)}</td>
+                  <td className="cell-main">
+                    {r.kind === 'pay' ? (
+                      <span className="zak-pay-name"><LuBanknote size={14} /> {r.name}{r.fromCash && <span className="badge cash" style={{ marginLeft: 6 }}>{t('из кассы')}</span>}</span>
+                    ) : <b>{r.name}</b>}
+                  </td>
+                  <td className="num" data-label={t('Кол-во')}>{r.qty || '—'}</td>
+                  <td className="num" data-label={t('Цена')}>{r.kind === 'buy' ? money(r.price) : '—'}</td>
+                  <td className="num" data-label={t('Сумма')}>{r.kind === 'buy' ? <b>{money(r.sum)}</b> : '—'}</td>
+                  <td className="num" data-label={t('Оплачено')} style={{ color: r.paid > 0 ? 'var(--green)' : undefined }}>{money(r.paid)}</td>
+                  <td className="num" data-label={t('Долг')} style={{ color: r.debt > 0 ? 'var(--danger)' : r.debt < 0 ? 'var(--green)' : undefined }}>
+                    {r.debt < 0 ? '−' + money(-r.debt) : money(r.debt)}
+                  </td>
+                  <td data-label={t('Принял')} className="tag-cat">{r.user || '—'}</td>
+                </tr>
+              ))}
+              {zakRows.length === 0 && (
+                <tr><td colSpan="9" className="empty">{loadingOlder ? t('Загружаем…') : t('За этот период закупок и оплат нет')}</td></tr>
+              )}
+            </tbody>
+            {zakRows.length > 0 && (
+              <tfoot>
+                <tr className="zak-total">
+                  <td colSpan="5">{t('Итого за период')}</td>
+                  <td className="num">{money(zakItogo.sum)}</td>
+                  <td className="num">{money(zakItogo.paid)}</td>
+                  <td className="num">{zakItogo.debt < 0 ? '−' + money(-zakItogo.debt) : money(zakItogo.debt)}</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+        <Pagination {...pgH} />
       </div>
 
       <div className="panel" data-tour="sup.list" style={{ padding: 0 }}>
         <div style={{ padding: '16px 16px 0' }}>
+          <h2 style={{ marginBottom: 12 }}><span className="h2-title"><span className="ic"><LuTruck size={17} /></span>{t('Список поставщиков')}</span></h2>
           <div className="toolbar">
             <input className="search" placeholder={t('Поиск по названию или телефону…')} value={q} onChange={(e) => setQ(e.target.value)} />
           </div>

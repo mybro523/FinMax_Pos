@@ -28,6 +28,7 @@ function productView(row, u) {
     name: row.name,
     barcode: row.barcode,
     category: row.category,
+    type: row.type || '',
     cost: fromCents(row.costC),
     price: fromCents(row.priceC),
     stock,
@@ -55,6 +56,12 @@ export function productView1(db, row, now) {
 }
 
 export const productByBarcode = (db, barcode) => q(db, 'SELECT * FROM products WHERE barcode = ?').get(barcode) || null
+
+// Типы товаров по алфавиту, как отдаёт сервер
+export const productTypesList = (db) =>
+  q(db, 'SELECT id, name, analogs, createdAt FROM product_types ORDER BY name')
+    .all()
+    .map((x) => ({ id: x.id, name: x.name, analogs: !!x.analogs, createdAt: x.createdAt }))
 
 export const categoriesList = (db) =>
   q(db, 'SELECT id, name, noExpiry, createdAt FROM categories ORDER BY ord, name')

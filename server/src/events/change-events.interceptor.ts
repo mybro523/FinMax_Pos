@@ -27,6 +27,8 @@ const RULES: { test: RegExp; keys: string[] }[] = [
   { test: /^\/deferred/, keys: ['deferred'] },
   // Переименование категории переносит товары, поэтому обновляем и их
   { test: /^\/categories/, keys: ['categories', 'products'] },
+  // Тип товара тоже переносит товары при переименовании
+  { test: /^\/product-types/, keys: ['productTypes', 'products'] },
   { test: /^\/shifts/, keys: ['shifts', 'sales'] },
   // Расход из кассы меняет и ожидаемые наличные в смене
   { test: /^\/expenses/, keys: ['expenses', 'shifts'] },
@@ -41,7 +43,7 @@ const RULES: { test: RegExp; keys: string[] }[] = [
     test: /^\/backup/,
     keys: [
       'products', 'sales', 'arrivals', 'customers', 'deferred', 'shifts', 'payments', 'returns', 'writeoffs', 'expenses', 'expenseCategories',
-      'suppliers', 'supplierPayments', 'cashMoves', 'payServices',
+      'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'productTypes',
     ],
   },
 ]
