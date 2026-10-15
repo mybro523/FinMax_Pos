@@ -9,10 +9,12 @@ import { useTheme, toggleTheme } from '../lib/theme'
 import { isDesktop, bridge } from '../lib/desktop'
 
 // ── Главный экран ──
-// Открывается после входа вместо бокового меню: квадратные плитки по группам с
-// объёмными картинками, как на кассовом аппарате. Касса — главное действие: золотая
-// и вдвое шире остальных. Раздел, на который у сотрудника нет права, остаётся на
-// месте, но серый: человек видит, что такой раздел есть, и понимает, что его
+// Открывается после входа вместо бокового меню: квадратные плитки с объёмными
+// картинками одной сплошной сеткой, как на кассовом аппарате. Заголовков групп нет
+// и ряды не разрываются: разделы идут в порядке групп (продажи, склад, финансы,
+// управление), и группа читается по соседям и картинке. Касса — главное действие:
+// золотая и вдвое шире остальных. Раздел, на который у сотрудника нет права, остаётся
+// на месте, но серый: человек видит, что такой раздел есть, и понимает, что его
 // открывает владелец.
 //
 // Внизу — кто вошёл, тема и выход. В программе для Windows ещё «Закрыть программу»:
@@ -32,25 +34,20 @@ export default function Home() {
   const products = useCollection('products')
   const expiring = expiringProducts(products).length
 
-  // Пункты по группам. Каждый пункт помнит свою группу: общий тур подсвечивает группу целиком
-  const groups = []
+  // Плитки подряд, без заголовков. Каждая помнит свою группу: общий тур подсвечивает группу целиком
+  const items = []
   let группа = null
   for (const n of NAV) {
-    if (n.section) {
-      группа = { section: n.section, items: [] }
-      groups.push(группа)
-    } else if (группа) группа.items.push({ ...n, группа: группа.section })
+    if (n.section) группа = n.section
+    else items.push({ ...n, группа })
   }
   const roleName = user?.roleName || (user?.role === 'founder' ? t('Владелец') : t('Кассир'))
 
   return (
     <Layout hub title={t('Главное меню')} subtitle={user?.pharmacy?.name || ''}>
       <div className="hub" data-tour="sidebar">
-        {groups.map((g) => (
-          <section key={g.section} className="hub-group">
-            <h2 className="hub-title" data-tour-grp={g.section}>{t(g.section)}</h2>
-            <div className="hub-grid">
-              {g.items.map((n) => {
+        <div className="hub-grid">
+          {items.map((n) => {
                 const ok = allowedNav(user, n)
                 const badge = n.badge && deferred.length > 0 ? deferred.length : n.expiryBadge && expiring > 0 ? expiring : 0
                 const cls = 'hub-tile' + (n.main ? ' gold wide' : '') + (ok ? '' : ' off')
@@ -80,10 +77,8 @@ export default function Home() {
                     {inner}
                   </div>
                 )
-              })}
-            </div>
-          </section>
-        ))}
+          })}
+        </div>
 
         <div className="hub-user" data-tour="side.user">
           <div className="hub-user-info">
