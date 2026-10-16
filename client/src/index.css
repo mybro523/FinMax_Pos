@@ -1617,7 +1617,8 @@ tbody tr.clickable { cursor: pointer; }
    картинка раздела в правом нижнем углу и название в левом верхнем. Касса золотая
    и вдвое шире — главное действие. Серая плитка — раздел закрыт для этой роли: он
    виден, но не нажимается, картинка приглушена. */
-.hub { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+/* Меню на всю ширину окна: плитки прежнего размера, в ряд встаёт столько, сколько помещается */
+.hub { width: 100%; display: flex; flex-direction: column; gap: 22px; }
 .hub-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); grid-auto-flow: dense; gap: 12px; }
 .hub-tile {
   position: relative; display: flex; flex-direction: column; align-items: flex-start; overflow: hidden;
