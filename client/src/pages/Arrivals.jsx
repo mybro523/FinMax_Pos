@@ -298,8 +298,9 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
   // подсказки, набранные до прихода данных, так и остались бы пустыми
   const suggest = useMemo(() => matches(code), [code, products]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Возвращает true, если товар реально добавлен новой строкой
-  function addProduct(p) {
+  // Возвращает true, если товар реально добавлен новой строкой.
+  // qty — сколько пришло, если известно заранее (из карточки нового товара)
+  function addProduct(p, qty = 1) {
     if (lines.some((l) => l.productId === p.id)) {
       // Не задваиваем: показываем, где эта позиция, и ставим курсор в её количество
       toast(`«${p.name}» ${tr('уже в этом приходе')}`, 'err')
@@ -311,7 +312,7 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
     // Цена продажи в строке — нынешняя цена товара. Поменяют её (или наценку) —
     // после проведения прихода у товара будет новая цена
     setLines((ls) => [...ls, {
-      productId: p.id, name: p.name, qty: 1, cost: p.cost, expiryDate: '', category: p.category, ves: isVesovoy(p), unit: edinica(p),
+      productId: p.id, name: p.name, qty, cost: p.cost, expiryDate: '', category: p.category, ves: isVesovoy(p), unit: edinica(p),
       price: String(Number(p.price) || ''), price0: Number(p.price) || 0, mk: null,
     }])
     setFocusId(p.id)
@@ -378,16 +379,26 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
   // Товара нет в базе: заводим карточку и сразу ставим строкой в этот же приход.
   // Остаток и закупочную здесь не спрашиваем — их даст сама строка прихода,
   // иначе количество учлось бы дважды: и в карточке, и приходом.
+  // Количество для строки прихода из поля «Остаток» карточки: весовой — в килограммах
+  // как ввели, штучный — целые упаковки. Пусто или ноль — одна упаковка, как раньше
+  function arrivalQty(form, p) {
+    const raw = String(form.stock ?? '').trim()
+    const n = Number(raw)
+    if (!raw || !(n > 0)) return 1
+    return isVesovoy(p) ? raw : Math.max(1, Math.floor(n))
+  }
+
   async function saveNewProduct(form) {
     if (!form.name.trim() || !(form.barcode || '').trim()) return toast(tr('Укажите название и штрихкод'), 'err')
     const data = productPayload(form, { normalizeBarcode: normalizeScan })
     const dup = products.find((p) => canonBarcode(p.barcode) === canonBarcode(data.barcode))
     if (dup) return toast(tr('Такой штрихкод уже есть') + ': ' + dup.name, 'err')
     try {
-      // Остаток принудительно нулевой: сколько пришло, скажет строка прихода
+      // Товар заводится с нулевым остатком: сколько пришло, скажет строка прихода.
+      // «Остаток» из карточки — это и есть количество прихода: ставим его в строку
       const created = await db.push('products', { ...data, stock: 0, looseUnits: 0 })
       setNewProduct(null)
-      addProduct(created)
+      addProduct(created, arrivalQty(form, created))
       toast(`«${created.name}» ${tr('добавлен в базу')}`)
       focusScanner()
     } catch (e) {
@@ -611,8 +622,8 @@ function ArrivalForm({ products, suppliers, toast, onClose, onSave }) {
       {newProduct && (
         <NewProductModal
           barcode={newProduct.barcode}
-          hideStock
-          note={tr('Заполните карточку — товар заведётся и сразу встанет в этот приход. Количество и закупочную цену введёте в строке прихода (весовой — в килограммах).')}
+          arrival
+          note={tr('Заполните карточку — товар заведётся и сразу встанет в этот приход. «Остаток» и закупочная цена из карточки станут количеством и ценой в строке прихода, там их можно поправить (весовой — в килограммах).')}
           confirmText={tr('Завести и добавить в приход')}
           onSave={saveNewProduct}
           onClose={() => {

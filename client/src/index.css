@@ -1849,7 +1849,9 @@ button.supd-card { font: inherit; text-align: left; cursor: pointer; width: 100%
 
 /* ═════════ Карточка товара: наценка между закупкой и ценой ═════════ */
 .pf-prices .pf-markup { flex: 0 0 112px; }
-.pf-prices label .tag-cat { white-space: nowrap; }
+/* Подписи цен — в одну строку, подсказка «за 1 уп» — под полем: поля на одной линии */
+.pf-prices label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-hint { display: block; margin-top: 4px; font-size: 11.5px; line-height: 1.3; color: var(--muted-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pf-prices .pf-markup input:disabled { background: var(--track); color: var(--muted-2); cursor: not-allowed; }
 label .tag-cat { font-weight: 400; }
 

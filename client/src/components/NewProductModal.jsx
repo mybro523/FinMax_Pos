@@ -9,9 +9,10 @@ import { translate as tr } from '../lib/i18n'
 // Прежде касса и приход держали свои укороченные копии: без фото, веса,
 // дозировки и срока — владелец заводил товар и половины карточки не видел.
 //
-// hideStock — для прихода: сколько пришло, вводится в строке прихода
-// (для весового — в килограммах), иначе остаток задвоился бы.
-export default function NewProductModal({ barcode, note, confirmText, hideStock, stock = '', onSave, onDefer, onClose }) {
+// arrival — форма открыта из прихода: «Остаток» из карточки становится количеством в
+// строке прихода (для весового — в килограммах), а сам товар заводится с нулём —
+// иначе остаток задвоился бы.
+export default function NewProductModal({ barcode, note, confirmText, arrival = false, stock = '', onSave, onDefer, onClose }) {
   const [f, setF] = useState({ ...emptyProduct, barcode, stock, minStock: '5' })
   const [saving, setSaving] = useState(false)
 
@@ -32,7 +33,7 @@ export default function NewProductModal({ barcode, note, confirmText, hideStock,
         {note}
       </div>
 
-      <ProductForm value={f} onChange={setF} autoFocus={barcode ? 'name' : 'barcode'} hideStock={hideStock} />
+      <ProductForm value={f} onChange={setF} autoFocus={barcode ? 'name' : 'barcode'} arrival={arrival} />
 
       <div className="modal-actions" style={{ justifyContent: 'space-between' }}>
         {onDefer ? (

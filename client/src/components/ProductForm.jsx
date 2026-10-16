@@ -87,7 +87,9 @@ export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
   }
 }
 
-export default function ProductForm({ value, onChange, autoFocus = 'barcode', hideStock = false }) {
+// arrival — форма открыта из прихода: «Остаток» здесь становится количеством в строке
+// прихода (товар считается один раз), а «Вскрыто (штук)» не спрашивается
+export default function ProductForm({ value, onChange, autoFocus = 'barcode', arrival = false }) {
   const dialog = useDialog()
   const fotoRef = useRef(null)
   const t = useT()
@@ -275,10 +277,13 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', hi
         </div>
       </div>
 
+      {/* Подписи в одну строку, «за 1 уп» — мелко под полем: три поля стоят на одной
+          линии при любой ширине окна */}
       <div className="row pf-prices">
         <div className="field" style={{ flex: 1 }} data-tour="pf.prices">
-          <label htmlFor="pf-cost">{t('Закупочная цена')} <span className="tag-cat">· {t('за 1')} {t(u)}</span></label>
+          <label htmlFor="pf-cost">{t('Закупочная цена')}</label>
           <NumberInput id="pf-cost" value={value.cost} onChange={(e) => set('cost', e.target.value)} />
+          <span className="pf-hint">{t('за 1')} {t(u)}</span>
         </div>
         <div className="field pf-markup" data-tour="pf.markup">
           <label htmlFor="pf-markup">{t('Наценка, %')}</label>
@@ -291,22 +296,24 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', hi
             disabled={!(Number(value.cost) > 0)}
             title={Number(value.cost) > 0 ? t('Процент к закупочной цене — цена продажи посчитается сама') : t('Сначала впишите закупочную цену')}
           />
+          <span className="pf-hint">{t('от закупочной')}</span>
         </div>
         <div className="field" style={{ flex: 1 }} data-tour="pf.prices">
-          <label htmlFor="pf-price">{t('Цена продажи')} <span className="tag-cat">· {t('за 1')} {t(u)}</span></label>
+          <label htmlFor="pf-price">{t('Цена продажи')}</label>
           <NumberInput id="pf-price" value={value.price} onChange={(e) => { setMkDraft(null); set('price', e.target.value) }} />
+          <span className="pf-hint">{t('за 1')} {t(u)}</span>
         </div>
       </div>
 
       <div className="row">
-        {/* В приходе остаток не спрашиваем: сколько пришло — в строке прихода,
-            иначе товар посчитался бы дважды */}
-        {!hideStock && (
-          <div className="field" style={{ flex: 1 }} data-tour="pf.stock">
-            <label>{t('Остаток')} ({t(u)})</label>
-            <NumberInput integer={!drob} value={value.stock} onChange={(e) => set('stock', e.target.value)} placeholder={drob ? '12.5' : ''} />
-          </div>
-        )}
+        {/* В приходе «Остаток» — это сколько пришло: число уходит в строку прихода, а
+            товар заводится с нулём, иначе он посчитался бы дважды */}
+        <div className="field" style={{ flex: 1 }} data-tour="pf.stock">
+          <label>{t('Остаток')} ({t(u)})</label>
+          <NumberInput integer={!drob} value={value.stock} onChange={(e) => set('stock', e.target.value)} placeholder={drob ? '12.5' : ''} />
+          {/* Подсказка под полем, а не в подписи: поля «Остаток» и «Мин. остаток» на одной линии */}
+          {arrival && <span className="pf-hint">{t('встанет в строку прихода')}</span>}
+        </div>
         <div className="field" style={{ flex: 1 }} data-tour="pf.stock">
           <label>{t('Мин. остаток')} ({t(u)})</label>
           <NumberInput integer value={value.minStock} onChange={(e) => set('minStock', e.target.value)} />
@@ -325,7 +332,7 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', hi
               title={t('Для продажи поштучно. 1 = продаётся только целиком')}
             />
           </div>
-          {!hideStock && <div className="field" style={{ flex: 1 }} data-tour="pf.loose">
+          {!arrival && <div className="field" style={{ flex: 1 }} data-tour="pf.loose">
             <label>{t('Вскрыто (штук)')}</label>
             <NumberInput
               integer
