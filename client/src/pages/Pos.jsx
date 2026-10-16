@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo, useDeferredValue, lazy, Suspense } from 'react'
 import {
   LuCamera, LuShoppingCart, LuPlus, LuMinus, LuTrash2, LuCheck, LuPrinter, LuScanLine, LuClock,
-  LuTriangleAlert, LuX, LuKeyboard, LuLock, LuUserRound,
+  LuTriangleAlert, LuX, LuKeyboard, LuLock, LuUserRound, LuChevronRight,
 } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { Modal, useToast, useDialog, PAYMENTS } from '../components/ui'
@@ -57,6 +57,8 @@ const availUnits = (p) => sellableUnits(p)
 // «Все категории» — отдельное значение, а не слово «Все»: иначе категория,
 // которую владелец сам назвал «Все», стала бы неотличима от сброса фильтра
 const VSE = '\u0000vse'
+// Свёрнута ли шапка категорий в каталоге — запоминается на этом компьютере
+const CATS_KEY = 'apteka_kassa_cats'
 // Ниже этой ширины чек и каталог рядом не помещаются — там переключатель.
 // Число то же, что в стилях кассы (index.css) и в туре (lib/tur.js): разойдутся —
 // и касса будет считать экран широким, пока на нём показан переключатель
@@ -154,6 +156,23 @@ export default function Pos() {
   const [failedSale, setFailedSale] = useState(null) // продажа не записалась на сервер
   const [selId, setSelId] = useState(null) // выбранная строка чека — с ней работают клавиши
   const [cat, setCat] = useState(VSE)
+  // Шапка категорий свёрнута или раскрыта — как оставили на этом компьютере в прошлый раз
+  const [catsOpen, setCatsOpen] = useState(() => {
+    try {
+      return localStorage.getItem(CATS_KEY) !== '0'
+    } catch {
+      return true
+    }
+  })
+  const toggleCats = () =>
+    setCatsOpen((v) => {
+      try {
+        localStorage.setItem(CATS_KEY, v ? '0' : '1')
+      } catch {
+        /* не запомнилось — не страшно */
+      }
+      return !v
+    })
   const [hi, setHi] = useState(0) // подсвеченная строка каталога
   const [pane, setPane] = useState('check') // на узком экране: 'check' | 'catalog'
   const [kb, setKb] = useState(false) // экранная клавиатура
@@ -1207,12 +1226,31 @@ export default function Pos() {
           </div>
 
           <div className="kassa-catalog" data-tour="pos.catalog">
+            {/* Шапка каталога: строка «Категории: …» сворачивает и разворачивает плашки.
+                Свёрнутая показывает выбранную категорию, а списку достаётся больше места */}
             {cats.length > 0 && (
-              <div className="chips kc-cats" data-tour="pos.cats">
-                <button className={'chip ' + (cat === VSE ? 'active' : '')} onMouseDown={(e) => e.preventDefault()} onClick={() => setCat(VSE)}>{t('Все')}</button>
-                {cats.map((c) => (
-                  <button key={c} className={'chip ' + (cat === c ? 'active' : '')} onMouseDown={(e) => e.preventDefault()} onClick={() => setCat(c)}>{t(c)}</button>
-                ))}
+              <div className={'kc-cats-box' + (catsOpen ? ' open' : '')} data-tour="pos.cats">
+                <button
+                  type="button"
+                  className="kc-cats-head"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={toggleCats}
+                  aria-expanded={catsOpen}
+                  aria-controls="kc-cats"
+                  data-tour="pos.cats-toggle"
+                >
+                  <span className={'kc-caret' + (catsOpen ? ' open' : '')} aria-hidden="true"><LuChevronRight size={16} /></span>
+                  <span className="kc-cats-title">{t('Категории')}: <b>{cat === VSE ? t('Все') : t(cat)}</b></span>
+                  <span className="kc-cats-hint">{catsOpen ? t('свернуть') : t('развернуть')}</span>
+                </button>
+                {catsOpen && (
+                  <div className="chips kc-cats" id="kc-cats">
+                    <button className={'chip ' + (cat === VSE ? 'active' : '')} onMouseDown={(e) => e.preventDefault()} onClick={() => setCat(VSE)}>{t('Все')}</button>
+                    {cats.map((c) => (
+                      <button key={c} className={'chip ' + (cat === c ? 'active' : '')} onMouseDown={(e) => e.preventDefault()} onClick={() => setCat(c)}>{t(c)}</button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             <KassaCatalog

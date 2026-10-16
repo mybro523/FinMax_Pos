@@ -6,6 +6,8 @@
      интерфейсу, оно перестало бы что-либо выделять. */
   --brand-gold: #efbd24;
   --brand-navy: #00359f;
+  /* Список товаров в каталоге кассы: светлее тёмно-синей шапки, чтобы отличался */
+  --catalog-list: #1a3480;
   --gold: #efbd24;
   --gold-dark: #dcac14;
   --gold-soft: #fbf3d5;
@@ -61,6 +63,7 @@
    Не чёрная, а глубокая синяя — как сайт FinMax. Синий для текста и значков
    светлее синего бренда: тот на тёмном не читается. Золото остаётся тем же. */
 :root[data-theme="dark"] {
+  --catalog-list: #13255c;
   --gold: #efbd24;
   --gold-dark: #f6cc4b;
   --gold-soft: #3b3112;
@@ -406,7 +409,20 @@ input::placeholder { color: var(--muted-2); }
   display: flex; flex-direction: column; min-height: 0; overflow: hidden;
   background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm);
 }
-.kc-cats { padding: 10px 12px; gap: 6px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.kc-cats { padding: 2px 12px 10px; gap: 6px; flex-shrink: 0; }
+/* Шапка каталога: строка «Категории: …», которая сворачивает и разворачивает плашки */
+.kc-cats-box { flex-shrink: 0; border-bottom: 1px solid var(--border); }
+.kc-cats-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 9px 12px; border: none; background: none; color: var(--text);
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: background 0.12s;
+}
+.kc-cats-head:hover { background: var(--hover); }
+.kc-caret { display: inline-flex; flex-shrink: 0; color: var(--accent); transition: transform 0.15s; }
+.kc-caret.open { transform: rotate(90deg); }
+.kc-cats-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kc-cats-title b { font-weight: 600; }
+.kc-cats-hint { margin-left: auto; font-size: 12px; color: var(--muted-2); flex-shrink: 0; }
 .kc-cats .chip { padding: 6px 11px; font-size: 12.5px; }
 .kc-list { min-height: 0; }
 .kc-row {
@@ -711,7 +727,8 @@ input::placeholder { color: var(--muted-2); }
   .kassa .cam-text { display: none; }
   /* Чек карточками вбок не листается — прокрутка панели только мешала бы */
   .kassa .kassa-cart { padding: 12px; overflow: visible; }
-  .kassa .kc-cats { padding: 8px 10px 6px; }
+  .kassa .kc-cats { padding: 0 10px 8px; }
+  .kassa .kc-cats-head { padding: 8px 10px; }
   .kassa-itogo .total-row.big { font-size: 26px; }
   .kassa .kp-bills button { padding: 8px 11px; }
   .kassa .chek-tab-main { padding: 9px 11px; }
@@ -1713,15 +1730,21 @@ tbody tr.clickable { cursor: pointer; }
 .kassa-wrap { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .kassa-foot {
   display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap;
-  padding: 8px 14px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm);
-  font-size: 13.5px; color: var(--muted);
+  padding: 8px 14px; border-radius: var(--radius); box-shadow: var(--shadow-sm);
+  /* Фирменный жёлтый — и в тёмной теме тоже: это подпись кассы, а не фон страницы */
+  background: var(--gold); border: 1px solid rgba(11, 26, 58, 0.18);
+  font-size: 13.5px; color: var(--on-gold);
 }
 .kassa-foot .kf-user { display: inline-flex; align-items: center; gap: 7px; min-width: 0; flex-wrap: wrap; }
-.kassa-foot .kf-user .ic { display: inline-flex; color: var(--accent); }
-.kassa-foot .kf-user b { color: var(--text); font-weight: 600; }
-.kassa-foot .kf-role { color: var(--muted-2); }
+.kassa-foot .kf-user .ic { display: inline-flex; color: var(--on-gold); }
+.kassa-foot .kf-user b { color: var(--on-gold); font-weight: 700; }
+.kassa-foot .kf-role { color: rgba(11, 26, 58, 0.72); }
 .kassa-foot .kf-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.kassa-foot .kf-kb.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+/* Кнопки на жёлтом: тёмно-синие надписи, полупрозрачная светлая плашка */
+.kassa-foot .btn.ghost { background: rgba(255, 255, 255, 0.4); border-color: rgba(11, 26, 58, 0.3); color: var(--on-gold); }
+.kassa-foot .btn.ghost:hover { background: rgba(255, 255, 255, 0.62); border-color: rgba(11, 26, 58, 0.5); }
+.kassa-foot .kf-kb.on { background: var(--on-gold); color: var(--gold); border-color: var(--on-gold); }
+.kassa-foot .kf-kb.on:hover { background: #142a5c; }
 
 /* ── Экранная клавиатура ──
    Закреплена внизу окна поверх всего, включая открытые окна форм: кассир печатает
@@ -1775,14 +1798,20 @@ button.supd-card { font: inherit; text-align: left; cursor: pointer; width: 100%
 /* ═════════ Каталог кассы — тёмно-синяя плашка, как табло «Итого» ═════════
    Категории и список товаров стоят на той же плашке, что и итог справа внизу:
    касса читается единым прилавком, а цены и остатки видны издалека. */
-.kassa-catalog { background: var(--sidebar); border-color: var(--sidebar-line); color: #e6ebf7; }
-.kassa-catalog .kc-cats { border-bottom-color: rgba(255, 255, 255, 0.08); }
+.kassa-catalog { background: var(--catalog-list); border-color: var(--sidebar-line); color: #e6ebf7; }
+/* Шапка с категориями — тем же тёмно-синим, что табло «Итого»; список под ней светлее */
+.kassa-catalog .kc-cats-box { background: var(--sidebar); border-bottom-color: rgba(255, 255, 255, 0.1); }
+.kassa-catalog .kc-cats-head { color: #e6ebf7; }
+.kassa-catalog .kc-cats-head:hover { background: rgba(255, 255, 255, 0.05); }
+.kassa-catalog .kc-caret { color: var(--gold); }
+.kassa-catalog .kc-cats-title b { color: #fff; }
+.kassa-catalog .kc-cats-hint { color: var(--sidebar-muted); }
 .kassa-catalog .kc-cats .chip { background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.14); color: var(--sidebar-text); }
 .kassa-catalog .kc-cats .chip:hover { border-color: rgba(255, 255, 255, 0.34); color: #fff; }
 .kassa-catalog .kc-cats .chip.active { background: var(--gold); border-color: var(--gold); color: var(--on-gold); }
-.kassa-catalog .kc-row { color: #e6ebf7; border-bottom-color: rgba(255, 255, 255, 0.07); }
-.kassa-catalog .kc-row:hover { background: rgba(255, 255, 255, 0.06); }
-.kassa-catalog .kc-row:active { background: rgba(255, 255, 255, 0.1); }
+.kassa-catalog .kc-row { color: #e6ebf7; border-bottom-color: rgba(255, 255, 255, 0.09); }
+.kassa-catalog .kc-row:hover { background: rgba(255, 255, 255, 0.07); }
+.kassa-catalog .kc-row:active { background: rgba(255, 255, 255, 0.12); }
 .kassa-catalog .kc-row.hi { background: rgba(239, 189, 36, 0.14); box-shadow: inset 3px 0 0 var(--gold); }
 .kassa-catalog .kc-name .tag-cat, .kassa-catalog .kc-right .tag-cat { color: var(--sidebar-muted); }
 .kassa-catalog .kc-price { color: #fff; }
@@ -1790,7 +1819,7 @@ button.supd-card { font: inherit; text-align: left; cursor: pointer; width: 100%
 .kassa-catalog .badge.ok { background: rgba(79, 208, 142, 0.16); color: #74e6ab; }
 .kassa-catalog .badge.low, .kassa-catalog .badge.debt { background: rgba(255, 107, 107, 0.18); color: #ffa3a3; }
 .kassa-catalog .kc-exp { color: #ffa3a3; }
-.kassa-catalog .kc-note { background: rgba(255, 255, 255, 0.05); color: var(--sidebar-text); border-color: rgba(255, 255, 255, 0.08); }
+.kassa-catalog .kc-note { background: rgba(255, 255, 255, 0.06); color: #dbe3f7; border-color: rgba(255, 255, 255, 0.1); }
 .kassa-catalog .empty { color: var(--sidebar-muted); }
 .kassa-catalog .kc-foto { border-color: rgba(255, 255, 255, 0.3); }
 .kassa-catalog .kc-cats, .kassa-catalog .kc-list { scrollbar-color: rgba(255, 255, 255, 0.25) transparent; }
