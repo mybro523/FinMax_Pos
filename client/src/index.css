@@ -142,14 +142,14 @@ svg { display: block; }
    весь экран. В шапке слева — кнопка «Меню», она возвращает к плиткам. */
 .app { min-height: 100vh; }
 
-/* Кнопка «Меню» в шапке: синяя плашка со значком плиток */
+/* Кнопка «Меню» в шапке: светлая плашка на тёмно-синей шапке, значок плиток золотой */
 .menu-btn {
   display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;
   height: 40px; padding: 0 14px 0 12px; border-radius: 9px;
-  background: var(--sidebar); color: #fff; text-decoration: none;
-  font-size: 13.5px; font-weight: 600; transition: background 0.13s;
+  background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.24); color: #fff; text-decoration: none;
+  font-size: 13.5px; font-weight: 600; transition: background 0.13s, border-color 0.13s;
 }
-.menu-btn:hover { background: var(--sidebar-2); }
+.menu-btn:hover { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.4); }
 .menu-btn svg { color: var(--gold); }
 /* Имя системы на главном экране вместо кнопки */
 .brand-mini { display: inline-flex; align-items: center; gap: 9px; flex-shrink: 0; }
@@ -158,16 +158,26 @@ svg { display: block; }
 .topbar-title { min-width: 0; }
 
 .main { display: flex; flex-direction: column; min-height: 100vh; min-width: 0; }
+/* Шапка — фирменным тёмно-синим на всех страницах, как табло «Итого» в кассе:
+   белый заголовок, светлый подзаголовок, кнопки действий — золотая главная и светлые остальные */
 .topbar {
-  background: var(--card);
-  border-bottom: 1px solid var(--border);
+  background: var(--sidebar);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   padding: 12px 28px; min-height: 64px;
   display: flex; align-items: center; justify-content: space-between;
   position: sticky; top: 0; z-index: 30;
-  gap: 14px;
+  gap: 14px; color: #fff;
 }
-.topbar h1 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
-.topbar .sub { font-size: 12.5px; color: var(--muted); margin-top: 1px; }
+.topbar h1 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; color: #fff; }
+.topbar .sub { font-size: 12.5px; color: var(--sidebar-text); margin-top: 1px; }
+/* Имя бренда на тёмной шапке: синий и зелёный светлые, иначе не видны */
+.topbar .brand-word { --brand-max-c: #86aaf8; --brand-pos-c: #4fc483; }
+/* Главное действие раздела («Новый приход», «Открыть кассу») — золотое; остальные — светлые плашки */
+.topbar-actions .btn:not(.ghost):not(.danger) { background: var(--gold); border-color: var(--gold); color: var(--on-gold); }
+.topbar-actions .btn:not(.ghost):not(.danger):hover { background: var(--gold); border-color: rgba(11, 26, 58, 0.45); box-shadow: 0 2px 10px rgba(239, 189, 36, 0.55); }
+.topbar-actions .btn.ghost { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.26); color: #fff; }
+.topbar-actions .btn.ghost:hover { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.46); color: #fff; }
+.topbar-actions .btn.ghost .ic { color: inherit; }
 .topbar-left { display: flex; align-items: center; gap: 13px; min-width: 0; }
 .topbar-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
 
@@ -1740,20 +1750,21 @@ tbody tr.clickable { cursor: pointer; }
 .kassa-foot {
   display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap;
   padding: 8px 14px; border-radius: var(--radius); box-shadow: var(--shadow-sm);
-  /* Фирменный жёлтый — и в тёмной теме тоже: это подпись кассы, а не фон страницы */
-  background: var(--gold); border: 1px solid rgba(11, 26, 58, 0.18);
-  font-size: 13.5px; color: var(--on-gold);
+  /* Фирменный тёмно-синий — как шапка сверху и табло «Итого»: касса читается единым аппаратом */
+  background: var(--sidebar); border: 1px solid var(--sidebar-line);
+  font-size: 13.5px; color: #e6ebf7;
 }
 .kassa-foot .kf-user { display: inline-flex; align-items: center; gap: 7px; min-width: 0; flex-wrap: wrap; }
-.kassa-foot .kf-user .ic { display: inline-flex; color: var(--on-gold); }
-.kassa-foot .kf-user b { color: var(--on-gold); font-weight: 700; }
-.kassa-foot .kf-role { color: rgba(11, 26, 58, 0.72); }
+.kassa-foot .kf-user .ic { display: inline-flex; color: var(--gold); }
+.kassa-foot .kf-user b { color: #fff; font-weight: 700; }
+.kassa-foot .kf-role { color: var(--sidebar-muted); }
 .kassa-foot .kf-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-/* Кнопки на жёлтом: тёмно-синие надписи, полупрозрачная светлая плашка */
-.kassa-foot .btn.ghost { background: rgba(255, 255, 255, 0.4); border-color: rgba(11, 26, 58, 0.3); color: var(--on-gold); }
-.kassa-foot .btn.ghost:hover { background: rgba(255, 255, 255, 0.62); border-color: rgba(11, 26, 58, 0.5); }
-.kassa-foot .kf-kb.on { background: var(--on-gold); color: var(--gold); border-color: var(--on-gold); }
-.kassa-foot .kf-kb.on:hover { background: #142a5c; }
+/* Кнопки на тёмно-синем: светлые полупрозрачные плашки с белой надписью */
+.kassa-foot .btn.ghost { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.26); color: #fff; }
+.kassa-foot .btn.ghost:hover { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.46); }
+/* Экранная клавиатура включена — кнопка золотая */
+.kassa-foot .kf-kb.on { background: var(--gold); color: var(--on-gold); border-color: var(--gold); }
+.kassa-foot .kf-kb.on:hover { background: var(--gold-dark); border-color: var(--gold-dark); }
 
 /* ── Экранная клавиатура ──
    Закреплена внизу окна поверх всего, включая открытые окна форм: кассир печатает
@@ -1809,7 +1820,7 @@ button.supd-card { font: inherit; text-align: left; cursor: pointer; width: 100%
    касса читается единым прилавком, а цены и остатки видны издалека. */
 .kassa-catalog { background: var(--catalog-list); border-color: var(--sidebar-line); color: #e6ebf7; }
 /* Шапка с категориями — тем же тёмно-синим, что табло «Итого»; список под ней светлее */
-.kassa-catalog .kc-cats-box { background: var(--sidebar); border-bottom-color: rgba(255, 255, 255, 0.1); }
+.kassa-catalog .kc-cats-box { background: var(--sidebar); border-bottom: 2px solid var(--gold); }
 .kassa-catalog .kc-cats-head { color: #e6ebf7; }
 .kassa-catalog .kc-cats-head:hover { background: rgba(255, 255, 255, 0.05); }
 .kassa-catalog .kc-caret { color: var(--gold); }
@@ -1831,7 +1842,8 @@ button.supd-card { font: inherit; text-align: left; cursor: pointer; width: 100%
 .kassa-catalog .kc-note { background: rgba(255, 255, 255, 0.06); color: #dbe3f7; border-color: rgba(255, 255, 255, 0.1); }
 .kassa-catalog .empty { color: var(--sidebar-muted); }
 .kassa-catalog .kc-foto { border-color: rgba(255, 255, 255, 0.3); }
-.kassa-catalog .kc-cats, .kassa-catalog .kc-list { scrollbar-color: rgba(255, 255, 255, 0.25) transparent; }
+/* Полоса прокрутки списка и плашек — фирменным тёмно-синим на более светлом списке */
+.kassa-catalog .kc-cats, .kassa-catalog .kc-list { scrollbar-color: var(--sidebar) rgba(255, 255, 255, 0.14); }
 .kassa-catalog :focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 
 /* ═════════ Карточка товара: наценка между закупкой и ценой ═════════ */
