@@ -23,24 +23,26 @@ import emblem from '../assets/brand/emblem-64.png'
 //
 // perm — право, без которого раздел закрыт (плитка серая, адрес уводит на главный
 // экран). owner — только владелец магазина. main — главное действие, золотая плитка.
+// Порядок — группами по смыслу, соседи подсказывают группу (заголовков на экране нет):
+// всё для работы за кассой, затем склад, затем деньги и отчёты, в конце управление
 export const NAV = [
   { section: 'Продажи' },
   { to: '/dashboard', label: 'Панель управления', Icon: LuLayoutDashboard, perm: 'dashboard.view' },
   { to: '/pos', label: 'Касса', Icon: LuShoppingCart, perm: 'pos.sell', main: true },
+  { to: '/shift', label: 'Смена кассы', Icon: LuCalculator, perm: 'shift.view' },
   { to: '/returns', label: 'Возврат товара', Icon: LuUndo2, perm: 'returns.view' },
+  { to: '/debts', label: 'Долги клиентов', Icon: LuReceipt, perm: 'debts.view' },
+  { to: '/discounts', label: 'История скидок', Icon: LuTag, perm: 'discounts.view' },
+  { to: '/deferred', label: 'Отложенные штрихкоды', Icon: LuClock, perm: 'deferred.view', badge: true },
   { section: 'Склад' },
   { to: '/products', label: 'Товары', Icon: LuPill, perm: 'products.view' },
   { to: '/arrivals', label: 'Приход товара', Icon: LuPackagePlus, perm: 'arrivals.view' },
+  { to: '/suppliers', label: 'Поставщики', Icon: LuTruck, perm: 'suppliers.view' },
   { to: '/expiry', label: 'Срок годности', Icon: LuCalendarClock, perm: 'expiry.view', expiryBadge: true },
   { to: '/writeoffs', label: 'Списание', Icon: LuTrash2, perm: 'writeoffs.view' },
   { to: '/inventory', label: 'Инвентаризация', Icon: LuClipboardCheck, perm: 'inventory.view' },
-  { to: '/deferred', label: 'Отложенные штрихкоды', Icon: LuClock, perm: 'deferred.view', badge: true },
   { to: '/orders', label: 'Авто-заявка', Icon: LuClipboardList, perm: 'orders.view' },
   { section: 'Финансы' },
-  { to: '/shift', label: 'Смена кассы', Icon: LuCalculator, perm: 'shift.view' },
-  { to: '/debts', label: 'Долги клиентов', Icon: LuReceipt, perm: 'debts.view' },
-  { to: '/discounts', label: 'История скидок', Icon: LuTag, perm: 'discounts.view' },
-  { to: '/suppliers', label: 'Поставщики', Icon: LuTruck, perm: 'suppliers.view' },
   { to: '/expenses', label: 'Расходы', Icon: LuHandCoins, perm: 'expenses.view' },
   { to: '/incomes', label: 'Доходы', Icon: LuCoins, perm: 'incomes.view' },
   { to: '/reports', label: 'Отчёт ОПУ', Icon: LuTrendingUp, perm: 'reports.view' },
