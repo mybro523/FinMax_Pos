@@ -30,6 +30,12 @@ const newId = () => 'c' + Date.now().toString(36) + (seq++).toString(36) + Math.
 // Пустое discValue — скидки на чек нет, строки живут со своими скидками
 export const novyChek = (n) => ({ id: newId(), n, cart: [], payment: 'cash', customerId: '', received: '', payVia: '', discMode: 'sum', discValue: '' })
 
+// Чек продан — вкладка остаётся с тем же номером, а всё остальное как у нового чека:
+// корзина, оплата, клиент, «Получено» и скидка на чек. Собираем от novyChek, а не
+// перечисляем поля руками: так однажды забылась скидка на чек, и она молча
+// доставалась следующему покупателю
+export const posleProdazhi = (c) => ({ ...novyChek(c.n), id: c.id })
+
 // Номер нового чека — наименьший свободный: «Чек 2» читается у прилавка быстрее, чем «Чек 17»
 export function svobodnyNomer(list) {
   let n = 1

@@ -9,7 +9,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  MAX_CHEKOV, klyuch, novyChek, svobodnyNomer, razobrat, chitat, pisat,
+  MAX_CHEKOV, klyuch, novyChek, svobodnyNomer, razobrat, chitat, pisat, posleProdazhi,
   osvezhit, sdacha, kupyury, pohozheNaKod, estBukva, raspredelit,
 } from '../src/lib/cheki.js'
 
@@ -40,6 +40,18 @@ test('новый чек пуст и платится наличными', () => 
   assert.equal(c.customerId, '')
   assert.equal(c.received, '')
   assert.notEqual(novyChek(1).id, novyChek(1).id, 'у двух чеков совпал номер записи')
+})
+
+test('проданный чек: та же вкладка, а всё остальное как у нового — скидка на чек тоже', () => {
+  const c = {
+    ...novyChek(3), cart: [line(pill, { discount: 20 })], payment: 'transfer', customerId: 'k1',
+    received: '500', payVia: 'Алиф', discMode: 'pct', discValue: '10',
+  }
+  const p = { ...c, ...posleProdazhi(c) }
+  assert.equal(p.id, c.id, 'вкладка та же')
+  assert.equal(p.n, 3, 'номер тот же')
+  // Ничего от прошлого покупателя: ни корзины, ни оплаты, ни клиента, ни скидки
+  assert.deepEqual({ ...p, id: 'x' }, { ...novyChek(3), id: 'x' })
 })
 
 test('номер нового чека — наименьший свободный', () => {

@@ -18,7 +18,7 @@ import { isVesovoy, kgText, KG, gramsOfKg, edinica, isKg,
   fitLine,
 } from '../lib/units'
 import {
-  MAX_CHEKOV, klyuch, chitat, pisat, razobrat, novyChek, svobodnyNomer,
+  MAX_CHEKOV, klyuch, chitat, pisat, razobrat, novyChek, svobodnyNomer, posleProdazhi,
   osvezhit, sdacha, kupyury, pohozheNaKod, estBukva, raspredelit,
 } from '../lib/cheki'
 import { findByBarcode, checkout, openShift as openShiftOp } from '../db/ops'
@@ -1032,6 +1032,7 @@ export default function Pos() {
     }
     setPaying(true)
     const soldCart = items // на случай, если продажу не удастся записать — вернём в корзину
+    const soldDisc = { discMode: chek.discMode, discValue: chek.discValue } // и скидку на чек — как была
     try {
       // Чек печатаем сразу по локальной записи — покупатель не ждёт ответа сервера,
       // запись уходит в фоне (цифры в чеке те же, что уйдут на сервер).
@@ -1047,15 +1048,16 @@ export default function Pos() {
       // «Получено» и «Сдача» — только для бумажного чека. На сервер они не уходят:
       // на деньги смены сдача не влияет, в кассе остаётся ровно сумма чека
       setReceipt({ ...sale, received: sd.state === 'ok' ? sd.received : null, change: sd.state === 'ok' ? sd.diff : 0 })
-      // Чек продан — вкладка остаётся пустой и готовой к следующему покупателю
-      patch({ cart: [], payment: 'cash', customerId: '', received: '', payVia: '' })
+      // Чек продан — вкладка остаётся и готова к следующему покупателю: всё как у
+      // нового чека, и скидка на чек тоже (иначе она досталась бы следующему)
+      patch(posleProdazhi)
       setIzm(null)
       pokazat('check')
       toast(t('Продажа проведена'))
 
       // Деньги нельзя терять молча: если запись так и не прошла — возвращаем корзину
       synced.catch((e) => {
-        setFailedSale({ message: e.message, cart: soldCart, payment, payVia: via, customerId })
+        setFailedSale({ message: e.message, cart: soldCart, payment, payVia: via, customerId, ...soldDisc })
         beepError()
       })
     } catch (e) {
@@ -1071,6 +1073,8 @@ export default function Pos() {
     const data = {
       cart: failedSale.cart, payment: failedSale.payment, payVia: failedSale.payVia || '',
       customerId: failedSale.customerId || '', received: '',
+      // Скидка на чек — та же, что была при продаже: чек возвращается целиком
+      discMode: failedSale.discMode === 'pct' ? 'pct' : 'sum', discValue: failedSale.discValue || '',
     }
     setCheki((s) => {
       const cur = s.list.find((c) => c.id === s.active)
@@ -1694,10 +1698,15 @@ export default function Pos() {
           <div className="modal-actions"><button className="btn ghost" onClick={() => setAnalogFor(null)}>{t('Закрыть')}</button></div>
         </Modal>
       )}
+      {receipt && <Receipt sale={receipt} onClose={() => setReceipt(null)} />}
+      {/* Продажа не записалась. Окно — после чека, чтобы лечь поверх него: кассир
+          должен увидеть отказ, а не закрыть его вместе с чеком одним Escape.
+          Закрыть окно любым способом — значит вернуть товары в корзину, как в нём
+          и написано: иначе продажа пропадала бы молча, а деньги покупателя — в кассе */}
       {failedSale && (
         <Modal
           title={<><span className="ic" style={{ color: 'var(--danger)' }}><LuTriangleAlert size={18} /></span>{t('Продажа не записана')}</>}
-          onClose={() => setFailedSale(null)}
+          onClose={vernutProdazhu}
         >
           <div className="note err" style={{ marginBottom: 12 }}>{failedSale.message}</div>
           <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.6 }}>
@@ -1708,7 +1717,6 @@ export default function Pos() {
           </div>
         </Modal>
       )}
-      {receipt && <Receipt sale={receipt} onClose={() => setReceipt(null)} />}
       {foto && <Lightbox src={foto.image} alt={foto.name} onClose={() => setFoto(null)} />}
       {camera && (
         <Suspense fallback={

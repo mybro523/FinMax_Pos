@@ -5,7 +5,7 @@ import {
   uppOf, isDivisible, unitPrice, unitCost,
   lineUnits, lineGross, lineDiscount, lineNet, lineCost,
   stockUnits, stockValue, stockCost, splitUnits,
-  fitLine,
+  fitLine, EDINICY, edinica, isDrobnyy,
 } from '../src/lib/units.js'
 
 // Упаковка 20 штук, продаётся по 200 сомони, закупка 100
@@ -191,4 +191,17 @@ test('мусор во входных данных не ломает расчёт
     assert.ok(Number.isInteger(r.qty) && r.qty >= 0, JSON.stringify(bad))
     assert.ok(Number.isInteger(r.pieces) && r.pieces >= 0, JSON.stringify(bad))
   }
+})
+
+test('единицы в карточке товара: шт, уп, меры и рулон — без пачек, коробок и ящиков', () => {
+  assert.deepEqual(EDINICY.map((x) => x.v), ['шт', 'уп', 'кг', 'л', 'м', 'м²', 'рулон'])
+  // Дробно продаются только меры
+  assert.deepEqual(EDINICY.filter((x) => x.drob).map((x) => x.v), ['кг', 'л', 'м', 'м²'])
+})
+
+test('товар, заведённый с убранной единицей, работает как прежде', () => {
+  const p = { unit: 'пачка', unitsPerPack: 20, price: 200 }
+  assert.equal(edinica(p), 'пачка', 'подпись прежняя')
+  assert.equal(isDrobnyy(p), false, 'продаётся целыми, как раньше')
+  assert.equal(unitPrice(p), 10, 'и поштучно — из своих штук внутри')
 })

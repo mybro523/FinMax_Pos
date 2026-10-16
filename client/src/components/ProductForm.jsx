@@ -27,7 +27,7 @@ import { priceFromMarkup, markupOf } from '../lib/pricing'
 // а не по договорённости, которую в следующий раз забудут.
 //
 // ── Единица измерения ──
-// Система универсальная: штуки, упаковки, килограммы, литры, метры, рулоны, пачки.
+// Система универсальная: штуки, упаковки, килограммы, литры, метры, рулоны.
 // Кг, л, м и м² продаются дробно (1,5 л, 2,3 м) — той же механикой, что весовой
 // товар. Остальные — целыми, и у них может быть «штук внутри» для продажи поштучно.
 //
@@ -235,7 +235,9 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
         <div className="field" style={{ flex: 1 }} data-tour="pf.unit">
           <label htmlFor="pf-unit">{t('Единица измерения')}</label>
           <select id="pf-unit" value={u} onChange={(e) => pickUnit(e.target.value)}>
-            {!unitKnown && <option value={u}>{u}</option>}
+            {/* Единица, которой больше нет в выборе (у товара, заведённого раньше), —
+                остаётся у этого товара, пока её не сменят */}
+            {!unitKnown && <option value={u}>{t(u)}</option>}
             {EDINICY.map((x) => (
               <option key={x.v} value={x.v}>
                 {t(x.v) === t(x.name) ? t(x.v) : `${t(x.v)} — ${t(x.name)}`}{x.drob ? ` (${t('дробно')})` : ''}
