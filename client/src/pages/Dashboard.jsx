@@ -10,7 +10,9 @@ const DashboardCharts = lazy(() => import('../components/DashboardCharts'))
 import Layout from '../components/Layout'
 import Metric from '../components/Metric'
 import Discrepancies from '../components/Discrepancies'
-import { Modal, PayBadge } from '../components/ui'
+import { Modal, PayBadge, PAYMENTS } from '../components/ui'
+import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import { skachatXlsx } from '../lib/excel'
 import { useCollection, money, stockText } from '../db/store'
 import { isDivisible, stockUnits, stockValue, stockCost as stockCostOf, unitPrice, lineUnits } from '../lib/units'
 import { dayKey, lastNDayKeys, fmtShort, fmtDayMonth, startOfDay } from '../lib/time'
@@ -18,7 +20,7 @@ import { expiringProducts } from '../lib/expiry'
 import { periodFinance } from '../lib/finance'
 import { LuTriangleAlert } from 'react-icons/lu'
 import { useT, translate as tr } from '../lib/i18n'
-import { useCan } from '../db/auth'
+import { useCan, getUser } from '../db/auth'
 
 // Формулы упаковок и штук — общие, из lib/units
 const unitsOf = stockUnits
@@ -422,9 +424,96 @@ export default function Dashboard() {
     return null
   }
 
+  // ── Выгрузка и печать ──
+  // Первым листом — сводка дня и склада, как в карточках наверху. Таблицы панели —
+  // каждая своим листом (на бумаге — друг под другом): выручка по дням, топ товаров,
+  // категории, что заканчивается, должники, долги поставщикам и чеки за сегодня
+  const kop = (x) => Math.round((Number(x) || 0) * 100) / 100
+  const f = stats.fin
+  const exCols = [
+    { header: t('Показатель'), key: 'k', width: 38 },
+    { header: t('Сумма'), key: 'sum', width: 16, money: true },
+    { header: t('Количество'), key: 'cnt', width: 13, num: true },
+  ]
+  const exRows = [
+    { k: t('Продано на (сегодня)'), sum: kop(f.revenueGross), cnt: stats.todayCount },
+    { k: t('Возвраты (сегодня)'), sum: kop(f.refunds), cnt: f.refundCount || '' },
+    { k: t('Выручка за сегодня'), sum: kop(stats.salesToday) },
+    { k: `— ${t('Наличные')}`, sum: kop(stats.todayByPay.cash) },
+    { k: `— ${t('Карта')}`, sum: kop(stats.todayByPay.card) },
+    { k: `— ${t('Перевод')}`, sum: kop(stats.todayByPay.transfer) },
+    { k: `— ${t('В долг')}`, sum: kop(stats.todayByPay.debt) },
+    { k: t('Прибыль за сегодня'), sum: kop(stats.profitToday) },
+    { k: t('Списано за сегодня'), sum: kop(f.writeOffCost), cnt: f.writeOffCount || '' },
+    { k: t('Остаток на складе (по цене продажи)'), sum: kop(stats.stockValue), cnt: stats.stockUnits },
+    { k: t('Вложено в товар (по закупочной)'), sum: kop(stats.stockCost) },
+    { k: t('Средняя маржа склада, %'), cnt: stats.margin },
+    { k: t('Долги клиентов'), sum: kop(stats.debtTotal), cnt: stats.debtors.length },
+    { k: t('Долги поставщикам'), sum: kop(stats.supplierDebt), cnt: stats.creditors.length },
+    { k: t('Заканчивается, позиций'), cnt: stats.lowList.length },
+    { k: t('Нет в наличии, позиций'), cnt: stats.outList.length },
+    { k: t('Неликвид (без продаж), позиций'), cnt: stats.deadStock.length },
+    { k: t('Срок годности истекает, позиций'), cnt: stats.expiring },
+  ]
+  const itogo = (rows, key) => kop(rows.reduce((s, r) => s + (Number(r[key]) || 0), 0))
+  const prodazhiDnya = stats.todayList.map((s) => ({
+    time: fmtShort(s.date),
+    items: s.items.map((i) => i.name).join(', '),
+    pay: t(PAYMENTS[s.payment]?.label || 'Наличные') + (s.payment === 'transfer' && s.payVia ? ` · ${s.payVia}` : ''),
+    sum: kop(s.total),
+  }))
+  const exListy = [
+    {
+      list: t('Выручка по дням'), zagolovok: t('Выручка за 10 дней'),
+      cols: [{ header: t('День'), key: 'day', width: 16 }, { header: t('Выручка'), key: 'sum', width: 16, money: true }],
+      rows: stats.chart.map((c) => ({ day: c.day, sum: kop(c.sum) })),
+    },
+    {
+      list: t('Топ товаров'), zagolovok: t('Топ товаров по выручке'),
+      cols: [{ header: t('Товар'), key: 'name', width: 34 }, { header: t('Продано, шт'), key: 'qty', width: 13, num: true }, { header: t('Выручка'), key: 'sum', width: 16, money: true }],
+      rows: stats.topProducts.map((p) => ({ name: p.name, qty: p.qty, sum: kop(p.sum) })),
+    },
+    {
+      list: t('По категориям'), zagolovok: t('Стоимость склада по категориям'),
+      cols: [{ header: t('Категория'), key: 'cat', width: 26 }, { header: t('Товаров'), key: 'count', width: 11, num: true }, { header: t('Стоимость'), key: 'value', width: 16, money: true }],
+      rows: stats.categories.map((c) => ({ cat: t(c.cat), count: c.count, value: kop(c.value) })),
+    },
+    {
+      list: t('Заканчивается'), zagolovok: t('Заканчивается'),
+      cols: [{ header: t('Товар'), key: 'name', width: 34 }, { header: t('Категория'), key: 'cat', width: 18 }, { header: t('Остаток'), key: 'stock', width: 16 }, { header: t('Минимум'), key: 'min', width: 10, num: true }],
+      rows: stats.lowList.map((p) => ({ name: p.name, cat: p.category || '', stock: stockText(p), min: p.minStock })),
+    },
+    {
+      list: t('Должники'), zagolovok: t('Долги клиентов'),
+      cols: [{ header: t('Клиент'), key: 'name', width: 28 }, { header: t('Телефон'), key: 'phone', width: 18 }, { header: t('Долг'), key: 'debt', width: 14, money: true }],
+      rows: stats.debtors.map((c) => ({ name: c.name, phone: c.phone || '', debt: kop(c.debt) })),
+    },
+    {
+      list: t('Долги поставщикам'), zagolovok: t('Долги поставщикам'),
+      cols: [{ header: t('Поставщик'), key: 'name', width: 28 }, { header: t('Телефон'), key: 'phone', width: 18 }, { header: t('Долг'), key: 'debt', width: 14, money: true }],
+      rows: stats.creditors.map((x) => ({ name: x.name, phone: x.phone || '', debt: kop(x.debt) })),
+    },
+    {
+      list: t('Чеки за сегодня'), zagolovok: t('Продажи за сегодня'),
+      cols: [{ header: t('Время'), key: 'time', width: 16 }, { header: t('Товары'), key: 'items', width: 44, wrap: true }, { header: t('Оплата'), key: 'pay', width: 16 }, { header: t('Сумма'), key: 'sum', width: 14, money: true }],
+      rows: prodazhiDnya,
+    },
+  ]
+    .filter((l) => l.rows.length)
+    .map((l) => (l.cols.some((c) => c.money) ? { ...l, itogi: { [l.cols[0].key]: t('Итого'), ...Object.fromEntries(l.cols.filter((c) => c.money).map((c) => [c.key, itogo(l.rows, c.key)])) } } : l))
+  const exPodzag = `${t('Сводка на')} ${fmtShort(new Date())}`
+  const exportExcel = () =>
+    skachatXlsx({ fayl: t('Панель управления'), list: t('Сводка'), zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Панель управления')}`, podzag: exPodzag, cols: exCols, rows: exRows, listy: exListy })
+
   return (
     <Layout title={t('Панель управления')} subtitle={t('Обзор магазина (время таджикское, UTC+5)')}
-      actions={can('pos.sell') && <Link to="/pos" className="btn" data-tour="dash.open-pos"><span className="ic"><LuShoppingCart size={16} /></span> {t('Открыть кассу')}</Link>}>
+      actions={
+        <>
+          <ExportPechat onExcel={exportExcel} />
+          {can('pos.sell') && <Link to="/pos" className="btn" data-tour="dash.open-pos"><span className="ic"><LuShoppingCart size={16} /></span> {t('Открыть кассу')}</Link>}
+        </>
+      }>
+      <PrintSheet zagolovok={t('Панель управления')} podzag={exPodzag} cols={exCols} rows={exRows} listy={exListy} />
 
       {stats.expiring > 0 && (
         <Link to="/expiry" className="note err" data-tour="dash.expiring" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, textDecoration: 'none' }}>

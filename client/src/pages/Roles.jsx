@@ -5,7 +5,10 @@ import { useToast, useDialog } from '../components/ui'
 import { api } from '../db/api'
 import { onChanged } from '../db/store'
 import { useT } from '../lib/i18n'
-import { PERMISSION_GROUPS, OWNER_ROLE_ID } from '../lib/permissions'
+import { PERMISSION_GROUPS, OWNER_ROLE_ID, ALL_PERMISSIONS } from '../lib/permissions'
+import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import { skachatXlsx } from '../lib/excel'
+import { getUser } from '../db/auth'
 
 // ── Роли и права ──
 // Слева роли, справа права выбранной роли по группам. Владелец — особая роль:
@@ -139,16 +142,43 @@ export default function Roles() {
 
   const total = useMemo(() => PERMISSION_GROUPS.reduce((s, g) => s + g.items.length, 0), [])
 
+  // ── Выгрузка и печать: кому что можно — права строками, роли колонками ──
+  // Сохранённые права ролей (несохранённая правка в выгрузку не попадает)
+  const hasRole = (r, key) => r.id === OWNER_ROLE_ID || (r.permissions || []).includes(key)
+  const exCols = [
+    { header: t('Раздел'), key: 'group', width: 18 },
+    { header: t('Право'), key: 'label', width: 44, wrap: true },
+    ...roles.map((r) => ({ header: r.name, key: 'r_' + r.id, width: 14 })),
+  ]
+  const exRows = PERMISSION_GROUPS.flatMap((g) =>
+    g.items.map(([key, label]) => ({
+      group: t(g.title),
+      label: t(label),
+      ...Object.fromEntries(roles.map((r) => ['r_' + r.id, hasRole(r, key) ? '✓' : ''])),
+    })),
+  )
+  const exItogi = {
+    group: t('Прав включено'),
+    ...Object.fromEntries(roles.map((r) => ['r_' + r.id, String(ALL_PERMISSIONS.filter((k) => hasRole(r, k)).length)])),
+  }
+  const exPodzag = `${t('Ролей')}: ${roles.length} · ${t('Всего прав')}: ${total} · ${t('Владельцу можно всё')}`
+  const exportExcel = () =>
+    skachatXlsx({ fayl: t('Роли и права'), zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Роли и права')}`, podzag: exPodzag, cols: exCols, rows: exRows, itogi: exItogi })
+
   return (
     <Layout
       title={t('Роли и права')}
       subtitle={t('Кому что можно в магазине')}
       actions={
-        <button className="btn" data-tour="roles.new" onClick={create}>
-          <span className="ic"><LuPlus size={16} /></span> {t('Новая роль')}
-        </button>
+        <>
+          <ExportPechat onExcel={exportExcel} />
+          <button className="btn" data-tour="roles.new" onClick={create}>
+            <span className="ic"><LuPlus size={16} /></span> {t('Новая роль')}
+          </button>
+        </>
       }
     >
+      <PrintSheet zagolovok={t('Роли и права')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />
       <div className="roles">
         <aside className="panel roles-list" data-tour="roles.list">
           <h2><span className="h2-title"><span className="ic"><LuShieldCheck size={17} /></span>{t('Роли')}</span></h2>

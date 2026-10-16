@@ -536,14 +536,15 @@ const repeatKey = () => {
 // Расход из кассы меняет и наличные, которые ждут в смене, — смены перечитываем следом
 const afterExpense = (touchesShift) => refresh(...(touchesShift ? ['expenses', 'shifts'] : ['expenses']))
 
-export async function addExpense({ date, category, amount, note, fromCash, shiftId, employeeId }) {
+export async function addExpense({ date, category, amount, note, fromCash, shiftId, employeeId, salaryMonth }) {
   const body = {
     category,
     amount: Math.round(Number(amount) * 100) / 100,
     note: (note || '').trim(),
     clientId: repeatKey(),
-    // Зарплата: кому выдана. Имя сервер запомнит сам
-    ...(employeeId ? { employeeId } : {}),
+    // Зарплата: кому выдана (имя сервер запомнит сам) и за какой месяц — по нему
+    // считается, сколько ещё осталось выдать
+    ...(employeeId ? { employeeId, ...(salaryMonth ? { salaryMonth } : {}) } : {}),
     // У расхода из кассы дата всегда «сейчас» — её ставит сервер; смену называем сами,
     // чтобы деньги списались именно с той кассы, которую выбрал владелец
     ...(fromCash ? { fromCash: true, ...(shiftId ? { shiftId } : {}) } : date ? { date } : {}),

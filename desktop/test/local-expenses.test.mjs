@@ -57,6 +57,7 @@ test('расход вносится без связи: ложится в жур�
     // Зарплата: кому выдана. У аренды сотрудника нет; имя сервер ставит сам
     employeeId: null,
     employeeName: '',
+    salaryMonth: '',
     userId: 'user-1',
     createdAt: iso(NOW),
     user: { id: 'user-1', name: 'kassir' },
@@ -391,4 +392,29 @@ test('зарплата без связи: сотрудник уходит сер
   assert.equal(e.employeeId, 'user-7')
   const op = pendingOps(db, 100).find((o) => o.type === 'expense')
   assert.equal(op.payload.expense.employeeId, 'user-7', 'сотрудник не должен теряться по дороге к серверу')
+})
+
+test('зарплата частями: месяц выдачи хранится и уходит серверу', () => {
+  const db = pharmacy({ products: [] })
+  q(db, "INSERT INTO expense_categories (id, name) VALUES ('z', 'Зарплата')").run()
+  // Аванс за октябрь, выданный уже в ноябре: месяц — октябрь, а не месяц выдачи
+  const e = createExpense(ctx(db), { category: 'Зарплата', amount: 1800, date: '2026-10-01', clientId: 'zp_m1', employeeId: 'user-7', salaryMonth: '2026-10' })
+  assert.equal(e.salaryMonth, '2026-10')
+  assert.equal(listDocs(db, 'expense').find((x) => x.id === e.id).salaryMonth, '2026-10')
+  const op = pendingOps(db, 100).find((o) => o.type === 'expense' && o.payload.expense.id === e.id)
+  assert.equal(op.payload.expense.salaryMonth, '2026-10', 'месяц не должен теряться по дороге к серверу')
+})
+
+test('месяц без сотрудника не хранится, непонятный месяц — отказ', () => {
+  const db = pharmacy({ products: [] })
+  q(db, "INSERT INTO expense_categories (id, name) VALUES ('z', 'Зарплата')").run()
+  q(db, "INSERT INTO expense_categories (id, name) VALUES ('a', 'Аренда')").run()
+  const rent = createExpense(ctx(db), { category: 'Аренда', amount: 900, date: '2026-10-01', clientId: 'ar_m1', salaryMonth: '2026-10' })
+  assert.equal(rent.salaryMonth, '', 'у аренды месяца зарплаты нет')
+  const op = pendingOps(db, 100).find((o) => o.payload.expense?.id === rent.id)
+  assert.equal('salaryMonth' in op.payload.expense, false)
+  assert.throws(
+    () => createExpense(ctx(db), { category: 'Зарплата', amount: 100, date: '2026-10-01', clientId: 'zp_m2', employeeId: 'user-7', salaryMonth: '2026-13' }),
+    /ГГГГ-ММ/,
+  )
 })

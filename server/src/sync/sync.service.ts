@@ -1083,6 +1083,7 @@ export class SyncService {
         id: p.id, date: p.date, category: p.category, amount: D(p.amount), note: p.note, fromCash: p.fromCash, shiftId, userId: ctx.tenantUserId,
         employeeId: emp?.id ?? null,
         employeeName: emp ? (emp.fullName || '').trim() || emp.name : '',
+        salaryMonth: emp ? p.salaryMonth : '',
       },
     })
     if (shiftId) {

@@ -222,10 +222,15 @@ test('смена, долг, клиент, отложенный штрихкод'
 test('расход с кассы: сумма больше нуля, статья обязательна, «из кассы» — только явное «да»', () => {
   const expense = { id: ID, date: AT, category: ' Транспорт ', amount: 50, note: 'такси до склада', fromCash: true, shiftId: 'cmshift1' }
   assert.deepEqual(parseExpense({ expense }, NOW), {
-    id: ID, date: new Date(AT), category: 'Транспорт', amount: 50, note: 'такси до склада', fromCash: true, shiftId: 'cmshift1', employeeId: null,
+    id: ID, date: new Date(AT), category: 'Транспорт', amount: 50, note: 'такси до склада', fromCash: true, shiftId: 'cmshift1', employeeId: null, salaryMonth: '',
   })
   // Зарплата с кассы: сотрудник доходит до сервера вместе с расходом
   assert.equal(parseExpense({ expense: { ...expense, category: 'Зарплата', employeeId: 'cmuser7' } }, NOW).employeeId, 'cmuser7')
+  // ...и месяц, за который она выдана
+  assert.equal(parseExpense({ expense: { ...expense, category: 'Зарплата', employeeId: 'cmuser7', salaryMonth: '2026-10' } }, NOW).salaryMonth, '2026-10')
+  // Непонятный месяц операцию не роняет: деньги выданы, месяц просто не записан
+  for (const bad of ['2026-13', '10.2026', 'октябрь', 202610, '2026-1'])
+    assert.equal(parseExpense({ expense: { ...expense, category: 'Зарплата', employeeId: 'cmuser7', salaryMonth: bad } }, NOW).salaryMonth, '')
   // Обычный расход — без смены и без отметки
   const plain = parseExpense({ expense: { id: ID, date: AT, category: 'Аренда', amount: 3000 } }, NOW)
   assert.deepEqual([plain.fromCash, plain.shiftId, plain.note], [false, null, ''])

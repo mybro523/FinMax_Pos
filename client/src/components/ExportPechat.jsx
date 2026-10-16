@@ -19,6 +19,8 @@ export default function ExportPechat({ onExcel }) {
         className="btn ghost"
         data-tour="export.excel"
         disabled={busy}
+        title={t('Экспорт Excel')}
+        aria-label={t('Экспорт Excel')}
         onClick={async () => {
           setBusy(true)
           try {
@@ -30,10 +32,10 @@ export default function ExportPechat({ onExcel }) {
           }
         }}
       >
-        <span className="ic"><LuFileSpreadsheet size={16} /></span> {busy ? t('Готовим…') : t('Экспорт Excel')}
+        <span className="ic"><LuFileSpreadsheet size={16} /></span> <span className="btn-text">{busy ? t('Готовим…') : t('Экспорт Excel')}</span>
       </button>
-      <button className="btn ghost" data-tour="export.print" onClick={() => window.print()}>
-        <span className="ic"><LuPrinter size={16} /></span> {t('Печать')}
+      <button className="btn ghost" data-tour="export.print" onClick={() => window.print()} title={t('Печать')} aria-label={t('Печать')}>
+        <span className="ic"><LuPrinter size={16} /></span> <span className="btn-text">{t('Печать')}</span>
       </button>
     </>
   )
@@ -42,9 +44,10 @@ export default function ExportPechat({ onExcel }) {
 // ── Печатный лист раздела ──
 // На экране не виден; при печати — единственное, что уходит на бумагу:
 // название магазина, заголовок, подзаголовок с датой и таблица ЦЕЛИКОМ
-// (а не только видимая страница списка). svodka — вторая, короткая таблица под
-// основной (например, итоги по статьям)
-export function PrintSheet({ zagolovok, podzag, cols, rows, itogi, svodka }) {
+// (а не только видимая страница списка). svodka — вторая, короткая таблица над
+// основной (например, итоги по статьям); listy — ещё таблицы под основной, каждая
+// со своим заголовком (у панели управления — склад, долги, продажи за день)
+export function PrintSheet({ zagolovok, podzag, cols, rows, itogi, svodka, listy }) {
   const apt = getUser()?.pharmacy?.name || ''
   return (
     <div className="printable print-sheet">
@@ -80,14 +83,17 @@ export function PrintSheet({ zagolovok, podzag, cols, rows, itogi, svodka }) {
         </tbody>
       </table>
       <div className="print-sheet-foot">{tr('Строк')}: {rows.length}</div>
+      {(listy || []).map((l, n) => (
+        <PrintTable key={n} className="print-dop" title={l.zagolovok} cols={l.cols} rows={l.rows} itogi={l.itogi} />
+      ))}
     </div>
   )
 }
 
 // Короткая таблица над основной: сводка, которую читают первой
-function PrintTable({ title, cols, rows, itogi }) {
+function PrintTable({ title, cols, rows, itogi, className = 'print-svodka' }) {
   return (
-    <div className="print-svodka">
+    <div className={className}>
       {title && <div className="print-svodka-title">{title}</div>}
       <table className="opu-table">
         <thead>

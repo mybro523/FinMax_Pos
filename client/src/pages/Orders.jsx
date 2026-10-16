@@ -1,18 +1,22 @@
 import { useMemo } from 'react'
-import { LuDownload, LuClipboardList, LuPackage, LuWallet, LuCircleCheck } from 'react-icons/lu'
+import { LuClipboardList, LuPackage, LuWallet, LuCircleCheck } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import Metric from '../components/Metric'
-import { useToast } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
+import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { useCollection, money, stockText } from '../db/store'
 import { lowStockProducts } from '../db/ops'
-import { fmtDate, dayKey, serverNow } from '../lib/time'
+import { fmtDate, serverNow } from '../lib/time'
+import { skachatXlsx } from '../lib/excel'
+import { getUser } from '../db/auth'
 import { useT } from '../lib/i18n'
+
+// Заявку отправляют поставщику файлом Excel или распечатывают: в ней штрихкоды,
+// сколько заказать и на какую сумму по закупочной цене
 
 export default function Orders() {
   const products = useCollection('products')
   const t = useT()
-  const toast = useToast()
   // products в зависимостях намеренно: lowStockProducts() читает список из общего
   // слоя данных сама, и это единственный признак, что данные поменялись
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -21,25 +25,35 @@ export default function Orders() {
 
   const total = low.reduce((s, p) => s + p.cost * p.need, 0)
 
-  function exportOrder() {
-    const lines = low.map((p) => `${p.name}\t${p.barcode}\t${p.need} ${p.unit}\t${p.cost} сомони`)
-    const text = `ЗАЯВКА НА ТОВАР — ${fmtDate(serverNow())}\n\nТовар\tШтрихкод\tКол-во\tЗакуп.\n${lines.join('\n')}\n\nИтого: ${money(total)}`
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `Заявка_${dayKey()}.txt`
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 0)
-    toast(t('Заявка выгружена'))
-  }
+  // ── Выгрузка и печать заявки ──
+  const kop = (x) => Math.round(x * 100) / 100
+  const exCols = [
+    { header: t('Товар'), key: 'name', width: 34 },
+    { header: t('Штрихкод'), key: 'barcode', width: 17 },
+    { header: t('Категория'), key: 'cat', width: 16 },
+    { header: t('Остаток'), key: 'stock', width: 14 },
+    { header: t('Минимум'), key: 'min', width: 10, num: true },
+    { header: t('Заказать'), key: 'need', width: 10, num: true },
+    { header: t('Ед.'), key: 'unit', width: 8 },
+    { header: t('Закупочная'), key: 'cost', width: 13, money: true },
+    { header: t('Сумма'), key: 'sum', width: 14, money: true },
+  ]
+  const exRows = low.map((p) => ({
+    name: p.name, barcode: p.barcode || '', cat: p.category || '', stock: stockText(p), min: p.minStock, need: p.need, unit: t(p.unit || ''),
+    cost: kop(Number(p.cost) || 0), sum: kop((Number(p.cost) || 0) * p.need),
+  }))
+  const exItogi = { name: t('Итого'), need: low.reduce((s, p) => s + p.need, 0), sum: kop(total) }
+  const exPodzag = `${t('Заявка на товар')} · ${fmtDate(serverNow())} · ${t('Позиций')}: ${low.length}`
+  const exportExcel = () =>
+    skachatXlsx({ fayl: t('Заявка на товар'), zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Заявка на товар')}`, podzag: exPodzag, cols: exCols, rows: exRows, itogi: exItogi })
 
   return (
     <Layout
       title={t('Авто-заявка')}
       subtitle={t('Товары, которые заканчиваются — система предлагает заказать')}
-      actions={low.length > 0 && <button className="btn" data-tour="ord.export" onClick={exportOrder}><span className="ic"><LuDownload size={16} /></span> {t('Выгрузить заявку')}</button>}
+      actions={<ExportPechat onExcel={exportExcel} />}
     >
+      <PrintSheet zagolovok={t('Заявка на товар')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />
       {low.length === 0 ? (
         <div className="panel" data-tour="ord.list"><div className="empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}><LuCircleCheck size={34} style={{ color: 'var(--green)' }} />{t('Все остатки в норме — заявка не требуется')}</div></div>
       ) : (

@@ -1,13 +1,18 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { LuUserPlus, LuTrash2, LuKeyRound, LuShieldCheck, LuPencil, LuUserCog } from 'react-icons/lu'
+import { LuUserPlus, LuTrash2, LuKeyRound, LuShieldCheck, LuPencil, LuUserCog, LuHandCoins } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { Modal, PasswordInput, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import NumberInput from '../components/NumberInput'
+import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import { useDeepPeriod } from '../components/Period'
+import { monthName, useVydachi } from '../components/SalaryPicker'
 import { api } from '../db/api'
-import { onChanged, money } from '../db/store'
-import { useAuth } from '../db/auth'
+import { onChanged, money, useCollection } from '../db/store'
+import { useAuth, getUser } from '../db/auth'
+import { skachatXlsx } from '../lib/excel'
+import { mesyac, poslednieMesyacy, prodazhiSotrudnika, zarplataKVydache, vydanoZaMesyac, ostatokZarplaty } from '../lib/otchety'
 import { fmtDate } from '../lib/time'
 import { useT } from '../lib/i18n'
 import { OWNER_ROLE_ID } from '../lib/permissions'
@@ -19,6 +24,10 @@ import { OWNER_ROLE_ID } from '../lib/permissions'
 //
 // У сотрудника есть и данные для зарплаты: ФИО, оклад и бонус — процент от суммы
 // его продаж за месяц. По ним раздел «Расходы» сам считает зарплату к выдаче.
+//
+// За выбранный месяц таблица показывает, сколько каждому начислено, сколько уже
+// выдано и сколько осталось: зарплату выдают и частями. Кнопка «Выдать» ведёт
+// в «Расходы», где зарплата этому сотруднику за этот месяц уже выбрана.
 
 const pct = (v) => `${String(Number(v) || 0).replace('.', ',')}%`
 
@@ -33,6 +42,33 @@ export default function Employees() {
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState(null)
   const pg = usePagination(list, 10)
+
+  // ── Зарплата за месяц ──
+  const months = useMemo(() => poslednieMesyacy(12), [])
+  const [month, setMonth] = useState(months[0])
+  const range = useMemo(() => mesyac(month), [month])
+  const salesCached = useCollection('sales')
+  const { deep } = useDeepPeriod(['sales'], range)
+  const sales = deep.sales || salesCached
+  const { expenses } = useVydachi(month)
+  // Чеки и выдачи зарплаты ссылаются на сотрудника в схеме магазина (userId), а не
+  // на учётную запись входа (id) — считаем по нему
+  const zp = useMemo(() => {
+    const m = new Map()
+    for (const u of list) {
+      const uid = u.userId
+      const salesSum = uid ? prodazhiSotrudnika(sales, uid, range.from, range.to) : 0
+      const nachisleno = zarplataKVydache({ salary: u.salary, bonusPercent: u.bonusPercent, salesSum }).total
+      const vydano = uid ? vydanoZaMesyac(expenses, uid, month) : 0
+      m.set(u.id, { salesSum, nachisleno, vydano, ...ostatokZarplaty(nachisleno, vydano) })
+    }
+    return m
+  }, [list, sales, expenses, month, range])
+  // В таблице зарплаты — те, кому есть что начислить или кому уже выдавали
+  const zpList = list.filter((u) => {
+    const z = zp.get(u.id)
+    return z && (z.nachisleno > 0 || z.vydano > 0)
+  })
 
   const load = useCallback(async () => {
     try {
@@ -118,16 +154,47 @@ export default function Employees() {
     load()
   }
 
+  // ── Выгрузка и печать: таблица с зарплатой за выбранный месяц ──
+  const exCols = [
+    { header: t('Логин'), key: 'login', width: 16 },
+    { header: t('ФИО'), key: 'fio', width: 26 },
+    { header: t('Роль'), key: 'role', width: 16 },
+    { header: t('Оклад'), key: 'salary', width: 13, money: true },
+    { header: t('Бонус, %'), key: 'bonus', width: 10, num: true },
+    { header: t('Начислено'), key: 'nachisleno', width: 14, money: true },
+    { header: t('Выдано'), key: 'vydano', width: 14, money: true },
+    { header: t('Осталось'), key: 'ostalos', width: 14, money: true },
+    { header: t('Статус'), key: 'status', width: 14 },
+  ]
+  const exRows = list.map((u) => {
+    const z = zp.get(u.id) || { nachisleno: 0, vydano: 0, ostalos: 0, pereplata: 0 }
+    return {
+      login: u.name, fio: u.fullName || '', role: roleName(u),
+      salary: Number(u.salary) || 0, bonus: Number(u.bonusPercent) || 0,
+      nachisleno: z.nachisleno, vydano: z.vydano, ostalos: z.pereplata > 0 ? -z.pereplata : z.ostalos,
+      status: u.active ? t('активен') : t('заблокирован'),
+    }
+  })
+  const sumOf = (k) => Math.round(exRows.reduce((a, r) => a + (r[k] || 0), 0) * 100) / 100
+  const exItogi = { login: t('Итого'), nachisleno: sumOf('nachisleno'), vydano: sumOf('vydano'), ostalos: sumOf('ostalos') }
+  const exPodzag = `${t('Зарплата за')} ${monthName(month, t)} · ${t('Сотрудников')}: ${list.length}`
+  const exportExcel = () =>
+    skachatXlsx({ fayl: t('Сотрудники'), zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Сотрудники')}`, podzag: exPodzag, cols: exCols, rows: exRows, itogi: exItogi })
+
   return (
     <Layout
       title={t('Сотрудники')}
       subtitle={t('Кто работает в магазине и с какой ролью')}
       actions={
-        <button className="btn" data-tour="emp.add" onClick={() => setAdding(true)}>
-          <span className="ic"><LuUserPlus size={16} /></span> {t('Добавить сотрудника')}
-        </button>
+        <>
+          <ExportPechat onExcel={exportExcel} />
+          <button className="btn" data-tour="emp.add" onClick={() => setAdding(true)}>
+            <span className="ic"><LuUserPlus size={16} /></span> {t('Добавить сотрудника')}
+          </button>
+        </>
       }
     >
+      <PrintSheet zagolovok={t('Сотрудники')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />
       <div className="panel" data-tour="emp.list" style={{ padding: 0 }}>
         <div style={{ overflowX: 'auto' }}>
           <table>
@@ -183,6 +250,54 @@ export default function Employees() {
         </div>
         <Pagination {...pg} />
       </div>
+
+      {/* ── Зарплата за месяц ── Отдельной таблицей: в общем списке колонки не
+          поместились бы рядом с кнопками. Сотрудники без оклада, бонуса и выдач
+          здесь не нужны */}
+      <div className="panel mt" data-tour="emp.zarplata" style={{ padding: 0 }}>
+        <h2 style={{ padding: '16px 16px 0' }}>
+          <span className="h2-title"><span className="ic"><LuHandCoins size={17} /></span>{t('Зарплата за месяц')}</span>
+        </h2>
+        <div className="emp-zp-bar">
+          <select id="empMonth" value={month} onChange={(e) => setMonth(e.target.value)} aria-label={t('Месяц')}>
+            {months.map((m) => <option key={m} value={m}>{monthName(m, t)}</option>)}
+          </select>
+          <span className="tag-cat">{t('Начислено — оклад и бонус от продаж за месяц. Выдают в «Расходах» со статьёй «Зарплата», можно частями.')}</span>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table>
+            <thead>
+              <tr>
+                <th>{t('Сотрудник')}</th><th className="num">{t('Оклад')}</th><th className="num">{t('Бонус')}</th>
+                <th className="num">{t('Продажи за месяц')}</th><th className="num">{t('Начислено')}</th>
+                <th className="num">{t('Выдано')}</th><th className="num">{t('Осталось')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {zpList.map((u) => (
+                <tr key={u.id}>
+                  <td><b>{u.fullName || u.name}</b>{u.fullName ? <div className="tag-cat">{u.name}</div> : null}</td>
+                  <td className="num">{Number(u.salary) > 0 ? money(u.salary) : <span className="tag-cat">—</span>}</td>
+                  <td className="num">{Number(u.bonusPercent) > 0 ? pct(u.bonusPercent) : <span className="tag-cat">—</span>}</td>
+                  <td className="num">{zp.get(u.id)?.salesSum > 0 ? money(zp.get(u.id).salesSum) : <span className="tag-cat">—</span>}</td>
+                  <ZpCells z={zp.get(u.id)} employeeId={u.userId} month={month} />
+                </tr>
+              ))}
+              {zpList.length > 0 && (
+                <tr className="emp-zp-total">
+                  <td colSpan="4"><b>{t('Итого')}</b></td>
+                  <td className="num"><b>{money(exItogi.nachisleno)}</b></td>
+                  <td className="num"><b>{money(exItogi.vydano)}</b></td>
+                  <td className="num"><b>{money(Math.max(0, zpList.reduce((s, u) => s + (zp.get(u.id)?.ostalos || 0), 0)))}</b></td>
+                </tr>
+              )}
+              {!loading && zpList.length === 0 && (
+                <tr><td colSpan="7" className="empty">{t('Оклад и бонус пока никому не заданы — впишите их кнопкой «Изменить» в списке выше.')}</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
       <div className="note info" style={{ marginTop: 16, maxWidth: 680, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <span>{t('Что видит и что может каждый сотрудник, решает его роль.')}</span>
         <Link to="/roles" className="linklike"><LuShieldCheck size={14} /> {t('Роли и права')}</Link>
@@ -191,6 +306,37 @@ export default function Employees() {
       {adding && <AddEmployee roles={roles} onDone={added} onClose={() => setAdding(false)} />}
       {editing && <EditEmployee user={editing} onDone={saved} onClose={() => setEditing(null)} />}
     </Layout>
+  )
+}
+
+// Начислено, выдано и осталось за месяц. «Выдать» — в «Расходы», где зарплата этому
+// сотруднику за этот месяц уже выбрана и в сумме стоит остаток
+function ZpCells({ z, employeeId, month }) {
+  const t = useT()
+  const nichego = !z || (z.nachisleno <= 0 && z.vydano <= 0)
+  return (
+    <>
+      <td className="num">{z && z.nachisleno > 0 ? money(z.nachisleno) : <span className="tag-cat">—</span>}</td>
+      <td className="num">{z && z.vydano > 0 ? money(z.vydano) : <span className="tag-cat">—</span>}</td>
+      <td className="num emp-zp-ost" style={{ whiteSpace: 'nowrap' }}>
+        {nichego ? (
+          <span className="tag-cat">—</span>
+        ) : z.ostalos > 0 ? (
+          <>
+            <b style={{ color: 'var(--danger)' }}>{money(z.ostalos)}</b>{' '}
+            {employeeId && (
+              <Link to="/expenses" state={{ zarplata: { employeeId, month } }} className="btn ghost sm emp-zp-pay" title={t('Выдать зарплату в «Расходах»')}>
+                <LuHandCoins size={14} /> {t('Выдать')}
+              </Link>
+            )}
+          </>
+        ) : z.pereplata > 0 ? (
+          <span className="badge debt">{t('выдано больше на')} {money(z.pereplata)}</span>
+        ) : (
+          <span className="badge ok">{t('выдано полностью')}</span>
+        )}
+      </td>
+    </>
   )
 }
 

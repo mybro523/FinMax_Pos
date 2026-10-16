@@ -8,6 +8,9 @@ import { useCan } from '../db/auth'
 import { payDebt } from '../db/ops'
 import { fmtDateTime } from '../lib/time'
 import { useT, translate as tr } from '../lib/i18n'
+import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import { skachatXlsx } from '../lib/excel'
+import { getUser } from '../db/auth'
 
 export default function Debts() {
   const customers = useCollection('customers')
@@ -22,6 +25,18 @@ export default function Debts() {
   const isFounder = can('customers.delete')
   const totalDebt = customers.reduce((s, c) => s + (c.debt || 0), 0)
   const pg = usePagination(customers, 10)
+
+  // ── Выгрузка и печать: все клиенты и их долги ──
+  const exCols = [
+    { header: t('Клиент'), key: 'name', width: 30 },
+    { header: t('Телефон'), key: 'phone', width: 18 },
+    { header: t('Долг'), key: 'debt', width: 14, money: true },
+  ]
+  const exRows = customers.map((c) => ({ name: c.name, phone: c.phone || '', debt: Number(c.debt) || 0 }))
+  const exItogi = { name: t('Итого'), debt: Math.round(totalDebt * 100) / 100 }
+  const exPodzag = `${t('Клиентов')}: ${customers.length} · ${t('с долгом')}: ${customers.filter((c) => (c.debt || 0) > 0).length}`
+  const exportExcel = () =>
+    skachatXlsx({ fayl: t('Долги клиентов'), zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Долги клиентов')}`, podzag: exPodzag, cols: exCols, rows: exRows, itogi: exItogi })
 
   async function add() {
     const r = await dialog.prompt({
@@ -75,8 +90,14 @@ export default function Debts() {
     <Layout
       title={t('Долги клиентов')}
       subtitle={`${t('Общая задолженность')}: ${money(totalDebt)}`}
-      actions={can('customers.create') && <button className="btn" data-tour="debt.add" onClick={add}><span className="ic"><LuUserPlus size={16} /></span> {t('Добавить клиента')}</button>}
+      actions={
+        <>
+          <ExportPechat onExcel={exportExcel} />
+          {can('customers.create') && <button className="btn" data-tour="debt.add" onClick={add}><span className="ic"><LuUserPlus size={16} /></span> {t('Добавить клиента')}</button>}
+        </>
+      }
     >
+      <PrintSheet zagolovok={t('Долги клиентов')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />
       <div className="panel" data-tour="debt.list" style={{ padding: 0 }}>
         <table>
           <thead><tr><th>{t('Клиент')}</th><th>{t('Телефон')}</th><th className="num">{t('Долг')}</th><th></th></tr></thead>

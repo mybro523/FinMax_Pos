@@ -320,6 +320,9 @@ export function parseExpense(p: any, now?: number) {
     shiftId: idOrNull(e.shiftId, 'смена'),
     // Зарплата: кому выдана. Нет — расход без сотрудника
     employeeId: idOrNull(e.employeeId, 'сотрудник'),
+    // И за какой месяц. Непонятный месяц операцию не роняет — деньги выданы, —
+    // просто не записывается (тогда месяцем считается месяц выдачи)
+    salaryMonth: typeof e.salaryMonth === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(e.salaryMonth) ? e.salaryMonth : '',
   }
 }
 

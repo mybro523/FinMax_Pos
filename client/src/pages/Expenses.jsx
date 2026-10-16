@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { LuWallet, LuPlus, LuPencil, LuTrash2, LuLock, LuBanknote } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { Modal, useToast, useDialog } from '../components/ui'
@@ -16,7 +16,8 @@ import { addExpense, updateExpense, removeExpense } from '../db/ops'
 import { dayKey, fmtDate, fmtTime } from '../lib/time'
 import { useT } from '../lib/i18n'
 import { isDesktop } from '../lib/desktop'
-import SalaryPicker, { isZarplata, useStaff, staffName } from '../components/SalaryPicker'
+import SalaryPicker, { isZarplata, useStaff, staffName, monthName, ZARPLATA } from '../components/SalaryPicker'
+import { mesyacZarplaty, poslednieMesyacy } from '../lib/otchety'
 
 // ── Расходы магазина ──
 // Аренда, зарплата, свет, налоги — всё, на что магазин тратит деньги помимо закупки
@@ -51,8 +52,24 @@ export default function Expenses() {
   const [sourceId, setSourceId] = useState('')
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState(null)
-  // Зарплата: кому выдаём. Остальным статьям сотрудник не нужен
+  // Зарплата: кому выдаём и за какой месяц. Остальным статьям это не нужно
   const [employeeId, setEmployeeId] = useState('')
+  const [salaryMonth, setSalaryMonth] = useState(() => poslednieMesyacy(1)[0])
+
+  // Пришли из «Сотрудников» по кнопке «Выдать»: зарплата этому сотруднику за тот
+  // месяц уже выбрана, остаётся проверить сумму
+  const loc = useLocation()
+  const nav = useNavigate()
+  const vydat = loc.state?.zarplata
+  useEffect(() => {
+    if (!vydat || !categories.length) return
+    if (categories.some((c) => isZarplata(c.name))) {
+      setCategory(ZARPLATA)
+      setEmployeeId(vydat.employeeId || '')
+      if (vydat.month) setSalaryMonth(vydat.month)
+    }
+    nav('.', { replace: true, state: null })
+  }, [vydat, categories, nav])
 
   // ── Из какой кассы можно взять деньги ──
   // Открытые смены: сайта и касс с программой. Список держим у себя, а не в общем
@@ -119,7 +136,7 @@ export default function Expenses() {
     try {
       await addExpense({
         date, category, amount: sum, note, fromCash, shiftId: fromCash ? sourceId : null,
-        ...(isZarplata(category) && employeeId ? { employeeId } : {}),
+        ...(isZarplata(category) && employeeId ? { employeeId, salaryMonth } : {}),
       })
       journal.reload()
       setAmount('')
@@ -166,6 +183,7 @@ export default function Expenses() {
     { header: t('Дата'), key: 'date', width: 18 },
     { header: t('Статья'), key: 'category', width: 24 },
     { header: t('Кому выдана'), key: 'employee', width: 22 },
+    { header: t('За месяц'), key: 'month', width: 16 },
     { header: t('Примечание'), key: 'note', width: 34, wrap: true },
     { header: t('Оплата'), key: 'pay', width: 18 },
     { header: t('Кто внёс'), key: 'who', width: 16 },
@@ -175,6 +193,7 @@ export default function Expenses() {
     date: e.fromCash ? `${fmtDate(e.date)} ${fmtTime(e.date)}` : fmtDate(e.date),
     category: t(e.category),
     employee: e.employeeName || '',
+    month: e.employeeId ? monthName(mesyacZarplaty(e), t) : '',
     note: e.note || '',
     pay: e.fromCash ? `${t('из кассы')}${tillOf(e) ? ' · ' + tillOf(e) : ''}` : '',
     who: e.user?.name || '',
@@ -225,7 +244,12 @@ export default function Expenses() {
             />
           </div>
         </div>
-        {isZarplata(category) && <SalaryPicker employeeId={employeeId} setEmployeeId={setEmployeeId} onAmount={setAmount} tour="exp.salary" />}
+        {isZarplata(category) && (
+          <SalaryPicker
+            employeeId={employeeId} setEmployeeId={setEmployeeId} month={salaryMonth} setMonth={setSalaryMonth}
+            amount={amount} onAmount={setAmount} tour="exp.salary"
+          />
+        )}
         <div className="field">
           <label htmlFor="expNote">{t('Примечание (необязательно)')}</label>
           <input
@@ -316,6 +340,7 @@ export default function Expenses() {
                 <td className="cell-main">
                   <b>{t(e.category)}</b>
                   {e.employeeName ? <span className="exp-emp"> · {e.employeeName}</span> : null}
+                  {e.employeeId ? <span className="exp-emp"> · {t('за')} {monthName(mesyacZarplaty(e), t)}</span> : null}
                   {e.fromCash && (
                     <span className="badge cash" style={{ marginLeft: 8, fontWeight: 500 }}>
                       <LuBanknote size={13} /> {t('из кассы')}{tillOf(e) ? ` · ${tillOf(e)}` : ''}
@@ -365,6 +390,9 @@ function EditExpense({ expense, categories, onSaved, onClose }) {
   const [amount, setAmount] = useState(String(expense.amount ?? ''))
   const [note, setNote] = useState(expense.note || '')
   const [employeeId, setEmployeeId] = useState(expense.employeeId || '')
+  // За какой месяц выдача. У старых выдач месяц не записан — это месяц их даты
+  const [salaryMonth, setSalaryMonth] = useState(() => mesyacZarplaty(expense))
+  const monthOpts = useMemo(() => [...new Set([mesyacZarplaty(expense), ...poslednieMesyacy(12)])].sort().reverse(), [expense])
   const [saving, setSaving] = useState(false)
   const { staff } = useStaff()
 
@@ -386,6 +414,7 @@ function EditExpense({ expense, categories, onSaved, onClose }) {
     // Сотрудник — только у зарплаты: сменили статью на другую — сотрудник снимается
     const wantEmp = isZarplata(category) ? employeeId : ''
     if (wantEmp !== (expense.employeeId || '')) patch.employeeId = wantEmp
+    if (wantEmp && salaryMonth !== mesyacZarplaty(expense)) patch.salaryMonth = salaryMonth
     if (!Object.keys(patch).length) return onClose()
 
     setSaving(true)
@@ -432,6 +461,14 @@ function EditExpense({ expense, categories, onSaved, onClose }) {
               <option value={expense.employeeId}>{expense.employeeName || t('удалённый сотрудник')}</option>
             )}
             {(staff || []).map((u) => <option key={u.id} value={u.id}>{staffName(u)}</option>)}
+          </select>
+        </div>
+      )}
+      {isZarplata(category) && employeeId && (
+        <div className="field">
+          <label htmlFor="expEditMonth">{t('За месяц')}</label>
+          <select id="expEditMonth" value={salaryMonth} onChange={(e) => setSalaryMonth(e.target.value)}>
+            {monthOpts.map((m) => <option key={m} value={m}>{monthName(m, t)}</option>)}
           </select>
         </div>
       )}

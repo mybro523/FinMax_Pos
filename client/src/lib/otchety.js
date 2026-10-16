@@ -277,3 +277,31 @@ export function poslednieMesyacy(n, now = new Date()) {
   }
   return out
 }
+
+// ── Зарплата частями ──
+// Зарплату выдают частями: аванс, потом остаток, бывает и в следующем месяце. За какой
+// месяц выдача, записано в самом расходе («2026-10»). У выдач, внесённых раньше, чем
+// месяц стали записывать, месяцем считается месяц самой выдачи (по Душанбе)
+const MESYAC = /^[0-9]{4}-(0[1-9]|1[0-2])$/
+export function mesyacKluch(d) {
+  const tj = new Date(ts(d) + 5 * 3600000)
+  return `${tj.getUTCFullYear()}-${String(tj.getUTCMonth() + 1).padStart(2, '0')}`
+}
+export const mesyacZarplaty = (e) => (MESYAC.test(String(e?.salaryMonth || '')) ? e.salaryMonth : mesyacKluch(e?.date))
+
+// Выдачи зарплаты сотруднику за месяц, старые сверху. krome — выдача, которую сейчас
+// правят: её саму в «уже выдано» не считаем
+export function vydachiZaMesyac(expenses, employeeId, month, krome) {
+  if (!employeeId) return []
+  return (expenses || [])
+    .filter((e) => e && e.employeeId === employeeId && (krome == null || e.id !== krome) && mesyacZarplaty(e) === month)
+    .sort((a, b) => ts(a.date) - ts(b.date))
+}
+export const vydanoZaMesyac = (expenses, employeeId, month, krome) =>
+  kop(vydachiZaMesyac(expenses, employeeId, month, krome).reduce((a, e) => a + num(e.amount), 0))
+
+// Начислено и выдано → сколько осталось выдать или сколько выдано сверх начисленного
+export function ostatokZarplaty(nachisleno, vydano) {
+  const raznica = kop(num(nachisleno) - num(vydano))
+  return { ostalos: Math.max(0, raznica), pereplata: Math.max(0, kop(-raznica)) }
+}

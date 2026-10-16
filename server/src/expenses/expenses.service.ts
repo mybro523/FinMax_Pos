@@ -128,6 +128,8 @@ export class ExpensesService {
             shiftId,
             userId: userId ?? null,
             ...employee,
+            // Месяц — только у зарплаты: без сотрудника он ничего не значит
+            salaryMonth: employee.employeeId ? dto.salaryMonth || '' : '',
           },
           include: withUser,
         })
@@ -166,6 +168,9 @@ export class ExpensesService {
       // Дата расхода из кассы — это время в смене, её не переносят
       if (dto.date !== undefined && !expense.fromCash) data.date = expenseDate(dto.date)
       if (dto.employeeId !== undefined) Object.assign(data, await this.employeeOf(tx, dto.employeeId))
+      if (dto.salaryMonth !== undefined) data.salaryMonth = dto.salaryMonth
+      // Сотрудника сняли (статья больше не «Зарплата») — месяц уходит вместе с ним
+      if (dto.employeeId !== undefined && !String(dto.employeeId).trim()) data.salaryMonth = ''
       const updated = await tx.expense.update({ where: { id }, data, include: withUser })
       if (expense.fromCash && expense.shiftId) await setExpenseCash(tx, expense.shiftId)
       return updated

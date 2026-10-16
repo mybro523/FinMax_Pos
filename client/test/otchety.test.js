@@ -10,6 +10,7 @@ import assert from 'node:assert/strict'
 import {
   qtyText, prodazhiPoTovaram, vseProdazhi, zakupkiIOplaty, sverkaPostavshikov,
   prodazhiSotrudnika, zarplataKVydache, mesyac, poslednieMesyacy, vPeriode,
+  mesyacKluch, mesyacZarplaty, vydachiZaMesyac, vydanoZaMesyac, ostatokZarplaty,
 } from '../src/lib/otchety.js'
 import { priceFromMarkup, markupOf } from '../src/lib/pricing.js'
 import { isVesovoy, isKg, edinica } from '../src/lib/units.js'
@@ -185,4 +186,41 @@ test('месяцы по таджикскому времени', () => {
   assert.ok(vPeriode('2026-10-31T18:59:59Z', m.from, m.to))
   assert.ok(!vPeriode('2026-10-31T19:00:00Z', m.from, m.to))
   assert.deepEqual(poslednieMesyacy(3, D('2026-01-15T10:00:00Z')), ['2026-01', '2025-12', '2025-11'])
+})
+
+// ── Зарплата частями ──
+const vydachi = [
+  { id: 'e1', employeeId: 'u1', amount: 1000, salaryMonth: '2026-10', date: '2026-10-15T06:00:00Z' },
+  // Остаток за октябрь выдан уже в ноябре — это всё равно октябрьская зарплата
+  { id: 'e2', employeeId: 'u1', amount: 800, salaryMonth: '2026-10', date: '2026-11-03T06:00:00Z' },
+  // Старая выдача, месяц не записан: 1 октября 01:00 по Душанбе — октябрь
+  { id: 'e3', employeeId: 'u1', amount: 500, salaryMonth: '', date: '2026-09-30T20:00:00Z' },
+  { id: 'e4', employeeId: 'u2', amount: 700, salaryMonth: '2026-10', date: '2026-10-15T06:00:00Z' },
+  { id: 'e5', employeeId: null, amount: 300, salaryMonth: '', date: '2026-10-15T06:00:00Z' },
+]
+
+test('зарплата частями: месяц выдачи — записанный, а у старых выдач — месяц их даты', () => {
+  assert.equal(mesyacKluch('2026-09-30T19:00:00Z'), '2026-10', 'полночь по Душанбе — уже октябрь')
+  assert.equal(mesyacKluch('2026-09-30T18:59:00Z'), '2026-09')
+  assert.equal(mesyacZarplaty(vydachi[1]), '2026-10', 'выдача в ноябре за октябрь')
+  assert.equal(mesyacZarplaty(vydachi[2]), '2026-10')
+  assert.equal(mesyacZarplaty({ salaryMonth: 'октябрь', date: '2026-11-03T06:00:00Z' }), '2026-11', 'непонятный месяц — месяц даты')
+})
+
+test('зарплата частями: сколько уже выдано за месяц', () => {
+  assert.equal(vydanoZaMesyac(vydachi, 'u1', '2026-10'), 2300)
+  assert.equal(vydanoZaMesyac(vydachi, 'u1', '2026-11'), 0, 'выдача в ноябре за октябрь в ноябрь не попадает')
+  assert.equal(vydanoZaMesyac(vydachi, 'u2', '2026-10'), 700)
+  assert.equal(vydanoZaMesyac(vydachi, 'u1', '2026-10', 'e2'), 1500, 'выдачу, которую правят, в «уже выдано» не считаем')
+  assert.equal(vydanoZaMesyac(vydachi, '', '2026-10'), 0)
+  assert.deepEqual(vydachiZaMesyac(vydachi, 'u1', '2026-10').map((e) => e.id), ['e3', 'e1', 'e2'], 'старые сверху')
+  assert.equal(vydanoZaMesyac([{ employeeId: 'u1', amount: 0.1, salaryMonth: '2026-10' }, { employeeId: 'u1', amount: 0.2, salaryMonth: '2026-10' }], 'u1', '2026-10'), 0.3, 'до дирама')
+})
+
+test('зарплата частями: осталось выдать или выдано сверх', () => {
+  assert.deepEqual(ostatokZarplaty(2000, 1800), { ostalos: 200, pereplata: 0 })
+  assert.deepEqual(ostatokZarplaty(2000, 2000), { ostalos: 0, pereplata: 0 })
+  assert.deepEqual(ostatokZarplaty(2000, 2100.5), { ostalos: 0, pereplata: 100.5 })
+  assert.deepEqual(ostatokZarplaty(0, 0), { ostalos: 0, pereplata: 0 })
+  assert.deepEqual(ostatokZarplaty(3900.33, 0.33), { ostalos: 3900, pereplata: 0 })
 })

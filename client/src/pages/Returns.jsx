@@ -3,7 +3,9 @@ import { LuUndo2, LuSearch, LuTriangleAlert, LuCircleCheck, LuPrinter } from 're
 import Layout from '../components/Layout'
 import { Modal, useToast, PayBadge } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
-import { JournalFilter, JournalCount, useJournalFilter } from '../components/JournalFilter'
+import { JournalFilter, JournalCount, useJournalFilter, periodText } from '../components/JournalFilter'
+import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import { skachatXlsx } from '../lib/excel'
 import { useCollection, money } from '../db/store'
 import { returnGoods } from '../db/ops'
 import { fmtDateTime, dayKey, chekNomer } from '../lib/time'
@@ -16,7 +18,10 @@ import { returnTicket } from '../lib/ticket'
 import TicketView from '../components/TicketView'
 import { usePechat } from '../components/PrintDialog'
 import { getRekvizity } from '../lib/rekvizity'
-import { useAuth, useCan } from '../db/auth'
+import { useAuth, useCan, getUser } from '../db/auth'
+
+// Чем вернули деньги — подписи те же, что в форме возврата
+const REFUND = { cash: 'Наличными из кассы', card: 'Возврат на карту', transfer: 'Возврат переводом', debt: 'Уменьшить долг клиента' }
 
 // ── Возврат товара ──
 // Кассир находит чек, отмечает что и сколько возвращают и решает по каждой позиции:
@@ -183,8 +188,42 @@ export default function Returns() {
 
   const pg = usePagination(journal.rows, 10, journal.controls.period + journal.controls.q)
 
+  // ── Выгрузка и печать: история возвратов, как она отобрана (период, поиск) ──
+  const itemsText = (r) =>
+    (r.items || [])
+      .map((i) => {
+        const prod = products.find((p) => p.id === i.productId)
+        const drob = isVesovoy({ unit: i.unit }) || isVesovoy(prod)
+        return `${i.name} ×${drob ? `${kgText(i.units)} ${t(isVesovoy({ unit: i.unit }) ? i.unit : edinica(prod))}` : i.units}`
+      })
+      .join(', ') + ((r.items || []).some((i) => !i.restock) ? ` (${t('часть списана')})` : '')
+  const exCols = [
+    { header: t('Дата'), key: 'date', width: 18 },
+    { header: t('Товары'), key: 'items', width: 46, wrap: true },
+    { header: t('Чем вернули'), key: 'refund', width: 22 },
+    { header: t('Кассир'), key: 'who', width: 14 },
+    { header: t('Возвращено'), key: 'total', width: 14, money: true },
+  ]
+  const exRows = journal.rows.map((r) => ({
+    date: fmtDateTime(r.date),
+    items: itemsText(r),
+    refund: t(REFUND[r.refund] || REFUND.cash) + (r.refund === 'transfer' && r.refundVia ? ` · ${r.refundVia}` : ''),
+    who: r.user?.name || '',
+    total: Number(r.total) || 0,
+  }))
+  const exItogi = { date: t('Итого'), total: Math.round(exRows.reduce((s, r) => s + r.total, 0) * 100) / 100 }
+  const exPodzag = [
+    `${t('Период')}: ${periodText(journal.controls)}`,
+    journal.controls.q.trim() ? `${t('Поиск')}: «${journal.controls.q.trim()}»` : '',
+    `${t('Записей')}: ${journal.rows.length}`,
+  ].filter(Boolean).join(' · ')
+  const exportExcel = () =>
+    skachatXlsx({ fayl: t('Возвраты'), zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Возвраты')}`, podzag: exPodzag, cols: exCols, rows: exRows, itogi: exItogi })
+
   return (
-    <Layout title={t('Возврат товара')} subtitle={t('Возврат денег покупателю по чеку')}>
+    <Layout title={t('Возврат товара')} subtitle={t('Возврат денег покупателю по чеку')} actions={<ExportPechat onExcel={exportExcel} />}>
+      {/* Пока открыт чек возврата, на бумагу идёт он, а не история */}
+      {!done && <PrintSheet zagolovok={t('Возвраты')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />}
       <div className="note info" style={{ marginBottom: 16, maxWidth: 780 }}>
         {t('Как это работает: найдите чек, укажите сколько штук возвращают и решите по каждому товару — вернуть его в продажу или списать. Деньги вернутся тем же способом, каким платили.')}
       </div>

@@ -11,6 +11,9 @@ import { useCan } from '../db/auth'
 import { useCategories, categoryNames } from '../lib/categories'
 import { sellsBelowCost } from '../lib/pricing'
 import NumberInput from '../components/NumberInput'
+import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import { skachatXlsx } from '../lib/excel'
+import { getUser } from '../db/auth'
 
 export default function Deferred() {
   const deferred = useCollection('deferred')
@@ -23,6 +26,16 @@ export default function Deferred() {
   const can = useCan()
   const isFounder = can('products.create')
   const pg = usePagination(deferred, 10)
+
+  // ── Выгрузка и печать: штрихкоды, которые ждут карточки ──
+  const exCols = [
+    { header: t('Штрихкод'), key: 'barcode', width: 24 },
+    { header: t('Добавлен'), key: 'added', width: 20 },
+  ]
+  const exRows = deferred.map((d) => ({ barcode: d.barcode, added: d.createdAt ? fmtDateTime(d.createdAt) : '' }))
+  const exPodzag = `${t('Ожидают оформления')}: ${deferred.length}`
+  const exportExcel = () =>
+    skachatXlsx({ fayl: t('Отложенные штрихкоды'), zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Отложенные штрихкоды')}`, podzag: exPodzag, cols: exCols, rows: exRows })
 
   async function del(item) {
     const ok = await dialog.confirm({
@@ -77,7 +90,9 @@ export default function Deferred() {
     <Layout
       title={t('Отложенные штрихкоды')}
       subtitle={`${deferred.length} ${t('ожидают оформления')}`}
+      actions={<ExportPechat onExcel={exportExcel} />}
     >
+      <PrintSheet zagolovok={t('Отложенные штрихкоды')} podzag={exPodzag} cols={exCols} rows={exRows} />
       {deferred.length === 0 ? (
         <div className="panel" data-tour="def.list">
           <div className="empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>

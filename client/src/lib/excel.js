@@ -77,14 +77,30 @@ function fillSheet(ws, { zagolovok, podzag, cols, rows, itogi }) {
 // itogi: { key: значение } — итоговая строка жирным (не обязательна)
 // svodka: { list, zagolovok, podzag, cols, rows, itogi } — второй лист со сводкой
 // (например, итоги по статьям), не обязателен
-export async function skachatXlsx({ fayl, zagolovok, podzag, cols, rows, itogi, svodka }) {
+// listy: [{ list, zagolovok, podzag, cols, rows, itogi }] — ещё листы: у панели
+// управления так лежат склад, долги и продажи за день. Не обязательны
+// list — имя первого листа (по умолчанию «Лист1»)
+export async function skachatXlsx({ fayl, zagolovok, podzag, cols, rows, itogi, svodka, listy, list }) {
   const ExcelJS = (await import('exceljs')).default
   const wb = new ExcelJS.Workbook()
-  const ws = wb.addWorksheet('Лист1', { views: [{ state: 'frozen', ySplit: 4 }] })
+  // Имя листа в Excel — до 31 знака, без : / ? * [ ] и обратной черты, и не повторяется
+  const used = new Set()
+  const imya = (raw, zapas) => {
+    const base = String(raw || zapas).split('').filter((ch) => !':/?*[]'.includes(ch) && ch !== String.fromCharCode(92)).join('').trim().slice(0, 28) || zapas
+    let name = base
+    for (let n = 2; used.has(name.toLowerCase()); n++) name = `${base} ${n}`
+    used.add(name.toLowerCase())
+    return name
+  }
+  const ws = wb.addWorksheet(imya(list, 'Лист1'), { views: [{ state: 'frozen', ySplit: 4 }] })
   fillSheet(ws, { zagolovok, podzag, cols, rows, itogi })
   if (svodka) {
-    const ws2 = wb.addWorksheet(String(svodka.list || 'Сводка').slice(0, 31), { views: [{ state: 'frozen', ySplit: 4 }] })
+    const ws2 = wb.addWorksheet(imya(svodka.list, 'Сводка'), { views: [{ state: 'frozen', ySplit: 4 }] })
     fillSheet(ws2, svodka)
+  }
+  for (const l of listy || []) {
+    const wsN = wb.addWorksheet(imya(l.list, 'Лист'), { views: [{ state: 'frozen', ySplit: 4 }] })
+    fillSheet(wsN, { zagolovok: l.zagolovok || zagolovok, podzag: l.podzag ?? podzag, cols: l.cols, rows: l.rows, itogi: l.itogi })
   }
 
   const buf = await wb.xlsx.writeBuffer()

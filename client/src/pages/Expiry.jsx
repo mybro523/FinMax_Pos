@@ -9,6 +9,11 @@ import { expiredUnits, sellableUnits, hasExpired } from '../lib/units'
 import { expiryStatus, expiryLabel, EXPIRY_WARN_DAYS } from '../lib/expiry'
 import { fmtDate } from '../lib/time'
 import { useT } from '../lib/i18n'
+import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import { skachatXlsx } from '../lib/excel'
+import { getUser } from '../db/auth'
+
+const LEVEL = { expired: 'Просрочен', soon: 'Скоро истекает', ok: 'В норме' }
 
 const EXP_COLOR = { expired: 'var(--danger)', soon: 'var(--warn)', ok: 'var(--muted)' }
 
@@ -43,8 +48,32 @@ export default function Expiry() {
 
   const pg = usePagination(rows.list, 10, mode)
 
+  // ── Выгрузка и печать: то, что выбрано вкладкой (требуют внимания или все) ──
+  const exCols = [
+    { header: t('Товар'), key: 'name', width: 34 },
+    { header: t('Категория'), key: 'cat', width: 18 },
+    { header: t('Остаток'), key: 'stock', width: 16 },
+    { header: t('Негодно, шт'), key: 'bad', width: 12, num: true },
+    { header: t('Годен до'), key: 'date', width: 13 },
+    { header: t('Осталось'), key: 'left', width: 18 },
+    { header: t('Статус'), key: 'level', width: 16 },
+  ]
+  const exRows = rows.list.map(({ p, s }) => ({
+    name: p.name + (p.dosage ? ` · ${p.dosage}` : ''), cat: p.category || '', stock: stockText(p),
+    bad: hasExpired(p) ? expiredUnits(p) : '', date: fmtDate(p.expiryDate), left: expiryLabel(s.days), level: t(LEVEL[s.level] || ''),
+  }))
+  const exPodzag = [
+    mode === 'warn' ? t('Требуют внимания') : t('Все со сроком'),
+    `${t('Просрочено')}: ${rows.expired}`,
+    `${t('Скоро истекает')}: ${rows.soon}`,
+    `${t('Строк')}: ${rows.list.length}`,
+  ].join(' · ')
+  const exportExcel = () =>
+    skachatXlsx({ fayl: t('Срок годности'), zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Срок годности товаров')}`, podzag: exPodzag, cols: exCols, rows: exRows })
+
   return (
-    <Layout title={t('Срок годности товаров')} subtitle={`${t('Контроль сроков (предупреждение за')} ${EXPIRY_WARN_DAYS} ${t('дней)')}`}>
+    <Layout title={t('Срок годности товаров')} subtitle={`${t('Контроль сроков (предупреждение за')} ${EXPIRY_WARN_DAYS} ${t('дней)')}`} actions={<ExportPechat onExcel={exportExcel} />}>
+      <PrintSheet zagolovok={t('Срок годности товаров')} podzag={exPodzag} cols={exCols} rows={exRows} />
       <div className="cards" data-tour="exp.cards" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 16 }}>
         <div className="metric">
           <div className="metric-head"><div className="label">{t('Просрочено')}</div><div className="ic-box" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}><LuTriangleAlert size={19} /></div></div>

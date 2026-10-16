@@ -9,7 +9,9 @@ import Metric from '../components/Metric'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { useCollection, money } from '../db/store'
-import { useAuth, useCan } from '../db/auth'
+import { useAuth, useCan, getUser } from '../db/auth'
+import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import { skachatXlsx } from '../lib/excel'
 import { openShift, closeShift, cashMove, removeCashMove } from '../db/ops'
 import { fmtDateTime, fmtShort, fmtTime, dayKey } from '../lib/time'
 import { useT, translate as tr } from '../lib/i18n'
@@ -211,12 +213,75 @@ export default function Shift() {
     }
   }
 
+  // ── Выгрузка и печать ──
+  // История закрытых смен (Z-отчёты) — все сразу, а не одна страница списка. Смена
+  // открыта — над таблицей её наличные: сколько сейчас должно лежать в кассе, и
+  // ещё таблица с продажами смены по способам оплаты
+  const kop = (x) => Math.round((Number(x) || 0) * 100) / 100
+  const exCols = [
+    { header: t('Открыта'), key: 'opened', width: 17 },
+    { header: t('Закрыта'), key: 'closed', width: 17 },
+    { header: t('Кассир'), key: 'who', width: 16 },
+    { header: t('Касса'), key: 'till', width: 14 },
+    { header: t('Чеков'), key: 'count', width: 9, num: true },
+    { header: t('Выручка'), key: 'revenue', width: 14, money: true },
+    { header: t('Возвраты'), key: 'refunds', width: 13, money: true },
+    { header: t('Наличные (факт)'), key: 'counted', width: 15, money: true },
+    { header: t('Расхождение'), key: 'diff', width: 14, money: true },
+  ]
+  const exRows = history.map((s) => ({
+    opened: fmtDateTime(s.openedAt), closed: s.closedAt ? fmtDateTime(s.closedAt) : '',
+    who: s.user?.name || '', till: s.deviceName || '',
+    count: s.count || 0, revenue: kop(shiftTotals(s).netSales), refunds: kop(s.refundTotal),
+    counted: kop(s.countedCash), diff: kop(s.difference),
+  }))
+  const exSum = (k) => kop(exRows.reduce((a, r) => a + (Number(r[k]) || 0), 0))
+  const exItogi = { opened: t('Итого'), count: exSum('count'), revenue: exSum('revenue'), refunds: exSum('refunds'), counted: exSum('counted'), diff: exSum('diff') }
+  const exPodzag = [
+    current ? `${t('Смена открыта')}: ${fmtDateTime(current.openedAt)}` : t('Смена закрыта'),
+    `${t('Закрытых смен')}: ${history.length}`,
+  ].join(' · ')
+  const exSvodka = current && live ? {
+    list: t('Наличные смены'),
+    zagolovok: t('Наличные открытой смены'),
+    podzag: `${t('Открыта')}: ${fmtDateTime(current.openedAt)}`,
+    cols: [{ header: t('Показатель'), key: 'k', width: 30 }, { header: t('Сумма'), key: 'v', width: 16, money: true }],
+    rows: [
+      { k: t('Наличные на начало'), v: kop(current.openingCash) },
+      { k: t('Продажи наличными'), v: kop(live.cash) },
+      { k: t('Погашено долгов'), v: kop(live.debtPaid) },
+      { k: t('Внесено'), v: kop(live.cashIn) },
+      { k: t('Изъято'), v: -kop(live.cashOut) },
+      { k: t('Расходы из кассы'), v: -kop(live.expenseCash) },
+      { k: t('Оплачено поставщикам'), v: -kop(live.supplierCash) },
+      { k: t('Возвраты наличными'), v: -kop(live.refundCash) },
+    ],
+    itogi: { k: t('Ожидается в кассе'), v: kop(live.expectedCash) },
+  } : null
+  const exListy = current && live ? [{
+    list: t('Продажи смены'),
+    zagolovok: t('Продажи открытой смены'),
+    cols: [{ header: t('Способ оплаты'), key: 'k', width: 26 }, { header: t('Сумма'), key: 'v', width: 16, money: true }],
+    rows: [
+      { k: t('Наличными'), v: kop(live.cash) },
+      { k: t('Картой'), v: kop(live.card) },
+      { k: t('Переводом'), v: kop(live.transfer) },
+      { k: t('В долг'), v: kop(live.debt) },
+      { k: t('Возвраты'), v: -kop(live.refundTotal) },
+    ],
+    itogi: { k: `${t('Выручка')} (${t('чеков')}: ${live.count})`, v: kop(live.netSales) },
+  }] : []
+  const exportExcel = () =>
+    skachatXlsx({ fayl: t('Смены кассы'), zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Смена кассы')}`, podzag: exPodzag, cols: exCols, rows: exRows, itogi: exItogi, svodka: exSvodka, listy: exListy })
+
   return (
     <Layout
       title={t('Смена кассы')}
       subtitle={current ? t('Смена открыта') : t('Смена закрыта')}
-      actions={current
-        ? (
+      actions={
+        <>
+          <ExportPechat onExcel={exportExcel} />
+          {current && (
           <>
             {can('shift.cash') && (
               <>
@@ -228,9 +293,12 @@ export default function Shift() {
               <button className="btn danger" data-tour="shift.close" onClick={doClose}><span className="ic"><LuClock size={16} /></span> {t('Закрыть смену')}</button>
             )}
           </>
-        )
-        : null}
+          )}
+        </>
+      }
     >
+      {/* Пока открыт Z-отчёт, на бумагу идёт он, а не история смен */}
+      {!view && <PrintSheet zagolovok={t('Смена кассы')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} svodka={exSvodka} listy={exListy} />}
       {/* ── Открытие смены ── */}
       {!current && !can('shift.open') && (
         <div className="note info" style={{ maxWidth: 460, marginBottom: 16 }}>{t('Открыть смену может сотрудник с правом «Смена кассы: открыть и закрыть»')}</div>

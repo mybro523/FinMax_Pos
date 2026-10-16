@@ -21,6 +21,8 @@ import { dayKeyTj } from '../time.mjs'
 // откуда пришёл ответ, он знать не должен
 export const NO_OPEN_SHIFT = 'Нет открытой смены — расход из кассы привязать не к чему. Откройте смену или снимите отметку «из кассы».'
 export const NO_SUCH_CATEGORY = 'Этой статьи расходов уже нет в списке — добавьте её в настройках'
+// Месяц зарплаты: «2026-10» — как у сервера (server/src/expenses/dto.ts)
+const SALARY_MONTH = /^\d{4}-(0[1-9]|1[0-2])$/
 
 // Часы кассы и сервера расходятся не больше чем на минуты
 const FUTURE_SLACK_MS = 5 * 60 * 1000
@@ -88,7 +90,11 @@ export function createExpense(ctx, raw) {
   const clientId = c.str(dto.clientId, 'clientId', { optional: true })
   // Зарплата: кому выдана. Имя запомнит сервер — по своему списку сотрудников
   const employeeId = c.str(dto.employeeId, 'employeeId', { optional: true })
+  // И за какой месяц («2026-10»): по нему считается, сколько ещё осталось выдать
+  const rawMonth = c.str(dto.salaryMonth, 'salaryMonth', { optional: true })
   c.done()
+  if (rawMonth && !SALARY_MONTH.test(rawMonth)) throw bad('Месяц зарплаты — в виде ГГГГ-ММ, например 2026-10')
+  const salaryMonth = employeeId ? rawMonth || '' : ''
 
   return inTx(db, () => {
     // Тот же запрос пришёл второй раз (окно переиграло его после заминки) — второго
@@ -125,6 +131,7 @@ export function createExpense(ctx, raw) {
       shiftId,
       employeeId: employeeId || null,
       employeeName: '',
+      salaryMonth,
       userId: ctx.user.id,
       createdAt: at,
       user: { id: ctx.user.id, name: ctx.user.name },
@@ -139,6 +146,7 @@ export function createExpense(ctx, raw) {
         expense: {
           id: body.id, date: body.date, category, amount: body.amount, note: body.note, fromCash, shiftId,
           ...(employeeId ? { employeeId } : {}),
+          ...(salaryMonth ? { salaryMonth } : {}),
         },
         deviceId: ctx.deviceId,
       },
