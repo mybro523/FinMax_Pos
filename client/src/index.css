@@ -8,6 +8,9 @@
   --brand-navy: #00359f;
   /* Список товаров в каталоге кассы: светлее тёмно-синей шапки, чтобы отличался */
   --catalog-list: #1a3480;
+  /* Корзина кассы — светло-жёлтая плашка: чек выделяется среди белых панелей */
+  --cart-bg: #fff4c7;
+  --cart-line: #efdc92;
   --gold: #efbd24;
   --gold-dark: #dcac14;
   --gold-soft: #fbf3d5;
@@ -64,6 +67,9 @@
    светлее синего бренда: тот на тёмном не читается. Золото остаётся тем же. */
 :root[data-theme="dark"] {
   --catalog-list: #13255c;
+  /* В тёмной теме — тёплая тёмная плашка: светлый текст на светло-жёлтом не читался бы */
+  --cart-bg: #2d2914;
+  --cart-line: #514517;
   --gold: #efbd24;
   --gold-dark: #f6cc4b;
   --gold-soft: #3b3112;
@@ -326,7 +332,10 @@ tbody tr:hover { background: var(--hover); }
 .btn.danger { background: var(--danger); border-color: var(--danger); }
 .btn.danger:hover { filter: brightness(0.94); }
 .btn.gold { background: var(--gold); border-color: var(--gold); color: var(--on-gold); }
-.btn.gold:hover { background: var(--gold-dark); border-color: var(--gold-dark); }
+/* При наведении золото не темнеет (иначе кнопка и жёлтый подвал кассы расходились бы
+   в цвете): отклик — тень и контур; темнеет только в момент нажатия */
+.btn.gold:hover { background: var(--gold); border-color: rgba(11, 26, 58, 0.45); box-shadow: 0 2px 10px rgba(239, 189, 36, 0.55); }
+.btn.gold:active { background: var(--gold-dark); border-color: var(--gold-dark); }
 .btn.sm { padding: 6px 10px; font-size: 13px; }
 .btn.icon { padding: 7px; }
 .btn.block { width: 100%; }
@@ -488,7 +497,7 @@ input::placeholder { color: var(--muted-2); }
 .kassa-izm .chek-x { color: inherit; padding: 2px; border-radius: 6px; flex-shrink: 0; }
 
 /* ── Чек ── */
-.kassa-cart { display: flex; flex-direction: column; padding: 16px; }
+.kassa-cart { display: flex; flex-direction: column; padding: 16px; background: var(--cart-bg); border-color: var(--cart-line); }
 .kassa-cart h2 { margin-bottom: 10px; flex-wrap: wrap; }
 .kassa-cart-tools { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .kassa-cart-tools .btn { font-weight: 500; }
@@ -623,7 +632,7 @@ input::placeholder { color: var(--muted-2); }
   .kassa-table-wrap { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   /* Заголовок таблицы остаётся на месте, пока строки едут под ним. Здесь sticky
      работает: у чека своя настоящая прокрутка */
-  .kassa-table thead th { position: sticky; top: 0; z-index: 1; background: var(--card); }
+  .kassa-table thead th { position: sticky; top: 0; z-index: 1; background: var(--cart-bg); }
   .cart-panel { flex-shrink: 0; }
 }
 @media (min-width: 1280px) and (min-height: 900px) {
@@ -684,7 +693,7 @@ input::placeholder { color: var(--muted-2); }
     counter-increment: stroka;
     display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 10px;
     padding: 10px 11px; margin-bottom: 8px;
-    border: 1px solid var(--border); border-radius: 10px; background: var(--soft);
+    border: 1px solid var(--cart-line); border-radius: 10px; background: var(--card);
   }
   .kassa-table tbody tr:last-child { margin-bottom: 0; }
   .kassa-table tbody tr:hover { box-shadow: none; }
@@ -1095,7 +1104,7 @@ input::placeholder { color: var(--muted-2); }
 /* Кнопки — отклик на наведение и нажатие */
 .btn { transition: background 0.13s, border-color 0.13s, color 0.13s, box-shadow 0.13s, transform 0.1s, filter 0.13s; }
 .btn:hover { box-shadow: 0 2px 10px rgba(0, 53, 159, 0.14); }
-.btn.ghost:hover, .btn.gold:hover { box-shadow: none; }
+.btn.ghost:hover { box-shadow: none; }
 .btn:active { transform: scale(0.985); box-shadow: none; }
 .btn:disabled { transform: none !important; box-shadow: none !important; }
 
