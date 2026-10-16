@@ -18,9 +18,10 @@ export class ShiftsController {
     return this.shifts.open(dto.openingCash, u?.tenantUserId)
   }
 
+  // Закрыть можно свою смену; чужую — с правом «закрыть смену другого сотрудника»
   @Post('close')
   @Perm('shift.open')
-  close(@Body() dto: CloseShiftDto) {
-    return this.shifts.close(dto.countedCash)
+  close(@Body() dto: CloseShiftDto, @CurrentUser() u: any) {
+    return this.shifts.close(dto.countedCash, { role: u?.role, permissions: u?.permissions, tenantUserId: u?.tenantUserId ?? null })
   }
 }

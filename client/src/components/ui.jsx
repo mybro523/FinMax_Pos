@@ -42,14 +42,17 @@ export function PasswordInput({ value, onChange, ...props }) {
   )
 }
 
-// ── Имя бренда ──
+// ── Имя бренда: «FinMax POS» ──
 // Набирается текстом, а не картинкой: на синем фоне синяя половина логотипа
-// пропала бы. «Fin» золотом, «Max» цветом текста — как в шапке сайта FinMax.
-export function BrandWord({ className }) {
+// пропала бы. «Fin» — жёлтым, «Max» — синим, «POS» — тёмно-зелёным, и между
+// «FinMax» и «POS» — пробел. Цвета — в index.css (--brand-fin, --brand-max-c,
+// --brand-pos-c): на тёмном фоне синий и зелёный светлее, иначе их не видно.
+// bare — только имя компании «FinMax», без «POS» (страница «О компании»)
+export function BrandWord({ className, bare = false }) {
   return (
-    <span className={'brand-word' + (className ? ' ' + className : '')}>
-      <span><span className="fin">Fin</span><span className="brand-max">Max</span></span>
-      <span className="brand-pos">POS</span>
+    <span className={'brand-word' + (className ? ' ' + className : '')} aria-label={bare ? 'FinMax' : 'FinMax POS'}>
+      <span className="fin">Fin</span><span className="brand-max">Max</span>
+      {!bare && <>{' '}<span className="brand-pos">POS</span></>}
     </span>
   )
 }

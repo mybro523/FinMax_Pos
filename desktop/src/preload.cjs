@@ -20,6 +20,19 @@ contextBridge.exposeInMainWorld('apteka', {
   app: {
     // «Закрыть программу» с главного экрана
     quit: () => ipcRenderer.invoke('app:quit'),
+    // Ссылка со страницы «О компании». Окно называет только имя ссылки (site, phone…),
+    // адрес знает основная часть: произвольный адрес отсюда не открыть
+    open: (key) => ipcRenderer.invoke('app:open', key),
+  },
+
+  // ── Обмен кассами по местной сети ──
+  // Кто из соседних касс на связи; адрес соседа вручную, если кассы не нашли друг друга
+  lan: {
+    status: () => ipcRenderer.invoke('lan:status'),
+    add: (address) => ipcRenderer.invoke('lan:add', address),
+    remove: (address) => ipcRenderer.invoke('lan:remove', address),
+    forget: (id) => ipcRenderer.invoke('lan:forget', id),
+    now: () => ipcRenderer.invoke('lan:now'),
   },
 
   session: {

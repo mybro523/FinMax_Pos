@@ -246,6 +246,86 @@ export const PHARMACY_SCHEMA = [
   );
   DELETE FROM meta WHERE key IN ('cursor', 'wcursor');
   `,
+  // Доходы вне продаж (версия 1.4.0). Сами доходы лежат в docs (kind = income), как
+  // расходы; их статьи — отдельным списком. Отметки обмена сбрасываются: статьи сервер
+  // завёл миграцией, и по прежней отметке «докуда получили» касса их уже не увидела бы
+  `
+  CREATE TABLE income_categories (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    createdAt TEXT NOT NULL DEFAULT ''
+  );
+  DELETE FROM meta WHERE key IN ('cursor', 'wcursor');
+  `,
+  // ── Обмен кассами по местной сети (версия 1.4.0) ──
+  // Кассы одного магазина передают друг другу сделанное без интернета — по кабелю,
+  // через роутер (local/lan.mjs). Журнал lan_log — всё, что эта касса может отдать
+  // соседям: свои операции и чужие, пришедшие от других касс, по порядку (seq).
+  // Чужая операция ложится в базу поверх данных сервера, как своя неотправленная:
+  // документы с пометкой sync = 'peer', движения остатка и долга с её номером. Когда
+  // сервер её принял (её касса отправила), пометки снимаются; отверг — всё убирается.
+  //
+  // lan_docs — какие документы положила чужая операция: по ним видно, что сервер
+  // прислал её документ, а значит, принял её.
+  // lan_peers — соседние кассы: где они и докуда журналы друг друга уже передали.
+  // lan_manual — адреса, вписанные вручную, если кассы не нашли друг друга сами
+  `
+  CREATE TABLE lan_log (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- Номер операции; у отметки о её судьбе — 'fate:' и номер
+    id TEXT NOT NULL UNIQUE,
+    -- op — операция; fate — что о ней сказал сервер её кассе
+    kind TEXT NOT NULL,
+    -- Касса, на которой операцию сделали
+    origin TEXT NOT NULL,
+    -- У отметки о судьбе — о какой операции речь
+    opId TEXT,
+    type TEXT NOT NULL DEFAULT '',
+    accountId TEXT,
+    createdAt TEXT NOT NULL,
+    -- Что операция сделала (документы, движения) или что сказал сервер — текстом JSON
+    body TEXT NOT NULL,
+    -- Есть ли в ней данные, которые видит не каждый (расходы, доходы, списания)
+    wide INTEGER NOT NULL DEFAULT 0,
+    -- Пришла урезанной: без данных, которые этой кассе не положены
+    redacted INTEGER NOT NULL DEFAULT 0,
+    -- own — своя; applied — чужая, лежит поверх данных сервера; confirmed — сервер её
+    -- принял; rejected — отверг; expired — так и не дошла до сервера за срок
+    state TEXT NOT NULL DEFAULT 'own',
+    -- Своя операция: что сказал о ней сервер (ok | rejected), уже передано соседям
+    fate TEXT,
+    -- Чужая операция: её касса сообщила «сервер принял» во время обмена с сервером под
+    -- этим номером. Поправку снимает следующий обмен — его данные уже с ней
+    fateGen INTEGER,
+    receivedAt TEXT
+  );
+  CREATE INDEX lan_log_state ON lan_log(state);
+  CREATE INDEX lan_log_op ON lan_log(opId);
+  CREATE TABLE lan_docs (
+    kind TEXT NOT NULL,
+    id TEXT NOT NULL,
+    opId TEXT NOT NULL,
+    PRIMARY KEY (kind, id)
+  );
+  CREATE INDEX lan_docs_op ON lan_docs(opId);
+  CREATE TABLE lan_peers (
+    deviceId TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    address TEXT NOT NULL DEFAULT '',
+    port INTEGER NOT NULL DEFAULT 0,
+    -- Докуда наш журнал у соседа есть (он подтвердил) и докуда его журнал есть у нас
+    sentUpTo INTEGER NOT NULL DEFAULT 0,
+    gotUpTo INTEGER NOT NULL DEFAULT 0,
+    -- Сосед получает и данные, которые видит не каждый (за ним работает владелец)
+    wide INTEGER NOT NULL DEFAULT 0,
+    seenAt TEXT,
+    okAt TEXT
+  );
+  CREATE TABLE lan_manual (
+    address TEXT PRIMARY KEY,
+    createdAt TEXT NOT NULL
+  );
+  `,
 ]
 
 // ── Общая база программы ──

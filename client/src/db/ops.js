@@ -582,6 +582,51 @@ export async function removeExpense(expense) {
   }
 }
 
+// ── Доходы вне продаж ──
+// Как расходы, но без кассы: в денежный ящик доход не попадает, поэтому смену не трогает.
+// Ответа сервера ждём; ключ повтора — на случай обрыва связи
+export async function addIncome({ date, category, amount, note }) {
+  const body = {
+    category,
+    amount: Math.round(Number(amount) * 100) / 100,
+    note: (note || '').trim(),
+    clientId: repeatKey(),
+    ...(date ? { date } : {}),
+  }
+  beginMutate(['incomes'])
+  try {
+    const created = await postWithRetry('/incomes', body)
+    setCollection('incomes', [created, ...db.get('incomes').filter((e) => e.id !== created.id)])
+    return created
+  } finally {
+    endMutate(['incomes'])
+    refresh('incomes')
+  }
+}
+
+export async function updateIncome(income, patch) {
+  beginMutate(['incomes'])
+  try {
+    const updated = await api.patch('/incomes/' + income.id, patch)
+    setCollection('incomes', db.get('incomes').map((e) => (e.id === updated.id ? updated : e)))
+    return updated
+  } finally {
+    endMutate(['incomes'])
+    refresh('incomes')
+  }
+}
+
+export async function removeIncome(income) {
+  beginMutate(['incomes'])
+  try {
+    await api.del('/incomes/' + income.id)
+    setCollection('incomes', db.get('incomes').filter((e) => e.id !== income.id))
+  } finally {
+    endMutate(['incomes'])
+    refresh('incomes')
+  }
+}
+
 // ── Наличные в смене: внести размен, изъять выручку ──
 // Ответа сервера ждём: деньги в ящике — не продажа, покупатель не стоит, а знать
 // наверняка, что запись легла, важнее полсекунды. Ключ повтора — на случай обрыва

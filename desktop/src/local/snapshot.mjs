@@ -22,7 +22,7 @@ import { packsToUnits, uppOf, wholeNonNeg } from './units.mjs'
 // Раздел ответа сервера → вид документа в локальной базе
 export const DOC_KEYS = {
   sales: 'sale', returns: 'return', arrivals: 'arrival', writeoffs: 'writeoff', payments: 'payment', shifts: 'shift', expenses: 'expense',
-  cashMoves: 'cashmove', supplierPayments: 'supplierpayment',
+  cashMoves: 'cashmove', supplierPayments: 'supplierpayment', incomes: 'income',
 }
 
 const rows = (v) => (Array.isArray(v) ? v : [])
@@ -177,6 +177,16 @@ function applyExpenseCategories(db, cats, full) {
   for (const id of cats.remove) q(db, 'DELETE FROM expense_categories WHERE id = ?').run(id)
 }
 
+// Статьи доходов — как статьи расходов: список сервера и есть весь список
+function applyIncomeCategories(db, cats, full) {
+  if (full) q(db, 'DELETE FROM income_categories').run()
+  const insert = q(db, 'INSERT OR REPLACE INTO income_categories (id, name, createdAt) VALUES (?, ?, ?)')
+  for (const c of cats.upsert) {
+    if (c && typeof c.id === 'string') insert.run(c.id, String(c.name ?? ''), isoOrNull(c.createdAt) || '')
+  }
+  for (const id of cats.remove) q(db, 'DELETE FROM income_categories WHERE id = ?').run(id)
+}
+
 // Поставщики. Кассиру сервер отдаёт их без долга — тогда долг, известный с прошлого
 // обмена владельца, не трогаем: иначе владелец, вернувшись, увидел бы нули
 function applySuppliers(db, sup, full) {
@@ -261,8 +271,14 @@ function applyDocs(db, kind, docs, full) {
   // (Отвергнутый — не в счёт: если сервер прислал документ с таким номером, значит,
   // он у сервера есть, и пометка «отвергнут» устарела.)
   const mine = new Set(q(db, "SELECT id FROM docs WHERE kind = ? AND sync = 'pending'").all(kind).map((r) => r.id))
+  // Смена соседней кассы, закрытая у неё без интернета (пришла по местной сети, см.
+  // lan.mjs): сервер её закрытия ещё не видел и присылает открытой. Закрытую копию не
+  // заменяем — иначе закрытая смена то пропадала бы из истории, то появлялась
+  const peerClosed =
+    kind === 'shift' ? new Set(q(db, "SELECT id FROM docs WHERE kind = 'shift' AND sync = 'peer' AND closedAt IS NOT NULL").all().map((r) => r.id)) : null
   for (const d of docs.upsert) {
     if (!d || typeof d.id !== 'string' || mine.has(d.id)) continue
+    if (peerClosed && peerClosed.has(d.id) && !d.closedAt) continue
     putDoc(db, kind, d, { sync: 'synced' })
   }
   const drop = q(db, "DELETE FROM docs WHERE kind = ? AND id = ? AND sync = 'synced'")
@@ -370,6 +386,14 @@ export function applyPull(db, res, { now }) {
       if (full || touched(p)) {
         applyExpenseCategories(db, p, full)
         changed.push('expenseCategories')
+      }
+    }
+    // Статьи доходов — тем же, кому видны доходы
+    if (data.incomeCategories) {
+      const p = part(data.incomeCategories)
+      if (full || touched(p)) {
+        applyIncomeCategories(db, p, full)
+        changed.push('incomeCategories')
       }
     }
 

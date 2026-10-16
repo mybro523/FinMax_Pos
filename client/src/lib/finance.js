@@ -69,9 +69,9 @@ export function expensesByCategory(list = []) {
   return [...map.values()].sort((a, b) => b.amount - a.amount)
 }
 
-// Итоги за период. sales/returns/writeOffs/expenses — списки как приходят с сервера.
-// to не задан — значит «по настоящий момент».
-export function periodFinance({ sales = [], returns = [], writeOffs = [], expenses = [], from, to }) {
+// Итоги за период. sales/returns/writeOffs/expenses/incomes — списки как приходят с
+// сервера. to не задан — значит «по настоящий момент».
+export function periodFinance({ sales = [], returns = [], writeOffs = [], expenses = [], incomes = [], from, to }) {
   const soldList = sales.filter((s) => s && s.date && Array.isArray(s.items) && inRange(s.date, from, to))
   const returnList = returns.filter((r) => r && r.date && inRange(r.date, from, to))
   const writeOffList = writeOffs.filter((w) => w && w.date && inRange(w.date, from, to))
@@ -93,6 +93,9 @@ export function periodFinance({ sales = [], returns = [], writeOffs = [], expens
 
   const expenseList = expenses.filter((e) => e && e.date && inRange(e.date, from, to))
   const expensesTotal = expenseList.reduce((s, e) => s + num(e.amount), 0)
+  // Доходы вне продаж: аренда, услуги, бонусы поставщиков. Прибавляются к чистой прибыли
+  const incomeList = incomes.filter((e) => e && e.date && inRange(e.date, from, to))
+  const incomesTotal = incomeList.reduce((s, e) => s + num(e.amount), 0)
 
   const refunds = returnList.reduce((s, r) => s + num(r.total), 0)
   const returnedBack = returnList.reduce((s, r) => s + returnedCost(r), 0)
@@ -132,6 +135,11 @@ export function periodFinance({ sales = [], returns = [], writeOffs = [], expens
     expenses: expensesTotal,
     expenseCount: expenseList.length,
     expensesByCategory: expensesByCategory(expenseList),
-    netProfit: profit - expensesTotal,
+    // Прочие доходы — то, что магазин получил не за товар. Складываются по статьям тем же
+    // правилом, что и расходы
+    incomes: incomesTotal,
+    incomeCount: incomeList.length,
+    incomesByCategory: expensesByCategory(incomeList),
+    netProfit: profit + incomesTotal - expensesTotal,
   }
 }

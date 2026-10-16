@@ -36,6 +36,8 @@ import { startTour, obucheniePokazano, OBSHIY } from './lib/tur'
 const WriteOffs = lazy(() => import('./pages/WriteOffs'))
 const Inventory = lazy(() => import('./pages/Inventory'))
 const Expenses = lazy(() => import('./pages/Expenses'))
+const Incomes = lazy(() => import('./pages/Incomes'))
+const About = lazy(() => import('./pages/About'))
 const Suppliers = lazy(() => import('./pages/Suppliers'))
 const SalesReport = lazy(() => import('./pages/SalesReport'))
 const SupplierReport = lazy(() => import('./pages/SupplierReport'))
@@ -71,6 +73,7 @@ const AHEAD_FOUNDER = [
   () => import('./pages/Employees'),
   () => import('./pages/Roles'),
   () => import('./pages/Expenses'),
+  () => import('./pages/Incomes'),
   () => import('./pages/Suppliers'),
   () => import('./pages/Reports'),
   () => import('./pages/SalesReport'),
@@ -201,6 +204,7 @@ function AuthedApp({ user }) {
           <Route path="/debts" element={guarded('debts.view', <Debts />)} />
           <Route path="/discounts" element={guarded('discounts.view', <Discounts />)} />
           <Route path="/expenses" element={guarded('expenses.view', <Expenses />)} />
+          <Route path="/incomes" element={guarded('incomes.view', <Incomes />)} />
           <Route path="/suppliers" element={guarded('suppliers.view', <Suppliers />)} />
           {/* Прежний адрес «Долги поставщикам» — теперь это вкладка в «Поставщиках» */}
           <Route path="/supplier-debts" element={<Navigate to="/suppliers?tab=debts" replace />} />
@@ -209,6 +213,8 @@ function AuthedApp({ user }) {
           <Route path="/supplier-report" element={guarded('suppliers.view', <SupplierReport />)} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/obuchenie" element={<Obuchenie />} />
+          {/* О компании FinMax — кнопка в шапке главного меню, открыта всем */}
+          <Route path="/about" element={<About />} />
           <Route path="/employees" element={ownerOnly(<Employees />)} />
           <Route path="/roles" element={ownerOnly(<Roles />)} />
           <Route path="*" element={<Navigate to={homeFor(user)} replace />} />

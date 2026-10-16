@@ -77,7 +77,9 @@ export function createSync({
   // refused — сервер на связи, но пачку операций целиком не принял (и это не про
   // вход и не про подписку). Сама по себе такая беда не пройдёт: очередь будет
   // стоять, пока не обновят программу или сервер, — человек должен это увидеть
-  let state = { online: null, syncing: false, blocked: false, refused: '' }
+  // waiting — очередь ждёт соседнюю кассу: операция ссылается на её чек или клиента,
+  // которых сервер ещё не знает (пришли по местной сети, local/lan.mjs)
+  let state = { online: null, syncing: false, blocked: false, refused: '', waiting: false }
   // Операция, которую сервер не может записать, и сколько раз подряд
   let stuck = { id: '', n: 0 }
   // ── Полная загрузка, которая не проходит ──
@@ -113,7 +115,13 @@ export function createSync({
 
   function setState(next) {
     const merged = { ...state, ...next }
-    if (merged.online === state.online && merged.syncing === state.syncing && merged.blocked === state.blocked && merged.refused === state.refused) return
+    if (
+      merged.online === state.online &&
+      merged.syncing === state.syncing &&
+      merged.blocked === state.blocked &&
+      merged.refused === state.refused &&
+      merged.waiting === state.waiting
+    ) return
     state = merged
     onState(state)
   }
@@ -132,10 +140,18 @@ export function createSync({
   // Возвращает: ok — можно спрашивать свежие данные; иначе — что помешало
   async function pushAll() {
     let blocked = false
+    let waiting = false
     for (;;) {
       const ops = store.pendingOps(BATCH)
       if (!ops.length) break
 
+      // Операция ссылается на то, что сделано на соседней кассе и ещё не дошло до
+      // сервера (возврат по её чеку, долг её нового клиента). Сервер такую отверг бы —
+      // ждём, пока сосед отправит своё. Порядок не нарушаем: дальше тоже не идём
+      if (store.waitsForPeer?.(ops[0])) {
+        waiting = true
+        break
+      }
       // Пачка — подряд идущие операции, которые можно отправить одним ключом.
       // Порядок не нарушаем: упёрлись в операцию без ключа — дальше не идём
       const token = tokenFor(ops[0])
@@ -145,7 +161,7 @@ export function createSync({
       }
       const batch = []
       for (const op of ops) {
-        if (tokenFor(op) !== token) break
+        if (tokenFor(op) !== token || store.waitsForPeer?.(op)) break
         batch.push(op)
       }
 
@@ -194,7 +210,8 @@ export function createSync({
       }
       stuck = { id: '', n: 0 }
     }
-    return { ok: true, reached: true, blocked }
+    // Ждём соседа — заход неудачный: следующий будет скоро, а не через пять минут
+    return { ok: !waiting, reached: true, blocked, waiting }
   }
 
   // ── Шаг второй: забрать изменившееся ──
@@ -279,7 +296,7 @@ export function createSync({
         setState({ online: true, blocked: sent.blocked })
         return result
       }
-      setState({ online: sent.reached && got.reached, blocked: sent.blocked, refused: sent.refused || '' })
+      setState({ online: sent.reached && got.reached, blocked: sent.blocked, refused: sent.refused || '', waiting: !!sent.waiting })
       if (got.changed.length) onChanged(got.changed)
       // Нужна полная загрузка — не ждём пять минут: сразу ещё один заход
       if (got.more) again = true

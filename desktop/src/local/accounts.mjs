@@ -205,6 +205,8 @@ export const userView = (acc, now) => ({
   pharmacy: { code: acc.pharmacyCode, name: acc.pharmacyName },
   subscription: subscriptionOf(acc, now),
   impersonatedBy: null,
+  // Сотрудник в базе магазина: по нему окно узнаёт «свою» смену
+  tenantUserId: acc.tenantUserId || null,
 })
 
 // ── Защита входа без интернета от подбора ──

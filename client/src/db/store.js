@@ -19,17 +19,20 @@ const EMPTY = []
 // «expenses» и «expenseCategories» — расходы магазина и их статьи. Тоже только для
 // владельца и тоже по требованию: их запрашивают «Расходы», «Отчёты» и «Настройки».
 //
+// «incomes» и «incomeCategories» — доходы вне продаж и их статьи: по тем же правилам.
+//
 // «suppliers» — поставщики (всем; долги в них видит только владелец), «supplierPayments» —
 // оплаты им (владельцу), «cashMoves» — внесения и изъятия наличных, «payServices» —
 // сервисы перевода для кассы.
 const COLLECTIONS = [
   'products', 'sales', 'arrivals', 'customers', 'deferred', 'shifts', 'payments', 'returns', 'writeoffs', 'categories',
   'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'productTypes',
+  'incomes', 'incomeCategories',
 ]
 // Адрес раздела на сервере — там, где он не совпадает с названием раздела здесь
 const PATHS = {
   expenseCategories: 'expense-categories', supplierPayments: 'supplier-payments', cashMoves: 'cash-moves', payServices: 'pay-services',
-  productTypes: 'product-types',
+  productTypes: 'product-types', incomeCategories: 'income-categories',
 }
 export const pathOf = (key) => '/' + (PATHS[key] || key)
 // ── Кэш принадлежит своему магазину ──
@@ -76,6 +79,7 @@ export const CACHE_DAYS = {
   writeoffs: JOURNAL_CACHE_DAYS,
   payments: JOURNAL_CACHE_DAYS,
   expenses: JOURNAL_CACHE_DAYS,
+  incomes: JOURNAL_CACHE_DAYS,
   supplierPayments: JOURNAL_CACHE_DAYS,
   cashMoves: JOURNAL_CACHE_DAYS,
 }
@@ -364,7 +368,10 @@ export function refreshAll() {
 // Журналы — приходы, возвраты, списания, погашения долгов — меняются несколько раз
 // в день, а не в минуту. Опрашивать их наравне с товарами и продажами незачем:
 // берём их заметно реже, а при возвращении на вкладку — сразу и все.
-const SLOW_KEYS = new Set(['arrivals', 'returns', 'writeoffs', 'payments', 'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices'])
+const SLOW_KEYS = new Set([
+  'arrivals', 'returns', 'writeoffs', 'payments', 'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices',
+  'incomes', 'incomeCategories',
+])
 const SLOW_EVERY = 8 // каждый восьмой тик ≈ раз в минуту
 
 let pollTimer = null

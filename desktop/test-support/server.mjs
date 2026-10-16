@@ -151,6 +151,8 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
       cursor: String(s.version),
       serverTime: new Date(now()).toISOString(),
       device: s.devices.get(query.deviceId),
+      // Ключ магазина для обмена кассами по местной сети (проверка задаёт его сама)
+      lan: s.lan ?? null,
       me: { ...view(u), impersonatedBy: null, tenantUserId: u.tenantUserId },
       ops,
       data,

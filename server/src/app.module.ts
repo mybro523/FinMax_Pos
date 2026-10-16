@@ -22,6 +22,7 @@ import { EventsModule } from './events/events.module'
 import { ExpiryModule } from './expiry/expiry.module'
 import { SyncModule } from './sync/sync.module'
 import { ExpensesModule } from './expenses/expenses.module'
+import { IncomesModule } from './incomes/incomes.module'
 import { SuppliersModule } from './suppliers/suppliers.module'
 import { PayServicesModule } from './payservices/pay-services.module'
 import { ProductTypesModule } from './producttypes/product-types.module'
@@ -56,6 +57,7 @@ import { AppController } from './app.controller'
     EventsModule,
     ExpiryModule,
     ExpensesModule,
+    IncomesModule,
     SuppliersModule,
     PayServicesModule,
     ProductTypesModule,

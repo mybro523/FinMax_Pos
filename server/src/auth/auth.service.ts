@@ -1,11 +1,11 @@
-import { BadRequestException, HttpException, HttpStatus, Injectable, UnauthorizedException } from '@nestjs/common'
+import { BadRequestException, ForbiddenException, HttpException, HttpStatus, Injectable, UnauthorizedException } from '@nestjs/common'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { AdminDbService } from '../admin/admin-db.service'
 import { LoginThrottle } from './throttle'
 import { AUTH_SECRET as SECRET } from '../common/config'
 import { hashPassword, verifyPassword, passwordProblem, isOutdatedHash } from './password'
 import { offlineDaysOf, subscriptionOf, subscriptionMessage } from '../admin/subscription'
-import { permissionsOf } from './permissions'
+import { mayChangeOwnPassword, NO_PASSWORD_CHANGE, permissionsOf } from './permissions'
 import { AccountCache } from '../admin/account-cache.service'
 
 // Неделя, а не месяц: украденный токен должен умирать быстро. Кассе без
@@ -236,6 +236,10 @@ export class AuthService {
       where: { id: accountId },
       include: { pharmacy: true, roleRef: true },
     })
+    // Свой пароль меняет тот, кому это разрешено в «Ролях и правах». Кассиру по
+    // умолчанию нельзя: пароль ему выдаёт и меняет владелец в «Сотрудниках».
+    // Владелец магазина и владелец сервиса меняют свой пароль всегда
+    if (acc && !mayChangeOwnPassword(acc)) throw new ForbiddenException(NO_PASSWORD_CHANGE)
     if (!acc || !(await AuthService.verifyPassword(oldPw, acc.passwordHash))) {
       this.byChange.fail(accountId)
       throw new BadRequestException('Текущий пароль неверный')

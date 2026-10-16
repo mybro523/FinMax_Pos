@@ -5,12 +5,12 @@
 // ключ повтора. Остальное читается из самого документа.
 import { q } from './db.mjs'
 
-export const KINDS = ['sale', 'return', 'arrival', 'writeoff', 'payment', 'shift', 'expense', 'cashmove', 'supplierpayment']
+export const KINDS = ['sale', 'return', 'arrival', 'writeoff', 'payment', 'shift', 'expense', 'cashmove', 'supplierpayment', 'income']
 
 // За какой срок касса держит журналы у себя. Столько же по умолчанию отдаёт сервер
 // (server/src/*/…service.ts) и столько же держит в памяти окно (client/src/db/store.js).
 // Смены сервер отдаёт все — у них срока нет.
-export const WINDOW_DAYS = { sale: 60, return: 180, arrival: 180, writeoff: 180, payment: 180, expense: 180, cashmove: 180, supplierpayment: 180 }
+export const WINDOW_DAYS = { sale: 60, return: 180, arrival: 180, writeoff: 180, payment: 180, expense: 180, cashmove: 180, supplierpayment: 180, income: 180 }
 
 // Какое поле документа считается его датой
 const dateOf = (kind, body) => (kind === 'payment' ? body.createdAt : kind === 'shift' ? body.openedAt : body.date)
@@ -26,8 +26,8 @@ export function putDoc(db, kind, body, { sync = 'synced', deviceId = null } = {}
     dateOf(kind, body),
     kind === 'shift' ? null : body.shiftId ?? null,
     kind === 'return' ? body.saleId ?? null : null,
-    // Ключ повтора есть у чека, возврата, расхода и движения наличных
-    kind === 'sale' || kind === 'return' || kind === 'expense' || kind === 'cashmove' ? body.clientId ?? null : null,
+    // Ключ повтора есть у чека, возврата, расхода, дохода и движения наличных
+    kind === 'sale' || kind === 'return' || kind === 'expense' || kind === 'cashmove' || kind === 'income' ? body.clientId ?? null : null,
     deviceId ?? body.deviceId ?? null,
     kind === 'shift' ? body.closedAt ?? null : null,
     JSON.stringify(body),

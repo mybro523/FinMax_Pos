@@ -22,6 +22,7 @@ import { io } from 'socket.io-client'
 import { createBackups, hostFolderOf, openOrRestore } from './backup.mjs'
 import { readBuildConfig, resolveApiUrl, resolveUpdateFeed, serverOrigin } from './config.mjs'
 import { createGateway } from './gateway.mjs'
+import { createLan } from './lan.mjs'
 import { createClock } from './local/clock.mjs'
 import { getMeta, openDb, setMeta } from './local/db.mjs'
 import { lastFloor, lastSeen } from './local/licence.mjs'
@@ -39,6 +40,20 @@ import { createUpdater, feedYaml } from './updater.mjs'
 import { createWindowState, MIN_SIZE } from './window-state.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+
+// ── Ссылки компании FinMax ──
+// Для страницы «О компании» (client/src/lib/company.js). Окно называет только имя
+// ссылки, адрес берётся отсюда: открыть во внешнем браузере произвольный адрес окно
+// не может — иначе любой сценарий в окне мог бы отправить человека куда угодно
+const COMPANY_LINKS = {
+  phone: 'tel:+992871940202',
+  whatsapp: 'https://wa.me/992871940202',
+  email: 'mailto:finmaxtj@gmail.com',
+  site: 'https://finmax.tj/',
+  instagram: 'https://www.instagram.com/finmax_tj',
+  facebook: 'https://www.facebook.com/finmaxtj',
+  youtube: 'https://youtube.com/@finmaxtj',
+}
 const RENDERER = join(ROOT, 'renderer')
 const FONTS = join(ROOT, 'assets', 'fonts')
 const ICON = join(ROOT, 'assets', 'icon.png')
@@ -235,6 +250,20 @@ async function start() {
   })
   log.info(`касса ${gateway.deviceId}`)
 
+  // ── Обмен кассами по местной сети ──
+  // Кассы одного магазина передают друг другу сделанное без интернета (lan.mjs).
+  // Порты и адрес, на котором слушать, задаются только при запуске из исходников —
+  // проверка запускает две программы на одном компьютере
+  const lan = createLan({
+    hub: gateway.lanHub,
+    log,
+    now: () => clock.now(),
+    tcpPort: (DEV && Number(process.env.FINMAX_LAN_TCP)) || undefined,
+    udpPort: (DEV && Number(process.env.FINMAX_LAN_UDP)) || undefined,
+    bindAddress: (DEV && process.env.FINMAX_LAN_BIND) || undefined,
+  })
+  gateway.attachLan(lan)
+
   const toWindow = (type, payload) => {
     if (win && !win.isDestroyed()) win.webContents.send('realtime:event', { type, payload })
   }
@@ -310,6 +339,8 @@ async function start() {
     const last = backups.last()
     return {
       ...base,
+      // Соседние кассы в местной сети: кто на связи
+      lan: gateway.lanStatus(),
       version: app.getVersion(),
       update: updater.state(),
       // Часам компьютера сейчас верить нельзя — время в чеках может быть неверным, и
@@ -335,6 +366,10 @@ async function start() {
 
   // Раз в минуту: не вышел ли срок работы без связи; заодно окно получает свежий отсчёт
   const tickTimer = setInterval(() => gateway.tick(), 60 * 1000)
+  // Соседи по сети: кто на связи, окно узнаёт раз в десять секунд (событий об этом нет)
+  const lanTimer = setInterval(() => {
+    if (lan.status().running) pushStatus()
+  }, 10 * 1000)
 
   // ── Только для проверок ──
   // Проверке надо «прожить» неделю без связи за секунду. У собранной программы этой
@@ -363,6 +398,8 @@ async function start() {
     store.deactivate()
     clearInterval(clockTimer)
     clearInterval(tickTimer)
+    clearInterval(lanTimer)
+    lan.stop()
     clearInterval(backupTimer)
     clearTimeout(backupFirst)
     updater.stop()
@@ -405,6 +442,31 @@ async function start() {
     if (!trusted(event)) return false
     app.quit()
     return true
+  })
+  // Ссылка со страницы «О компании» — во внешнем браузере, почте или звонилке.
+  // Только из списка COMPANY_LINKS и только по имени
+  ipcMain.handle('app:open', async (event, key) => {
+    if (!trusted(event) || typeof key !== 'string' || !Object.hasOwn(COMPANY_LINKS, key)) return false
+    try {
+      await shell.openExternal(COMPANY_LINKS[key])
+      return true
+    } catch (e) {
+      log.warn('ссылка компании не открылась', e)
+      return false
+    }
+  })
+
+  // ── Обмен кассами по местной сети ──
+  // Смотреть, кто на связи, может любой вошедший; вписывать и убирать адреса — только с
+  // правом на кассы и устройства (проверяет gateway)
+  ipcMain.handle('lan:status', (event) => (trusted(event) ? gateway.lanStatus() : null))
+  ipcMain.handle('lan:add', async (event, address) => (trusted(event) ? gateway.lanAdd(address) : { ok: false, error: 'rights' }))
+  ipcMain.handle('lan:remove', async (event, address) => (trusted(event) ? gateway.lanRemove(address) : false))
+  ipcMain.handle('lan:forget', async (event, id) => (trusted(event) ? gateway.lanForget(id) : false))
+  ipcMain.handle('lan:now', async (event) => {
+    if (!trusted(event)) return null
+    await gateway.lanNow().catch(() => {})
+    return gateway.lanStatus()
   })
 
   // ── Состояние программы: связь, очередь, копия, обновление ──

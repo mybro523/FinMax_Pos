@@ -127,6 +127,20 @@ export function JournalFilter({ controls, placeholder, children }) {
   )
 }
 
+// Период словами — для подзаголовка выгрузки и печати: «за 30 дней», «01.10.2026 — 16.10.2026»
+export function periodText(controls) {
+  const { period, fromDate, toDate } = controls
+  const ru = (d) => (d ? d.split('-').reverse().join('.') : '')
+  if (period === 'custom') {
+    if (fromDate && toDate) return `${ru(fromDate)} — ${ru(toDate)}`
+    if (fromDate) return `${tr('с')} ${ru(fromDate)}`
+    if (toDate) return `${tr('по')} ${ru(toDate)}`
+    return tr('Всё время')
+  }
+  const p = PERIODS.find((x) => x.key === period)
+  return p ? tr(p.label) : ''
+}
+
 // Подпись под таблицей: сколько нашли и не идёт ли ещё загрузка
 export function JournalCount({ rows, loading, total }) {
   if (loading) return <div className="note info" style={{ marginBottom: 10 }}>{tr('Загружаем историю за выбранный период…')}</div>

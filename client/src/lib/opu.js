@@ -8,6 +8,9 @@
 //
 // Валовой доход берётся из общего расчёта periodFinance (как «Прибыль» во вкладке
 // «Подробно»), поэтому возвраты и списания учтены и отчёты не спорят друг с другом.
+//
+// Прочие доходы (раздел «Доходы»: аренда, услуги, бонусы поставщиков) прибавляются
+// к чистому доходу: это тоже деньги, которые остались у магазина за период.
 
 import { periodFinance } from './finance.js'
 
@@ -25,8 +28,8 @@ export const OPU_NALOGI = 'Налоги'
 export const OPU_MAGAZIN = 'Расход магазина'
 const norm = (s) => String(s || '').trim().toLowerCase()
 
-export function opuFinance({ sales = [], returns = [], writeOffs = [], expenses = [], debtPayments = [], supplierPayments = [], arrivals = [], from, to }) {
-  const fin = periodFinance({ sales, returns, writeOffs, expenses, from, to })
+export function opuFinance({ sales = [], returns = [], writeOffs = [], expenses = [], incomes = [], debtPayments = [], supplierPayments = [], arrivals = [], from, to }) {
+  const fin = periodFinance({ sales, returns, writeOffs, expenses, incomes, from, to })
 
   // Расходы по статьям: зарплата, налоги, магазин, всё прочее — «другие»
   let zarplata = 0
@@ -81,7 +84,8 @@ export function opuFinance({ sales = [], returns = [], writeOffs = [], expenses 
   const kassa = fin.byPay.cash + debtPaid - refundsCash
 
   const valovoy = fin.profit
-  const chistiy = valovoy - allExpenses - supplierPaid
+  const prochieDohody = fin.incomes
+  const chistiy = valovoy + prochieDohody - allExpenses - supplierPaid
 
   return {
     prodazha: fin.revenue,
@@ -99,6 +103,8 @@ export function opuFinance({ sales = [], returns = [], writeOffs = [], expenses 
     magazin,
     other,
     allExpenses,
+    prochieDohody,
+    dohodyByCategory: fin.incomesByCategory,
     chistiy,
     kassa,
     fin,

@@ -18,6 +18,7 @@ const products = require('../dist/products/dto')
 const categories = require('../dist/categories/dto')
 const suppliers = require('../dist/suppliers/dto')
 const expenses = require('../dist/expenses/dto')
+const incomes = require('../dist/incomes/dto')
 const roles = require('../dist/roles/dto')
 const users = require('../dist/users/dto')
 const admin = require('../dist/admin/dto')
@@ -48,6 +49,12 @@ const PAIRS = [
       shiftId: 'смена расхода назначается при создании',
       clientId: 'ключ от задвоения нужен только при создании',
     },
+  },
+  {
+    name: 'доход',
+    create: incomes.CreateIncomeDto,
+    update: incomes.UpdateIncomeDto,
+    только_при_создании: { clientId: 'ключ от задвоения нужен только при создании' },
   },
   {
     name: 'сотрудник',

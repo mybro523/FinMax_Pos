@@ -39,11 +39,12 @@ export const OP_TYPES = [
   'deferred.remove',
   'expense',
   'cash.move',
+  'income',
 ] as const
 export type OpType = (typeof OP_TYPES)[number]
 
 // Что касса может прислать только от имени владельца — как и на сайте
-export const FOUNDER_ONLY: ReadonlySet<string> = new Set(['writeoff', 'expense'])
+export const FOUNDER_ONLY: ReadonlySet<string> = new Set(['writeoff', 'expense', 'income'])
 
 const obj = (v: any, what: string) => {
   if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Reject(`Нет данных: ${what}`)
@@ -319,6 +320,24 @@ export function parseExpense(p: any, now?: number) {
     shiftId: idOrNull(e.shiftId, 'смена'),
     // Зарплата: кому выдана. Нет — расход без сотрудника
     employeeId: idOrNull(e.employeeId, 'сотрудник'),
+  }
+}
+
+// ── Доход вне продаж ──
+// Вносится в программе и без связи, как расход. Статью сервер со своим списком не
+// сверяет: доход уже получен, а статью за это время могли убрать из списка
+export function parseIncome(p: any, now?: number) {
+  const e = obj(obj(p, 'доход').income, 'доход')
+  const amount = money(e.amount, 'сумма дохода')
+  if (amount <= 0) throw new Reject('Сумма дохода должна быть больше нуля')
+  const category = text(e.category, 60).trim()
+  if (!category) throw new Reject('У дохода не указана статья')
+  return {
+    id: id(e.id, 'доход'),
+    date: when(e.date, 'доход', now),
+    category,
+    amount,
+    note: text(e.note, 500),
   }
 }
 

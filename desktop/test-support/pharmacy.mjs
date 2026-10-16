@@ -61,6 +61,13 @@ export const EXPENSE_CATEGORIES = ['Аренда', 'Зарплата', 'Нало
   createdAt: '2026-09-01T08:00:00.000Z',
 }))
 
+// Статьи доходов — готовый список, который сервер заводит каждому магазину
+export const INCOME_CATEGORIES = ['Аренда', 'Услуги', 'Бонус от поставщика', 'Прочие доходы'].map((name, n) => ({
+  id: 'inccat-' + (n + 1),
+  name,
+  createdAt: '2026-09-01T08:00:00.000Z',
+}))
+
 // Поставщики и сервисы перевода — как их отдаёт сервер владельцу
 export const SUPPLIERS = [
   { id: 'sup-1', name: 'Опт-Маркет', phone: '+992 900 11 22 33', note: '', openingDebt: 500, debt: 500, createdAt: '2026-09-01T08:00:00.000Z' },
@@ -73,7 +80,10 @@ export function pharmacy(snap = {}, now = NOW) {
   const db = openDb(':memory:', PHARMACY_SCHEMA)
   applySnapshot(
     db,
-    { categories: CATEGORIES, expenseCategories: EXPENSE_CATEGORIES, suppliers: SUPPLIERS, payServices: PAY_SERVICES, products: [], customers: [], deferred: [], ...snap },
+    {
+      categories: CATEGORIES, expenseCategories: EXPENSE_CATEGORIES, incomeCategories: INCOME_CATEGORIES, suppliers: SUPPLIERS, payServices: PAY_SERVICES,
+      products: [], customers: [], deferred: [], ...snap,
+    },
     { now },
   )
   return db

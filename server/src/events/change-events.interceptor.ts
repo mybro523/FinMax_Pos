@@ -33,6 +33,9 @@ const RULES: { test: RegExp; keys: string[] }[] = [
   // Расход из кассы меняет и ожидаемые наличные в смене
   { test: /^\/expenses/, keys: ['expenses', 'shifts'] },
   { test: /^\/expense-categories/, keys: ['expenseCategories'] },
+  // Доходы вне продаж: смену не трогают, меняется только их журнал
+  { test: /^\/incomes/, keys: ['incomes'] },
+  { test: /^\/income-categories/, keys: ['incomeCategories'] },
   // Сотрудники: завели кассира, сбросили пароль, заблокировали. Раньше второе
   // устройство узнавало об этом только после перезагрузки страницы.
   { test: /^\/users/, keys: ['users'] },
@@ -43,7 +46,7 @@ const RULES: { test: RegExp; keys: string[] }[] = [
     test: /^\/backup/,
     keys: [
       'products', 'sales', 'arrivals', 'customers', 'deferred', 'shifts', 'payments', 'returns', 'writeoffs', 'expenses', 'expenseCategories',
-      'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'productTypes',
+      'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'productTypes', 'incomes', 'incomeCategories',
     ],
   },
 ]

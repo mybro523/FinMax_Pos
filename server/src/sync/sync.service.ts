@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, HttpException, Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
-import { createHash } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
 import { PrismaService } from '../prisma/prisma.service'
 import { AccountCache } from '../admin/account-cache.service'
 import { AuthService } from '../auth/auth.service'
@@ -12,6 +12,8 @@ import { Count, firstCountAfter, forgetShortageDoc, lockInventories, pruneCounte
 import { TX, TX_SNAPSHOT } from '../common/tx'
 import { setCashMoves, setExpenseCash, setSupplierCash, shiftTotals } from '../shifts/totals'
 import { withDeviceNames } from '../shifts/shifts.service'
+import { mayCloseShift, NOT_YOUR_SHIFT } from '../shifts/closer'
+import { AUTH_SECRET } from '../common/config'
 import { lockSupplier, supplierBrief } from '../suppliers/suppliers.service'
 import { CASHIER_DEFAULT, OP_PERMISSIONS, hasPerm, permissionsOf } from '../auth/permissions'
 import {
@@ -26,6 +28,7 @@ import {
   parseDeferredAdd,
   parseDeferredRemove,
   parseExpense,
+  parseIncome,
   parseReturn,
   parseSale,
   parseShiftClose,
@@ -69,6 +72,9 @@ interface Ctx {
   deviceId: string
   // Сотрудник в базе магазина, на которого записываются документы
   tenantUserId: string | null
+  // Кто сделал операцию и его права — для правил, которые зависят от человека
+  // (закрыть чужую смену можно только по праву)
+  actor?: { role: string; permissions: string[]; tenantUserId: string | null }
   // Операция принята, но что-то в ней не сошлось — владельцу есть на что посмотреть
   flagged: boolean
   // Разделы, которые операция задела сверх обычного (поправила итог пересчёта)
@@ -119,6 +125,7 @@ const TOUCHES: Record<OpType, string[]> = {
   // Расход из кассы меняет и ожидаемые наличные в смене
   expense: ['expenses', 'shifts'],
   'cash.move': ['cashMoves', 'shifts'],
+  income: ['incomes'],
 }
 
 // Сколько журнал изменений хранится. Касса без связи работает не больше недели;
@@ -144,6 +151,18 @@ const KEY_OK = /^[A-Za-z0-9_-]{20,128}$/
 const MAX_UNITS = 2_000_000_000
 // Сколько операций касса может назвать в одном обмене, спрашивая об их судьбе
 const MAX_ASKED = 120
+// Касса, не выходившая на связь дольше этого, в счёт касс магазина не идёт
+const LAN_DEVICE_DAYS = 60
+
+// ── Ключ обмена кассами по местной сети ──
+// Кассы одного магазина передают друг другу сделанное без интернета — по кабелю, через
+// роутер. Шифруют они это общим ключом магазина: посторонний компьютер в той же сети
+// ничего не прочитает и ничего не подсунет. Ключ выводится из секрета сервера и номера
+// магазина: хранить его отдельно не нужно, у всех касс магазина он один, а у соседнего
+// магазина — другой
+export function lanKeyOf(pharmacyId: string): string {
+  return createHmac('sha256', AUTH_SECRET).update('finmax-lan|' + pharmacyId).digest('base64url')
+}
 
 // ── Ошибки базы, которые повтором не лечатся ──
 // Число не помещается в поле, значение не того вида, пусто там, где пусто быть не может.
@@ -248,7 +267,7 @@ export class SyncService {
       if (!hasPerm(performer, ...alternatives)) return this.reject(op, deviceId, user, createdAt, 'Недостаточно прав')
     }
 
-    const ctx: Ctx = { deviceId, tenantUserId: performer.tenantUserId, flagged: false, extra: new Set() }
+    const ctx: Ctx = { deviceId, tenantUserId: performer.tenantUserId, flagged: false, extra: new Set(), actor: performer }
     try {
       const docId = await this.prisma.$transaction(async (tx) => {
         // Первым делом — номер операции. Если она уже принята (или принимается
@@ -346,6 +365,8 @@ export class SyncService {
         return this.applyExpense(tx, parseExpense(payload), ctx)
       case 'cash.move':
         return this.applyCashMove(tx, parseCashMove(payload), ctx)
+      case 'income':
+        return this.applyIncome(tx, parseIncome(payload), ctx)
     }
   }
 
@@ -1007,6 +1028,10 @@ export class SyncService {
     if (!shift) throw new Reject('Смена не найдена')
     if (shift.deviceId !== ctx.deviceId) throw new Reject('Эта смена открыта на другой кассе')
     if (shift.closedAt) return shift.id
+    // Закрыть смену может тот, кто её открыл, или сотрудник с правом закрывать чужие
+    // смены (владелец — всегда). Касса проверяет это и сама; здесь — на случай прежней
+    // версии программы. Отказ касса не путает с «смены нет»: смена у неё снова открыта
+    if (ctx.actor && !mayCloseShift(shift, ctx.actor)) throw new Reject(NOT_YOUR_SHIFT)
     // Итоги считает сервер — по документам, которые к этому моменту уже пришли
     // (они идут в той же очереди раньше закрытия). Формула та же, что у сайта
     const totals = await shiftTotals(tx, shift, p.countedCash)
@@ -1066,6 +1091,17 @@ export class SyncService {
       // тогда итоги закрытой смены пересчитываются вместе с ним
       await this.recountClosed(tx, shiftId)
     }
+    return p.id
+  }
+
+  // ── Доход вне продаж ──
+  // Внесён в программе, возможно без связи. Смены у дохода нет: в денежный ящик он
+  // не попадает (наличные в ящик вносятся «Внесением»)
+  private async applyIncome(tx: Tx, p: ReturnType<typeof parseIncome>, ctx: Ctx): Promise<string> {
+    if (await tx.income.findUnique({ where: { id: p.id }, select: { id: true } })) return p.id
+    await tx.income.create({
+      data: { id: p.id, date: p.date, category: p.category, amount: D(p.amount), note: p.note, userId: ctx.tenantUserId },
+    })
     return p.id
   }
 
@@ -1201,7 +1237,7 @@ export class SyncService {
         rows.push(
           ...(await tx.$queryRaw<{ tbl: string; rowId: string; op: string }[]>`
             SELECT "tbl", "rowId", "op" FROM "ChangeLog"
-            WHERE "tbl" IN ('WriteOff', 'Expense', 'ExpenseCategory', 'SupplierPayment', 'Supplier') AND "txid" >= ${askedW} AND "txid" < ${since} ORDER BY "seq"`),
+            WHERE "tbl" IN ('WriteOff', 'Expense', 'ExpenseCategory', 'Income', 'IncomeCategory', 'SupplierPayment', 'Supplier') AND "txid" >= ${askedW} AND "txid" < ${since} ORDER BY "seq"`),
         )
       }
       if (rows.length > MAX_CHANGES) return { full: true, cursor: horizon, fates, data: trimPull(await this.loadAll(tx, scope.wide), scope) }
@@ -1218,12 +1254,17 @@ export class SyncService {
     }
 
     const me = await this.auth.me(user.sub, null)
+    // Сколько касс магазина недавно выходили на связь: при одной кассе обмен по местной
+    // сети программе не нужен, и она не открывает его вовсе
+    const lanDevices = await this.prisma.device.count({ where: { lastSeenAt: { gte: new Date(Date.now() - LAN_DEVICE_DAYS * DAY) } } })
     return {
       full: snap.full,
       // Числом в JSON такое не передать: оно больше, чем умеет JavaScript
       cursor,
       serverTime: new Date().toISOString(),
       device: { id: device.id, name: device.name },
+      // Ключ магазина для обмена кассами по местной сети (см. lanKeyOf)
+      lan: user.pharmacyId ? { key: lanKeyOf(user.pharmacyId), devices: lanDevices } : null,
       me: { ...me, tenantUserId: user.tenantUserId ?? null },
       // Судьба операций, о которых спросила касса. Нет в списке — сервер её не принимал
       ops: Object.fromEntries(
@@ -1279,6 +1320,9 @@ export class SyncService {
             // сумма «из кассы», и она приходит внутри самой смены (expenseCash)
             expenses: all(await tx.expense.findMany({ where: { date: { gte: journalFrom } }, include: { user: { select: { id: true, name: true } } }, orderBy: { date: 'desc' } })),
             expenseCategories: all(await tx.expenseCategory.findMany({ orderBy: { name: 'asc' } })),
+            // Доходы вне продаж и их статьи — по тем же правилам, что расходы
+            incomes: all(await tx.income.findMany({ where: { date: { gte: journalFrom } }, include: { user: { select: { id: true, name: true } } }, orderBy: { date: 'desc' } })),
+            incomeCategories: all(await tx.incomeCategory.findMany({ orderBy: { name: 'asc' } })),
           }
         : {}),
       payments: all(
@@ -1333,6 +1377,8 @@ export class SyncService {
             ),
             expenses: await load('Expense', (part) => tx.expense.findMany({ where: inIds(part), include: { user: { select: { id: true, name: true } } } })),
             expenseCategories: await load('ExpenseCategory', (part) => tx.expenseCategory.findMany({ where: inIds(part) })),
+            incomes: await load('Income', (part) => tx.income.findMany({ where: inIds(part), include: { user: { select: { id: true, name: true } } } })),
+            incomeCategories: await load('IncomeCategory', (part) => tx.incomeCategory.findMany({ where: inIds(part) })),
           }
         : {}),
       payments: await load('DebtPayment', (part) =>
@@ -1518,13 +1564,15 @@ function requiredPermissions(type: string, payload: any): string[][] {
 
 // Какие разделы с деньгами магазина касса получает в обмене: журнал списаний, расходы
 // и долги поставщикам видят только те, у кого на это есть право
-type PullScope = { wide: boolean; suppliers: boolean; writeoffs: boolean; expenses: boolean }
+type PullScope = { wide: boolean; suppliers: boolean; writeoffs: boolean; expenses: boolean; incomes: boolean }
 function pullScope(user: any): PullScope {
   // Те же права, что у журналов на сервере: отчёты и панель тоже читают списания и расходы
   const suppliers = hasPerm(user, 'suppliers.view')
   const writeoffs = hasPerm(user, 'writeoffs.view', 'reports.view', 'dashboard.view')
   const expenses = hasPerm(user, 'expenses.view', 'reports.view')
-  return { wide: suppliers || writeoffs || expenses, suppliers, writeoffs, expenses }
+  // Доходы читает и отчёт ОПУ: чистый доход считается вместе с ними
+  const incomes = hasPerm(user, 'incomes.view', 'reports.view')
+  return { wide: suppliers || writeoffs || expenses || incomes, suppliers, writeoffs, expenses, incomes }
 }
 function trimPull<T extends Record<string, any>>(data: T, scope: PullScope): T {
   if (!scope.wide) return data
@@ -1533,6 +1581,10 @@ function trimPull<T extends Record<string, any>>(data: T, scope: PullScope): T {
   if (!scope.expenses) {
     delete out.expenses
     delete out.expenseCategories
+  }
+  if (!scope.incomes) {
+    delete out.incomes
+    delete out.incomeCategories
   }
   if (!scope.suppliers) {
     delete out.supplierPayments

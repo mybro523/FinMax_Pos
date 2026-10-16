@@ -343,6 +343,7 @@ model User {
   writeOffs    WriteOff[]
   inventories  Inventory[]
   expenses     Expense[]
+  incomes      Income[]
   arrivals     Arrival[]
   supplierPayments SupplierPayment[]
   cashMoves    CashMove[]
@@ -428,6 +429,34 @@ model ProductType {
 }
 
 model ExpenseCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+}
+
+// ── Доходы вне продаж ──
+// Деньги, которые магазин получает не за проданный товар: сдал часть помещения,
+// оказал услугу, получил бонус от поставщика. Вносятся так же, как расходы, а отчёт
+// ОПУ прибавляет их к чистому доходу. В денежный ящик смены доход не попадает:
+// наличные, положенные в ящик, вносятся в смене «Внесением».
+model Income {
+  id        String   @id @default(cuid())
+  clientId  String?  @unique // защита от задвоения при повторе запроса
+  date      DateTime @default(now())
+  // Статья — названием, как у расхода: убрали статью из списка — прежние доходы
+  // остаются с её названием
+  category  String
+  amount    Decimal  @db.Decimal(12, 2)
+  note      String   @default("")
+  userId    String? // кто внёс
+  user      User?    @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([date])
+}
+
+// Статьи доходов. Готовый список заводит миграция, свои владелец добавляет в настройках
+model IncomeCategory {
   id        String   @id @default(cuid())
   name      String   @unique
   createdAt DateTime @default(now())

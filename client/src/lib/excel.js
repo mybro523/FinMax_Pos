@@ -10,13 +10,8 @@
 const THIN = { style: 'thin', color: { argb: 'FFB9C2D4' } }
 const BORDER = { top: THIN, left: THIN, bottom: THIN, right: THIN }
 
-// cols: [{ header, key, width, money?, num? }]
-// rows: [{ key: значение }]
-// itogi: { key: значение } — итоговая строка жирным (не обязательна)
-export async function skachatXlsx({ fayl, zagolovok, podzag, cols, rows, itogi }) {
-  const ExcelJS = (await import('exceljs')).default
-  const wb = new ExcelJS.Workbook()
-  const ws = wb.addWorksheet('Лист1', { views: [{ state: 'frozen', ySplit: 4 }] })
+// Один лист: заголовок, подзаголовок, шапка, строки и итог
+function fillSheet(ws, { zagolovok, podzag, cols, rows, itogi }) {
   ws.columns = cols.map((c) => ({ width: c.width || 16 }))
   const n = cols.length
 
@@ -42,19 +37,23 @@ export async function skachatXlsx({ fayl, zagolovok, podzag, cols, rows, itogi }
   })
   head.height = 22
 
-  for (const r of rows) {
+  rows.forEach((r, k) => {
     const row = ws.addRow(cols.map((c) => r[c.key] ?? ''))
     cols.forEach((c, i) => {
       const cell = row.getCell(i + 1)
       cell.border = BORDER
+      // Полосы через строку: длинную таблицу легче вести глазами
+      if (k % 2 === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7F9FD' } }
       if (c.money) {
         cell.numFmt = '#,##0.00'
         cell.alignment = { horizontal: 'right' }
       } else if (c.num) {
         cell.alignment = { horizontal: 'right' }
+      } else if (c.wrap) {
+        cell.alignment = { wrapText: true, vertical: 'top' }
       }
     })
-  }
+  })
 
   if (itogi) {
     const row = ws.addRow(cols.map((c) => itogi[c.key] ?? ''))
@@ -70,6 +69,22 @@ export async function skachatXlsx({ fayl, zagolovok, podzag, cols, rows, itogi }
         cell.alignment = { horizontal: 'right' }
       }
     })
+  }
+}
+
+// cols: [{ header, key, width, money?, num?, wrap? }]
+// rows: [{ key: значение }]
+// itogi: { key: значение } — итоговая строка жирным (не обязательна)
+// svodka: { list, zagolovok, podzag, cols, rows, itogi } — второй лист со сводкой
+// (например, итоги по статьям), не обязателен
+export async function skachatXlsx({ fayl, zagolovok, podzag, cols, rows, itogi, svodka }) {
+  const ExcelJS = (await import('exceljs')).default
+  const wb = new ExcelJS.Workbook()
+  const ws = wb.addWorksheet('Лист1', { views: [{ state: 'frozen', ySplit: 4 }] })
+  fillSheet(ws, { zagolovok, podzag, cols, rows, itogi })
+  if (svodka) {
+    const ws2 = wb.addWorksheet(String(svodka.list || 'Сводка').slice(0, 31), { views: [{ state: 'frozen', ySplit: 4 }] })
+    fillSheet(ws2, svodka)
   }
 
   const buf = await wb.xlsx.writeBuffer()

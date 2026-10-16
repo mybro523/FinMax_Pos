@@ -145,8 +145,7 @@ svg { display: block; }
 /* Имя системы на главном экране вместо кнопки */
 .brand-mini { display: inline-flex; align-items: center; gap: 9px; flex-shrink: 0; }
 .brand-mini img { width: 30px; height: 30px; }
-.brand-mini .brand-word { color: var(--text); font-size: 17px; }
-.brand-mini .brand-word .brand-pos { color: var(--accent); border-color: var(--accent); }
+.brand-mini .brand-word { font-size: 17px; }
 .topbar-title { min-width: 0; }
 
 .main { display: flex; flex-direction: column; min-height: 100vh; min-width: 0; }
@@ -1125,11 +1124,9 @@ input, select { transition: border 0.14s, box-shadow 0.14s, background 0.14s; }
   padding: 34px 44px; color: #fff;
   background: linear-gradient(160deg, #10307f 0%, #0a1a45 52%, #061233 100%);
 }
-/* Имя в углу панели — точь-в-точь как в карточке входа: Fin золотом, POS синим.
-   Панель всегда тёмная, поэтому синий берём светлый — фирменный тон тёмной темы */
-.auth-brand .brand-word { font-size: 22px; }
-.auth-brand .brand-word .fin { color: var(--gold); }
-.auth-brand .brand-word .brand-pos { color: #6f9bf5; border-color: #6f9bf5; }
+/* Имя в углу панели — как в карточке входа. Панель всегда тёмная, поэтому синий
+   и зелёный берём светлые — как в тёмной теме */
+.auth-brand .brand-word { font-size: 22px; --brand-max-c: #86aaf8; --brand-pos-c: #4fc483; }
 .auth-brand-body { max-width: 460px; margin: auto; text-align: center; }
 /* Логотип на белой карточке — как на сайте FinMax */
 .auth-hero { width: 176px; padding: 20px 22px 16px; background: #fff; border-radius: 22px; box-shadow: 0 18px 44px rgba(0, 0, 0, 0.32); margin: 0 auto 30px; }
@@ -1148,9 +1145,7 @@ input, select { transition: border 0.14s, box-shadow 0.14s, background 0.14s; }
 }
 .auth-brandline { display: flex; align-items: center; gap: 10px; margin-bottom: 26px; }
 .auth-brandline img { width: 40px; height: 40px; }
-.auth-brandline .brand-word { color: var(--text); font-size: 19px; }
-.auth-brandline .brand-word .fin { color: var(--gold); }
-.auth-brandline .brand-word .brand-pos { color: var(--accent); border-color: var(--accent); }
+.auth-brandline .brand-word { font-size: 19px; }
 .auth-card h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
 .auth-sub { font-size: 13.5px; color: var(--muted); margin: 4px 0 22px; }
 .auth-card .field label { color: var(--text); }
@@ -1283,10 +1278,16 @@ tbody tr.clickable { cursor: pointer; }
 }
 
 
-/* Max в имени бренда: синий бренда; на тёмных поверхностях — светлый тон, иначе не виден */
-.brand-word .brand-max { color: var(--brand-navy); }
-:root[data-theme="dark"] .brand-word .brand-max { color: #86aaf8; }
-.topbar .brand-word .brand-max, .auth-brand .brand-word .brand-max, .sidebar .brand-word .brand-max { color: #86aaf8; }
+/* ── Имя бренда «FinMax POS» ──
+   Fin — жёлтым, Max — синим, POS — тёмно-зелёным; между FinMax и POS — пробел
+   (он в разметке, components/ui.jsx). На тёмных поверхностях синий и зелёный —
+   светлые тона: тёмно-синий и тёмно-зелёный на тёмном фоне не видны */
+:root { --brand-fin: #efbd24; --brand-max-c: #00359f; --brand-pos-c: #146c3c; }
+:root[data-theme="dark"] { --brand-max-c: #86aaf8; --brand-pos-c: #4fc483; }
+.brand-word { font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; }
+.brand-word .fin { color: var(--brand-fin); }
+.brand-word .brand-max { color: var(--brand-max-c); }
+.brand-word .brand-pos { color: var(--brand-pos-c); }
 
 /* ── Фото товара ── */
 .foto-mini {
@@ -1315,6 +1316,12 @@ tbody tr.clickable { cursor: pointer; }
   .print-sheet { display: block; }
   .print-sheet .opu-table td, .print-sheet .opu-table th { border-bottom: 1px solid #c7ccd8; padding: 8px 10px; font-size: 12.5px; }
   .print-sheet-foot { margin-top: 10px; font-size: 12px; color: #434b5e; }
+  /* Шапка таблицы на бумаге — серой заливкой: колонки читаются и на ч/б принтере */
+  .print-sheet .opu-table th { background: #eef1f7 !important; color: #1d2433 !important; font-weight: 700; }
+  .print-sheet .opu-table tbody tr:nth-child(even) td { background: #f7f9fd !important; }
+  .print-sheet .opu-table tr { break-inside: avoid; }
+  .print-svodka { margin: 0 0 16px; max-width: 520px; }
+  .print-svodka-title { font-weight: 700; font-size: 13.5px; margin: 0 0 6px; }
 }
 
 /* ── Отчёт ОПУ ── */
@@ -1825,3 +1832,75 @@ tfoot .zak-total td { font-weight: 700; border-top: 2px solid var(--border-stron
 
 /* Отметка «есть / нет» в настройках типов */
 .btn.ghost.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+/* ── О компании ── */
+.about { display: grid; gap: 16px; max-width: 1100px; }
+.about .panel { margin: 0; }
+.about-hero { padding: 28px; background: linear-gradient(135deg, var(--card) 0%, var(--card) 45%, var(--accent-soft) 100%); }
+.about-hero-head { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
+.about-emblem { width: 64px; height: 64px; border-radius: 16px; background: #fff; padding: 6px; box-shadow: var(--shadow-sm); flex-shrink: 0; }
+.about-name .brand-word { font-size: 34px; line-height: 1.1; }
+.about-tagline { color: var(--muted); font-size: 15px; margin-top: 4px; text-wrap: balance; }
+.about-text { font-size: 15px; line-height: 1.65; max-width: 70ch; color: var(--text); margin: 0 0 12px; }
+.about-motto { display: inline-flex; align-items: center; gap: 8px; font-style: italic; color: var(--accent-dark); font-weight: 600; margin-bottom: 18px; }
+.about-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 640px; }
+.about-stat { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+.about-stat b { display: block; font-size: 26px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; line-height: 1.2; }
+.about-stat span { font-size: 13px; color: var(--muted); }
+.about-services { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.about-service { display: flex; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--soft); }
+.about-service-ic { flex: 0 0 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: var(--gold-soft); color: var(--gold-dark); }
+.about-service b { display: block; font-size: 14.5px; margin-bottom: 4px; }
+.about-service p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.about-lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 18px; }
+.about-lists h3 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 8px; display: flex; align-items: center; gap: 6px; font-weight: 700; }
+.about-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.about-chip { padding: 6px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-dark); font-size: 13px; font-weight: 500; }
+.about-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px; align-items: start; }
+.about-founder { display: flex; gap: 16px; align-items: flex-start; }
+.about-avatar { flex: 0 0 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-btn); color: #fff; font-weight: 800; font-size: 20px; letter-spacing: 0.02em; }
+.about-founder-name { font-size: 17px; }
+.about-founder-role { color: var(--muted); font-size: 13.5px; margin: 2px 0 10px; }
+.about-founder-quote { margin: 0; font-size: 14px; line-height: 1.6; font-style: italic; }
+.about-contact-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.about-contact {
+  display: flex; align-items: center; gap: 12px; padding: 11px 14px; min-height: 48px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--card);
+  color: var(--text); text-decoration: none; transition: border-color 0.13s, background 0.13s;
+}
+.about-contact:hover { border-color: var(--accent); background: var(--hover); }
+.about-contact:focus-visible { outline: 3px solid var(--ring); outline-offset: 1px; }
+.about-contact-ic { flex: 0 0 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.about-contact-ic.whatsapp { background: var(--green-soft); color: var(--green); }
+.about-contact-ic.youtube, .about-contact-ic.instagram { background: var(--danger-soft); color: var(--danger); }
+.about-contact-txt { display: flex; flex-direction: column; min-width: 0; }
+.about-contact-txt span { font-size: 12px; color: var(--muted); }
+.about-contact-txt b { font-size: 14px; overflow-wrap: anywhere; }
+.about-contact-go { margin-left: auto; color: var(--muted-2); flex-shrink: 0; }
+.about-foot { text-align: center; color: var(--muted); font-size: 13px; padding: 4px 0 12px; }
+.about-foot .brand-word { font-size: 14px; }
+@media (max-width: 860px) {
+  .about-row { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .about-hero { padding: 20px; }
+  .about-name .brand-word { font-size: 28px; }
+  .about-stats { grid-template-columns: 1fr; }
+}
+
+/* ── Кассы в местной сети ── */
+.lan-peers { display: grid; gap: 8px; margin-bottom: 12px; }
+.lan-peer { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--soft); }
+.lan-peer.on { border-color: var(--green); background: var(--green-soft); }
+.lan-peer-ic { flex: 0 0 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.lan-peer-main { min-width: 0; flex: 1; }
+.lan-peer-main b { font-size: 14px; }
+.lan-dot { flex: 0 0 10px; height: 10px; border-radius: 50%; background: var(--muted-2); }
+.lan-dot.on { background: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
+.lan-sub { font-size: 13px; font-weight: 700; margin: 14px 0 4px; }
+.lan-manual { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.lan-here { margin: 10px 0 8px; }
+.lan-firewall { margin-top: 10px; }
+.lan-section > .panel { margin-top: 0; border: none; box-shadow: none; padding: 0; max-width: none !important; }
+.sync-badge.lan.muted { background: var(--soft); color: var(--muted); border-color: var(--border); }
+.sync-warn { color: var(--warn); }

@@ -1,5 +1,5 @@
 import { useRef, useState, useMemo, useEffect } from 'react'
-import { LuWallet, LuTrendingUp, LuBoxes, LuReceipt, LuUndo2, LuHandCoins, LuPiggyBank, LuTruck, LuUsers, LuCalculator } from 'react-icons/lu'
+import { LuWallet, LuTrendingUp, LuBoxes, LuReceipt, LuUndo2, LuHandCoins, LuPiggyBank, LuTruck, LuUsers, LuCalculator, LuCoins } from 'react-icons/lu'
 import { Link } from 'react-router-dom'
 import Layout from '../components/Layout'
 import Metric from '../components/Metric'
@@ -95,6 +95,12 @@ function OpuModal({ kind, d, onClose }) {
       total: ['Отдано поставщикам', d.supplierPaid],
       text: 'Все деньги, отданные поставщикам за период: оплаты из раздела «Поставщики» и приходы, оплаченные сразу. Долг перед поставщиком попадает сюда только после оплаты.',
     },
+    dohody: {
+      title: 'Прочие доходы',
+      rows: (d.dohodyByCategory || []).map((c) => [c.category, c.amount]),
+      total: ['Прочие доходы', d.prochieDohody],
+      text: 'Деньги, полученные не за товар: аренда, услуги, бонусы поставщиков — по статьям раздела «Доходы». Прибавляются к чистому доходу.',
+    },
     zarplata: {
       title: 'Зарплата',
       rows: [],
@@ -126,11 +132,12 @@ function OpuModal({ kind, d, onClose }) {
       title: 'Чистый доход',
       rows: [
         ['Валовой доход', d.valovoy],
+        ...(d.prochieDohody > 0 ? [['Прочие доходы', d.prochieDohody]] : []),
         ['Все расходы', -d.allExpenses],
         ['Отдано поставщикам', -d.supplierPaid],
       ],
       total: ['Чистый доход', d.chistiy],
-      text: 'Сколько денег на самом деле осталось: валовой доход минус все расходы и минус деньги, отданные поставщикам за товар.',
+      text: 'Сколько денег на самом деле осталось: валовой доход плюс прочие доходы, минус все расходы и минус деньги, отданные поставщикам за товар.',
     },
     kassa: {
       title: 'Касса',
@@ -162,7 +169,7 @@ function OpuModal({ kind, d, onClose }) {
   )
 }
 
-const OPU_KEYS = ['sales', 'returns', 'writeoffs', 'expenses', 'payments', 'supplierPayments', 'arrivals']
+const OPU_KEYS = ['sales', 'returns', 'writeoffs', 'expenses', 'incomes', 'payments', 'supplierPayments', 'arrivals']
 const dstr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 function Opu({ onExcelRef }) {
@@ -171,6 +178,8 @@ function Opu({ onExcelRef }) {
   const returns = useCollection('returns')
   const writeOffs = useCollection('writeoffs')
   const expenses = useCollection('expenses')
+  // Доходы вне продаж — прибавляются к чистому доходу
+  const incomes = useCollection('incomes')
   const debtPayments = useCollection('payments')
   const supplierPayments = useCollection('supplierPayments')
   const arrivals = useCollection('arrivals')
@@ -215,13 +224,14 @@ function Opu({ onExcelRef }) {
         returns: (deep && deep.returns) || returns,
         writeOffs: (deep && deep.writeoffs) || writeOffs,
         expenses: (deep && deep.expenses) || expenses,
+        incomes: (deep && deep.incomes) || incomes,
         debtPayments: (deep && deep.payments) || debtPayments,
         supplierPayments: (deep && deep.supplierPayments) || supplierPayments,
         arrivals: (deep && deep.arrivals) || arrivals,
         from: range.from,
         to: range.to,
       }),
-    [deep, sales, returns, writeOffs, expenses, debtPayments, supplierPayments, arrivals, range],
+    [deep, sales, returns, writeOffs, expenses, incomes, debtPayments, supplierPayments, arrivals, range],
   )
 
   const apt = getUser()?.pharmacy?.name || ''
@@ -230,6 +240,7 @@ function Opu({ onExcelRef }) {
     [t('Продажа'), d.prodazha],
     [t('Себестоимость'), d.sebestoimost],
     [t('Валовой доход'), d.valovoy, 'b'],
+    [t('Прочие доходы'), d.prochieDohody],
     [t('Оплата поставщику'), d.supplierPaid],
     [t('Расход магазина'), d.magazin],
     [t('Налоги'), d.nalogi],
@@ -279,6 +290,7 @@ function Opu({ onExcelRef }) {
         <Metric label={t('Выручка')} value={money(d.prodazha)} Icon={LuWallet} tint="accent" sub={t('подробнее')} onClick={() => setModal('vyruchka')} />
         <Metric label={t('Себестоимость')} value={money(d.sebestoimost)} Icon={LuBoxes} tint="blue" sub={t('подробнее')} onClick={() => setModal('sebest')} />
         <Metric label={t('Валовой доход')} value={money(d.valovoy)} Icon={LuTrendingUp} tint="green" sub={t('подробнее')} onClick={() => setModal('valovoy')} />
+        <Metric label={t('Прочие доходы')} value={money(d.prochieDohody)} Icon={LuCoins} tint="green" sub={t('подробнее')} onClick={() => setModal('dohody')} />
         <Metric label={t('Поставщик')} value={money(d.supplierPaid)} Icon={LuTruck} tint="blue" sub={t('подробнее')} onClick={() => setModal('postavshik')} />
         <Metric label={t('Зарплата')} value={money(d.zarplata)} Icon={LuUsers} tint="accent" sub={t('подробнее')} onClick={() => setModal('zarplata')} />
         <Metric label={t('Другие расходы')} value={money(d.allExpenses - d.zarplata)} Icon={LuHandCoins} tint="danger" sub={t('подробнее')} onClick={() => setModal('drugie')} />
@@ -306,7 +318,7 @@ function Opu({ onExcelRef }) {
       </div>
 
       <p className="tag-cat no-print" style={{ marginTop: 10, lineHeight: 1.6, maxWidth: 720 }}>
-        {t('Чистый доход — кассовый: валовой доход минус все расходы и деньги, отданные поставщикам за товар.')}{' '}
+        {t('Чистый доход — кассовый: валовой доход плюс прочие доходы, минус все расходы и деньги, отданные поставщикам за товар.')}{' '}
         {t('Чтобы зарплата и налоги попали в свои строки, записывайте их в разделе «Расходы» в статьи «Зарплата», «Налоги» и «Расход магазина».')}
       </p>
 
@@ -326,6 +338,8 @@ export default function Reports() {
   // Расходы магазина — аренда, зарплата и прочее. Без них видна только прибыль на
   // товаре, а не то, что магазин заработал на самом деле
   const expenses = useCollection('expenses')
+  // Доходы вне продаж: аренда, услуги, бонусы — к чистой прибыли
+  const incomes = useCollection('incomes')
   const t = useT()
   // Вкладки: «Отчёт ОПУ» открывается первой, подробная аналитика — рядом.
   // Выбор запоминается: кто живёт в ОПУ, тот в нём и остаётся
@@ -382,8 +396,9 @@ export default function Reports() {
       some(needJournals, 'returns'),
       some(needJournals, 'writeoffs'),
       some(needJournals, 'expenses'),
+      some(needJournals, 'incomes'),
     ])
-      .then(([s, r, w, x]) => { if (!cancelled) setDeep({ sales: s, returns: r, writeoffs: w, expenses: x }) })
+      .then(([s, r, w, x, inc]) => { if (!cancelled) setDeep({ sales: s, returns: r, writeoffs: w, expenses: x, incomes: inc }) })
       .catch(() => { if (!cancelled) setDeep(null) })
       .finally(() => { if (!cancelled) setLoadingOlder(false) })
     return () => { cancelled = true }
@@ -396,10 +411,11 @@ export default function Reports() {
         returns: (deep && deep.returns) || returns,
         writeOffs: (deep && deep.writeoffs) || writeOffs,
         expenses: (deep && deep.expenses) || expenses,
+        incomes: (deep && deep.incomes) || incomes,
         from: range.from,
         to: range.to,
       }),
-    [sales, returns, writeOffs, expenses, deep, range],
+    [sales, returns, writeOffs, expenses, incomes, deep, range],
   )
 
   // Снимок склада (не зависит от периода)
@@ -491,6 +507,23 @@ export default function Reports() {
         </Modal>
       )
     }
+    if (modal === 'incomes') {
+      return (
+        <Modal title={`${t('Прочие доходы')} · ${rangeLabel}`} onClose={close}>
+          {data.incomesByCategory.map((c) => (
+            <div className="total-row" key={c.category}>
+              <span>{t(c.category)} <span className="tag-cat">· {c.count}</span></span>
+              <span style={{ color: 'var(--green)' }}>+{money(c.amount)}</span>
+            </div>
+          ))}
+          {data.incomeCount === 0 && <div className="empty">{t('За период доходов нет')}</div>}
+          <div className="total-row big"><span>{t('Всего доходов')}</span><span style={{ color: 'var(--green)' }}>{money(data.incomes)}</span></div>
+          <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6 }}>
+            {t('Доходы вносятся в разделе «Доходы».')} <Link to="/incomes" className="linklike">{t('Открыть раздел')}</Link>
+          </p>
+        </Modal>
+      )
+    }
     if (modal === 'profit' || modal === 'cost' || modal === 'net') {
       return (
         <Modal title={`${t('Финансы')} · ${rangeLabel}`} onClose={close}>
@@ -519,6 +552,12 @@ export default function Reports() {
           <div className="total-row"><span>{t('Маржа')}</span><span>{data.margin}%</span></div>
           {/* Чистая прибыль — отдельным итогом: прибыль на товаре минус всё, что магазин
               потратила помимо товара */}
+          {data.incomes > 0 && (
+            <div className="total-row">
+              <span>{t('Прочие доходы')} <span className="tag-cat">· {data.incomeCount}</span></span>
+              <span style={{ color: 'var(--green)' }}>+{money(data.incomes)}</span>
+            </div>
+          )}
           <div className="total-row">
             <span>{t('Расходы магазина')} <span className="tag-cat">· {data.expenseCount}</span></span>
             <span style={{ color: data.expenses > 0 ? 'var(--danger)' : undefined }}>−{money(data.expenses)}</span>
@@ -530,7 +569,7 @@ export default function Reports() {
           <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6 }}>
             {t('За период')} {rangeLabel}: {data.count} {t('чек(ов)')}.{' '}
             {t('Товар, вернувшийся на полку, прибыль не уменьшает — потеряны только деньги за него.')}{' '}
-            {t('Чистая прибыль — это прибыль минус расходы магазина: аренда, зарплата и прочее.')}
+            {t('Чистая прибыль — это прибыль плюс прочие доходы минус расходы магазина: аренда, зарплата и прочее.')}
           </p>
         </Modal>
       )
@@ -606,12 +645,21 @@ export default function Reports() {
           onClick={() => setModal('expenses')}
         />
         <Metric
+          tour="rep.incomes"
+          label={t('Прочие доходы')}
+          value={money(data.incomes)}
+          Icon={LuCoins}
+          tint="green"
+          sub={data.incomeCount > 0 ? `${t('записей')}: ${data.incomeCount}` : t('подробнее')}
+          onClick={() => setModal('incomes')}
+        />
+        <Metric
           tour="rep.net"
           label={t('Чистая прибыль')}
           value={money(data.netProfit)}
           Icon={LuPiggyBank}
           tint={data.netProfit < 0 ? 'danger' : 'green'}
-          sub={t('прибыль минус расходы')}
+          sub={t('прибыль + доходы − расходы')}
           warn={data.netProfit < 0}
           onClick={() => setModal('net')}
         />

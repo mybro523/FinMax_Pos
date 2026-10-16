@@ -49,8 +49,9 @@ export function clearAttempts(db, ops) {
   db.transaction(() => ops.forEach((o) => st.run(o.id)))()
 }
 
-// Какие документы создала операция: [вид, номер]
-function docsOf(op) {
+// Какие документы создала операция: [вид, номер]. Нужно и обмену кассами по местной
+// сети (lan.mjs): он передаёт соседям документы операции вместе с ней
+export function docsOf(op) {
   const p = op.payload || {}
   switch (op.type) {
     case 'sale':
@@ -68,6 +69,8 @@ function docsOf(op) {
       return [['payment', p.payment?.id]]
     case 'expense':
       return [['expense', p.expense?.id]]
+    case 'income':
+      return [['income', p.income?.id]]
     case 'cash.move':
       return [['cashmove', p.move?.id]]
     default:
@@ -336,6 +339,10 @@ export function describeOp(op, find = () => null) {
       const m = p.move || {}
       return { sum: m.amount ?? null, title: '', detail: { kind: m.kind || '', note: m.note || '' } }
     }
+    case 'income': {
+      const e = p.income || {}
+      return { sum: e.amount ?? null, title: e.category || '', detail: { category: e.category || '', note: e.note || '', date: e.date || '' } }
+    }
     case 'customer.create':
       return { sum: null, title: p.customer?.name || '', detail: { phone: p.customer?.phone || '', debt: p.customer?.debt || 0 } }
     case 'shift.open':
@@ -374,5 +381,6 @@ const TOUCHES = {
   // Расход из кассы меняет и наличные, которые ждут в смене
   expense: ['expenses', 'shifts'],
   'cash.move': ['cashMoves', 'shifts'],
+  income: ['incomes'],
 }
 export const touchedBy = (op) => TOUCHES[op?.type] || []

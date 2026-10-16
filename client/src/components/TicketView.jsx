@@ -1,4 +1,5 @@
 import emblem from '../assets/brand/emblem-64.png'
+import { BrandWord } from './ui'
 
 // ── Чек на экране ──
 // Рисует то, что собрал lib/ticket.js, и ровно в том же порядке, что уйдёт на
@@ -40,7 +41,7 @@ export default function TicketView({ ticket, logo = true }) {
           <div className="ticket-rule" aria-hidden="true" />
           <div className="ticket-tail">
             {tail.map((line, i) => (
-              <div key={i} className={line === 'FinMax POS' ? 'ticket-brand' : ''}>{line}</div>
+              <div key={i} className={line === 'FinMax POS' ? 'ticket-brand' : ''}>{line === 'FinMax POS' ? <BrandWord /> : line}</div>
             ))}
           </div>
         </>

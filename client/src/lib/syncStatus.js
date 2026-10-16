@@ -46,6 +46,8 @@ export function badgeOf(st, t) {
     return { tone: 'warn', label: pending > 0 ? `${t('Нет интернета')} · ${t('ждут отправки')}: ${pending}` : t('Нет интернета · касса работает') }
   }
   if (pending > 0) {
+    // Операция ждёт соседнюю кассу: ссылается на её чек или клиента, которых сервер ещё не знает
+    if (st.waiting) return { tone: 'warn', label: `${t('Ждут соседнюю кассу')}: ${pending}` }
     // Связь есть, а отправить нечем: нужен вход автора этих чеков или владельца
     if (st.blocked) return { tone: 'warn', label: `${t('Ждут отправки')}: ${pending}` }
     return { tone: 'busy', label: `${t('Отправка')}: ${pending}` }
@@ -84,6 +86,8 @@ export function opTitle(type, t) {
       return t('Расход')
     case 'cash.move':
       return t('Наличные в смене')
+    case 'income':
+      return t('Доход')
     default:
       return t('Операция')
   }

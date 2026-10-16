@@ -52,7 +52,30 @@ import { PHARMACY_SCHEMA } from './local/schema.mjs'
 import { NO_OPEN_SHIFT } from './local/ops/expense.mjs'
 import { myOpenShift } from './local/docs.mjs'
 import { applyPull, tenantUserOf } from './local/snapshot.mjs'
+import {
+  lanAddManual,
+  lanAppliedCount,
+  lanAskFull,
+  lanBeforePull,
+  lanCatchUp,
+  lanEntriesSince,
+  lanFate,
+  lanForgetPeer,
+  lanGen,
+  lanManual,
+  lanNextGen,
+  lanPeer,
+  lanPeerProgress,
+  lanPeers,
+  lanPeerSeen,
+  lanPrune,
+  lanReceive,
+  lanRemoveManual,
+  lanWideHere,
+  waitsForPeer,
+} from './local/lan.mjs'
 import { checkRequest, createRemote, DESKTOP_TOKEN, isLinkFailure } from './net.mjs'
+import { parseAddress } from './lan.mjs'
 import { createSync } from './sync.mjs'
 
 // Объяснения для человека. Каждое есть в словаре интерфейса (client/src/lib/i18n.js)
@@ -65,6 +88,8 @@ export const MESSAGES = {
   // общее «раздел работает только с интернетом» здесь было бы неправдой
   expenseOnline: 'Изменить или удалить расход можно только с интернетом. Внести новый расход можно и без него.',
   expenseCatsOnline: 'Статьи расходов меняются только с интернетом.',
+  incomeOnline: 'Изменить или удалить доход можно только с интернетом. Внести новый доход можно и без него.',
+  incomeCatsOnline: 'Статьи доходов меняются только с интернетом.',
   supplierOnline: 'Заводить и менять поставщиков, платить им можно только с интернетом. Приход в долг известному поставщику оформляется и без него.',
   cashMoveOnline: 'Отменить внесение или изъятие можно только с интернетом. Внести и изъять наличные можно и без него.',
   payServicesOnline: 'Сервисы перевода меняются только с интернетом.',
@@ -87,6 +112,7 @@ const SERVER_ONLY_ONE = [
   { re: /^\/arrivals\/([^/]+)$/, kind: 'arrival' },
   { re: /^\/customers\/([^/]+)$/, kind: 'customer' },
   { re: /^\/expenses\/([^/]+)$/, kind: 'expense' },
+  { re: /^\/incomes\/([^/]+)$/, kind: 'income' },
   { re: /^\/cash-moves\/([^/]+)$/, kind: 'cashmove' },
 ]
 
@@ -95,6 +121,8 @@ const SERVER_ONLY_ONE = [
 const OFFLINE_TEXT = [
   { re: /^\/expenses\/[^/]+$/, text: 'expenseOnline' },
   { re: /^\/expense-categories(\/|$)/, text: 'expenseCatsOnline' },
+  { re: /^\/incomes\/[^/]+$/, text: 'incomeOnline' },
+  { re: /^\/income-categories(\/|$)/, text: 'incomeCatsOnline' },
   { re: /^\/suppliers(\/|$)/, text: 'supplierOnline' },
   { re: /^\/supplier-payments(\/|$)/, text: 'supplierOnline' },
   { re: /^\/cash-moves\/[^/]+$/, text: 'cashMoveOnline' },
@@ -107,6 +135,7 @@ const offlineText = (route) => MESSAGES[OFFLINE_TEXT.find((x) => x.re.test(route
 const LOCAL_SECTIONS = new Set([
   'products', 'categories', 'customers', 'deferred', 'shifts', 'sales', 'returns', 'arrivals', 'writeoffs', 'payments',
   'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'productTypes',
+  'incomes', 'incomeCategories',
 ])
 
 // Имя файла из кода магазина. Код приходит с сервера, но в путь на диске попадает
@@ -142,6 +171,9 @@ export function createGateway({
 
   // Открытая база магазина. Одна: на компьютере работает один магазин
   let pharmacy = null
+  // Обмен кассами по местной сети (lan.mjs в корне программы). Сеть подключает основная
+  // часть программы (attachLan); здесь — то, что знает о ней база магазина
+  let lanNet = null
   // Слушает ли окно события (после входа — да)
   let listening = false
 
@@ -225,7 +257,7 @@ export function createGateway({
     // ни разу не получала списаний, и владелец получает всё заново, один раз
     // Широкие разделы (списания, расходы, долги поставщикам) получает не только
     // владелец, а всякий, кому они открыты правами
-    const wideHere = () => hasPerm(activeAccount(), 'suppliers.view', 'writeoffs.view', 'expenses.view', 'reports.view', 'dashboard.view')
+    const wideHere = () => hasPerm(activeAccount(), 'suppliers.view', 'writeoffs.view', 'expenses.view', 'incomes.view', 'reports.view', 'dashboard.view')
     function cursor() {
       if (wideHere() && !getMeta(db, 'wcursor')) return ''
       return getMeta(db, 'cursor') || ''
@@ -239,15 +271,23 @@ export function createGateway({
         pendingOps: (n) => pendingOps(db, n),
         markAttempt: (ops) => markAttempt(db, ops, clock.now()),
         clearAttempts: (ops) => clearAttempts(db, ops),
-        ack: (op, fate) => ackOp(db, op, fate),
+        ack: (op, fate) => {
+          ackOp(db, op, fate)
+          // Соседние кассы снимут поправку этой операции (обмен по местной сети)
+          if (lanFate(db, op.id, 'ok', null, { deviceId, now: clock.now() })) lanNet?.kick()
+        },
         reject: (op, error) => {
           log.warn(`сервер отверг операцию ${op.type} ${op.id}: ${error}`)
           rejectOp(db, op, error)
+          if (lanFate(db, op.id, 'rejected', error, { deviceId, now: clock.now() })) lanNet?.kick()
           // Окно держит свои списки в памяти: отвергнутая смена, возврат, клиент
           // должны исчезнуть с экрана сейчас, а не при очередной сверке через минуту
           send('changed', touchedBy(op))
         },
         sentOps: (n) => sentOps(db, n),
+        // Операция ссылается на чек или клиента соседней кассы, которых сервер ещё не
+        // знает (пришли по местной сети), — ждёт, пока сосед отправит своё (lan.mjs)
+        waitsForPeer: (op) => waitsForPeer(db, op),
         // Нужно всё заново (попросил человек или сервер что-то отверг): обмен не называет
         // отметку, пока полный ответ не ляжет в базу (см. sync.mjs)
         wantsFull: () => getMeta(db, 'needFull') === '1',
@@ -260,15 +300,23 @@ export function createGateway({
           inTx(db, () => {
             const fates = res.ops && typeof res.ops === 'object' ? res.ops : {}
             const stale = []
+            let toPeers = false
             for (const op of sent) {
               const fate = fates[op.id]
-              if (fate?.status === 'ok') ackOp(db, op, fate)
-              else if (fate?.status === 'rejected') {
+              if (fate?.status === 'ok') {
+                ackOp(db, op, fate)
+                if (lanFate(db, op.id, 'ok', null, { deviceId, now: clock.now() })) toPeers = true
+              } else if (fate?.status === 'rejected') {
                 log.warn(`сервер отверг операцию ${op.type} ${op.id}: ${fate.error}`)
                 rejectOp(db, op, fate.error)
+                if (lanFate(db, op.id, 'rejected', fate.error, { deviceId, now: clock.now() })) toPeers = true
                 stale.push(...touchedBy(op))
               }
             }
+            if (toPeers) lanNet?.kick()
+            // Операции соседних касс, которые в этих данных уже есть, — их поправка
+            // снимается до того, как данные лягут (см. local/lan.mjs)
+            lanBeforePull(db, res.data, { startedGen: ph.pullGen || 0, now: clock.now() })
             const changed = applyPull(db, res, { now: clock.now() })
             // Сервер отдал магазин целиком — просьба «нужно всё заново» выполнена. Отказ,
             // пришедший в этом же ответе, сюда входит: данные сняты с того же состояния
@@ -292,6 +340,9 @@ export function createGateway({
           token,
         ),
       pull: async (since, asked = []) => {
+        // Номер этого обмена: по нему видно, начат ли он после известия соседа «сервер
+        // принял мою операцию» (local/lan.mjs)
+        ph.pullGen = lanNextGen(db)
         const token = session.get()
         // Вошли без интернета, а ключа от прошлого входа нет. Забрать данные нечем;
         // но если сервер уже доступен — просим войти заново, теперь через него
@@ -333,10 +384,15 @@ export function createGateway({
           if (data.me.tenantUserId) q(core, 'UPDATE accounts SET tenantUserId = ? WHERE id = ?').run(data.me.tenantUserId, data.me.id)
         }
         ph.users.clear()
+        // Обмен кассами по местной сети: общий ключ магазина, сколько у него касс и как
+        // называется эта касса — всё это сообщает сервер
+        rememberLan(ph, data)
       },
       onState: () => send('status', status()),
     })
     pharmacy = ph
+    // Ключ магазина мог быть известен с прошлого раза — обмен по сети начинается сразу
+    lanNet?.sync().catch(() => {})
     return ph
   }
 
@@ -360,6 +416,10 @@ export function createGateway({
       refused: st.refused || '',
       pending: pendingCount(pharmacy.db),
       rejected: rejectedCount(pharmacy.db),
+      // Операция ждёт, пока соседняя касса отправит своё (её чек или клиента)
+      waiting: !!st.waiting,
+      // Сколько операций соседних касс лежит здесь, а сервер их ещё не видел
+      fromPeers: lanAppliedCount(pharmacy.db),
       syncedAt: getMeta(pharmacy.db, 'syncedAt'),
       // Сколько программе осталось работать без связи с сервером
       licence: { checkedAt: lic.checkedAt, offlineDays: lic.offlineDays, until: lic.until, leftMs: lic.leftMs, warn: lic.warn, expired: lic.expired },
@@ -476,6 +536,92 @@ export function createGateway({
     }
   }
   const sealing = { seal, open }
+
+  // ── Обмен кассами по местной сети: что знает база магазина ──
+  // Общий ключ магазина выдаёт сервер при обмене. Хранится зашифрованным средствами
+  // Windows, как ключи входа; в памяти — пока открыта база
+  function lanKeyOf(ph) {
+    if (ph.lanKey) return ph.lanKey
+    const stored = getMeta(ph.db, 'lanKey')
+    const key = stored ? open(stored) : null
+    if (key) ph.lanKey = key
+    return key || ''
+  }
+  function rememberLan(ph, data) {
+    const lan = data?.lan
+    let changed = false
+    if (lan && typeof lan.key === 'string' && /^[A-Za-z0-9_-]{20,200}$/.test(lan.key) && lan.key !== lanKeyOf(ph)) {
+      ph.lanKey = lan.key
+      const sealed = seal(lan.key)
+      if (sealed) setMeta(ph.db, 'lanKey', sealed)
+      changed = true
+    }
+    if (lan && Number.isInteger(lan.devices) && String(lan.devices) !== getMeta(ph.db, 'lanDevices')) {
+      setMeta(ph.db, 'lanDevices', String(lan.devices))
+      changed = true
+    }
+    const name = data?.device?.name
+    if (typeof name === 'string' && name && name !== getMeta(ph.db, 'deviceName')) {
+      setMeta(ph.db, 'deviceName', name.slice(0, 60))
+      changed = true
+    }
+    if (changed) lanNet?.sync().catch(() => {})
+  }
+  // Обмен нужен, когда у магазина больше одной кассы, вписан адрес соседа или сосед
+  // уже знаком. Одна касса — сеть не открывается вовсе (и Windows ни о чём не спросит)
+  function lanEnabled(ph) {
+    if (!ph || !lanKeyOf(ph)) return false
+    return Number(getMeta(ph.db, 'lanDevices') || 0) >= 2 || lanManual(ph.db).length > 0 || lanPeers(ph.db).length > 0
+  }
+  function lanAfterWrite(ph) {
+    if (!lanEnabled(ph)) return
+    try {
+      lanCatchUp(ph.db, { deviceId, now: clock.now() })
+    } catch (e) {
+      log.warn('обмен по сети: операция не записалась в журнал', e)
+    }
+    lanNet?.kick()
+  }
+  const lanHub = {
+    state() {
+      const ph = pharmacy
+      if (!ph) return null
+      const key = lanKeyOf(ph)
+      const wide = lanWideHere(core, ph.code)
+      // За кассой начал работать тот, кому видны деньги магазина, — журналы соседей
+      // нужны целиком, а не урезанными
+      const was = getMeta(ph.db, 'lanWide') === '1'
+      if (wide !== was) {
+        if (wide) lanAskFull(ph.db)
+        setMeta(ph.db, 'lanWide', wide ? '1' : '0')
+      }
+      return { enabled: lanEnabled(ph), key, deviceId, name: getMeta(ph.db, 'deviceName') || '', wide }
+    },
+    entriesFor(since, wide) {
+      const ph = pharmacy
+      if (!ph) return { entries: [], upTo: since, more: false }
+      lanCatchUp(ph.db, { deviceId, now: clock.now() })
+      return lanEntriesSince(ph.db, since, { wide })
+    },
+    receive(peerId, entries) {
+      const ph = pharmacy
+      if (!ph || !Array.isArray(entries) || !entries.length) return
+      const r = lanReceive(ph.db, entries, { now: clock.now(), gen: lanGen(ph.db) })
+      if (r.changed.length) send('changed', r.changed)
+      // Сосед сообщил «сервер принял»: обменяться с сервером поскорее — его данные
+      // снимут поправку, а ждавшие этого свои операции уйдут
+      if (r.kickSync) ph.sync.kick()
+      // Пришедшее от одного соседа — дальше остальным
+      lanNet?.kick()
+      send('status', status())
+    },
+    progress: (peerId, p) => pharmacy && lanPeerProgress(pharmacy.db, peerId, p),
+    peers: () => (pharmacy ? lanPeers(pharmacy.db) : []),
+    peer: (id) => (pharmacy ? lanPeer(pharmacy.db, id) : null),
+    peerSeen: (p) => pharmacy && lanPeerSeen(pharmacy.db, p),
+    manual: () => (pharmacy ? lanManual(pharmacy.db) : []),
+    forgetAddress: (id) => pharmacy && q(pharmacy.db, "UPDATE lan_peers SET address = '' WHERE deviceId = ?").run(id),
+  }
 
   // ── Вход ──
   async function login(req) {
@@ -665,6 +811,8 @@ export function createGateway({
       // Записано на диск — теперь это надо отправить. Не дожидаясь ответа сервера:
       // кассир уже может пробивать следующий чек
       ph.sync.kick()
+      // И соседним кассам по местной сети — сразу
+      lanAfterWrite(ph)
       send('status', status())
     }
     return reply(req.method === 'POST' ? 201 : 200, data)
@@ -846,6 +994,41 @@ export function createGateway({
     // Обмен с сервером прямо сейчас (для проверок и для кнопки «обновить»)
     syncNow: () => (pharmacy ? pharmacy.sync.run() : Promise.resolve({ ok: false, changed: [] })),
 
+    // ── Обмен кассами по местной сети ──
+    lanHub,
+    attachLan(net) {
+      lanNet = net
+    },
+    lanStatus() {
+      const base = lanNet ? lanNet.status() : { enabled: false, running: false, peers: [], manual: [] }
+      return { ...base, fromPeers: pharmacy ? lanAppliedCount(pharmacy.db) : 0 }
+    },
+    // Вписать адрес соседа вручную (поиск в сети не сработал). Только с правом на
+    // настройки касс: это доступ к данным магазина
+    async lanAdd(address) {
+      if (!pharmacy || !hasPerm(activeAccount(), 'settings.devices')) return { ok: false, error: 'rights' }
+      const a = parseAddress(address)
+      if (!a) return { ok: false, error: 'address' }
+      if (!lanKeyOf(pharmacy)) return { ok: false, error: 'nokey' }
+      lanAddManual(pharmacy.db, a.text, clock.now())
+      await lanNet?.sync()
+      await lanNet?.now()
+      return { ok: true }
+    },
+    async lanRemove(address) {
+      if (!pharmacy || !hasPerm(activeAccount(), 'settings.devices')) return false
+      const done = lanRemoveManual(pharmacy.db, String(address || ''))
+      await lanNet?.sync()
+      return done
+    },
+    async lanForget(peerId) {
+      if (!pharmacy || !hasPerm(activeAccount(), 'settings.devices') || typeof peerId !== 'string') return false
+      const done = lanForgetPeer(pharmacy.db, peerId)
+      await lanNet?.sync()
+      return done
+    },
+    lanNow: () => (lanNet ? lanNet.now() : Promise.resolve([])),
+
     // Загрузить всё заново: забыть отметку «докуда получили» и спросить у сервера
     // весь магазин. Сделанное здесь и не отправленное при этом не теряется — оно, как
     // всегда, сначала уходит на сервер и накладывается поверх свежих данных
@@ -900,6 +1083,15 @@ export function createGateway({
       const acc = activeAccount()
       if (acc) touchLicence(core, acc.pharmacyCode, licNow(), sealing, floorNow())
       watchLicence()
+      // Раз в сутки — уборка журнала обмена по сети; чужое, так и не дошедшее до
+      // сервера за две недели, снимается
+      if (pharmacy) {
+        try {
+          if (lanPrune(pharmacy.db, clock.now())) send('changed', ['products', 'customers', 'sales', 'returns', 'shifts', 'arrivals'])
+        } catch (e) {
+          log.warn('обмен по сети: журнал не убран', e)
+        }
+      }
       if (pharmacy && activeAccount()) send('status', status())
     },
     isOnline: () => !!pharmacy?.sync.isOnline(),

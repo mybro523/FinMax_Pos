@@ -18,9 +18,11 @@ export class AuthController {
     return this.auth.login(dto.name, dto.password, req?.ip || '')
   }
 
+  // Кроме учётной записи — сотрудник в базе магазина: на него ссылаются смены и чеки,
+  // и экран по нему узнаёт «свою» смену (закрыть чужую можно только по праву)
   @Get('me')
-  me(@CurrentUser() u: any) {
-    return this.auth.me(u.sub, u.impersonatedBy)
+  async me(@CurrentUser() u: any) {
+    return { ...(await this.auth.me(u.sub, u.impersonatedBy)), tenantUserId: u.tenantUserId ?? null }
   }
 
   @Post('change-password')

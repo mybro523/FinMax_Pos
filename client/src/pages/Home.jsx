@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { LuLogOut, LuMoon, LuSun, LuPower, LuLock } from 'react-icons/lu'
+import { LuLogOut, LuMoon, LuSun, LuPower, LuLock, LuInfo } from 'react-icons/lu'
 import Layout, { NAV, allowedNav } from '../components/Layout'
 import { useCollection } from '../db/store'
 import { useAuth, logout } from '../db/auth'
@@ -44,7 +44,16 @@ export default function Home() {
   const roleName = user?.roleName || (user?.role === 'founder' ? t('Владелец') : t('Кассир'))
 
   return (
-    <Layout hub title={t('Главное меню')} subtitle={user?.pharmacy?.name || ''}>
+    <Layout
+      hub
+      title={t('Главное меню')}
+      subtitle={user?.pharmacy?.name || ''}
+      actions={
+        <Link to="/about" className="btn ghost" data-tour="hub.about">
+          <span className="ic"><LuInfo size={16} /></span> {t('О компании')}
+        </Link>
+      }
+    >
       <div className="hub" data-tour="sidebar">
         <div className="hub-grid">
           {items.map((n) => {

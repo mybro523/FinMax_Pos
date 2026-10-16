@@ -19,6 +19,7 @@ import { shiftTicket } from '../lib/ticket'
 import TicketView from '../components/TicketView'
 import { usePechat } from '../components/PrintDialog'
 import { getRekvizity } from '../lib/rekvizity'
+import { canCloseShift, shiftOpenerName } from '../lib/shiftOwner'
 
 export default function Shift() {
   const shifts = useCollection('shifts')
@@ -39,6 +40,8 @@ export default function Shift() {
   const isFounder = can('shift.others')
   const current = shifts.find((s) => !s.closedAt)
   const history = shifts.filter((s) => s.closedAt)
+  // Закрыть можно свою смену; чужую — только по праву (владелец может всегда)
+  const mayClose = canCloseShift(current, user, can)
   const pg = usePagination(history, 10)
 
   // Разбивка сегодняшних продаж по кассирам — для владельца
@@ -221,7 +224,7 @@ export default function Shift() {
                 <button className="btn ghost" data-tour="shift.cash-out" onClick={() => doCash('out')}><span className="ic"><LuArrowUpFromLine size={16} /></span> {t('Изъять')}</button>
               </>
             )}
-            {can('shift.open') && (
+            {mayClose && (
               <button className="btn danger" data-tour="shift.close" onClick={doClose}><span className="ic"><LuClock size={16} /></span> {t('Закрыть смену')}</button>
             )}
           </>
@@ -244,6 +247,11 @@ export default function Shift() {
       )}
 
       {/* ── Текущая смена ── */}
+      {current && can('shift.open') && !mayClose && (
+        <div className="note info" data-tour="shift.not-yours" style={{ maxWidth: 640, marginBottom: 14 }}>
+          {t('Эту смену открыл другой сотрудник')}{shiftOpenerName(current) ? <> — <b>{shiftOpenerName(current)}</b></> : null}. {t('Закрыть её может он сам или владелец.')}
+        </div>
+      )}
       {current && live && (
         <>
           <div className="tag-cat" style={{ marginBottom: 12 }}>

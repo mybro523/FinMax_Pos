@@ -18,6 +18,7 @@ import { createArrival } from './ops/arrival.mjs'
 import { createCustomer, payDebt } from './ops/customer.mjs'
 import { addDeferred, removeDeferred } from './ops/deferred.mjs'
 import { cashSources, createExpense, expenseCategoriesList } from './ops/expense.mjs'
+import { createIncome, incomeCategoriesList } from './ops/income.mjs'
 import { createCashMove } from './ops/cash.mjs'
 import { suppliersDebts, payServicesList, suppliersList } from './suppliers.mjs'
 import { createReturn } from './ops/return.mjs'
@@ -60,12 +61,13 @@ const journal = (kind) => (ctx) => {
 }
 
 // Свои неотправленные документы за период — их добавляют к ответу сервера,
-// когда за давним периодом ходили в интернет: сервер о них ещё не знает
+// когда за давним периодом ходили в интернет: сервер о них ещё не знает. Туда же —
+// пришедшие от соседней кассы по местной сети (sync = 'peer'): их сервер тоже ещё не видел
 export function pendingInPeriod(db, kind, { from, to }) {
   const rows = q(
     db,
     `SELECT body FROM docs
-     WHERE kind = ? AND sync = 'pending' AND (? IS NULL OR date >= ?) AND (? IS NULL OR date <= ?)`,
+     WHERE kind = ? AND sync IN ('pending', 'peer') AND (? IS NULL OR date >= ?) AND (? IS NULL OR date <= ?)`,
   ).all(kind, from, from, to, to)
   return rows.map((r) => JSON.parse(r.body))
 }
@@ -115,6 +117,9 @@ const ROUTES = [
   ['GET', /^\/expenses$/, perm(['expenses.view', 'reports.view'], journal('expense'))],
   ['GET', /^\/expenses\/cash-sources$/, perm(['expenses.create'], (ctx) => cashSources(ctx.db, ctx.deviceId))],
   ['GET', /^\/expense-categories$/, perm(['expenses.view', 'expenses.create', 'settings.expenseCategories'], (ctx) => expenseCategoriesList(ctx.db))],
+  // Доходы — деньги магазина: по тем же правам, что на сервере
+  ['GET', /^\/incomes$/, perm(['incomes.view', 'reports.view'], journal('income'))],
+  ['GET', /^\/income-categories$/, perm(['incomes.view', 'incomes.create', 'settings.incomeCategories'], (ctx) => incomeCategoriesList(ctx.db))],
   // Поставщики нужны приходу — всем; долги в них видит только владелец
   ['GET', /^\/suppliers$/, (ctx) => suppliersList(ctx.db, hasPerm(ctx.user, 'suppliers.view'))],
   // Сводка «кому сколько должны» — с учётом своих непосланных приходов в долг
@@ -129,6 +134,7 @@ const ROUTES = [
   ['POST', /^\/arrivals$/, perm(['arrivals.create'], canArrive)],
   ['POST', /^\/writeoffs$/, perm(['writeoffs.create'], (ctx) => createWriteOff(ctx, ctx.body))],
   ['POST', /^\/expenses$/, perm(['expenses.create'], (ctx) => createExpense(ctx, ctx.body))],
+  ['POST', /^\/incomes$/, perm(['incomes.create'], (ctx) => createIncome(ctx, ctx.body))],
   ['POST', /^\/shifts\/open$/, perm(['shift.open'], (ctx) => openShift(ctx, ctx.body))],
   ['POST', /^\/shifts\/cash$/, perm(['shift.cash'], (ctx) => createCashMove(ctx, ctx.body))],
   ['POST', /^\/shifts\/close$/, perm(['shift.open'], (ctx) => closeShift(ctx, ctx.body))],

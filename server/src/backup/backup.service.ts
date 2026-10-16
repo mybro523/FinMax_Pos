@@ -21,7 +21,8 @@ import { forgetCountedAfter } from '../common/counted'
 // 3 — категории и восстановление сотрудников; 4 — расходы и их статьи;
 // 5 — поставщики и оплаты им, внесение/изъятие наличных, сервисы перевода, правки остатка
 // 6 — типы товаров, ФИО/оклад/бонус сотрудников, кому выдана зарплата
-const FORMAT = 6
+// 7 — доходы вне продаж и их статьи
+const FORMAT = 7
 
 @Injectable()
 export class BackupService {
@@ -31,7 +32,7 @@ export class BackupService {
   async dump() {
     const [
       products, customers, sales, arrivals, shifts, payments, users, deferred, returns, writeOffs, batches, inventories, categories, expenses, expenseCategories,
-      suppliers, supplierPayments, cashMoves, payServices, stockEdits, productTypes,
+      suppliers, supplierPayments, cashMoves, payServices, stockEdits, productTypes, incomes, incomeCategories,
     ] = await Promise.all([
         this.prisma.product.findMany(),
         this.prisma.customer.findMany(),
@@ -61,6 +62,10 @@ export class BackupService {
         this.prisma.payService.findMany(),
         this.prisma.stockEdit.findMany(),
         this.prisma.productType.findMany(),
+        // Доходы вне продаж — тоже деньги магазина: без них чистый доход после
+        // восстановления оказался бы занижен
+        this.prisma.income.findMany(),
+        this.prisma.incomeCategory.findMany(),
       ])
 
     return {
@@ -75,11 +80,12 @@ export class BackupService {
         returns: returns.length,
         writeOffs: writeOffs.length,
         expenses: expenses.length,
+        incomes: incomes.length,
         suppliers: suppliers.length,
       },
       data: {
         categories, products, customers, sales, arrivals, shifts, payments, users, deferred, returns, writeOffs, batches, inventories, expenses, expenseCategories,
-        suppliers, supplierPayments, cashMoves, payServices, stockEdits, productTypes,
+        suppliers, supplierPayments, cashMoves, payServices, stockEdits, productTypes, incomes, incomeCategories,
       },
     }
   }
@@ -109,6 +115,8 @@ export class BackupService {
       // Расходы заменяются вместе со всем остальным — и когда в копии их нет (она
       // снята до появления раздела): внесённое после копии отменяется, как и чеки
       await tx.expense.deleteMany({})
+      // Доходы — так же: копия, снятая до их появления, отменяет внесённые после неё
+      await tx.income.deleteMany({})
       await tx.supplierPayment.deleteMany({})
       await tx.cashMove.deleteMany({})
       await tx.stockEdit.deleteMany({})
@@ -244,6 +252,14 @@ export class BackupService {
       }
       if (d.expenses?.length) {
         await tx.expense.createMany({ data: strip(d.expenses, ['user']).map((e: any) => ({ ...e, userId: ref(e.userId) })) })
+      }
+      // ── Доходы и их статьи ── по тем же правилам, что расходы
+      if (d.incomeCategories?.length) {
+        await tx.incomeCategory.deleteMany({})
+        await tx.incomeCategory.createMany({ data: strip(d.incomeCategories), skipDuplicates: true })
+      }
+      if (d.incomes?.length) {
+        await tx.income.createMany({ data: strip(d.incomes, ['user']).map((e: any) => ({ ...e, userId: ref(e.userId) })) })
       }
       // Сервисы перевода — как статьи расходов: список заменяем, только если он есть в копии
       if (d.payServices?.length) {

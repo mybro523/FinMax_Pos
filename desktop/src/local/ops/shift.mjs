@@ -4,6 +4,7 @@
 // на сервере открытая смена одна на весь магазин, а здесь — своя у каждой кассы.
 // Без интернета иначе нельзя: касса не может знать, открыта ли смена на соседней,
 // а ждать связи, чтобы начать продавать, — значит не продавать.
+import { hasPerm } from '../accounts.mjs'
 import { bodyOf, checker } from '../check.mjs'
 import { bad, inTx, newId, q } from '../db.mjs'
 import { docsOfShift, enqueue, myOpenShift, putDoc } from '../docs.mjs'
@@ -12,6 +13,21 @@ import { expenseCashOf } from './expense.mjs'
 import { cashMovesOf } from './cash.mjs'
 
 const money = (d) => fromCents(toCents(d))
+
+// ── Кто может закрыть смену ──
+// Тот, кто её открыл, или сотрудник с правом «Смена кассы: закрыть смену другого
+// сотрудника»; владелец — всегда. Иначе кассир закрыл бы смену владельца и подписал бы
+// своим пересчётом чужие деньги. Текст — слово в слово как у сервера
+// (server/src/shifts/closer.ts): сервер проверяет то же самое при приёме закрытия
+export const NOT_YOUR_SHIFT = 'Эту смену открыл другой сотрудник. Закрыть её может он сам или владелец.'
+
+export function mayCloseShift(shift, user) {
+  if (hasPerm(user, 'shift.closeAny')) return true
+  // Кто открыл — неизвестно (смена из прежней версии): закрыть может любой, кому можно
+  if (!shift?.userId && !shift?.user) return true
+  if (shift.userId && shift.userId === user?.id) return true
+  return !!shift.user?.name && shift.user.name === user?.name
+}
 
 // ── Смена, как её видит окно ──
 // У открытой смены этой кассы сумма расходов из кассы — та, что уже знает сервер,
@@ -185,6 +201,7 @@ export function closeShift(ctx, raw) {
   return inTx(db, () => {
     const open = myOpenShift(db, ctx.deviceId)
     if (!open) throw bad('Нет открытой смены')
+    if (!mayCloseShift(open.body, ctx.user)) throw bad(NOT_YOUR_SHIFT)
 
     const body = { ...open.body, closedAt: new Date(now).toISOString(), ...shiftTotals(db, open.body, countedCash) }
     // Смена, открытая здесь же и ещё не ушедшая на сервер, остаётся «ждущей».

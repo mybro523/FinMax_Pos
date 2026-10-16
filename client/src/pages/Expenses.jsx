@@ -4,9 +4,12 @@ import { LuWallet, LuPlus, LuPencil, LuTrash2, LuLock, LuBanknote } from 'react-
 import Layout from '../components/Layout'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
-import { JournalFilter, JournalCount, useJournalFilter } from '../components/JournalFilter'
+import { JournalFilter, JournalCount, useJournalFilter, periodText } from '../components/JournalFilter'
 import NumberInput from '../components/NumberInput'
-import { useCan } from '../db/auth'
+import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import { useCan, getUser } from '../db/auth'
+import { skachatXlsx } from '../lib/excel'
+import { byCategory } from '../lib/svodka'
 import { useCollection, money, onChanged } from '../db/store'
 import { api } from '../db/api'
 import { addExpense, updateExpense, removeExpense } from '../db/ops'
@@ -156,8 +159,41 @@ export default function Expenses() {
 
   const noTill = sources !== null && tills.length === 0
 
+  // ── Выгрузка и печать ──
+  // То, что сейчас отобрано в журнале (период, поиск, статья), — все страницы сразу.
+  // Под таблицей — сводка по статьям: на что ушли деньги, видно с первого взгляда
+  const exCols = [
+    { header: t('Дата'), key: 'date', width: 18 },
+    { header: t('Статья'), key: 'category', width: 24 },
+    { header: t('Кому выдана'), key: 'employee', width: 22 },
+    { header: t('Примечание'), key: 'note', width: 34, wrap: true },
+    { header: t('Оплата'), key: 'pay', width: 18 },
+    { header: t('Кто внёс'), key: 'who', width: 16 },
+    { header: t('Сумма'), key: 'amount', width: 14, money: true },
+  ]
+  const exRows = journalRows.map((e) => ({
+    date: e.fromCash ? `${fmtDate(e.date)} ${fmtTime(e.date)}` : fmtDate(e.date),
+    category: t(e.category),
+    employee: e.employeeName || '',
+    note: e.note || '',
+    pay: e.fromCash ? `${t('из кассы')}${tillOf(e) ? ' · ' + tillOf(e) : ''}` : '',
+    who: e.user?.name || '',
+    amount: Number(e.amount) || 0,
+  }))
+  const exItogi = { date: t('Итого'), amount: periodTotal }
+  const exPodzag = [
+    `${t('Период')}: ${periodText(journal.controls)}`,
+    catFilter !== 'all' ? `${t('Статья')}: ${t(catFilter)}` : '',
+    journal.controls.q.trim() ? `${t('Поиск')}: «${journal.controls.q.trim()}»` : '',
+    `${t('Записей')}: ${journalRows.length}`,
+  ].filter(Boolean).join(' · ')
+  const exSvodka = byCategory(journalRows, t, { list: t('По статьям'), zagolovok: t('Расходы по статьям'), podzag: exPodzag })
+  const exportExcel = () =>
+    skachatXlsx({ fayl: t('Расходы'), zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Расходы')}`, podzag: exPodzag, cols: exCols, rows: exRows, itogi: exItogi, svodka: exSvodka })
+
   return (
-    <Layout title={t('Расходы')} subtitle={t('Аренда, зарплата и другие траты магазина')}>
+    <Layout title={t('Расходы')} subtitle={t('Аренда, зарплата и другие траты магазина')} actions={<ExportPechat onExcel={exportExcel} />}>
+      <PrintSheet zagolovok={t('Расходы')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} svodka={exSvodka} />
       <div className="note info" style={{ marginBottom: 16, maxWidth: 780 }}>
         {t('Как это работает: вносите сюда всё, на что магазин тратит деньги помимо закупки товара. В «Отчёте ОПУ» расходы вычитаются из прибыли — получается чистая прибыль.')}
       </div>

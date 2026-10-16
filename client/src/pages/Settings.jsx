@@ -3,7 +3,7 @@ import {
   LuShoppingCart, LuPackagePlus, LuCreditCard, LuClipboardList, LuTrendingUp, LuServer, LuRefreshCw,
   LuKeyRound, LuUser, LuPalette, LuLanguages, LuSun, LuMoon, LuDatabaseBackup, LuDownload, LuTriangleAlert,
   LuTags, LuPlus, LuPencil, LuTrash2, LuUpload, LuShapes,
-  LuCalendarClock, LuHandCoins, LuQrCode, LuReceiptText, LuMonitorSmartphone, LuWallet,
+  LuCalendarClock, LuHandCoins, LuQrCode, LuReceiptText, LuMonitorSmartphone, LuWallet, LuCoins,
 } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { useToast, useDialog, PasswordInput, Modal } from '../components/ui'
@@ -17,6 +17,7 @@ import DevicesPanel from '../components/DevicesPanel'
 import PrintPanel from '../components/PrintPanel'
 import ChekPanel from '../components/ChekPanel'
 import VesyPanel from '../components/VesyPanel'
+import LanPanel from '../components/LanPanel'
 import { isDesktop } from '../lib/desktop'
 
 // ── Подписка ──
@@ -161,7 +162,7 @@ export default function Settings() {
     { id: 'profil', label: 'Профиль', Icon: LuUser, show: true },
     { id: 'chek', label: 'Чек и печать', Icon: LuReceiptText, show: can('settings.print') },
     { id: 'kategorii', label: 'Категории и типы', Icon: LuTags, show: can('settings.categories') },
-    { id: 'dengi', label: 'Деньги', Icon: LuWallet, show: can('settings.expenseCategories') || can('settings.payServices') },
+    { id: 'dengi', label: 'Деньги', Icon: LuWallet, show: can('settings.expenseCategories') || can('settings.incomeCategories') || can('settings.payServices') },
     { id: 'ustroystva', label: 'Кассы и устройства', Icon: LuMonitorSmartphone, show: can('settings.devices') },
     { id: 'kopiya', label: 'Резервная копия', Icon: LuDatabaseBackup, show: can('settings.backup') },
   ].filter((r) => r.show)
@@ -233,7 +234,14 @@ export default function Settings() {
                 </p>
               </div>
 
-              <div className="panel mt" data-tour="set.password" style={{ maxWidth: 640 }}>
+              {/* Свой пароль меняет тот, кому это разрешено в «Ролях и правах» (кассиру по
+                  умолчанию нельзя: пароль ему выдаёт владелец). Сервер проверяет то же самое */}
+              {!can('profile.password') && (
+                <div className="note info mt" style={{ maxWidth: 640 }}>
+                  <LuKeyRound size={14} style={{ verticalAlign: '-2px' }} /> {t('Пароль меняет владелец в разделе «Сотрудники».')}
+                </div>
+              )}
+              {can('profile.password') && <div className="panel mt" data-tour="set.password" style={{ maxWidth: 640 }}>
                 <h2><span className="h2-title"><span className="ic"><LuKeyRound size={17} /></span>{t('Смена пароля')}</span></h2>
                 <div className="field"><label>{t('Текущий пароль')}</label>
                   <PasswordInput value={pw.oldPassword} onChange={(e) => set('oldPassword', e.target.value)} autoComplete="current-password" />
@@ -247,7 +255,7 @@ export default function Settings() {
                   </div>
                 </div>
                 <button className="btn" onClick={changePassword} disabled={saving}>{saving ? t('Сохранение…') : t('Изменить пароль')}</button>
-              </div>
+              </div>}
 
               <div className="panel mt" style={{ maxWidth: 640 }}>
                 <h2><span className="h2-title"><span className="ic"><LuServer size={17} /></span>{t('О системе')}</span></h2>
@@ -294,6 +302,7 @@ export default function Settings() {
           {active === 'dengi' && (
             <>
               {can('settings.expenseCategories') && <ExpenseCategoriesPanel />}
+              {can('settings.incomeCategories') && <IncomeCategoriesPanel />}
               {can('settings.payServices') && <PayServicesPanel />}
             </>
           )}
@@ -301,6 +310,8 @@ export default function Settings() {
           {active === 'ustroystva' && can('settings.devices') && (
             <>
               <DevicesPanel />
+              {/* Кассы в одной сети передают друг другу сделанное без интернета — только в программе */}
+              {isDesktop && <LanPanel manage />}
               {/* Этикетки весов разбирает касса на этом устройстве — настройка здесь же */}
               <VesyPanel />
             </>
@@ -590,6 +601,86 @@ function ExpenseCategoriesPanel() {
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && add()}
             placeholder={t('Напр. Охрана')}
+          />
+        </div>
+        <button className="btn" onClick={add} style={{ marginBottom: 14 }}>
+          <span className="ic"><LuPlus size={16} /></span> {t('Добавить')}
+        </button>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>{t('Статья')}</th><th></th></tr>
+        </thead>
+        <tbody>
+          {categories.map((c) => (
+            <tr key={c.id}>
+              <td><b>{t(c.name)}</b></td>
+              <td className="num">
+                <button className="btn ghost sm icon" onClick={() => remove(c)} title={t('Убрать')} aria-label={`${t('Убрать')}: ${t(c.name)}`}><LuTrash2 size={15} /></button>
+              </td>
+            </tr>
+          ))}
+          {categories.length === 0 && <tr><td colSpan="2" className="empty">{t('Статей пока нет')}</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ── Статьи доходов ──
+// Как статьи расходов: готовый список (аренда, услуги, бонус от поставщика, прочие
+// доходы) есть у каждого магазина, свои владелец добавляет здесь. Доход хранит статью
+// названием, поэтому убрать статью можно всегда — прежние доходы остаются с ней
+function IncomeCategoriesPanel() {
+  const t = useT()
+  const toast = useToast()
+  const dialog = useDialog()
+  const categories = useCollection('incomeCategories')
+  const [name, setName] = useState('')
+
+  function add() {
+    const value = name.trim()
+    if (!value) return toast(t('Укажите название статьи'), 'err')
+    if (categories.some((c) => c.name.toLowerCase() === value.toLowerCase())) {
+      return toast(t('Такая статья доходов уже есть'), 'err')
+    }
+    db.push('incomeCategories', { name: value })
+      .then(() => toast(t('Статья добавлена')))
+      .catch((e) => toast(t(e.message), 'err'))
+    setName('')
+  }
+
+  async function remove(c) {
+    const ok = await dialog.confirm({
+      title: t('Убрать статью доходов?'),
+      message: `«${t(c.name)}» ${t('исчезнет из списка для новых доходов. Прежние доходы по ней останутся как были.')}`,
+      danger: true,
+      confirmText: t('Убрать'),
+    })
+    if (!ok) return
+    db.remove('incomeCategories', c.id)
+      .then(() => toast(t('Статья убрана')))
+      .catch((e) => toast(t(e.message), 'err'))
+  }
+
+  return (
+    <div className="panel mt" data-tour="set.inccats" style={{ maxWidth: 640 }}>
+      <h2><span className="h2-title"><span className="ic"><LuCoins size={17} /></span>{t('Статьи доходов')}</span></h2>
+      <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7, marginBottom: 12 }}>
+        {t('По этим статьям вносятся доходы в разделе «Доходы». Добавьте свои, если готовых не хватает.')}
+      </p>
+
+      <div className="row" style={{ alignItems: 'flex-end' }}>
+        <div className="field" style={{ flex: 1 }}>
+          <label htmlFor="incCatName">{t('Новая статья')}</label>
+          <input
+            id="incCatName"
+            value={name}
+            maxLength={60}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && add()}
+            placeholder={t('Напр. Проценты банка')}
           />
         </div>
         <button className="btn" onClick={add} style={{ marginBottom: 14 }}>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { LuBadgeCheck, LuCheck, LuCloudOff, LuRefreshCw, LuTriangleAlert, LuDownload } from 'react-icons/lu'
+import { LuBadgeCheck, LuCheck, LuCloudOff, LuRefreshCw, LuTriangleAlert, LuDownload, LuNetwork } from 'react-icons/lu'
 import { bridge } from '../lib/desktop'
 import { desktopAction, refreshDesktopStatus, useDesktopStatus } from '../db/desktopStatus'
 import { useAuth } from '../db/auth'
@@ -8,7 +8,9 @@ import { fmtDate, fmtShort, serverNow } from '../lib/time'
 import { useT } from '../lib/i18n'
 import { badgeOf, leftText, opTitle, updateBadgeOf, updateText, versionBadgeOf } from '../lib/syncStatus'
 import { rejectedDetail } from '../lib/rejected'
+import { lanBadgeOf } from '../lib/lanStatus'
 import { Modal, useToast } from './ui'
+import LanPanel from './LanPanel'
 
 // ── Значок состояния программы ──
 // Только в программе для Windows. Касса там работает и без интернета, и человек
@@ -34,6 +36,8 @@ export default function SyncBadge() {
   if (!badge) return null
   const update = updateBadgeOf(st, t)
   const ver = versionBadgeOf(st, t)
+  // Соседние кассы в местной сети — когда у магазина их больше одной
+  const lanBadge = lanBadgeOf(st, t)
   const Icon = ICONS[badge.tone]
 
   return (
@@ -48,6 +52,12 @@ export default function SyncBadge() {
         <span className={'ic' + (badge.tone === 'busy' ? ' spin' : '')}><Icon size={15} /></span>
         <span className="sync-label">{badge.label}</span>
       </button>
+      {lanBadge && (
+        <button type="button" className={'sync-badge lan ' + lanBadge.tone} onClick={() => setOpen(true)} title={t('Кассы в местной сети')} data-testid="lan-badge">
+          <span className="ic"><LuNetwork size={14} /></span>
+          <span className="sync-label">{lanBadge.label}</span>
+        </button>
+      )}
       {update && (
         <button type="button" className="sync-badge busy" onClick={() => setOpen(true)} data-testid="update-badge">
           <span className="ic"><LuDownload size={15} /></span>
@@ -155,6 +165,11 @@ function StatusModal({ st, onClose }) {
 
         <Row label={t('Ждут отправки')} tone={pending > 0 ? 'warn' : 'ok'}>{pending > 0 ? pending : t('ничего')}</Row>
         <Row label={t('Последний обмен с сервером')}>{st?.syncedAt ? fmtShort(st.syncedAt) : '—'}</Row>
+        {st?.waiting && pending > 0 && (
+          <div className="note warn" style={{ margin: '8px 0' }}>
+            {t('Часть операций ссылается на чек или клиента соседней кассы, которых сервер ещё не знает. Они уйдут на сервер сами, как только соседняя касса отправит своё.')}
+          </div>
+        )}
         {st?.blocked && pending > 0 && (
           <div className="note warn" style={{ margin: '8px 0' }}>
             {t('Часть чеков пробил сотрудник, чей вход на этом компьютере больше не действует. Они уйдут на сервер, когда войдёт он сам или владелец.')}
@@ -210,6 +225,13 @@ function StatusModal({ st, onClose }) {
                   </button>
                 </div>
               ))}
+          </div>
+        )}
+
+        {/* ── Соседние кассы в местной сети ── */}
+        {st?.lan?.enabled && (
+          <div className="sync-section lan-section">
+            <LanPanel />
           </div>
         )}
 

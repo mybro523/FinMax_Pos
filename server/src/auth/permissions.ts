@@ -58,6 +58,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       ['shift.open', 'Смена кассы: открыть и закрыть'],
       ['shift.cash', 'Смена кассы: внести и изъять наличные'],
       ['shift.others', 'Смена кассы: смены других кассиров и отмена внесений'],
+      ['shift.closeAny', 'Смена кассы: закрыть смену другого сотрудника'],
       ['debts.view', 'Долги клиентов: просмотр'],
       ['debts.pay', 'Долги клиентов: принять оплату'],
       ['customers.create', 'Клиенты: добавить'],
@@ -69,6 +70,9 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       ['expenses.view', 'Расходы: журнал'],
       ['expenses.create', 'Расходы: внести расход'],
       ['expenses.edit', 'Расходы: изменить и удалить'],
+      ['incomes.view', 'Доходы: журнал'],
+      ['incomes.create', 'Доходы: внести доход'],
+      ['incomes.edit', 'Доходы: изменить и удалить'],
       ['reports.view', 'Отчёты: просмотр'],
       ['reports.export', 'Отчёты: выгрузка CSV'],
     ],
@@ -79,10 +83,12 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     items: [
       ['settings.categories', 'Настройки: категории товаров'],
       ['settings.expenseCategories', 'Настройки: статьи расходов'],
+      ['settings.incomeCategories', 'Настройки: статьи доходов'],
       ['settings.payServices', 'Настройки: сервисы перевода'],
       ['settings.print', 'Настройки: печать и данные чека'],
       ['settings.devices', 'Настройки: кассы и устройства'],
       ['settings.backup', 'Настройки: резервная копия'],
+      ['profile.password', 'Настройки: сменить свой пароль'],
     ],
   },
 ]
@@ -117,7 +123,8 @@ export const ROLE_PRESETS: { name: string; description: string; permissions: str
   {
     name: 'Наблюдатель',
     description: 'Только просмотр: панель, журналы и отчёты без права что-либо менять',
-    permissions: ALL_PERMISSIONS.filter((k) => k.endsWith('.view') || k === 'shift.others'),
+    // Свой пароль наблюдатель меняет сам: это не действие с данными магазина
+    permissions: ALL_PERMISSIONS.filter((k) => k.endsWith('.view') || k === 'shift.others' || k === 'profile.password'),
   },
 ]
 
@@ -130,6 +137,15 @@ export function permissionsOf(acc: { role: string; roleRef?: { permissions: stri
   if (acc.role === 'founder') return ALL_PERMISSIONS
   if (acc.roleRef) return acc.roleRef.permissions.filter(isPermission)
   return CASHIER_DEFAULT
+}
+
+// ── Смена своего пароля ──
+// По праву «Настройки: сменить свой пароль». Владелец магазина и владелец сервиса
+// меняют свой пароль всегда: запереть их без пароля было бы нельзя исправить
+export const NO_PASSWORD_CHANGE = 'Менять пароль вам не разрешено. Пароль меняет владелец в разделе «Сотрудники».'
+export function mayChangeOwnPassword(acc: { role: string; roleRef?: { permissions: string[] } | null }): boolean {
+  if (acc.role === 'founder' || acc.role === 'superadmin') return true
+  return permissionsOf(acc).includes('profile.password')
 }
 
 export type Actor = { role?: string; permissions?: string[] }
@@ -155,5 +171,6 @@ export const OP_PERMISSIONS: Record<string, string[]> = {
   'deferred.add': ['pos.defer', 'deferred.manage'],
   'deferred.remove': ['deferred.manage'],
   expense: ['expenses.create'],
+  income: ['incomes.create'],
   'cash.move': ['shift.cash'],
 }
