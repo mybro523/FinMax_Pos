@@ -7,6 +7,7 @@ import { TX } from '../common/tx'
 import { periodFilter, PeriodQuery, MAX_ROWS } from '../common/period'
 import { CheckoutDto } from './dto'
 import { WEB_SHIFT } from '../shifts/shifts.service'
+import { NO_SHIFT_SALE } from '../shifts/till'
 
 @Injectable()
 export class SalesService {
@@ -125,8 +126,10 @@ export class SalesService {
       }
 
       // Привязка чека к открытой смене (для Z-отчёта). Смена — та, что открыта на
-      // сайте: у касс, работающих без интернета, свои смены и свои чеки
+      // сайте: у касс, работающих без интернета, свои смены и свои чеки.
+      // Смены нет — продажи нет: каждый чек обязан войти в отчёт смены
       const openShift = await tx.shift.findFirst({ where: WEB_SHIFT, select: { id: true } })
+      if (!openShift) throw new BadRequestException(NO_SHIFT_SALE)
 
       return tx.sale.create({
         data: {

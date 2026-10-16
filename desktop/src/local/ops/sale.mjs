@@ -12,6 +12,11 @@ import { D, dmax, dmin, fromCents, fromCentsD, toCents } from '../money.mjs'
 import { move, productById } from '../stock.mjs'
 import { uppOf, wholeNonNeg } from '../units.mjs'
 
+// Продажа без открытой смены не проводится — текст слово в слово как у сервера
+// (server/src/shifts/till.ts). Проверяет маршрут /sales (local/api.mjs): сама продажа
+// остаётся чистой механикой, которую проверки гоняют и без смены
+export const NO_SHIFT_SALE = 'Сначала откройте смену: без открытой смены продажа невозможна.'
+
 export function checkout(ctx, raw) {
   const { db, now } = ctx
   const dto = bodyOf(raw)

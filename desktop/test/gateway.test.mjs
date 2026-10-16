@@ -63,11 +63,21 @@ function setup({ role = 'founder', permissions } = {}) {
 }
 
 // Войти с интернетом и дождаться, пока данные лягут в локальную базу
-async function loggedIn(opts) {
+// shift: false — смену проверка откроет сама (по умолчанию она открыта сразу после
+// входа, с интернетом, и уже отправлена серверу: без открытой смены касса не продаёт)
+async function loggedIn({ shift = true, ...opts } = {}) {
   const t = setup(opts)
   const r = await t.login()
   assert.equal(r.status, 201)
   await t.gw.syncNow()
+  if (shift) {
+    const opened = await t.req('POST', '/shifts/open', { openingCash: 0 })
+    assert.equal(opened.status, 201, 'смена для проверки не открылась: ' + JSON.stringify(opened.data))
+    await t.gw.syncNow()
+    // Журнал полученного сервером — с чистого листа: проверки считают в нём то, что
+    // касса отправила уже в ходе работы (сама смена остаётся в его памяти — для повторов)
+    t.srv.state.received.length = 0
+  }
   return t
 }
 
@@ -161,8 +171,8 @@ test('продажа без интернета: чек записан, оста�
   assert.deepEqual(bad.data.message, ['Позиции: нужна хотя бы 1 позиция'])
 
   // Весь рабочий день кассы — без единого обращения к серверу за операциями
+  // Смена открыта ещё при входе (см. loggedIn) — день начинается сразу с работы
   for (const [method, path, body] of [
-    ['POST', '/shifts/open', { openingCash: 50 }],
     ['POST', '/customers', { name: 'Новый' }],
     ['POST', '/customers/ivan/pay', { amount: 5 }],
     ['POST', '/returns', { saleId: sale.data.id, items: [{ productId: 'nur', units: 1 }] }],
@@ -175,8 +185,21 @@ test('продажа без интернета: чек записан, оста�
     assert.equal(r.status, 201, `${method} ${path}: ${JSON.stringify(r.data)}`)
   }
   assert.equal(t.srv.state.calls.filter((c) => c.method !== 'GET').length, 0)
-  assert.equal(t.gw.pharmacyDb().prepare("SELECT COUNT(*) AS n FROM outbox WHERE state = 'pending'").get().n, 9)
+  assert.equal(t.gw.pharmacyDb().prepare("SELECT COUNT(*) AS n FROM outbox WHERE state = 'pending'").get().n, 8)
   assert.equal(t.errors.length, 0)
+})
+
+test('без открытой смены касса не продаёт — отказ тем же текстом, что у сервера', async (tt) => {
+  const t = await loggedIn({ shift: false })
+  tt.after(() => t.gw.close())
+  t.srv.state.online = false
+  const no = await t.req('POST', '/sales', { payment: 'cash', items: [{ productId: 'nur', qty: 1 }] })
+  assert.equal(no.status, 400)
+  assert.equal(no.data.message, 'Сначала откройте смену: без открытой смены продажа невозможна.')
+  assert.equal((await t.req('GET', '/products')).data.find((p) => p.id === 'nur').stock, 5, 'остаток не тронут')
+  // Открыли смену — продажа проходит
+  assert.equal((await t.req('POST', '/shifts/open', { openingCash: 0 })).status, 201)
+  assert.equal((await t.req('POST', '/sales', { payment: 'cash', items: [{ productId: 'nur', qty: 1 }] })).status, 201)
 })
 
 test('программу закрыли и открыли без интернета — вход и данные на месте', async (tt) => {
@@ -547,7 +570,7 @@ test('отчёт за давний период: с интернетом — с 
 })
 
 test('возврат по давнему чеку, которого на кассе нет: касса берёт чек с сервера и оформляет возврат у себя, в своей смене', async (tt) => {
-  const t = await loggedIn()
+  const t = await loggedIn({ shift: false })
   tt.after(() => t.gw.close())
   // Чеку полгода: в журнале кассы его нет, а на сервере он есть — с одним прежним возвратом
   const old = {
@@ -700,7 +723,7 @@ test('чек уходит на сервер сам: один раз, с номе
 
   // Сервер принял: очередь пуста, чек больше не «ждёт», остаток не задвоился
   assert.equal(t.gw.status().pending, 0)
-  assert.deepEqual(local(t, 'SELECT state FROM outbox'), [{ state: 'done' }])
+  assert.deepEqual(local(t, "SELECT state FROM outbox WHERE type = 'sale'"), [{ state: 'done' }])
   assert.equal(local(t, "SELECT sync FROM docs WHERE kind = 'sale'")[0].sync, 'synced')
   assert.equal(local(t, 'SELECT COUNT(*) AS n FROM stock_moves WHERE synced = 0')[0].n, 0)
   assert.equal((await t.req('GET', '/products')).data.find((p) => p.id === 'nur').stock, 3, 'проданное вычтено дважды или не вычтено вовсе')
@@ -716,7 +739,7 @@ test('чек уходит на сервер сам: один раз, с номе
 })
 
 test('накопленное без интернета уходит по порядку, когда связь вернулась', async (tt) => {
-  const t = await loggedIn()
+  const t = await loggedIn({ shift: false })
   tt.after(() => t.gw.close())
   t.srv.state.online = false
   await t.req('POST', '/shifts/open', { openingCash: 50 })
@@ -752,9 +775,10 @@ test('обрыв связи посреди отправки: сервер при
   tt.after(() => t.gw.close())
   // Сервер принимает пачку, но ответ теряется по дороге
   t.srv.state.loseResponse = (route) => route === '/sync/push'
+  const opsBefore = t.srv.state.ops.size // смена, открытая при входе
   await sell(t, 2)
   await settle(t)
-  assert.equal(t.srv.state.ops.size, 1, 'сервер операцию принял')
+  assert.equal(t.srv.state.ops.size, opsBefore + 1, 'сервер операцию принял')
   assert.equal(t.gw.status().pending, 1, 'а касса об этом не знает')
   const pullsBefore = t.srv.count('GET', '/sync/pull')
 
@@ -767,7 +791,7 @@ test('обрыв связи посреди отправки: сервер при
   // Связь наладилась: та же операция уходит снова, сервер узнаёт её по номеру
   t.srv.state.loseResponse = null
   await t.gw.syncNow()
-  assert.equal(t.srv.state.ops.size, 1, 'операция записана дважды')
+  assert.equal(t.srv.state.ops.size, opsBefore + 1, 'операция записана дважды')
   assert.equal(t.srv.state.data.sales.length, 1, 'чек задвоился')
   assert.equal(t.srv.state.data.products.find((p) => p.id === 'nur').stock, 3, 'товар списан дважды')
   assert.equal(t.gw.status().pending, 0)
@@ -818,7 +842,7 @@ test('сервер отверг операцию: товар возвращае�
   const st = t.gw.status()
   assert.equal(st.pending, 0, 'отвергнутое не шлётся по кругу')
   assert.equal(st.rejected, 1)
-  assert.equal(local(t, 'SELECT error FROM outbox')[0].error, 'Суммы чека не сходятся с его позициями')
+  assert.equal(local(t, "SELECT error FROM outbox WHERE type = 'sale'")[0].error, 'Суммы чека не сходятся с его позициями')
   assert.equal(local(t, 'SELECT sync FROM docs WHERE id = ?', sale.data.id)[0].sync, 'rejected')
   // Сервер продажу не учёл — и касса больше не вычитает её из остатка
   assert.equal((await t.req('GET', '/products')).data.find((p) => p.id === 'nur').stock, 5)
@@ -988,7 +1012,7 @@ test('магазины не смешиваются: у каждой свой ф�
 // ── Расходы магазина ──
 
 test('расход из кассы, внесённый без связи: сразу уменьшает наличные в смене, доходит до сервера и не считается дважды', async (tt) => {
-  const t = await loggedIn()
+  const t = await loggedIn({ shift: false })
   tt.after(() => t.gw.close())
   const shift = await t.req('POST', '/shifts/open', { openingCash: 100 })
   await t.gw.syncNow()
@@ -1029,7 +1053,7 @@ test('расход из кассы, внесённый без связи: сра
 })
 
 test('сервер принял расход из кассы, а связь тут же оборвалась: сумма в смене остаётся верной', async (tt) => {
-  const t = await loggedIn()
+  const t = await loggedIn({ shift: false })
   tt.after(() => t.gw.close())
   const shift = await t.req('POST', '/shifts/open', { openingCash: 100 })
   await t.gw.syncNow()
@@ -1108,7 +1132,7 @@ test('править и удалять расход умеет только се
 })
 
 test('расход из кассы поправили и удалили через сервер: наличные в смене идут следом', async (tt) => {
-  const t = await loggedIn()
+  const t = await loggedIn({ shift: false })
   tt.after(() => t.gw.close())
   const shift = await t.req('POST', '/shifts/open', { openingCash: 100 })
   const e = await t.req('POST', '/expenses', { category: 'Транспорт', amount: 40, fromCash: true })
@@ -1122,7 +1146,7 @@ test('расход из кассы поправили и удалили чере
 })
 
 test('кассир: расходы закрыты, как на сервере, — ни прочитать, ни внести; а сумму «из кассы» в своей смене он видит', async (tt) => {
-  const t = await loggedIn({ role: 'cashier' })
+  const t = await loggedIn({ role: 'cashier', shift: false })
   tt.after(() => t.gw.close())
   for (const [method, path] of [['GET', '/expenses?days=180'], ['GET', '/expenses/cash-sources'], ['GET', '/expense-categories'], ['POST', '/expenses']]) {
     const r = await t.req(method, path, { category: 'Аренда', amount: 10 })
@@ -1275,6 +1299,9 @@ test('сколько дней работать без связи, назнача
   assert.equal((await t.login()).status, 201)
   await t.gw.syncNow()
   assert.equal(t.gw.status().licence.offlineDays, 14)
+  // Смена — пока связь есть: без неё касса не продаёт
+  assert.equal((await t.req('POST', '/shifts/open', { openingCash: 0 })).status, 201)
+  await t.gw.syncNow()
 
   t.srv.state.online = false
   t.time.now += 10 * DAY_MS
@@ -1502,7 +1529,7 @@ test('обмен называет серверу ключ кассы — заг�
 // ── Сервер отверг операцию: хвостов не остаётся ──
 
 test('сервер отверг открытие смены: касса не остаётся с «открытой» сменой, которой на сервере нет', async (tt) => {
-  const t = await loggedIn()
+  const t = await loggedIn({ shift: false })
   tt.after(() => t.gw.close())
   t.srv.state.rejectIf = (op) => (op.type === 'shift.open' ? 'На этой кассе уже открыта другая смена' : null)
   assert.equal((await t.req('POST', '/shifts/open', { openingCash: 100 })).status, 201)
@@ -1607,7 +1634,7 @@ const pullsOf = (t) => t.srv.state.calls.filter((c) => c.route === '/sync/pull')
 const changedOf = (t) => new Set(t.events.filter((e) => e.type === 'changed').flatMap((e) => e.payload))
 
 test('сервер отверг закрытие смены: касса берёт смену у сервера — открытой — и её можно закрыть снова', async (tt) => {
-  const t = await loggedIn()
+  const t = await loggedIn({ shift: false })
   tt.after(() => t.gw.close())
   const opened = await t.req('POST', '/shifts/open', { openingCash: 100 })
   await sell(t, 1)
@@ -1766,7 +1793,7 @@ test('отказ пришёл, а забрать магазин целиком �
 })
 
 test('сервер отверг закрытие смены, а связь тут же пропала: смена на кассе сразу снова открыта — вторую не открыть, чеки идут в неё', async (tt) => {
-  const t = await loggedIn()
+  const t = await loggedIn({ shift: false })
   tt.after(() => t.gw.close())
   const opened = await t.req('POST', '/shifts/open', { openingCash: 100 })
   await sell(t, 1)
@@ -1807,7 +1834,7 @@ test('сервер отверг закрытие смены, а связь ту�
 
 test('сервер ответил, что такой смены у него нет: заново она не открывается — кассир открывает новую, и её сервер принимает', async (tt) => {
   for (const reason of ['Смена не найдена', 'Эта смена открыта на другой кассе']) {
-    const t = await loggedIn()
+    const t = await loggedIn({ shift: false })
     tt.after(() => t.gw.close())
     const opened = await t.req('POST', '/shifts/open', { openingCash: 100 })
     await sell(t, 1)
@@ -1876,7 +1903,7 @@ test('срок работы без связи считается по своем
 // ── Поставщики, наличные в смене и переводы (версия 1.0.2) ──
 
 test('внесение и изъятие без связи: в смене кассы сразу, после связи — на сервере в той же смене; отмена — только через сервер', async (tt) => {
-  const t = await loggedIn()
+  const t = await loggedIn({ shift: false })
   tt.after(() => t.gw.close())
   const shift = await t.req('POST', '/shifts/open', { openingCash: 100 })
   await t.gw.syncNow()
@@ -1951,7 +1978,7 @@ test('продажа переводом без связи: сервис — из
 })
 
 test('приход в долг без связи: долг поставщика на кассе растёт сразу, на сервере — после связи; оплата из кассы называет серверу смену кассы', async (tt) => {
-  const t = await loggedIn()
+  const t = await loggedIn({ shift: false })
   tt.after(() => t.gw.close())
   const debt = async () => (await t.req('GET', '/suppliers')).data.find((s) => s.id === 'sup-1').debt
   t.srv.state.online = false

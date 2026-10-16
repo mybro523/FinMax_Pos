@@ -51,7 +51,13 @@ async function shop({ role = 'founder', permissions, lan = { key: KEY, devices: 
   const r = await req('POST', '/auth/login', { name: 'kassir', password: PASS })
   assert.equal(r.status, 201)
   await gw.syncNow()
-  return { gw, srv, net, events, req, time }
+  // Без открытой смены касса не продаёт — открываем сразу, пока есть связь
+  assert.equal((await req('POST', '/shifts/open', { openingCash: 0 })).status, 201)
+  await gw.syncNow()
+  // Журнал обмена к началу работы: смена и «сервер принял» уже в нём — соседям
+  // проверки отдают то, что касса запишет дальше
+  const lanFrom = gw.lanHub.entriesFor(0, true).upTo
+  return { gw, srv, net, events, req, time, lanFrom }
 }
 
 test('ключ магазина приходит с сервера и включает обмен при двух кассах', async (tt) => {
@@ -79,7 +85,7 @@ test('записанная продажа сразу уходит в журна�
   const sale = await t.req('POST', '/sales', { items: [{ productId: 'nur', qty: 2 }], payment: 'cash' })
   assert.equal(sale.status, 201)
   assert.ok(t.net.kicks > before, 'соседям надо передать сразу')
-  const out = t.gw.lanHub.entriesFor(0, true)
+  const out = t.gw.lanHub.entriesFor(t.lanFrom, true)
   assert.equal(out.entries.length, 1)
   assert.equal(out.entries[0].type, 'sale')
   assert.equal(out.entries[0].id.length > 10, true)
@@ -93,7 +99,7 @@ test('операция соседа ложится в базу, окно узн�
     b.gw.close()
   })
   await a.req('POST', '/sales', { items: [{ productId: 'nur', qty: 2 }], payment: 'cash' })
-  const out = a.gw.lanHub.entriesFor(0, true)
+  const out = a.gw.lanHub.entriesFor(a.lanFrom, true)
   // Окно программы слушает события (после входа так и есть)
   b.gw.listen(true)
   b.events.length = 0

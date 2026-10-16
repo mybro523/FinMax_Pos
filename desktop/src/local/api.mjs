@@ -12,8 +12,8 @@
 // история движения товара. Такой запрос уходит на сервер.
 import { hasPerm } from './accounts.mjs'
 import { categoriesList, productTypesList, customersList, deferredList, productByBarcode, productsList, productView1 } from './catalog.mjs'
-import { forbidden, q } from './db.mjs'
-import { listDocs, listShifts, WINDOW_DAYS } from './docs.mjs'
+import { bad, forbidden, q } from './db.mjs'
+import { listDocs, listShifts, myOpenShift, WINDOW_DAYS } from './docs.mjs'
 import { createArrival } from './ops/arrival.mjs'
 import { createCustomer, payDebt } from './ops/customer.mjs'
 import { addDeferred, removeDeferred } from './ops/deferred.mjs'
@@ -22,7 +22,7 @@ import { createIncome, incomeCategoriesList } from './ops/income.mjs'
 import { createCashMove } from './ops/cash.mjs'
 import { suppliersDebts, payServicesList, suppliersList } from './suppliers.mjs'
 import { createReturn } from './ops/return.mjs'
-import { checkout } from './ops/sale.mjs'
+import { checkout, NO_SHIFT_SALE } from './ops/sale.mjs'
 import { closeShift, openShift, shiftView } from './ops/shift.mjs'
 import { createWriteOff } from './ops/writeoff.mjs'
 import { DAY_MS } from './time.mjs'
@@ -77,8 +77,10 @@ const perm = (keys, handler) => (ctx) => {
   if (!hasPerm(ctx.user, ...keys)) throw forbidden('Недостаточно прав')
   return handler(ctx)
 }
-// Скидка, продажа в долг и приход в долг — отдельные права
+// Скидка, продажа в долг и приход в долг — отдельные права.
+// Без открытой смены на этой кассе продажа не проводится: чек обязан войти в её отчёт
 const canSell = (ctx) => {
+  if (!myOpenShift(ctx.db, ctx.deviceId)) throw bad(NO_SHIFT_SALE)
   if (ctx.body?.payment === 'debt' && !hasPerm(ctx.user, 'pos.debt')) throw forbidden('Нет права продавать в долг')
   if ((Array.isArray(ctx.body?.items) ? ctx.body.items : []).some((i) => Number(i?.discount) > 0) && !hasPerm(ctx.user, 'pos.discount')) {
     throw forbidden('Нет права давать скидку')

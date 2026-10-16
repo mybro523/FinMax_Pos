@@ -21,7 +21,7 @@ import {
   MAX_CHEKOV, klyuch, chitat, pisat, razobrat, novyChek, svobodnyNomer,
   osvezhit, sdacha, kupyury, pohozheNaKod, estBukva, raspredelit,
 } from '../lib/cheki'
-import { findByBarcode, checkout } from '../db/ops'
+import { findByBarcode, checkout, openShift as openShiftOp } from '../db/ops'
 import { productPayload } from '../components/ProductForm'
 import NewProductModal from '../components/NewProductModal'
 import { beepOk, beepError, unlockAudio } from '../lib/sound'
@@ -83,6 +83,40 @@ export default function Pos() {
   // до нажатия честнее, чем дать набрать корзину и отказать на оплате — кассир
   // решил бы, что программа сломалась, а покупатель уже стоит у прилавка.
   const canSell = auth?.subscription ? auth.subscription.canWrite : true
+  // ── Смена ──
+  // Без открытой смены касса не продаёт: каждый чек обязан войти в отчёт смены. На сайте
+  // смена — общая смена сайта, в программе — смена этой кассы (локальная база отдаёт
+  // только её). Пока смены не загружены, окно не показываем: иначе мигало бы при входе
+  const shifts = useCollection('shifts')
+  const loadingShifts = useFirstLoading('shifts')
+  const smena = shifts.find((s) => !s.closedAt) || null
+  const noShift = !loadingShifts && !smena
+  const [noShiftModal, setNoShiftModal] = useState(false)
+  const [openCash, setOpenCash] = useState('')
+  const [openingShift, setOpeningShift] = useState(false)
+  // Окно — сразу при входе в кассу (и каждый раз, когда смену закрыли)
+  useEffect(() => {
+    if (noShift) setNoShiftModal(true)
+  }, [noShift])
+  // Смена появилась (открыли здесь или на другом устройстве) — окно больше не нужно
+  useEffect(() => {
+    if (smena) setNoShiftModal(false)
+  }, [smena])
+  async function openShiftHere() {
+    if (openingShift) return
+    setOpeningShift(true)
+    try {
+      const { synced } = openShiftOp(Number(openCash) || 0, auth)
+      await synced
+      setOpenCash('')
+      toast(t('Смена открыта'))
+      focusScanner()
+    } catch (e) {
+      toast(t('Смена не открыта') + ': ' + t(e.message), 'err')
+    } finally {
+      setOpeningShift(false)
+    }
+  }
   const t = useT()
   const toast = useToast()
   const dialog = useDialog()
@@ -942,6 +976,11 @@ export default function Pos() {
       toast(auth?.subscription?.message || t('Продажи закрыты: подписка не оплачена'), 'err')
       return
     }
+    // Смены нет — продажи нет: показываем окно, где смену можно открыть
+    if (!smena) {
+      setNoShiftModal(true)
+      return
+    }
     if (!cart.length) return
 
     // Последняя сверка с базой прямо перед оплатой. Если что-то изменилось по
@@ -1105,6 +1144,10 @@ export default function Pos() {
   // F9 — к оплате. Наличными: курсор встаёт в «Получено», Enter там проводит
   // продажу. Картой и в долг получать нечего — продажа проводится сразу.
   function kOplate() {
+    if (!smena) {
+      setNoShiftModal(true)
+      return
+    }
     if (!cart.length) {
       toast(t('Корзина пуста — отсканируйте товар'), 'err')
       return
@@ -1553,7 +1596,7 @@ export default function Pos() {
               <button
                 className="btn gold kassa-pay"
                 data-tour="pos.pay"
-                disabled={!cart.length || paying || !canSell || sd.state === 'short'}
+                disabled={!cart.length || paying || !canSell || !smena || sd.state === 'short'}
                 onClick={pay}
                 title={canSell ? undefined : auth?.subscription?.message || ''}
               >
@@ -1563,6 +1606,12 @@ export default function Pos() {
             {!canSell && (
               <div className="note err kassa-stop">
                 {t('Продажи закрыты: подписка не оплачена. Товары и отчёты открыты, копию базы скачать можно.')}
+              </div>
+            )}
+            {canSell && noShift && (
+              <div className="note warn kassa-stop" data-tour="pos.noshift-note">
+                {t('Смена не открыта — сначала откройте смену, тогда можно будет продавать.')}{' '}
+                <button type="button" className="linklike" onClick={() => setNoShiftModal(true)}>{t('Открыть смену')}</button>
               </div>
             )}
           </div>
@@ -1586,6 +1635,41 @@ export default function Pos() {
       </div>
       </div>
 
+      {/* ── Смена не открыта ── Окно при входе в кассу и при попытке продать. Закрыть
+          его можно — посмотреть цены и остатки; продать без смены всё равно нельзя */}
+      {noShiftModal && noShift && (
+        <Modal title={<><span className="ic"><LuLock size={18} /></span>{t('Смена не открыта')}</>} onClose={() => setNoShiftModal(false)}>
+          <div data-tour="pos.noshift">
+            <div className="note warn" style={{ marginBottom: 14 }}>
+              {t('Сначала откройте смену: без открытой смены продажа невозможна.')}{' '}
+              {t('Каждый чек попадает в отчёт смены — так вечером касса сойдётся.')}
+            </div>
+            {can('shift.open') ? (
+              <>
+                <div className="field">
+                  <label htmlFor="posOpenCash">{t('Наличные в кассе на начало (сомони)')}</label>
+                  <NumberInput id="posOpenCash" data-tour="pos.noshift-cash" value={openCash} onChange={(e) => setOpenCash(e.target.value)} placeholder="0" autoFocus onKeyDown={(e) => e.key === 'Enter' && openShiftHere()} />
+                </div>
+                <div className="modal-actions">
+                  <button className="btn ghost" onClick={() => setNoShiftModal(false)} disabled={openingShift}>{t('Закрыть')}</button>
+                  <button className="btn gold" data-tour="pos.noshift-open" onClick={openShiftHere} disabled={openingShift}>
+                    <span className="ic"><LuClock size={16} /></span> {openingShift ? t('Открываем…') : t('Открыть смену')}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p style={{ fontSize: 14, lineHeight: 1.6, margin: '0 0 6px' }}>
+                  {t('Открыть смену может владелец или сотрудник с правом «Смена кассы: открыть и закрыть». Попросите его открыть смену — и можно продавать.')}
+                </p>
+                <div className="modal-actions">
+                  <button className="btn" onClick={() => setNoShiftModal(false)}>{t('Закрыть')}</button>
+                </div>
+              </>
+            )}
+          </div>
+        </Modal>
+      )}
       {analogFor && (
         <Modal
           title={`«${analogFor.product.name}» — ${analogFor.allExpired ? t('весь остаток просрочен') : t('нет в наличии')}`}
