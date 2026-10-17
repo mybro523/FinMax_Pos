@@ -58,6 +58,8 @@ test('расход вносится без связи: ложится в жур�
     employeeId: null,
     employeeName: '',
     salaryMonth: '',
+    bonusFrom: '',
+    bonusTo: '',
     userId: 'user-1',
     createdAt: iso(NOW),
     user: { id: 'user-1', name: 'kassir' },
@@ -416,5 +418,29 @@ test('месяц без сотрудника не хранится, непоня
   assert.throws(
     () => createExpense(ctx(db), { category: 'Зарплата', amount: 100, date: '2026-10-01', clientId: 'zp_m2', employeeId: 'user-7', salaryMonth: '2026-13' }),
     /ГГГГ-ММ/,
+  )
+})
+
+test('бонус за выбранные дни: дни хранятся и уходят серверу, ошибочные — отказ', () => {
+  const db = pharmacy({ products: [] })
+  q(db, "INSERT INTO expense_categories (id, name) VALUES ('z', 'Зарплата')").run()
+  const e = createExpense(ctx(db), {
+    category: 'Зарплата', amount: 2037, date: '2026-10-01', clientId: 'zp_d1', employeeId: 'user-7',
+    salaryMonth: '2026-10', bonusFrom: '2026-10-10', bonusTo: '2026-11-09',
+  })
+  assert.deepEqual([e.bonusFrom, e.bonusTo], ['2026-10-10', '2026-11-09'])
+  const op = pendingOps(db, 100).find((o) => o.payload.expense?.id === e.id)
+  assert.deepEqual([op.payload.expense.bonusFrom, op.payload.expense.bonusTo], ['2026-10-10', '2026-11-09'])
+  // Одна дата без другой — не период: не хранится и не отправляется
+  const one = createExpense(ctx(db), { category: 'Зарплата', amount: 10, date: '2026-10-01', clientId: 'zp_d2', employeeId: 'user-7', bonusFrom: '2026-10-10' })
+  assert.deepEqual([one.bonusFrom, one.bonusTo], ['', ''])
+  assert.equal('bonusFrom' in pendingOps(db, 100).find((o) => o.payload.expense?.id === one.id).payload.expense, false)
+  assert.throws(
+    () => createExpense(ctx(db), { category: 'Зарплата', amount: 10, date: '2026-10-01', clientId: 'zp_d3', employeeId: 'user-7', bonusFrom: '2026-11-09', bonusTo: '2026-10-10' }),
+    /позже/,
+  )
+  assert.throws(
+    () => createExpense(ctx(db), { category: 'Зарплата', amount: 10, date: '2026-10-01', clientId: 'zp_d4', employeeId: 'user-7', bonusFrom: '10.10.2026', bonusTo: '2026-11-09' }),
+    /ГГГГ-ММ-ДД/,
   )
 })

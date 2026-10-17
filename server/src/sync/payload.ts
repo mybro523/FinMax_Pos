@@ -323,7 +323,16 @@ export function parseExpense(p: any, now?: number) {
     // И за какой месяц. Непонятный месяц операцию не роняет — деньги выданы, —
     // просто не записывается (тогда месяцем считается месяц выдачи)
     salaryMonth: typeof e.salaryMonth === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(e.salaryMonth) ? e.salaryMonth : '',
+    // И за какие дни считали бонус. Непонятные дни операцию тоже не роняют
+    ...bonusDays(e.bonusFrom, e.bonusTo),
   }
+}
+
+// Дни бонуса: обе даты «ГГГГ-ММ-ДД» и «с» не позже «по», иначе — не записаны
+const BONUS_DAY = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
+function bonusDays(from: unknown, to: unknown) {
+  const ok = typeof from === 'string' && typeof to === 'string' && BONUS_DAY.test(from) && BONUS_DAY.test(to) && from <= to
+  return ok ? { bonusFrom: from as string, bonusTo: to as string } : { bonusFrom: '', bonusTo: '' }
 }
 
 // ── Доход вне продаж ──

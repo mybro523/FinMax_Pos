@@ -1928,6 +1928,15 @@ tfoot .zak-total td { font-weight: 700; border-top: 2px solid var(--border-stron
 .salary-calc { font-size: 13.5px; line-height: 1.7; color: var(--text); margin: -4px 0 10px; font-variant-numeric: tabular-nums; }
 .salary-calc .salary-total b { color: var(--accent); font-size: 15px; }
 .exp-emp { font-weight: 600; color: var(--accent); }
+.exp-days { font-weight: 500; color: var(--muted); }
+/* Дни бонуса при выдаче зарплаты: «с … по …» одной строкой, на телефоне — в столбик */
+.salary-period { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; margin: -2px 0 12px; }
+.salary-period-label { font-size: 13px; font-weight: 600; color: var(--muted); }
+.salary-period-field { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.salary-period-field > span { min-width: 18px; }
+.salary-period-field input { width: auto; min-width: 150px; padding: 7px 10px; }
+.salary-period-reset { font-size: 13px; }
+.salary-err { color: var(--danger); font-size: 13px; margin: -4px 0 10px; }
 
 /* Отметка «есть / нет» в настройках типов */
 .btn.ghost.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }

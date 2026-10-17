@@ -32,11 +32,11 @@ type AccountRow = {
   tenantUserId?: string | null
 }
 // Данные для зарплаты живут в схеме магазина, рядом с именем сотрудника
-type Profile = { fullName: string; salary: unknown; bonusPercent: unknown }
+type Profile = { fullName: string; salary: unknown; bonusPercent: unknown; salaryDay?: number }
 const SELECT = {
   id: true, login: true, role: true, active: true, createdAt: true, roleId: true, tenantUserId: true, roleRef: { select: { name: true } },
 } as const
-const PROFILE = { id: true, fullName: true, salary: true, bonusPercent: true } as const
+const PROFILE = { id: true, fullName: true, salary: true, bonusPercent: true, salaryDay: true } as const
 const view = (a: AccountRow, p?: Profile | null) => ({
   id: a.id,
   name: a.login,
@@ -50,14 +50,17 @@ const view = (a: AccountRow, p?: Profile | null) => ({
   fullName: p?.fullName || '',
   salary: Number(p?.salary ?? 0) || 0,
   bonusPercent: Number(p?.bonusPercent ?? 0) || 0,
+  // С какого числа начинается его месяц зарплаты
+  salaryDay: Number(p?.salaryDay ?? 1) || 1,
 })
 
 // ФИО, оклад и бонус из запроса — только то, что прислали
-function profileData(dto: { fullName?: string; salary?: number; bonusPercent?: number }) {
-  const data: { fullName?: string; salary?: number; bonusPercent?: number } = {}
+function profileData(dto: { fullName?: string; salary?: number; bonusPercent?: number; salaryDay?: number }) {
+  const data: { fullName?: string; salary?: number; bonusPercent?: number; salaryDay?: number } = {}
   if (dto.fullName !== undefined) data.fullName = String(dto.fullName || '').trim().slice(0, 120)
   if (dto.salary !== undefined) data.salary = Math.round(Math.max(0, Number(dto.salary) || 0) * 100) / 100
   if (dto.bonusPercent !== undefined) data.bonusPercent = Math.round(Math.min(100, Math.max(0, Number(dto.bonusPercent) || 0)) * 100) / 100
+  if (dto.salaryDay !== undefined) data.salaryDay = Math.min(28, Math.max(1, Math.trunc(Number(dto.salaryDay) || 1)))
   return data
 }
 

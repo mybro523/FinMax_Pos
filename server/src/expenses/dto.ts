@@ -5,6 +5,9 @@ const MAX_MONEY = 9_999_999_999.99
 // Месяц зарплаты: «2026-10» или пусто
 export const SALARY_MONTH = /^(\d{4}-(0[1-9]|1[0-2]))?$/
 const SALARY_MONTH_MSG = { message: 'Месяц зарплаты — в виде ГГГГ-ММ, например 2026-10' }
+// День периода бонуса: «2026-10-10» или пусто
+export const BONUS_DAY = /^([0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01]))?$/
+const BONUS_DAY_MSG = { message: 'Дата периода бонуса — в виде ГГГГ-ММ-ДД, например 2026-10-10' }
 
 export class CreateExpenseDto {
   @IsString() @MinLength(1) @MaxLength(60) category: string // статья расхода — названием
@@ -21,6 +24,9 @@ export class CreateExpenseDto {
   @IsOptional() @IsString() @MaxLength(64) employeeId?: string
   // Зарплата: за какой месяц («2026-10»). Без сотрудника не хранится
   @IsOptional() @IsString() @Matches(SALARY_MONTH, SALARY_MONTH_MSG) salaryMonth?: string
+  // Зарплата: за какие дни считали бонус от продаж — «с» и «по» включительно
+  @IsOptional() @IsString() @Matches(BONUS_DAY, BONUS_DAY_MSG) bonusFrom?: string
+  @IsOptional() @IsString() @Matches(BONUS_DAY, BONUS_DAY_MSG) bonusTo?: string
 }
 
 // Отметку «из кассы» и смену задним числом не меняют: это уже другая операция.
@@ -33,6 +39,8 @@ export class UpdateExpenseDto {
   // Пустая строка — убрать сотрудника; не прислано — оставить как было
   @IsOptional() @IsString() @MaxLength(64) employeeId?: string
   @IsOptional() @IsString() @Matches(SALARY_MONTH, SALARY_MONTH_MSG) salaryMonth?: string
+  @IsOptional() @IsString() @Matches(BONUS_DAY, BONUS_DAY_MSG) bonusFrom?: string
+  @IsOptional() @IsString() @Matches(BONUS_DAY, BONUS_DAY_MSG) bonusTo?: string
 }
 
 export class CreateExpenseCategoryDto {

@@ -79,6 +79,15 @@ export class ExpensesService {
     return name
   }
 
+  // Период бонуса: обе даты или ни одной (одна без другой — не период), «с» не позже «по»
+  private bonusPeriod(from?: string | null, to?: string | null) {
+    const f = String(from || '')
+    const t = String(to || '')
+    if (!f || !t) return { bonusFrom: '', bonusTo: '' }
+    if (f > t) throw new BadRequestException('Период бонуса: дата «с» позже даты «по»')
+    return { bonusFrom: f, bonusTo: t }
+  }
+
   // Кому выдана зарплата: сотрудник должен быть в этом магазине. Имя запоминаем
   // снимком — ФИО, а если его нет, логин
   private async employeeOf(tx: Tx, raw?: string | null) {
@@ -95,9 +104,9 @@ export class ExpensesService {
     return this.prisma.user
       .findMany({
         orderBy: [{ active: 'desc' }, { name: 'asc' }],
-        select: { id: true, name: true, fullName: true, role: true, active: true, salary: true, bonusPercent: true },
+        select: { id: true, name: true, fullName: true, role: true, active: true, salary: true, bonusPercent: true, salaryDay: true },
       })
-      .then((rows) => rows.map((u) => ({ ...u, salary: Number(u.salary) || 0, bonusPercent: Number(u.bonusPercent) || 0 })))
+      .then((rows) => rows.map((u) => ({ ...u, salary: Number(u.salary) || 0, bonusPercent: Number(u.bonusPercent) || 0, salaryDay: Number(u.salaryDay) || 1 })))
   }
 
   async create(dto: CreateExpenseDto, userId?: string) {
@@ -128,8 +137,9 @@ export class ExpensesService {
             shiftId,
             userId: userId ?? null,
             ...employee,
-            // Месяц — только у зарплаты: без сотрудника он ничего не значит
+            // Месяц и дни бонуса — только у зарплаты: без сотрудника они ничего не значат
             salaryMonth: employee.employeeId ? dto.salaryMonth || '' : '',
+            ...(employee.employeeId ? this.bonusPeriod(dto.bonusFrom, dto.bonusTo) : { bonusFrom: '', bonusTo: '' }),
           },
           include: withUser,
         })
@@ -169,8 +179,12 @@ export class ExpensesService {
       if (dto.date !== undefined && !expense.fromCash) data.date = expenseDate(dto.date)
       if (dto.employeeId !== undefined) Object.assign(data, await this.employeeOf(tx, dto.employeeId))
       if (dto.salaryMonth !== undefined) data.salaryMonth = dto.salaryMonth
-      // Сотрудника сняли (статья больше не «Зарплата») — месяц уходит вместе с ним
-      if (dto.employeeId !== undefined && !String(dto.employeeId).trim()) data.salaryMonth = ''
+      // Дни бонуса меняют парой: недостающую берём из прежней выдачи
+      if (dto.bonusFrom !== undefined || dto.bonusTo !== undefined) {
+        Object.assign(data, this.bonusPeriod(dto.bonusFrom ?? expense.bonusFrom, dto.bonusTo ?? expense.bonusTo))
+      }
+      // Сотрудника сняли (статья больше не «Зарплата») — месяц и дни уходят вместе с ним
+      if (dto.employeeId !== undefined && !String(dto.employeeId).trim()) Object.assign(data, { salaryMonth: '', bonusFrom: '', bonusTo: '' })
       const updated = await tx.expense.update({ where: { id }, data, include: withUser })
       if (expense.fromCash && expense.shiftId) await setExpenseCash(tx, expense.shiftId)
       return updated

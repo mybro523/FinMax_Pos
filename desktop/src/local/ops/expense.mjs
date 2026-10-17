@@ -23,6 +23,8 @@ export const NO_OPEN_SHIFT = 'Нет открытой смены — расхо�
 export const NO_SUCH_CATEGORY = 'Этой статьи расходов уже нет в списке — добавьте её в настройках'
 // Месяц зарплаты: «2026-10» — как у сервера (server/src/expenses/dto.ts)
 const SALARY_MONTH = /^\d{4}-(0[1-9]|1[0-2])$/
+// День периода бонуса: «2026-10-10»
+const BONUS_DAY = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
 
 // Часы кассы и сервера расходятся не больше чем на минуты
 const FUTURE_SLACK_MS = 5 * 60 * 1000
@@ -92,9 +94,18 @@ export function createExpense(ctx, raw) {
   const employeeId = c.str(dto.employeeId, 'employeeId', { optional: true })
   // И за какой месяц («2026-10»): по нему считается, сколько ещё осталось выдать
   const rawMonth = c.str(dto.salaryMonth, 'salaryMonth', { optional: true })
+  // И за какие дни считали бонус от продаж — «с» и «по» включительно
+  const rawFrom = c.str(dto.bonusFrom, 'bonusFrom', { optional: true })
+  const rawTo = c.str(dto.bonusTo, 'bonusTo', { optional: true })
   c.done()
   if (rawMonth && !SALARY_MONTH.test(rawMonth)) throw bad('Месяц зарплаты — в виде ГГГГ-ММ, например 2026-10')
+  for (const d of [rawFrom, rawTo]) if (d && !BONUS_DAY.test(d)) throw bad('Дата периода бонуса — в виде ГГГГ-ММ-ДД, например 2026-10-10')
+  if (rawFrom && rawTo && rawFrom > rawTo) throw bad('Период бонуса: дата «с» позже даты «по»')
   const salaryMonth = employeeId ? rawMonth || '' : ''
+  // Одна дата без другой — не период
+  const withDays = !!(employeeId && rawFrom && rawTo)
+  const bonusFrom = withDays ? rawFrom : ''
+  const bonusTo = withDays ? rawTo : ''
 
   return inTx(db, () => {
     // Тот же запрос пришёл второй раз (окно переиграло его после заминки) — второго
@@ -132,6 +143,8 @@ export function createExpense(ctx, raw) {
       employeeId: employeeId || null,
       employeeName: '',
       salaryMonth,
+      bonusFrom,
+      bonusTo,
       userId: ctx.user.id,
       createdAt: at,
       user: { id: ctx.user.id, name: ctx.user.name },
@@ -147,6 +160,7 @@ export function createExpense(ctx, raw) {
           id: body.id, date: body.date, category, amount: body.amount, note: body.note, fromCash, shiftId,
           ...(employeeId ? { employeeId } : {}),
           ...(salaryMonth ? { salaryMonth } : {}),
+          ...(withDays ? { bonusFrom, bonusTo } : {}),
         },
         deviceId: ctx.deviceId,
       },

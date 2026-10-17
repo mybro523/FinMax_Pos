@@ -17,7 +17,7 @@ import { dayKey, fmtDate, fmtTime } from '../lib/time'
 import { useT } from '../lib/i18n'
 import { isDesktop } from '../lib/desktop'
 import SalaryPicker, { isZarplata, useStaff, staffName, monthName, ZARPLATA } from '../components/SalaryPicker'
-import { mesyacZarplaty, poslednieMesyacy } from '../lib/otchety'
+import { mesyacZarplaty, poslednieMesyacy, periodVeren, denText } from '../lib/otchety'
 
 // ── Расходы магазина ──
 // Аренда, зарплата, свет, налоги — всё, на что магазин тратит деньги помимо закупки
@@ -55,6 +55,8 @@ export default function Expenses() {
   // Зарплата: кому выдаём и за какой месяц. Остальным статьям это не нужно
   const [employeeId, setEmployeeId] = useState('')
   const [salaryMonth, setSalaryMonth] = useState(() => poslednieMesyacy(1)[0])
+  // За какие дни бонус от продаж: ставит выбор сотрудника (по его карточке), можно поменять
+  const [bonusPeriod, setBonusPeriod] = useState({ from: '', to: '' })
 
   // Пришли из «Сотрудников» по кнопке «Выдать»: зарплата этому сотруднику за тот
   // месяц уже выбрана, остаётся проверить сумму
@@ -131,18 +133,21 @@ export default function Expenses() {
     if (!(sum > 0)) return toast(t('Укажите сумму расхода'), 'err')
     if (!fromCash && date > dayKey()) return toast(t('Дата расхода не может быть в будущем'), 'err')
     if (fromCash && !sourceId) return toast(t('Нет открытой смены — из кассы взять нечего.'), 'err')
+    const zp = isZarplata(category) && employeeId
+    if (zp && (bonusPeriod.from || bonusPeriod.to) && !periodVeren(bonusPeriod)) return toast(t('Дата «с» позже даты «по» — поправьте дни бонуса'), 'err')
 
     setSaving(true)
     try {
       await addExpense({
         date, category, amount: sum, note, fromCash, shiftId: fromCash ? sourceId : null,
-        ...(isZarplata(category) && employeeId ? { employeeId, salaryMonth } : {}),
+        ...(zp ? { employeeId, salaryMonth, ...(periodVeren(bonusPeriod) ? { bonusFrom: bonusPeriod.from, bonusTo: bonusPeriod.to } : {}) } : {}),
       })
       journal.reload()
       setAmount('')
       setNote('')
       setFromCash(false)
       setEmployeeId('')
+      setBonusPeriod({ from: '', to: '' })
       toast(t('Расход добавлен'))
     } catch (e) {
       toast(t(e.message), 'err')
@@ -184,6 +189,7 @@ export default function Expenses() {
     { header: t('Статья'), key: 'category', width: 24 },
     { header: t('Кому выдана'), key: 'employee', width: 22 },
     { header: t('За месяц'), key: 'month', width: 16 },
+    { header: t('Бонус за дни'), key: 'bonusDays', width: 24 },
     { header: t('Примечание'), key: 'note', width: 34, wrap: true },
     { header: t('Оплата'), key: 'pay', width: 18 },
     { header: t('Кто внёс'), key: 'who', width: 16 },
@@ -194,6 +200,7 @@ export default function Expenses() {
     category: t(e.category),
     employee: e.employeeName || '',
     month: e.employeeId ? monthName(mesyacZarplaty(e), t) : '',
+    bonusDays: e.bonusFrom && e.bonusTo ? `${denText(e.bonusFrom)} – ${denText(e.bonusTo)}` : '',
     note: e.note || '',
     pay: e.fromCash ? `${t('из кассы')}${tillOf(e) ? ' · ' + tillOf(e) : ''}` : '',
     who: e.user?.name || '',
@@ -247,6 +254,7 @@ export default function Expenses() {
         {isZarplata(category) && (
           <SalaryPicker
             employeeId={employeeId} setEmployeeId={setEmployeeId} month={salaryMonth} setMonth={setSalaryMonth}
+            period={bonusPeriod} setPeriod={setBonusPeriod}
             amount={amount} onAmount={setAmount} tour="exp.salary"
           />
         )}
@@ -340,7 +348,12 @@ export default function Expenses() {
                 <td className="cell-main">
                   <b>{t(e.category)}</b>
                   {e.employeeName ? <span className="exp-emp"> · {e.employeeName}</span> : null}
-                  {e.employeeId ? <span className="exp-emp"> · {t('за')} {monthName(mesyacZarplaty(e), t)}</span> : null}
+                  {e.employeeId ? (
+                    <span className="exp-emp">
+                      {' · '}{t('за')} {monthName(mesyacZarplaty(e), t)}
+                      {e.bonusFrom && e.bonusTo ? <span className="exp-days"> · {t('бонус с')} {denText(e.bonusFrom, true)} {t('по')} {denText(e.bonusTo, true)}</span> : null}
+                    </span>
+                  ) : null}
                   {e.fromCash && (
                     <span className="badge cash" style={{ marginLeft: 8, fontWeight: 500 }}>
                       <LuBanknote size={13} /> {t('из кассы')}{tillOf(e) ? ` · ${tillOf(e)}` : ''}
@@ -393,6 +406,9 @@ function EditExpense({ expense, categories, onSaved, onClose }) {
   // За какой месяц выдача. У старых выдач месяц не записан — это месяц их даты
   const [salaryMonth, setSalaryMonth] = useState(() => mesyacZarplaty(expense))
   const monthOpts = useMemo(() => [...new Set([mesyacZarplaty(expense), ...poslednieMesyacy(12)])].sort().reverse(), [expense])
+  // За какие дни считали бонус (у старых выдач не записано — тогда пусто)
+  const [bFrom, setBFrom] = useState(expense.bonusFrom || '')
+  const [bTo, setBTo] = useState(expense.bonusTo || '')
   const [saving, setSaving] = useState(false)
   const { staff } = useStaff()
 
@@ -415,6 +431,11 @@ function EditExpense({ expense, categories, onSaved, onClose }) {
     const wantEmp = isZarplata(category) ? employeeId : ''
     if (wantEmp !== (expense.employeeId || '')) patch.employeeId = wantEmp
     if (wantEmp && salaryMonth !== mesyacZarplaty(expense)) patch.salaryMonth = salaryMonth
+    if (wantEmp && (bFrom !== (expense.bonusFrom || '') || bTo !== (expense.bonusTo || ''))) {
+      if ((bFrom || bTo) && !periodVeren({ from: bFrom, to: bTo })) return toast(t('Дата «с» позже даты «по» — поправьте дни бонуса'), 'err')
+      patch.bonusFrom = bFrom
+      patch.bonusTo = bTo
+    }
     if (!Object.keys(patch).length) return onClose()
 
     setSaving(true)
@@ -470,6 +491,18 @@ function EditExpense({ expense, categories, onSaved, onClose }) {
           <select id="expEditMonth" value={salaryMonth} onChange={(e) => setSalaryMonth(e.target.value)}>
             {monthOpts.map((m) => <option key={m} value={m}>{monthName(m, t)}</option>)}
           </select>
+        </div>
+      )}
+      {isZarplata(category) && employeeId && (
+        <div className="row">
+          <div className="field" style={{ flex: 1 }}>
+            <label htmlFor="expEditFrom">{t('Бонус с')}</label>
+            <input id="expEditFrom" type="date" value={bFrom} max={bTo || undefined} onChange={(e) => setBFrom(e.target.value)} />
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label htmlFor="expEditTo">{t('Бонус по')}</label>
+            <input id="expEditTo" type="date" value={bTo} min={bFrom || undefined} onChange={(e) => setBTo(e.target.value)} />
+          </div>
         </div>
       )}
       <div className="field">

@@ -1084,6 +1084,8 @@ export class SyncService {
         employeeId: emp?.id ?? null,
         employeeName: emp ? (emp.fullName || '').trim() || emp.name : '',
         salaryMonth: emp ? p.salaryMonth : '',
+        bonusFrom: emp ? p.bonusFrom : '',
+        bonusTo: emp ? p.bonusTo : '',
       },
     })
     if (shiftId) {

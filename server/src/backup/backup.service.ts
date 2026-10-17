@@ -41,7 +41,7 @@ export class BackupService {
         this.prisma.shift.findMany(),
         this.prisma.debtPayment.findMany(),
         this.prisma.user.findMany({
-          select: { id: true, name: true, role: true, active: true, createdAt: true, fullName: true, salary: true, bonusPercent: true },
+          select: { id: true, name: true, role: true, active: true, createdAt: true, fullName: true, salary: true, bonusPercent: true, salaryDay: true },
         }),
         this.prisma.deferredBarcode.findMany(),
         this.prisma.saleReturn.findMany({ include: { items: true } }),
@@ -187,6 +187,8 @@ export class BackupService {
             fullName: typeof u.fullName === 'string' ? u.fullName.slice(0, 120) : '',
             salary: Math.max(0, Number(u.salary) || 0),
             bonusPercent: Math.min(100, Math.max(0, Number(u.bonusPercent) || 0)),
+            // Копия старше этого поля — обычный календарный месяц
+            salaryDay: Math.min(28, Math.max(1, Math.trunc(Number(u.salaryDay) || 1))),
           },
         })
         userIds.add(u.id)

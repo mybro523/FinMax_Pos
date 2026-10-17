@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator'
+import { IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator'
 
 // Деньги в базе — до 9 999 999 999,99
 const MAX_MONEY = 9_999_999_999.99
@@ -13,6 +13,8 @@ export class CreateUserDto {
   @IsOptional() @IsString() @MaxLength(120) fullName?: string
   @IsOptional() @IsNumber() @Min(0) @Max(MAX_MONEY) salary?: number
   @IsOptional() @IsNumber() @Min(0) @Max(100) bonusPercent?: number
+  // С какого числа начинается его месяц зарплаты: 1–28 (в каждом месяце есть такой день)
+  @IsOptional() @IsInt() @Min(1) @Max(28) salaryDay?: number
 }
 
 export class UpdateUserDto {
@@ -23,4 +25,5 @@ export class UpdateUserDto {
   @IsOptional() @IsString() @MaxLength(120) fullName?: string
   @IsOptional() @IsNumber() @Min(0) @Max(MAX_MONEY) salary?: number
   @IsOptional() @IsNumber() @Min(0) @Max(100) bonusPercent?: number
+  @IsOptional() @IsInt() @Min(1) @Max(28) salaryDay?: number
 }

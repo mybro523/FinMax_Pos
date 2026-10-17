@@ -336,6 +336,9 @@ model User {
   fullName     String  @default("")
   salary       Decimal @default(0) @db.Decimal(12, 2)
   bonusPercent Decimal @default(0) @db.Decimal(5, 2)
+  // С какого числа начинается его месяц зарплаты (1–28): бонус «за октябрь» при 10 —
+  // по продажам с 10 октября по 9 ноября. 1 — обычный календарный месяц
+  salaryDay    Int     @default(1)
   createdAt DateTime @default(now())
   shifts       Shift[]
   sales        Sale[]
@@ -417,6 +420,10 @@ model Expense {
   // осталось выдать. Пусто — выдача внесена раньше, чем месяц стали записывать:
   // для неё месяцем считается месяц самой выдачи
   salaryMonth  String   @default("")
+  // Зарплата: за какие дни считали бонус от продаж («2026-10-10» … «2026-11-09»).
+  // Пусто — не записано (выдача внесена раньше или без бонуса)
+  bonusFrom    String   @default("")
+  bonusTo      String   @default("")
   createdAt DateTime @default(now())
 
   @@index([date])

@@ -3,9 +3,12 @@ import { Link } from 'react-router-dom'
 import { api } from '../db/api'
 import { useCollection, money } from '../db/store'
 import { useT } from '../lib/i18n'
-import { fmtDate } from '../lib/time'
+import { fmtDate, dayKey } from '../lib/time'
 import { useDeepPeriod } from './Period'
-import { mesyac, poslednieMesyacy, prodazhiSotrudnika, zarplataKVydache, vydachiZaMesyac, ostatokZarplaty } from '../lib/otchety'
+import {
+  mesyac, poslednieMesyacy, prodazhiSotrudnika, zarplataKVydache, vydachiZaMesyac, ostatokZarplaty,
+  periodZarplaty, dniKMomentam, periodVeren, denText,
+} from '../lib/otchety'
 
 // ── Кому выдаём зарплату ──
 // Появляется в расходе со статьёй «Зарплата». Выбрали сотрудника и месяц — программа
@@ -16,6 +19,10 @@ import { mesyac, poslednieMesyacy, prodazhiSotrudnika, zarplataKVydache, vydachi
 // Зарплату выдают и частями. Тогда видно, сколько за этот месяц уже выдано и сколько
 // осталось, а в сумму подставляется остаток. Пока владелец вписывает сумму, под
 // расчётом видно, сколько останется после этой выдачи.
+//
+// Бонус считается за дни «с» и «по». По умолчанию это месяц сотрудника: с числа из
+// его карточки (обычно 1-го) по день перед ним в следующем месяце. Даты можно
+// поменять — вышел на работу 20-го, платят раз в две недели. Оклад — целиком.
 
 const DAY = 86400000
 
@@ -62,19 +69,44 @@ export function useVydachi(month) {
 
 const kop = (x) => Math.round(x * 100) / 100
 
-export default function SalaryPicker({ employeeId, setEmployeeId, month, setMonth, amount, onAmount, tour }) {
+export default function SalaryPicker({ employeeId, setEmployeeId, month, setMonth, period, setPeriod, amount, onAmount, tour }) {
   const t = useT()
+  const idp = tour || 'sal'
   const { staff, error } = useStaff()
   const months = useMemo(() => poslednieMesyacy(6), [])
-  const range = useMemo(() => mesyac(month), [month])
+  const emp = (staff || []).find((u) => u.id === employeeId)
+
+  // ── За какие дни бонус ──
+  // Сменили сотрудника или месяц — даты снова по его карточке. Пока новые даты не
+  // встали (первая отрисовка после смены), считаем по карточке, а не по прежним
+  const def = emp ? periodZarplaty(month, emp.salaryDay) : null
+  const keyNow = emp ? `${emp.id}|${month}|${emp.salaryDay || 1}` : ''
+  const periodKey = useRef('')
+  useEffect(() => {
+    if (!emp) {
+      periodKey.current = ''
+      return
+    }
+    if (periodKey.current === keyNow) return
+    periodKey.current = keyNow
+    setPeriod(periodZarplaty(month, emp.salaryDay))
+  }, [emp, month, keyNow, setPeriod])
+  const fresh = periodKey.current === keyNow
+  const per = emp ? (fresh && period?.from && period?.to ? period : def) : null
+  const pf = per?.from || ''
+  const pt = per?.to || ''
+  const perOk = periodVeren(per)
+  const svoi = !!per && !!def && (pf !== def.from || pt !== def.to)
+  const range = useMemo(() => (perOk ? dniKMomentam(pf, pt) : mesyac(month)), [perOk, pf, pt, month])
+  const idet = perOk && pt >= dayKey() // период ещё идёт: продажи — по сегодня
+
   const salesCached = useCollection('sales')
   const { deep, loading } = useDeepPeriod(['sales'], range)
   const sales = deep.sales || salesCached
   const { expenses, loading: loadingEx } = useVydachi(month)
 
-  const emp = (staff || []).find((u) => u.id === employeeId)
-  const salesSum = emp ? prodazhiSotrudnika(sales, emp.id, range.from, range.to) : 0
-  const calc = emp ? zarplataKVydache({ salary: emp.salary, bonusPercent: emp.bonusPercent, salesSum }) : null
+  const salesSum = emp && perOk ? prodazhiSotrudnika(sales, emp.id, range.from, range.to) : 0
+  const calc = emp && perOk ? zarplataKVydache({ salary: emp.salary, bonusPercent: emp.bonusPercent, salesSum }) : null
   // Что уже выдано за этот месяц и сколько осталось
   const vydachi = emp ? vydachiZaMesyac(expenses, emp.id, month) : []
   const vydano = kop(vydachi.reduce((a, e) => a + (Number(e.amount) || 0), 0))
@@ -95,34 +127,59 @@ export default function SalaryPicker({ employeeId, setEmployeeId, month, setMont
       return
     }
     if (loading || loadingEx) return
-    const key = `${employeeId}|${month}|${calc.total}|${vydano}`
+    const key = `${employeeId}|${month}|${pf}|${pt}|${calc.total}|${vydano}`
     if (last.current === key) return
     last.current = key
     const want = vydano > 0 ? ost.ostalos : calc.total
     if (want > 0) onAmount(String(want))
     // За месяц уже выдано всё — прежнюю сумму не оставляем: её легко выдать второй раз
     else if (vydano > 0) onAmount('')
-  }, [calc, ost, vydano, employeeId, month, loading, loadingEx, onAmount])
+  }, [calc, ost, vydano, employeeId, month, pf, pt, loading, loadingEx, onAmount])
 
   const active = (staff || []).filter((u) => u.active || u.id === employeeId)
 
   return (
     <div className="salary-pick" data-tour={tour}>
-      <div className="row" style={{ gap: 14 }}>
+      <div className="row" style={{ gap: 14, flexWrap: 'wrap' }}>
         <div className="field" style={{ flex: 2, minWidth: 200 }}>
-          <label htmlFor={`${tour || 'sal'}-emp`}>{t('Кому выдаём зарплату')}</label>
-          <select id={`${tour || 'sal'}-emp`} value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
+          <label htmlFor={`${idp}-emp`}>{t('Кому выдаём зарплату')}</label>
+          <select id={`${idp}-emp`} value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
             <option value="">{staff === null ? t('Загружаем…') : t('— выберите сотрудника —')}</option>
             {active.map((u) => <option key={u.id} value={u.id}>{staffName(u)}</option>)}
           </select>
         </div>
         <div className="field" style={{ flex: 1, minWidth: 150 }}>
-          <label htmlFor={`${tour || 'sal'}-month`}>{t('За месяц')}</label>
-          <select id={`${tour || 'sal'}-month`} value={month} onChange={(e) => setMonth(e.target.value)}>
+          <label htmlFor={`${idp}-month`}>{t('За месяц')}</label>
+          <select id={`${idp}-month`} value={month} onChange={(e) => setMonth(e.target.value)}>
             {months.map((m) => <option key={m} value={m}>{monthName(m, t)}</option>)}
           </select>
         </div>
       </div>
+      {emp && (
+        <div className="salary-period" data-tour="exp.salary-period">
+          <span className="salary-period-label">{t('Бонус от продаж за дни')}</span>
+          <label className="salary-period-field" htmlFor={`${idp}-from`}>
+            <span>{t('с')}</span>
+            <input
+              id={`${idp}-from`} type="date" value={pf} max={pt || undefined}
+              onChange={(e) => setPeriod({ from: e.target.value || def.from, to: pt || def.to })}
+            />
+          </label>
+          <label className="salary-period-field" htmlFor={`${idp}-to`}>
+            <span>{t('по')}</span>
+            <input
+              id={`${idp}-to`} type="date" value={pt} min={pf || undefined}
+              onChange={(e) => setPeriod({ from: pf || def.from, to: e.target.value || def.to })}
+            />
+          </label>
+          {svoi ? (
+            <button type="button" className="linklike salary-period-reset" onClick={() => setPeriod(def)}>{t('как в карточке')}</button>
+          ) : (
+            <span className="tag-cat">{Number(emp.salaryDay) > 1 ? `${t('его месяц — с')} ${emp.salaryDay} ${t('числа')}` : t('календарный месяц')}</span>
+          )}
+        </div>
+      )}
+      {per && !perOk && <div className="salary-err">{t('Дата «с» позже даты «по» — поправьте дни бонуса')}</div>}
       {error && <div className="tag-cat" style={{ color: 'var(--danger)' }}>{t(error)}</div>}
       {staff && staff.length === 0 && !error && (
         <div className="tag-cat">{t('Сотрудников пока нет.')} <Link to="/employees" className="linklike">{t('Сотрудники')}</Link></div>
@@ -130,9 +187,10 @@ export default function SalaryPicker({ employeeId, setEmployeeId, month, setMont
       {calc && (
         <div className="salary-calc">
           <span>{t('Оклад')} <b>{money(calc.salary)}</b></span>
-          <span> + {t('бонус')} {String(emp.bonusPercent).replace('.', ',')}% {t('от продаж за')} {monthName(month, t)} ({money(salesSum)}) = <b>{money(calc.bonus)}</b></span>
+          <span> + {t('бонус')} {String(emp.bonusPercent).replace('.', ',')}% {t('от продаж с')} {denText(pf)} {t('по')} {denText(pt)} ({money(salesSum)}) = <b>{money(calc.bonus)}</b></span>
           <span className="salary-total"> → {t('к выдаче')} <b>{money(calc.total)}</b></span>
           {loading && <span className="tag-cat"> · {t('загружаем продажи…')}</span>}
+          {idet && Number(emp.bonusPercent) > 0 && <div className="tag-cat">{t('Период ещё идёт — продажи посчитаны по сегодняшний день.')}</div>}
           {vydano > 0 && (
             <div className="salary-paid" data-tour="exp.salary-paid">
               {t('Уже выдано за')} {monthName(month, t)}: <b>{money(vydano)}</b>

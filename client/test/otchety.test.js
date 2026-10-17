@@ -11,6 +11,7 @@ import {
   qtyText, prodazhiPoTovaram, vseProdazhi, zakupkiIOplaty, sverkaPostavshikov,
   prodazhiSotrudnika, zarplataKVydache, mesyac, poslednieMesyacy, vPeriode,
   mesyacKluch, mesyacZarplaty, vydachiZaMesyac, vydanoZaMesyac, ostatokZarplaty,
+  periodZarplaty, dniKMomentam, periodVeren, denText,
 } from '../src/lib/otchety.js'
 import { priceFromMarkup, markupOf } from '../src/lib/pricing.js'
 import { isVesovoy, isKg, edinica } from '../src/lib/units.js'
@@ -223,4 +224,44 @@ test('зарплата частями: осталось выдать или вы
   assert.deepEqual(ostatokZarplaty(2000, 2100.5), { ostalos: 0, pereplata: 100.5 })
   assert.deepEqual(ostatokZarplaty(0, 0), { ostalos: 0, pereplata: 0 })
   assert.deepEqual(ostatokZarplaty(3900.33, 0.33), { ostalos: 3900, pereplata: 0 })
+})
+
+// ── Бонус за выбранные дни ──
+test('месяц зарплаты сотрудника: с его числа по день перед ним в следующем месяце', () => {
+  assert.deepEqual(periodZarplaty('2026-10', 1), { from: '2026-10-01', to: '2026-10-31' }, 'с 1-го — обычный месяц')
+  assert.deepEqual(periodZarplaty('2026-02', 1), { from: '2026-02-01', to: '2026-02-28' })
+  assert.deepEqual(periodZarplaty('2028-02', 1), { from: '2028-02-01', to: '2028-02-29' }, 'високосный год')
+  assert.deepEqual(periodZarplaty('2026-10', 10), { from: '2026-10-10', to: '2026-11-09' })
+  assert.deepEqual(periodZarplaty('2026-12', 15), { from: '2026-12-15', to: '2027-01-14' }, 'через Новый год')
+  assert.deepEqual(periodZarplaty('2026-01', 28), { from: '2026-01-28', to: '2026-02-27' })
+  assert.deepEqual(periodZarplaty('2026-10'), periodZarplaty('2026-10', 1), 'не указано — с 1-го')
+  assert.deepEqual(periodZarplaty('2026-10', 0), periodZarplaty('2026-10', 1))
+  assert.deepEqual(periodZarplaty('2026-10', 31), periodZarplaty('2026-10', 28), 'больше 28 не бывает')
+})
+
+test('бонус за дни: продажи считаются с первого дня по последний включительно, по Душанбе', () => {
+  const r = dniKMomentam('2026-10-10', '2026-11-09')
+  assert.equal(r.from.toISOString(), '2026-10-09T19:00:00.000Z', '10 октября 00:00 по Душанбе')
+  assert.equal(r.to.toISOString(), '2026-11-09T19:00:00.000Z', 'до 10 ноября 00:00 по Душанбе')
+  const prodazhi = [
+    { userId: 'u1', total: 100, date: '2026-10-09T18:59:00Z' }, // 9 окт 23:59 — раньше периода
+    { userId: 'u1', total: 200, date: '2026-10-09T19:00:00Z' }, // 10 окт 00:00 — первый день
+    { userId: 'u1', total: 300, date: '2026-11-09T18:59:00Z' }, // 9 ноя 23:59 — последний день
+    { userId: 'u1', total: 400, date: '2026-11-09T19:00:00Z' }, // 10 ноя 00:00 — уже после
+    { userId: 'u2', total: 999, date: '2026-10-20T10:00:00Z' }, // чужая продажа
+  ]
+  assert.equal(prodazhiSotrudnika(prodazhi, 'u1', r.from, r.to), 500)
+  assert.equal(zarplataKVydache({ salary: 2000, bonusPercent: 3, salesSum: 500 }).total, 2015, 'оклад целиком, бонус — за дни')
+})
+
+test('период бонуса: верный — обе даты и «с» не позже «по»', () => {
+  assert.equal(periodVeren({ from: '2026-10-10', to: '2026-11-09' }), true)
+  assert.equal(periodVeren({ from: '2026-10-10', to: '2026-10-10' }), true, 'один день — тоже период')
+  assert.equal(periodVeren({ from: '2026-11-09', to: '2026-10-10' }), false)
+  assert.equal(periodVeren({ from: '2026-10-10', to: '' }), false)
+  assert.equal(periodVeren({ from: '10.10.2026', to: '2026-11-09' }), false)
+  assert.equal(periodVeren(null), false)
+  assert.equal(denText('2026-10-10'), '10.10.2026')
+  assert.equal(denText('2026-11-09', true), '09.11')
+  assert.equal(denText(''), '')
 })

@@ -12,7 +12,10 @@ import { api } from '../db/api'
 import { onChanged, money, useCollection } from '../db/store'
 import { useAuth, getUser } from '../db/auth'
 import { skachatXlsx } from '../lib/excel'
-import { mesyac, poslednieMesyacy, prodazhiSotrudnika, zarplataKVydache, vydanoZaMesyac, ostatokZarplaty } from '../lib/otchety'
+import {
+  mesyac, poslednieMesyacy, prodazhiSotrudnika, zarplataKVydache, vydanoZaMesyac, ostatokZarplaty,
+  periodZarplaty, dniKMomentam, denText,
+} from '../lib/otchety'
 import { fmtDate } from '../lib/time'
 import { useT } from '../lib/i18n'
 import { OWNER_ROLE_ID } from '../lib/permissions'
@@ -30,6 +33,7 @@ import { OWNER_ROLE_ID } from '../lib/permissions'
 // в «Расходы», где зарплата этому сотруднику за этот месяц уже выбрана.
 
 const pct = (v) => `${String(Number(v) || 0).replace('.', ',')}%`
+const DAY = 86400000
 
 export default function Employees() {
   const toast = useToast()
@@ -46,7 +50,9 @@ export default function Employees() {
   // ── Зарплата за месяц ──
   const months = useMemo(() => poslednieMesyacy(12), [])
   const [month, setMonth] = useState(months[0])
-  const range = useMemo(() => mesyac(month), [month])
+  // Месяц зарплаты у каждого свой (с числа из карточки, не позже 28-го): продажи
+  // нужны с начала месяца по 27-е число следующего
+  const range = useMemo(() => ({ from: mesyac(month).from, to: new Date(mesyac(month).to.getTime() + 28 * DAY) }), [month])
   const salesCached = useCollection('sales')
   const { deep } = useDeepPeriod(['sales'], range)
   const sales = deep.sales || salesCached
@@ -57,13 +63,16 @@ export default function Employees() {
     const m = new Map()
     for (const u of list) {
       const uid = u.userId
-      const salesSum = uid ? prodazhiSotrudnika(sales, uid, range.from, range.to) : 0
+      // Бонус — за месяц сотрудника: с его числа по день перед ним в следующем месяце
+      const per = periodZarplaty(month, u.salaryDay)
+      const r = dniKMomentam(per.from, per.to)
+      const salesSum = uid ? prodazhiSotrudnika(sales, uid, r.from, r.to) : 0
       const nachisleno = zarplataKVydache({ salary: u.salary, bonusPercent: u.bonusPercent, salesSum }).total
       const vydano = uid ? vydanoZaMesyac(expenses, uid, month) : 0
-      m.set(u.id, { salesSum, nachisleno, vydano, ...ostatokZarplaty(nachisleno, vydano) })
+      m.set(u.id, { per, salesSum, nachisleno, vydano, ...ostatokZarplaty(nachisleno, vydano) })
     }
     return m
-  }, [list, sales, expenses, month, range])
+  }, [list, sales, expenses, month])
   // В таблице зарплаты — те, кому есть что начислить или кому уже выдавали
   const zpList = list.filter((u) => {
     const z = zp.get(u.id)
@@ -161,6 +170,7 @@ export default function Employees() {
     { header: t('Роль'), key: 'role', width: 16 },
     { header: t('Оклад'), key: 'salary', width: 13, money: true },
     { header: t('Бонус, %'), key: 'bonus', width: 10, num: true },
+    { header: t('Бонус за дни'), key: 'days', width: 24 },
     { header: t('Начислено'), key: 'nachisleno', width: 14, money: true },
     { header: t('Выдано'), key: 'vydano', width: 14, money: true },
     { header: t('Осталось'), key: 'ostalos', width: 14, money: true },
@@ -171,6 +181,7 @@ export default function Employees() {
     return {
       login: u.name, fio: u.fullName || '', role: roleName(u),
       salary: Number(u.salary) || 0, bonus: Number(u.bonusPercent) || 0,
+      days: z.per ? `${denText(z.per.from)} – ${denText(z.per.to)}` : '',
       nachisleno: z.nachisleno, vydano: z.vydano, ostalos: z.pereplata > 0 ? -z.pereplata : z.ostalos,
       status: u.active ? t('активен') : t('заблокирован'),
     }
@@ -269,7 +280,7 @@ export default function Employees() {
             <thead>
               <tr>
                 <th>{t('Сотрудник')}</th><th className="num">{t('Оклад')}</th><th className="num">{t('Бонус')}</th>
-                <th className="num">{t('Продажи за месяц')}</th><th className="num">{t('Начислено')}</th>
+                <th className="num">{t('Продажи за его месяц')}</th><th className="num">{t('Начислено')}</th>
                 <th className="num">{t('Выдано')}</th><th className="num">{t('Осталось')}</th>
               </tr>
             </thead>
@@ -279,7 +290,10 @@ export default function Employees() {
                   <td><b>{u.fullName || u.name}</b>{u.fullName ? <div className="tag-cat">{u.name}</div> : null}</td>
                   <td className="num">{Number(u.salary) > 0 ? money(u.salary) : <span className="tag-cat">—</span>}</td>
                   <td className="num">{Number(u.bonusPercent) > 0 ? pct(u.bonusPercent) : <span className="tag-cat">—</span>}</td>
-                  <td className="num">{zp.get(u.id)?.salesSum > 0 ? money(zp.get(u.id).salesSum) : <span className="tag-cat">—</span>}</td>
+                  <td className="num">
+                    {zp.get(u.id)?.salesSum > 0 ? money(zp.get(u.id).salesSum) : <span className="tag-cat">—</span>}
+                    {zp.get(u.id)?.per && <div className="tag-cat">{denText(zp.get(u.id).per.from, true)} – {denText(zp.get(u.id).per.to, true)}</div>}
+                  </td>
                   <ZpCells z={zp.get(u.id)} employeeId={u.userId} month={month} />
                 </tr>
               ))}
@@ -341,7 +355,7 @@ function ZpCells({ z, employeeId, month }) {
 }
 
 // Оклад и бонус — общие поля обеих форм
-function PayFields({ salary, setSalary, bonus, setBonus, idPrefix }) {
+function PayFields({ salary, setSalary, bonus, setBonus, day, setDay, idPrefix }) {
   const t = useT()
   return (
     <>
@@ -357,6 +371,19 @@ function PayFields({ salary, setSalary, bonus, setBonus, idPrefix }) {
       </div>
       <div className="tag-cat" style={{ marginTop: -6, marginBottom: 12 }}>
         {t('Бонус — процент от суммы его продаж за месяц. Зарплату к выдаче программа посчитает сама в разделе «Расходы».')}
+      </div>
+      <div className="field" data-tour="emp.salary-day">
+        <label htmlFor={`${idPrefix}-day`}>{t('Его месяц зарплаты начинается с')}</label>
+        <select id={`${idPrefix}-day`} value={day} onChange={(e) => setDay(e.target.value)}>
+          {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+            <option key={d} value={d}>{d === 1 ? t('1-го числа — обычный месяц') : `${d} ${t('числа')}`}</option>
+          ))}
+        </select>
+      </div>
+      <div className="tag-cat" style={{ marginTop: -6, marginBottom: 12 }}>
+        {Number(day) > 1
+          ? `${t('Бонус «за октябрь» будет считаться по продажам с')} ${day} ${t('октября по')} ${Number(day) - 1} ${t('ноября')}.`
+          : t('Бонус «за октябрь» будет считаться по продажам с 1 по 31 октября.')}
       </div>
     </>
   )
@@ -382,6 +409,7 @@ function AddEmployee({ roles, onDone, onClose }) {
   const [roleId, setRoleId] = useState(cashier?.id || roles.find((r) => r.id !== OWNER_ROLE_ID)?.id || '')
   const [salary, setSalary] = useState('')
   const [bonus, setBonus] = useState('')
+  const [day, setDay] = useState('1')
   const [saving, setSaving] = useState(false)
 
   async function submit() {
@@ -398,6 +426,7 @@ function AddEmployee({ roles, onDone, onClose }) {
         fullName: fullName.trim(),
         salary: Number(salary) || 0,
         bonusPercent: Number(bonus) || 0,
+        salaryDay: Number(day) || 1,
       })
       onDone(u)
     } catch (e) {
@@ -427,7 +456,7 @@ function AddEmployee({ roles, onDone, onClose }) {
           {roles.map((r) => <option key={r.id} value={r.id}>{r.name}{r.description ? ` — ${r.description}` : ''}</option>)}
         </select>
       </div>
-      <PayFields salary={salary} setSalary={setSalary} bonus={bonus} setBonus={setBonus} idPrefix="emp" />
+      <PayFields salary={salary} setSalary={setSalary} bonus={bonus} setBonus={setBonus} day={day} setDay={setDay} idPrefix="emp" />
       <div className="modal-actions">
         <button className="btn ghost" onClick={onClose} disabled={saving}>{t('Отмена')}</button>
         <button className="btn" onClick={submit} disabled={saving}>{saving ? t('Сохранение…') : t('Добавить')}</button>
@@ -443,6 +472,7 @@ function EditEmployee({ user, onDone, onClose }) {
   const [fullName, setFullName] = useState(user.fullName || '')
   const [salary, setSalary] = useState(Number(user.salary) > 0 ? String(user.salary) : '')
   const [bonus, setBonus] = useState(Number(user.bonusPercent) > 0 ? String(user.bonusPercent) : '')
+  const [day, setDay] = useState(String(Number(user.salaryDay) || 1))
   const [saving, setSaving] = useState(false)
 
   async function submit() {
@@ -454,6 +484,7 @@ function EditEmployee({ user, onDone, onClose }) {
         fullName: fullName.trim(),
         salary: Number(salary) || 0,
         bonusPercent: Number(bonus) || 0,
+        salaryDay: Number(day) || 1,
       })
       onDone(u)
     } catch (e) {
@@ -469,7 +500,7 @@ function EditEmployee({ user, onDone, onClose }) {
         <label htmlFor="emp-edit-fio">{t('ФИО сотрудника')}</label>
         <input id="emp-edit-fio" value={fullName} maxLength={120} autoFocus onChange={(e) => setFullName(e.target.value)} placeholder={t('напр. Каримов Фарход Аминович')} />
       </div>
-      <PayFields salary={salary} setSalary={setSalary} bonus={bonus} setBonus={setBonus} idPrefix="emp-edit" />
+      <PayFields salary={salary} setSalary={setSalary} bonus={bonus} setBonus={setBonus} day={day} setDay={setDay} idPrefix="emp-edit" />
       <div className="modal-actions">
         <button className="btn ghost" onClick={onClose} disabled={saving}>{t('Отмена')}</button>
         <button className="btn" onClick={submit} disabled={saving}>{saving ? t('Сохранение…') : t('Сохранить')}</button>

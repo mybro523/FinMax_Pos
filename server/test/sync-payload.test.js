@@ -222,7 +222,7 @@ test('смена, долг, клиент, отложенный штрихкод'
 test('расход с кассы: сумма больше нуля, статья обязательна, «из кассы» — только явное «да»', () => {
   const expense = { id: ID, date: AT, category: ' Транспорт ', amount: 50, note: 'такси до склада', fromCash: true, shiftId: 'cmshift1' }
   assert.deepEqual(parseExpense({ expense }, NOW), {
-    id: ID, date: new Date(AT), category: 'Транспорт', amount: 50, note: 'такси до склада', fromCash: true, shiftId: 'cmshift1', employeeId: null, salaryMonth: '',
+    id: ID, date: new Date(AT), category: 'Транспорт', amount: 50, note: 'такси до склада', fromCash: true, shiftId: 'cmshift1', employeeId: null, salaryMonth: '', bonusFrom: '', bonusTo: '',
   })
   // Зарплата с кассы: сотрудник доходит до сервера вместе с расходом
   assert.equal(parseExpense({ expense: { ...expense, category: 'Зарплата', employeeId: 'cmuser7' } }, NOW).employeeId, 'cmuser7')
@@ -231,6 +231,15 @@ test('расход с кассы: сумма больше нуля, статья
   // Непонятный месяц операцию не роняет: деньги выданы, месяц просто не записан
   for (const bad of ['2026-13', '10.2026', 'октябрь', 202610, '2026-1'])
     assert.equal(parseExpense({ expense: { ...expense, category: 'Зарплата', employeeId: 'cmuser7', salaryMonth: bad } }, NOW).salaryMonth, '')
+  // ...и за какие дни считали бонус
+  const zp = { ...expense, category: 'Зарплата', employeeId: 'cmuser7', salaryMonth: '2026-10' }
+  const withDays = parseExpense({ expense: { ...zp, bonusFrom: '2026-10-10', bonusTo: '2026-11-09' } }, NOW)
+  assert.deepEqual([withDays.bonusFrom, withDays.bonusTo], ['2026-10-10', '2026-11-09'])
+  // Непонятные дни, одна дата без другой или «с» позже «по» — дни просто не записаны
+  for (const [f, t] of [['2026-11-09', '2026-10-10'], ['2026-10-10', ''], ['10.10.2026', '2026-11-09'], ['2026-10-32', '2026-11-01'], [20261010, '2026-11-09']]) {
+    const x = parseExpense({ expense: { ...zp, bonusFrom: f, bonusTo: t } }, NOW)
+    assert.deepEqual([x.bonusFrom, x.bonusTo], ['', ''], `${f} … ${t}`)
+  }
   // Обычный расход — без смены и без отметки
   const plain = parseExpense({ expense: { id: ID, date: AT, category: 'Аренда', amount: 3000 } }, NOW)
   assert.deepEqual([plain.fromCash, plain.shiftId, plain.note], [false, null, ''])

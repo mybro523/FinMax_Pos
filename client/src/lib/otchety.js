@@ -300,6 +300,35 @@ export function vydachiZaMesyac(expenses, employeeId, month, krome) {
 export const vydanoZaMesyac = (expenses, employeeId, month, krome) =>
   kop(vydachiZaMesyac(expenses, employeeId, month, krome).reduce((a, e) => a + num(e.amount), 0))
 
+// ── Месяц зарплаты сотрудника ──
+// Месяц зарплаты бывает не календарным: в карточке сотрудника записано, с какого
+// числа он начинается (1–28). При 10 бонус «за октябрь» — по продажам с 10 октября
+// по 9 ноября включительно; при 1 — обычный месяц. Дни — ключами «ГГГГ-ММ-ДД»
+const dd2 = (n) => String(n).padStart(2, '0')
+const dneyVMesyace = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate()
+export function periodZarplaty(month, salaryDay = 1) {
+  const [y, m] = String(month).split('-').map(Number)
+  const d = Math.min(28, Math.max(1, Math.trunc(Number(salaryDay) || 1)))
+  const from = `${y}-${dd2(m)}-${dd2(d)}`
+  if (d === 1) return { from, to: `${y}-${dd2(m)}-${dd2(dneyVMesyace(y, m))}` }
+  const ny = m === 12 ? y + 1 : y
+  const nm = m === 12 ? 1 : m + 1
+  return { from, to: `${ny}-${dd2(nm)}-${dd2(d - 1)}` }
+}
+// Дни «с» и «по» включительно (по Душанбе) → моменты [from, to) для vPeriode
+export function dniKMomentam(fromKey, toKey) {
+  const at = (k, plus) => {
+    const [y, m, d] = String(k).split('-').map(Number)
+    return new Date(Date.UTC(y, m - 1, d + plus) - 5 * 3600000)
+  }
+  return { from: at(fromKey, 0), to: at(toKey, 1) }
+}
+// Период верный: обе даты «ГГГГ-ММ-ДД» и «с» не позже «по»
+const DEN = /^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/
+export const periodVeren = (p) => !!p && DEN.test(String(p.from || '')) && DEN.test(String(p.to || '')) && p.from <= p.to
+// «2026-10-10» → «10.10.2026» (short — «10.10»)
+export const denText = (k, short = false) => (DEN.test(String(k || '')) ? `${k.slice(8, 10)}.${k.slice(5, 7)}${short ? '' : '.' + k.slice(0, 4)}` : '')
+
 // Начислено и выдано → сколько осталось выдать или сколько выдано сверх начисленного
 export function ostatokZarplaty(nachisleno, vydano) {
   const raznica = kop(num(nachisleno) - num(vydano))
