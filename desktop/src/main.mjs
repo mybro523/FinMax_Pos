@@ -22,6 +22,7 @@ import { io } from 'socket.io-client'
 import { createBackups, hostFolderOf, openOrRestore } from './backup.mjs'
 import { readBuildConfig, resolveApiUrl, resolveUpdateFeed, serverOrigin } from './config.mjs'
 import { createGateway } from './gateway.mjs'
+import { safeXlsxName, xlsxBytes } from './files.mjs'
 import { createLan } from './lan.mjs'
 import { createClock } from './local/clock.mjs'
 import { getMeta, openDb, setMeta } from './local/db.mjs'
@@ -627,6 +628,32 @@ async function start() {
     } catch (e) {
       log.warn('PDF не сохранён: ' + (e?.message || e))
       return { ok: false, error: 'Не получилось. Повторите.' }
+    }
+  })
+
+  // ── Выгрузка в Excel ──
+  // Файл собирает страница, сохраняет основная часть: в программе страница живёт по
+  // адресу app://, и обычное скачивание с неё обрывается, не записав ни байта. Путь
+  // выбирает человек в окне «Сохранить как»; от страницы — только имя и сам файл
+  ipcMain.handle('file:save-xlsx', async (event, req) => {
+    if (!trusted(event) || !gateway.activeRole()) return { ok: false, error: 'Требуется вход в систему' }
+    const bytes = xlsxBytes(req?.bytes)
+    if (!bytes) return { ok: false, error: 'Файл не получился. Повторите.' }
+    try {
+      const r = await dialog.showSaveDialog(win, {
+        title: 'Сохранить таблицу Excel',
+        defaultPath: join(app.getPath('documents'), safeXlsxName(req?.name)),
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      })
+      if (r.canceled || !r.filePath) return { ok: false, canceled: true }
+      const path = /\.xlsx$/i.test(r.filePath) ? r.filePath : r.filePath + '.xlsx'
+      fs.writeFileSync(path, bytes)
+      // Показать файл в Проводнике: человек сразу видит, куда лёг файл
+      shell.showItemInFolder(path)
+      return { ok: true, path }
+    } catch (e) {
+      log.warn('Excel не сохранён: ' + (e?.message || e))
+      return { ok: false, error: 'Не получилось сохранить файл. Повторите.' }
     }
   })
 

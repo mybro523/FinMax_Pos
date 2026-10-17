@@ -6,6 +6,10 @@
 // деньги — числами с форматом (их можно сразу суммировать), итоговая строка.
 //
 // Сама библиотека тяжёлая, поэтому грузится только в момент нажатия кнопки.
+//
+// В программе для Windows файл сохраняет её основная часть (окно «Сохранить как»):
+// скачивание со страницы там обрывается, не записав ни байта.
+import { bridge } from './desktop.js'
 
 const THIN = { style: 'thin', color: { argb: 'FFB9C2D4' } }
 const BORDER = { top: THIN, left: THIN, bottom: THIN, right: THIN }
@@ -104,6 +108,12 @@ export async function skachatXlsx({ fayl, zagolovok, podzag, cols, rows, itogi, 
   }
 
   const buf = await wb.xlsx.writeBuffer()
+  if (bridge?.file?.saveXlsx) {
+    const r = await bridge.file.saveXlsx(fayl + '.xlsx', new Uint8Array(buf))
+    // Человек закрыл окно «Сохранить как» — это не ошибка
+    if (r && !r.ok && !r.canceled) throw new Error(r.error || 'Не получилось сохранить файл')
+    return
+  }
   const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

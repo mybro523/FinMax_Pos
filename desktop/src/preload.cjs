@@ -95,6 +95,12 @@ contextBridge.exposeInMainWorld('apteka', {
     pdf: () => ipcRenderer.invoke('print:pdf'),
   },
 
+  // Выгрузка в Excel: страница собирает файл, основная часть спрашивает, куда его
+  // сохранить, и записывает. Скачать файл обычным способом окно в программе не может
+  file: {
+    saveXlsx: (name, bytes) => ipcRenderer.invoke('file:save-xlsx', { name, bytes }),
+  },
+
   // Обновление программы
   update: {
     check: () => ipcRenderer.invoke('update:check'),
