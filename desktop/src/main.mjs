@@ -19,7 +19,7 @@ import os from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { io } from 'socket.io-client'
-import { createBackups, hostFolderOf, openOrRestore } from './backup.mjs'
+import { copyTime, createBackups, hostFolderOf, openOrRestore } from './backup.mjs'
 import { readBuildConfig, resolveApiUrl, resolveUpdateFeed, serverOrigin } from './config.mjs'
 import { createGateway } from './gateway.mjs'
 import { safeXlsxName, xlsxBytes } from './files.mjs'
@@ -39,6 +39,7 @@ import { createSessionStore } from './session.mjs'
 import { createSettings } from './settings.mjs'
 import { createUpdater, feedYaml } from './updater.mjs'
 import { createWindowState, MIN_SIZE } from './window-state.mjs'
+import { applyRestore, describeCopy, findCopies, requestRestore, RESTORE_FILE, saveCopyTo } from './restore.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -170,6 +171,12 @@ async function start() {
   // можно, не открывая базу по-настоящему
   const earlySeen = peekSeen(join(dataDir, 'core.db'))
   const appNow = () => (clock ? clock.now() : Math.max(Date.now(), earlySeen))
+
+  // ── Копия, которую владелец попросил загрузить ──
+  // Просьбу записал прошлый запуск (окно «Загрузить копию»). Выполняем её сейчас, пока ни
+  // одна база не открыта (см. restore.mjs). Не вышло — базы остаются как были, а окно
+  // состояния скажет почему
+  const restoreResult = applyRestore({ userData, dataDir, fs, Database, now: appNow, schemaMax: PHARMACY_SCHEMA.length, log })
   const backups = createBackups({ dir: join(userData, 'backups'), fs, Database, now: appNow, log, host: hostFolderOf(os.hostname()) })
   const opening = (name, schema) => (file) =>
     openOrRestore({ file, name, open: (f) => openDb(f, schema), backups, fs, extra: settings.get().backupDir, now: appNow, log })
@@ -358,6 +365,10 @@ async function start() {
         error: backupNote.error,
         skipped: backupNote.skipped,
         running: !!backupRunning,
+        // Копию попросили загрузить, а при запуске она не загрузилась (или загрузилась,
+        // но номер кассы не перенёсся)
+        restoreError: restoreResult && !restoreResult.ok ? restoreResult.error : '',
+        restoreWarning: restoreResult?.ok ? restoreResult.warning || '' : '',
       },
     }
   }
@@ -519,6 +530,97 @@ async function start() {
     if (!trusted(event) || !allowed('settings.backup')) return false
     fs.mkdirSync(backups.dir, { recursive: true })
     return (await shell.openPath(backups.dir)) === ''
+  })
+
+  // ── Сохранить копию в выбранную папку ──
+  // Флешка, другой диск — одним нажатием, без настройки второй папки. Снимается свежая
+  // копия, и она же кладётся туда отдельной папкой с понятным именем
+  ipcMain.handle('backup:saveTo', async (event) => {
+    if (!trusted(event) || !allowed('settings.backup')) return { ok: false, error: 'rights' }
+    const r = await dialog.showOpenDialog(win, { title: 'Куда сохранить копию базы', properties: ['openDirectory', 'createDirectory'] })
+    if (r.canceled || !r.filePaths?.[0]) return { ok: false, canceled: true }
+    if (!(await backupNow())) return { ok: false, error: 'backup', detail: backupNote.error }
+    const last = backups.last()
+    try {
+      const path = saveCopyTo({
+        from: last.folder,
+        dest: r.filePaths[0],
+        label: 'FinMax POS — копия ' + localStamp(last.at),
+        at: last.at,
+        info: { version: app.getVersion(), computer: os.hostname() },
+        fs,
+        Database,
+      })
+      log.info('копия базы сохранена: ' + path)
+      shell.showItemInFolder(path)
+      return { ok: true, path }
+    } catch (e) {
+      log.warn('копия базы в выбранную папку не сохранилась', e)
+      return { ok: false, error: 'save', detail: String(e?.message || e) }
+    }
+  })
+
+  // ── Загрузить копию ──
+  // Окно видит копии под номерами и называет номер: путей к файлам оно не знает и
+  // передать не может (как и вторую папку). Номера живут, пока открыт список
+  const copyChoices = new Map()
+  let choiceSeq = 0
+  function copyView(c, where) {
+    const d = describeCopy({ folder: c.folder, files: c.files, shopFile: gateway.pharmacyFile()?.name || '', deviceId: gateway.deviceId, schemaMax: PHARMACY_SCHEMA.length, fs, Database, thorough: false })
+    const id = 'c' + ++choiceSeq
+    copyChoices.set(id, { folder: c.folder, where })
+    // Подпись копии из выбранной папки — имя её папки («FinMax POS — копия 2026-10-18 12-40»).
+    // У обычной копии имя — служебная отметка времени: дата и так видна, подписи не нужно
+    const name = c.folder.split(/[\\/]/).filter(Boolean).pop() || ''
+    const place = where === 'picked' && !Number.isFinite(copyTime(name)) ? name : ''
+    return { id, where, place, at: Number.isFinite(d.at) ? new Date(d.at).toISOString() : null, computer: d.computer, pending: d.pending, foreign: d.foreign, problem: d.problem }
+  }
+  const newestFirst = (a, b) => String(b.at || '').localeCompare(String(a.at || ''))
+  ipcMain.handle('backup:copies', (event) => {
+    if (!trusted(event) || !allowed('settings.backup')) return null
+    copyChoices.clear()
+    if (!gateway.pharmacyFile()) return { copies: [] }
+    const st = gateway.status()
+    const copies = backups.listAll({ extra: settings.get().backupDir }).map((c) => copyView(c, c.where))
+    return { pending: st.pending, online: st.online, copies: copies.sort(newestFirst) }
+  })
+  ipcMain.handle('backup:pick', async (event) => {
+    if (!trusted(event) || !allowed('settings.backup') || !gateway.pharmacyFile()) return null
+    const r = await dialog.showOpenDialog(win, { title: 'Папка с копией базы', properties: ['openDirectory'] })
+    if (r.canceled || !r.filePaths?.[0]) return { canceled: true }
+    return { copies: findCopies(r.filePaths[0], { fs }).map((c) => copyView(c, 'picked')).sort(newestFirst) }
+  })
+  ipcMain.handle('backup:restore', async (event, req) => {
+    if (!trusted(event) || !allowed('settings.backup')) return { ok: false, error: 'rights' }
+    const shop = gateway.pharmacyFile()
+    const chosen = copyChoices.get(String(req?.id || ''))
+    if (!shop || !chosen) return { ok: false, error: 'gone' }
+    // Заново: копию могли унести или испортить, пока окно было открыто
+    const found = findCopies(chosen.folder, { fs, depth: 0 })[0]
+    if (!found) return { ok: false, error: 'gone' }
+    const d = describeCopy({ folder: found.folder, files: found.files, shopFile: shop.name, deviceId: gateway.deviceId, schemaMax: PHARMACY_SCHEMA.length, fs, Database })
+    if (d.problem) return { ok: false, error: d.problem }
+    if (d.foreign && req?.acceptForeign !== true) return { ok: false, error: 'foreign' }
+    if (gateway.status().pending > 0 && req?.acceptLoss !== true) return { ok: false, error: 'loss' }
+    try {
+      requestRestore({ userData, fs, Database, folder: d.folder, shopFile: shop.name, foreign: d.foreign, at: d.at, now: () => clock.now() })
+    } catch (e) {
+      log.warn('копию не удалось подготовить к загрузке', e)
+      return { ok: false, error: 'stage', detail: String(e?.message || e) }
+    }
+    // Перед загрузкой — копия нынешнего состояния: передумали — загрузите её обратно
+    if (!(await backupNow())) {
+      fs.rmSync(join(userData, RESTORE_FILE), { force: true })
+      return { ok: false, error: 'safety', detail: backupNote.error }
+    }
+    log.info(`загрузка копии ${d.folder} (${shop.name}${d.foreign ? ', с другого компьютера' : ''}): программа перезапускается`)
+    // Ответ окну уходит раньше, чем программа закроется
+    setTimeout(() => {
+      // При проверке перезапуск делает сама проверка (иначе новая программа ушла бы из-под неё)
+      if (!(DEV && process.env.APTEKA_NO_RELAUNCH === '1')) app.relaunch()
+      app.quit()
+    }, 600)
+    return { ok: true }
   })
 
   // ── Печать на чековом принтере ──
@@ -716,6 +818,14 @@ function peekSeen(file) {
       /* не открылась — закрывать нечего */
     }
   }
+}
+
+// Местное время для имени папки сохранённой копии: «2026-10-18 12-40» (двоеточие в
+// именах папок Windows запрещено)
+function localStamp(ms) {
+  const d = new Date(ms)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}-${p(d.getMinutes())}`
 }
 
 function isDevServer(url) {

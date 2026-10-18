@@ -427,13 +427,15 @@ export function createGateway({
     }
   }
 
-  // Базу недавно поднимали из копии — напоминаем об этом неделю
+  // Базу недавно поднимали из копии — напоминаем об этом неделю. manual — копию загрузил
+  // владелец сам (restore.mjs), а не программа после поломки файла; foreign — копия
+  // другого компьютера, и эта касса теперь работает под его номером
   const RESTORED_SHOW_MS = 7 * 86400000
   function restoredNote(db) {
     try {
       const r = JSON.parse(getMeta(db, 'restored') || 'null')
       if (!r || !Number.isFinite(r.at) || clock.now() - r.at > RESTORED_SHOW_MS) return null
-      return { at: new Date(r.at).toISOString(), from: Number.isFinite(r.from) ? new Date(r.from).toISOString() : null }
+      return { at: new Date(r.at).toISOString(), from: Number.isFinite(r.from) ? new Date(r.from).toISOString() : null, manual: r.manual === true, foreign: r.foreign === true }
     } catch {
       return null
     }

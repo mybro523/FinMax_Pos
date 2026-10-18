@@ -40,6 +40,29 @@ const parse = (name) => {
 }
 // Папка без номера (положили руками) — старше всех пронумерованных
 const serial = (name) => Number(STAMP.exec(name)?.[5] || 0)
+// Те же метка и её разбор — для загрузки копии вручную (restore.mjs)
+export const copyStamp = stamp
+export const copyTime = parse
+
+// Целая ли база в этом файле. Быстрая проверка: страницы и их связи. База без единой
+// таблицы — не копия, а пустое место: так выглядит «копия», снятая с пустого файла
+export function intactFile(file, Database) {
+  let db = null
+  try {
+    db = new Database(file, { readonly: true, fileMustExist: true })
+    const rows = db.pragma('quick_check(1)')
+    if (!(rows.length === 1 && Object.values(rows[0])[0] === 'ok')) return false
+    return db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table'").get().n > 0
+  } catch {
+    return false
+  } finally {
+    try {
+      db?.close()
+    } catch {
+      /* не открылась — закрывать нечего */
+    }
+  }
+}
 
 // ── Как назвать подпапку этого компьютера во второй папке копий ──
 // Имя компьютера, каким его можно положить в путь (латиница, цифры, дефис,
@@ -63,25 +86,7 @@ export function hostFolderOf(hostname) {
 export function createBackups({ dir, fs, Database, now = () => Date.now(), log = { info() {}, warn() {}, error() {} }, keep = KEEP, host = '' }) {
   const second = (extra) => (extra && host ? join(extra, host) : extra)
 
-  // Целая ли база в этом файле. Быстрая проверка: страницы и их связи. База без единой
-  // таблицы — не копия, а пустое место: так выглядит «копия», снятая с пустого файла
-  function intact(file) {
-    let db = null
-    try {
-      db = new Database(file, { readonly: true, fileMustExist: true })
-      const rows = db.pragma('quick_check(1)')
-      if (!(rows.length === 1 && Object.values(rows[0])[0] === 'ok')) return false
-      return db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table'").get().n > 0
-    } catch {
-      return false
-    } finally {
-      try {
-        db?.close()
-      } catch {
-        /* не открылась — закрывать нечего */
-      }
-    }
-  }
+  const intact = (file) => intactFile(file, Database)
 
   // Копии в папке, новые сверху
   function listIn(root) {
@@ -160,6 +165,10 @@ export function createBackups({ dir, fs, Database, now = () => Date.now(), log =
     dir,
     list: () => listIn(dir),
     last: () => listIn(dir)[0] || null,
+    // Копии и в основной папке, и во второй (в подпапке этого компьютера), новые сверху.
+    // where — откуда: main | extra
+    listAll: ({ extra = '' } = {}) =>
+      ranked([...listIn(dir).map((c) => ({ ...c, where: 'main' })), ...(extra ? listIn(second(extra)).map((c) => ({ ...c, where: 'extra' })) : [])]),
     // Пора ли снимать: последней копии больше суток (или её нет вовсе). «Больше суток» —
     // в любую сторону: если время последней копии от нынешнего далеко и вперёд, значит,
     // время программы с тех пор поправили, и сколько прошло на самом деле, неизвестно

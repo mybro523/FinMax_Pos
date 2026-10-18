@@ -79,6 +79,13 @@ contextBridge.exposeInMainWorld('apteka', {
     clearFolder: () => ipcRenderer.invoke('backup:folderClear'),
     // Открыть папку с копиями в Проводнике
     open: () => ipcRenderer.invoke('backup:open'),
+    // Снять свежую копию и положить её в папку, которую человек выберет в системном окне
+    saveTo: () => ipcRenderer.invoke('backup:saveTo'),
+    // Загрузить копию: список копий (под номерами — путей окно не видит), копии из папки,
+    // выбранной в системном окне, и сама загрузка: программа перезапустится
+    copies: () => ipcRenderer.invoke('backup:copies'),
+    pick: () => ipcRenderer.invoke('backup:pick'),
+    restore: (id, confirm) => ipcRenderer.invoke('backup:restore', { id, acceptForeign: confirm?.acceptForeign === true, acceptLoss: confirm?.acceptLoss === true }),
   },
 
   // Печать на чековом принтере (ESC/POS). Не настроен — программа отвечает «system»,

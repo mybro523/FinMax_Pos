@@ -104,6 +104,166 @@ function Row({ label, children, tone }) {
   )
 }
 
+// Что не так с копией (коды — из основной части программы, desktop/src/restore.mjs)
+function problemText(code, t) {
+  if (code === 'incomplete') return t('Неполная копия: в ней нет общей базы программы')
+  if (code === 'noshop') return t('В копии нет базы этого магазина')
+  if (code === 'broken') return t('Копия повреждена')
+  if (code === 'newer') return t('Копия от более новой версии программы — сначала обновите программу')
+  return ''
+}
+
+// Почему не вышло загрузить или сохранить копию
+function copyErrorText(r, t) {
+  const detail = r?.detail ? `: ${r.detail}` : ''
+  if (r?.error === 'rights') return t('Нет прав на резервные копии')
+  if (r?.error === 'gone') return t('Копия не найдена. Откройте список заново.')
+  if (r?.error === 'foreign') return t('Отметьте, что тот компьютер больше не работает')
+  if (r?.error === 'loss') return t('Отметьте, что понимаете: неотправленное уйдёт из программы')
+  if (r?.error === 'stage') return t('Не удалось подготовить копию к загрузке') + detail
+  if (r?.error === 'safety') return t('Не удалось снять копию нынешнего состояния') + detail
+  if (r?.error === 'backup') return t('Копию снять не удалось') + detail
+  if (r?.error === 'save') return t('Не получилось сохранить копию') + detail
+  return problemText(r?.error, t) || t('Не получилось. Повторите.')
+}
+
+// ── Загрузить копию базы ──
+// Список копий этой кассы (основная и вторая папка) и копии из папки, которую выберет
+// владелец, — например, с флешки сломавшегося компьютера. Что будет и что пропадёт, окно
+// говорит до загрузки. Загрузка — с перезапуском программы (desktop/src/restore.mjs)
+function RestoreView({ st, onBack }) {
+  const t = useT()
+  const toast = useToast()
+  const [list, setList] = useState(null)
+  const [picked, setPicked] = useState([])
+  const [sel, setSel] = useState('')
+  const [okForeign, setOkForeign] = useState(false)
+  const [okLoss, setOkLoss] = useState(false)
+  const [busy, setBusy] = useState('')
+  const [done, setDone] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    bridge.backup.copies().then(
+      (r) => alive && setList(Array.isArray(r?.copies) ? r.copies : []),
+      () => alive && setList([]),
+    )
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const copies = [...picked, ...(list || [])]
+  const chosen = copies.find((c) => c.id === sel) || null
+  const pending = st?.pending || 0
+  const ready = !!chosen && !chosen.problem && (!chosen.foreign || okForeign) && (pending === 0 || okLoss) && !busy && !done
+  const choose = (c) => {
+    setSel(c.id)
+    setOkForeign(false)
+  }
+  const whereText = (c) => (c.where === 'main' ? t('Эта касса') : c.where === 'extra' ? t('Вторая папка') : c.place || t('Из выбранной папки'))
+
+  const pickFolder = async () => {
+    setBusy('pick')
+    const r = await bridge.backup.pick().catch(() => null)
+    setBusy('')
+    if (!r || r.canceled) return
+    const found = Array.isArray(r.copies) ? r.copies : []
+    setPicked(found)
+    if (!found.length) return toast(t('В этой папке нет копий базы'), 'err')
+    const first = found.find((c) => !c.problem)
+    if (first) choose(first)
+  }
+
+  const load = async () => {
+    setBusy('restore')
+    const r = await bridge.backup.restore(chosen.id, { acceptForeign: okForeign, acceptLoss: okLoss }).catch(() => null)
+    if (r?.ok) return setDone(true)
+    setBusy('')
+    toast(copyErrorText(r, t), 'err')
+  }
+
+  return (
+    <div data-testid="restore-view">
+      <div className="tag-cat" style={{ marginBottom: 10 }}>
+        {t('Выберите копию. Программа снимет копию нынешнего состояния, загрузит выбранную и перезапустится — войдите снова. Всё, что уже на сервере, останется там: магазин на прошлую дату так не вернуть.')}
+      </div>
+      {list === null ? (
+        <div className="tag-cat">{t('Загружаем список копий…')}</div>
+      ) : copies.length ? (
+        <div className="restore-list" role="radiogroup" aria-label={t('Копии базы')}>
+          {copies.map((c) => (
+            <label key={c.id} className={'restore-row' + (sel === c.id ? ' on' : '') + (c.problem ? ' off' : '')} data-testid="restore-copy">
+              <input type="radio" name="restore-copy" checked={sel === c.id} disabled={!!c.problem || !!busy || done} onChange={() => choose(c)} />
+              <span className="restore-main">
+                <b>{c.at ? fmtShort(c.at) : t('время неизвестно')}</b>
+                <span className="tag-cat">
+                  {whereText(c)}
+                  {c.computer ? ` · ${t('компьютер')} ${c.computer}` : ''}
+                </span>
+                {c.problem ? (
+                  <span className="tag-cat sync-bad">{problemText(c.problem, t)}</span>
+                ) : (
+                  <span className="tag-cat">{c.pending > 0 ? `${t('Не ушло на сервер')}: ${c.pending}` : t('Всё было отправлено на сервер')}</span>
+                )}
+              </span>
+              {c.foreign && !c.problem && <span className="badge low">{t('другой компьютер')}</span>}
+            </label>
+          ))}
+        </div>
+      ) : (
+        <div className="note info">{t('Копий пока нет. Снимите копию или выберите папку с копией.')}</div>
+      )}
+      <div className="modal-actions" style={{ justifyContent: 'flex-start' }}>
+        <button className="btn ghost" disabled={!!busy || done} onClick={pickFolder} data-testid="restore-pick">
+          {busy === 'pick' ? t('Ищем копии…') : t('Выбрать папку…')}
+        </button>
+      </div>
+
+      {chosen && !done && (
+        <div className="restore-confirm">
+          {chosen.foreign && (
+            <div className="note warn">
+              {t('Это копия другой кассы. Загружайте её, только если тот компьютер больше не работает: эта касса станет той кассой — с её номером, сменой и чеками, которые не ушли на сервер.')}
+              <label className="restore-check">
+                <input type="checkbox" checked={okForeign} onChange={(e) => setOkForeign(e.target.checked)} data-testid="restore-ok-foreign" />
+                {t('Тот компьютер больше не работает')}
+              </label>
+            </div>
+          )}
+          {pending > 0 && (
+            <div className="note warn">
+              {t('На этой кассе не ушло на сервер')}: {pending}.{' '}
+              {t('После загрузки копии этого в программе не будет — оно останется в копии нынешнего состояния, которую программа снимет перед загрузкой.')}
+              <label className="restore-check">
+                <input type="checkbox" checked={okLoss} onChange={(e) => setOkLoss(e.target.checked)} data-testid="restore-ok-loss" />
+                {t('Понимаю')}
+              </label>
+            </div>
+          )}
+          {!st?.online && (
+            <div className="note info">{t('Связи с сервером сейчас нет. Копия загрузится, а смену, остатки и журналы программа сверит с сервером, как только появится интернет.')}</div>
+          )}
+        </div>
+      )}
+      {done && (
+        <div className="note info" style={{ marginTop: 10 }} data-testid="restore-done">
+          {t('Копия загружается. Программа сейчас перезапустится — войдите снова.')}
+        </div>
+      )}
+
+      <div className="modal-actions">
+        <button className="btn ghost" disabled={!!busy || done} onClick={onBack}>
+          {t('Назад')}
+        </button>
+        <button className="btn danger" disabled={!ready} onClick={load} data-testid="restore-load">
+          {busy === 'restore' ? t('Загружаем…') : t('Загрузить копию')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function StatusModal({ st, onClose }) {
   const t = useT()
   const toast = useToast()
@@ -111,6 +271,9 @@ function StatusModal({ st, onClose }) {
   const isFounder = user?.role === 'founder'
   const [busy, setBusy] = useState('')
   const [rejected, setRejected] = useState([])
+  // Окно состояния или его экран «Загрузить копию» — в том же окне, а не вторым поверх:
+  // Escape у двух окон сразу закрывал бы не то
+  const [view, setView] = useState('main')
 
   // Что сервер не принял — подробности видит только владелец
   const rejectedCount = st?.rejected || 0
@@ -136,6 +299,24 @@ function StatusModal({ st, onClose }) {
   const backup = st?.backup || {}
   const update = st?.update || {}
   const pending = st?.pending || 0
+
+  // Свежая копия — в папку, которую выберет владелец (флешка, другой диск)
+  const saveTo = async () => {
+    setBusy('saveTo')
+    const r = await bridge.backup.saveTo().catch(() => null)
+    setBusy('')
+    refreshDesktopStatus()
+    if (r?.ok) toast(`${t('Копия сохранена')}: ${r.path}`)
+    else if (!r?.canceled) toast(copyErrorText(r, t), 'err')
+  }
+
+  if (view === 'restore') {
+    return (
+      <Modal wide title={t('Загрузить копию базы')} onClose={onClose}>
+        <RestoreView st={st} onBack={() => setView('main')} />
+      </Modal>
+    )
+  }
 
   return (
     <Modal wide title={t('Состояние программы')} onClose={onClose}>
@@ -261,11 +442,28 @@ function StatusModal({ st, onClose }) {
         {/* ── Копия базы ── */}
         <div className="sync-section">
           <h4>{t('Копия базы')}</h4>
-          {st?.restored && (
+          {st?.restored?.manual && (
+            <div className="note info" style={{ marginBottom: 8 }} data-testid="restored-manual">
+              {st.restored.from ? `${t('Загружена копия базы от')} ${fmtShort(st.restored.from)}.` : t('Загружена копия базы.')}{' '}
+              {st.restored.foreign ? `${t('Эта касса теперь работает под номером кассы со старого компьютера.')} ` : ''}
+              {t('Перед загрузкой программа сохранила копию прежнего состояния — её можно загрузить обратно.')}
+            </div>
+          )}
+          {st?.restored && !st.restored.manual && (
             <div className="note err" style={{ marginBottom: 8 }}>
               {st.restored.from
                 ? `${t('Файл базы был повреждён, и программа подняла её из копии от')} ${fmtShort(st.restored.from)}. ${t('Чеки, пробитые после этой копии и не ушедшие на сервер, могли пропасть — сверьте кассу.')}`
                 : t('Файл базы был повреждён, а копии не нашлось: данные загружены с сервера заново. Чеки, не ушедшие на сервер, пропали — сверьте кассу.')}
+            </div>
+          )}
+          {backup.restoreError && (
+            <div className="note err" style={{ marginBottom: 8 }} data-testid="restore-error">
+              {t('Копию загрузить не удалось')}: {backup.restoreError}. {t('Базы остались прежними.')}
+            </div>
+          )}
+          {backup.restoreWarning && (
+            <div className="note warn" style={{ marginBottom: 8 }}>
+              {t('Копия загружена, но')} {backup.restoreWarning}.
             </div>
           )}
           <Row label={t('Последняя копия')} tone={backup.at ? undefined : 'warn'}>{backup.at ? fmtShort(backup.at) : t('ещё не снималась')}</Row>
@@ -302,6 +500,16 @@ function StatusModal({ st, onClose }) {
             {isFounder && (
               <button className="btn ghost" disabled={!!busy} onClick={() => bridge.backup.open().catch(() => {})}>
                 {t('Открыть папку с копиями')}
+              </button>
+            )}
+            {isFounder && (
+              <button className="btn ghost" disabled={!!busy} onClick={saveTo} data-testid="backup-save-to">
+                {busy === 'saveTo' ? t('Сохраняем…') : t('Сохранить копию в…')}
+              </button>
+            )}
+            {isFounder && (
+              <button className="btn ghost" disabled={!!busy} onClick={() => setView('restore')} data-testid="restore-open">
+                {t('Загрузить копию')}
               </button>
             )}
           </div>
