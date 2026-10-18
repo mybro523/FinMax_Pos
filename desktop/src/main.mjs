@@ -54,6 +54,8 @@ const COMPANY_LINKS = {
   instagram: 'https://www.instagram.com/finmax_tj',
   facebook: 'https://www.facebook.com/finmaxtj',
   youtube: 'https://www.youtube.com/@murod_davlatov_94',
+  // Картинки главного меню — Icons8: их бесплатная лицензия требует ссылку
+  icons8: 'https://icons8.com',
 }
 const RENDERER = join(ROOT, 'renderer')
 const FONTS = join(ROOT, 'assets', 'fonts')

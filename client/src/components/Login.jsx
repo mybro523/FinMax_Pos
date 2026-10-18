@@ -120,10 +120,6 @@ export default function Login() {
               ))}
             </div>
           </div>
-          {/* Картинки меню — Icons8, бесплатная лицензия требует ссылку на их сайт */}
-          <div className="auth-credits">
-            {t('Иконки')}: <a href="https://icons8.com" target="_blank" rel="noopener noreferrer">Icons8</a>
-          </div>
         </form>
       </main>
     </div>

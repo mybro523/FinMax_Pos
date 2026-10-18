@@ -73,6 +73,10 @@ export const COMPANY = {
   },
 }
 
+// Картинки главного меню — Icons8 («3D Fluency»): их бесплатная лицензия требует
+// ссылку на сайт Icons8. Она стоит маленькой строкой внизу «О компании»
+export const ICONS8 = { key: 'icons8', href: 'https://icons8.com' }
+
 // key — имя ссылки для программы для Windows; href — адрес для сайта
 export const COMPANY_CONTACTS = [
   { key: 'phone', label: 'Телефон', value: '+992 87 194 02 02', href: 'tel:+992871940202' },

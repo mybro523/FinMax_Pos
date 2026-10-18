@@ -3,13 +3,14 @@
 // таджикском. Этот тест проверяет данные сам.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { COMPANY, COMPANY_CONTACTS } from '../src/lib/company.js'
+import { COMPANY, COMPANY_CONTACTS, ICONS8 } from '../src/lib/company.js'
 import { translate, setLang } from '../src/lib/i18n.js'
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'src')
+const DESKTOP_MAIN = join(SRC, '..', '..', 'desktop', 'src', 'main.mjs')
 
 // Ключи словаря — из исходника, как в i18n.test.js: «Контроль» или «Мурод Давлатов»
 // могли бы совпасть с переводом и выглядеть пропущенными
@@ -65,6 +66,23 @@ test('у каждой услуги есть свой значок', () => {
   const automation = map('AUTOMATION_ICONS')
   for (const s of COMPANY.services) assert.ok(service.has(s.key), s.key)
   for (const s of COMPANY.automation) assert.ok(automation.has(s.key), s.key)
+})
+
+// Программа для Windows открывает ссылки по имени из своего списка (desktop/src/main.mjs):
+// поменяли адрес только здесь — в программе осталась бы старая ссылка
+test('ссылки «О компании» в программе для Windows ведут туда же, что на сайте', { skip: !existsSync(DESKTOP_MAIN) }, () => {
+  const main = readFileSync(DESKTOP_MAIN, 'utf8')
+  const start = main.indexOf('const COMPANY_LINKS = {')
+  const block = main.slice(start, main.indexOf('\n}', start))
+  const links = Object.fromEntries([...block.matchAll(/^\s*(\w+): '([^']+)'/gm)].map((m) => [m[1], m[2]]))
+  for (const c of [...COMPANY_CONTACTS, ICONS8]) assert.equal(links[c.key], c.href, c.key)
+})
+
+// Картинки главного меню — Icons8 по бесплатной лицензии, а она требует ссылку на их сайт
+test('ссылка на Icons8 стоит на странице «О компании»', () => {
+  assert.equal(ICONS8.href, 'https://icons8.com')
+  const about = readFileSync(join(SRC, 'pages', 'About.jsx'), 'utf8')
+  assert.ok(about.includes('href={ICONS8.href}'))
 })
 
 test('заголовки блоков делятся на две части — вторая золотом — и по-таджикски тоже', () => {

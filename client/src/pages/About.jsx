@@ -8,7 +8,7 @@ import Layout from '../components/Layout'
 import { BrandWord, useToast } from '../components/ui'
 import { useT } from '../lib/i18n'
 import { bridge, isDesktop } from '../lib/desktop'
-import { COMPANY, COMPANY_CONTACTS } from '../lib/company'
+import { COMPANY, COMPANY_CONTACTS, ICONS8 } from '../lib/company'
 import emblem from '../assets/brand/emblem-64.png'
 import founderPhoto from '../assets/brand/founder.jpg'
 
@@ -164,6 +164,10 @@ export default function About() {
 
         <div className="about-foot">
           <BrandWord /> — {t('программа для торговли от компании FinMax')}{version ? ` · ${t('версия')} ${version}` : ''}
+          <div className="about-credits">
+            {t('Иконки')}:{' '}
+            <a href={ICONS8.href} target="_blank" rel="noopener noreferrer" onClick={(e) => openInApp(e, ICONS8.key)}>Icons8</a>
+          </div>
         </div>
       </div>
     </Layout>
