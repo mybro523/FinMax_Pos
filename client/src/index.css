@@ -9,8 +9,8 @@
   /* Список товаров в каталоге кассы: светлее тёмно-синей шапки, чтобы отличался */
   --catalog-list: #1a3480;
   /* Корзина кассы — светло-серая плашка: чек выделяется среди белых панелей */
-  --cart-bg: #eceff5;
-  --cart-line: #d3dae6;
+  --cart-bg: #f1f3f8;
+  --cart-line: #d8dee8;
   --gold: #efbd24;
   --gold-dark: #dcac14;
   --gold-soft: #fbf3d5;
@@ -816,7 +816,9 @@ input::placeholder { color: var(--muted-2); }
    «Провести продажу» — оно на две с половиной секунды закрывало бы ровно ту кнопку,
    к которой тянется кассир. Поэтому на кассе сообщение встаёт сверху. */
 @media (min-width: 1280px) and (min-height: 600px) {
-  .kassa-open .toast { top: 74px; bottom: auto; animation-name: down; }
+  /* Второй селектор сильнее правила «над полосой внизу» (html.has-foot .toast):
+     иначе у сообщения были бы и верх, и низ, и оно растянулось бы на весь экран */
+  .kassa-open .toast, html.has-foot.kassa-open .toast { top: 74px; bottom: auto; animation-name: down; }
 }
 @keyframes down { from { opacity: 0; transform: translate(-50%, -10px); } }
 @keyframes up { from { opacity: 0; transform: translate(-50%, 10px); } }
@@ -1792,26 +1794,49 @@ tbody tr.clickable { cursor: pointer; }
 /* Строка чека закрыта для правки, пока скидка задана на весь чек */
 .kassa-table .disc-input:read-only { color: var(--muted); background: var(--track); cursor: not-allowed; }
 
-/* ── Подвал кассы: кто работает, клавиатура, блокировка ── */
 .kassa-wrap { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.kassa-foot {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap;
-  padding: 8px 14px; border-radius: var(--radius); box-shadow: var(--shadow-sm);
-  /* Фирменный тёмно-синий — как шапка сверху и табло «Итого»: касса читается единым аппаратом */
-  background: var(--sidebar); border: 1px solid var(--sidebar-line);
+
+/* ── Полоса внизу окна: кто работает, клавиатура, блокировка ──
+   Одна на весь проект — как шапка сверху, только внизу: фирменный тёмно-синий во всю
+   ширину, всегда на виду, страница листается между шапкой и ею. Прикреплена к низу
+   окна (sticky здесь не держится — у страницы задан overflow-x), а место под неё
+   оставляет класс has-foot на <html>. На телефоне — просто в конце страницы */
+:root { --app-foot-h: 52px; }
+.app-foot {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; height: var(--app-foot-h);
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 0 28px; background: var(--sidebar); border-top: 1px solid rgba(255, 255, 255, 0.08);
   font-size: 13.5px; color: #e6ebf7;
 }
-.kassa-foot .kf-user { display: inline-flex; align-items: center; gap: 7px; min-width: 0; flex-wrap: wrap; }
-.kassa-foot .kf-user .ic { display: inline-flex; color: var(--gold); }
-.kassa-foot .kf-user b { color: #fff; font-weight: 700; }
-.kassa-foot .kf-role { color: var(--sidebar-muted); }
-.kassa-foot .kf-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+html.has-foot .main { padding-bottom: var(--app-foot-h); }
+.app-foot .kf-user { display: inline-flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-foot .kf-user .ic { display: inline-flex; color: var(--gold); flex-shrink: 0; }
+.app-foot .kf-user b { color: #fff; font-weight: 700; }
+.app-foot .kf-role { color: var(--sidebar-muted); }
+.app-foot .kf-actions { display: flex; gap: 8px; flex-shrink: 0; }
 /* Кнопки на тёмно-синем: светлые полупрозрачные плашки с белой надписью */
-.kassa-foot .btn.ghost { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.26); color: #fff; }
-.kassa-foot .btn.ghost:hover { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.46); }
+.app-foot .btn.ghost { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.26); color: #fff; }
+.app-foot .btn.ghost:hover { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.46); }
 /* Экранная клавиатура включена — кнопка золотая */
-.kassa-foot .kf-kb.on { background: var(--gold); color: var(--on-gold); border-color: var(--gold); }
-.kassa-foot .kf-kb.on:hover { background: var(--gold-dark); border-color: var(--gold-dark); }
+.app-foot .kf-kb.on { background: var(--gold); color: var(--on-gold); border-color: var(--gold); }
+.app-foot .kf-kb.on:hover { background: var(--gold-dark); border-color: var(--gold-dark); }
+/* Уведомления и экранная клавиатура — над полосой, а не поверх неё */
+html.has-foot .toast { bottom: calc(var(--app-foot-h) + 14px); }
+html.has-foot .vkb { bottom: calc(var(--app-foot-h) + 10px); }
+/* Клавиатура стоит над полосой: страница уже кончается у полосы, поэтому отступ
+   снизу — ровно на клавиатуру (256) с зазором, без лишнего; окнам — с учётом полосы */
+html.has-foot.kb-open .content { padding-bottom: 272px !important; }
+html.has-foot.kb-open .overlay { padding-bottom: 342px; }
+html.has-foot.kb-open .modal { max-height: calc(100vh - 372px); }
+@media (max-width: 600px) {
+  .app-foot { position: static; height: auto; padding: 10px 14px; flex-wrap: wrap; gap: 8px 12px; }
+  html.has-foot .main { padding-bottom: 0; }
+  html.has-foot .toast { bottom: 24px; }
+}
+@media print {
+  .app-foot { display: none !important; }
+  html.has-foot .main { padding-bottom: 0; }
+}
 
 /* ── Экранная клавиатура ──
    Закреплена внизу окна поверх всего, включая открытые окна форм: кассир печатает
@@ -1847,7 +1872,7 @@ html.kb-open .modal { max-height: calc(100vh - 320px); }
 .vkb-num .num-enter { grid-column: span 2; }
 /* Без физической клавиатуры обходятся на кассовом ПК; телефон и планшет носят свою */
 @media (max-width: 1279px) {
-  .kassa-foot .kf-kb, .vkb { display: none; }
+  .app-foot .kf-kb, .vkb { display: none; }
 }
 /* На широком экране касса занимает окно целиком: подвал и клавиатура не растягивают
    страницу, а отнимают высоту у чека — он листается внутри себя. Если высоты всё же
@@ -1855,7 +1880,6 @@ html.kb-open .modal { max-height: calc(100vh - 320px); }
 @media (min-width: 1280px) and (min-height: 600px) {
   .kassa-wrap { height: 100%; gap: 10px; }
   .kassa-wrap .kassa { flex: 1 1 auto; height: auto; }
-  .kassa-foot { flex-shrink: 0; }
 }
 
 /* ── Поставщики: вкладки «Поставщики | Долги поставщикам» ── */

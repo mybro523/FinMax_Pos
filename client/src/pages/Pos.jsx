@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo, useDeferredValue, lazy, Suspense } from 'react'
 import {
   LuCamera, LuShoppingCart, LuPlus, LuMinus, LuTrash2, LuCheck, LuPrinter, LuScanLine, LuClock,
-  LuTriangleAlert, LuX, LuKeyboard, LuLock, LuUserRound, LuChevronRight,
+  LuTriangleAlert, LuX, LuLock, LuChevronRight,
 } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { Modal, useToast, useDialog, PAYMENTS } from '../components/ui'
@@ -11,7 +11,7 @@ const CameraScanner = lazy(() => import('../components/CameraScanner'))
 import KassaCatalog, { LIMIT } from '../components/KassaCatalog'
 import Lightbox from '../components/Lightbox'
 import { useCollection, useFirstLoading, money, db, stockText, realId } from '../db/store'
-import { useAuth, useCan, logout } from '../db/auth'
+import { useAuth, useCan } from '../db/auth'
 import { isVesovoy, kgText, KG, gramsOfKg, edinica, isKg,
   uppOf, isDivisible as isDiv, lineUnits, lineGross, lineNet,
   sellableUnits, expiredUnits, hasExpired, stockUnits,
@@ -38,7 +38,6 @@ import { usePechat } from '../components/PrintDialog'
 import { getRekvizity } from '../lib/rekvizity'
 import { useCategories, categoryNames } from '../lib/categories'
 import NumberInput from '../components/NumberInput'
-import VirtualKeyboard from '../components/VirtualKeyboard'
 
 // ── Хелперы штучной продажи ──
 // Сама арифметика упаковок и штук живёт в lib/units — одна на всю программу.
@@ -209,7 +208,6 @@ export default function Pos() {
     })
   const [hi, setHi] = useState(0) // подсвеченная строка каталога
   const [pane, setPane] = useState('check') // на узком экране: 'check' | 'catalog'
-  const [kb, setKb] = useState(false) // экранная клавиатура
   const [izm, setIzm] = useState(null) // что изменилось в чеке, пока он лежал: { id, text }
   const inputRef = useRef(null)
   const receivedRef = useRef(null)
@@ -837,14 +835,6 @@ export default function Pos() {
     focusScanner()
   }
 
-  // ── Блокировка ──
-  // Кассир отошёл от прилавка: экран закрывается страницей входа. Открытые чеки
-  // остаются на устройстве — после входа касса откроется с тем же чеком
-  const zablokirovat = () => {
-    pisat(cheki.code, cheki)
-    logout()
-  }
-  const roleName = auth?.roleName || (auth?.role === 'founder' ? t('Владелец') : t('Кассир'))
   const total = cart.reduce((s, i) => s + lineNet(i), 0)
   const discountTotal = cart.reduce((s, i) => s + Math.min(i.discount || 0, lineGross(i)), 0)
   // Сводка «Товаров»: каждая единица своим числом — «3 уп + 2 рулон + 5 шт + 1,5 кг».
@@ -1248,6 +1238,7 @@ export default function Pos() {
                     }}
                     onKeyDown={onScanKey}
                     placeholder={t('Наведите сканер на товар…')}
+                    data-vkb-default
                     autoFocus
                   />
                 </div>
@@ -1621,22 +1612,10 @@ export default function Pos() {
           </div>
         </div>
       </div>
-      {/* ── Подвал кассы: кто работает, экранная клавиатура, блокировка ── */}
-      {kb && <VirtualKeyboard fallbackRef={inputRef} onClose={() => { setKb(false); focusScanner() }} />}
-      <div className="kassa-foot" data-tour="pos.foot">
-        <span className="kf-user">
-          <span className="ic"><LuUserRound size={15} /></span>
-          {t('Кассир')}: <b>{auth?.name || '—'}</b> <span className="kf-role">({roleName})</span>
-        </span>
-        <div className="kf-actions">
-          <button type="button" className={'btn ghost sm kf-kb' + (kb ? ' on' : '')} onClick={() => setKb((v) => !v)} aria-pressed={kb} data-tour="pos.keyboard">
-            <span className="ic"><LuKeyboard size={15} /></span> {t('Клавиатура')}
-          </button>
-          <button type="button" className="btn ghost sm" onClick={zablokirovat} data-tour="pos.lock">
-            <span className="ic"><LuLock size={15} /></span> {t('Блокировка')}
-          </button>
-        </div>
-      </div>
+      {/* Кто работает, экранная клавиатура и блокировка — в полосе внизу окна, она
+          теперь одна на весь проект (components/AppFoot.jsx). Открытые чеки хранятся
+          на устройстве при каждом изменении, поэтому блокировка их не теряет; экранная
+          клавиатура без курсора печатает в поле сканера (data-vkb-default) */}
       </div>
 
       {/* ── Смена не открыта ── Окно при входе в кассу и при попытке продать. Закрыть

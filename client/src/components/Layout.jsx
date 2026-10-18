@@ -13,6 +13,7 @@ import { useT } from '../lib/i18n'
 import { startTour } from '../lib/tur'
 import { isDesktop } from '../lib/desktop'
 import SyncBadge from './SyncBadge'
+import AppFoot from './AppFoot'
 import { BrandWord } from './ui'
 import emblem from '../assets/brand/emblem-64.png'
 
@@ -142,6 +143,7 @@ export default function Layout({ title, subtitle, actions, fill, hub, children }
           </div>
         </header>
         <main className="content" key={location.pathname}>{children}</main>
+        <AppFoot />
       </div>
 
       {/* Хост для модалок страницы. Лежит внутри .app (у неё нет transform, поэтому
