@@ -284,6 +284,26 @@ test('приход в долг: поставщик и неоплаченная �
   rejected(() => parseArrival(arrival({ debt: -1 }), NOW), /долг поставщику/)
 })
 
+test('приход со скидкой поставщика: процент доходит, прежняя касса — без скидки, мусор — отказ', () => {
+  const arrival = (item) => ({ arrival: { id: ID, date: AT, total: 85, items: [{ id: ID, productId: 'p1', name: 'x', qty: 10, cost: 8.5, ...item }] } })
+  assert.equal(parseArrival(arrival({ discount: 15 }), NOW).items[0].discount, 15)
+  assert.equal(parseArrival(arrival({ discount: 12.5 }), NOW).items[0].discount, 12.5)
+  // Касса прежней версии скидки не шлёт — строка без скидки
+  assert.equal(parseArrival(arrival({}), NOW).items[0].discount, 0)
+  assert.equal(parseArrival(arrival({ discount: null }), NOW).items[0].discount, 0)
+  for (const bad of [-1, 100.01, 'много', Infinity]) rejected(() => parseArrival(arrival({ discount: bad }), NOW), /Недопустимый процент: скидка поставщика/)
+})
+
+test('скидка поставщика в базе: от 0 до 100 и до сотых', () => {
+  const { discountOf } = require('../dist/common/money')
+  assert.equal(discountOf(15).toString(), '15')
+  assert.equal(discountOf(12.345).toString(), '12.35')
+  assert.equal(discountOf(undefined).toString(), '0')
+  assert.equal(discountOf(-5).toString(), '0')
+  assert.equal(discountOf(250).toString(), '100')
+  assert.equal(discountOf('мусор').toString(), '0')
+})
+
 test('внесение и изъятие наличных: смена, вид и сумма больше нуля', () => {
   const move = { id: ID, shiftId: 'cmshift1', kind: 'in', amount: 200, note: 'размен', date: AT }
   assert.deepEqual(parseCashMove({ move }, NOW), { id: ID, shiftId: 'cmshift1', kind: 'in', amount: 200, note: 'размен', date: new Date(AT) })

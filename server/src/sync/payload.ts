@@ -75,6 +75,12 @@ function signedMoney(v: any, what: string): number {
   return v
 }
 
+// Проценты: от 0 до 100
+function percent(v: any, what: string): number {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 100) throw new Reject(`Недопустимый процент: ${what}`)
+  return v
+}
+
 function int(v: any, what: string, min = 0, max = 10_000_000): number {
   if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max) throw new Reject(`Недопустимое количество: ${what}`)
   return v
@@ -222,7 +228,10 @@ export function parseArrival(p: any, now?: number) {
       qty: int(i.qty, 'упаковки', 0),
       // Штуки (у весового товара — граммы) сверх целых упаковок
       pieces: i.pieces === undefined || i.pieces === null ? 0 : int(i.pieces, 'штуки', 0),
+      // Закупочная цена — уже со скидкой поставщика
       cost: money(i.cost, 'закупочная цена'),
+      // Скидка поставщика на строку, % — для истории. Прежние кассы её не шлют
+      discount: i.discount === undefined || i.discount === null || i.discount === '' ? 0 : percent(i.discount, 'скидка поставщика'),
       // Новая цена продажи, назначенная в приходе наценкой. Нет — цена остаётся прежней
       price: i.price === undefined || i.price === null || i.price === '' ? null : money(i.price, 'цена продажи'),
     }

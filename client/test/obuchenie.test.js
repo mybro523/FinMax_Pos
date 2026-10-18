@@ -94,7 +94,8 @@ const меткиТуров = () => {
     for (const [, , s] of u.ekran) {
       const x = spec(s)
       if (x.t) out.add(x.t)
-      if (x.open) out.add(x.open)
+      // open — кнопка или цепочка кнопок, открывающих форму (вкладка, затем вкладка в ней)
+      for (const o of [].concat(x.open || [])) out.add(o)
     }
   }
   for (const s of OBSHIY_TUR) if (s.t) out.add(s.t)
@@ -111,7 +112,8 @@ test('каждая метка тура указывает на настоящи�
     if (id.startsWith('grp:')) return !группы.includes(id.slice(4))
     // Кнопки разделов настроек размечаются в цикле по списку разделов
     if (id.startsWith('set.nav-')) return !разделыНастроек().includes(id.slice('set.nav-'.length))
-    return !src.includes(`data-tour="${id}"`) && !src.includes(`tour="${id}"`)
+    // Метка бывает и полем списка, из которого кнопки рисуются в цикле: { tour: 'arr.new' }
+    return !src.includes(`data-tour="${id}"`) && !src.includes(`tour="${id}"`) && !src.includes(`tour: '${id}'`)
   })
   assert.deepEqual(нет, [], `тур указывает в пустоту — таких меток нет на страницах: ${нет.join(', ')}`)
 })
@@ -138,7 +140,7 @@ test('тур никогда не нажимает кнопки, которые �
   for (const u of OBUCHENIE) {
     for (const [, , s] of u.ekran) {
       const x = spec(s)
-      if (x.open && опасные.test(x.open)) нажимает.push(`${u.to}: ${x.open}`)
+      for (const o of [].concat(x.open || [])) if (опасные.test(o)) нажимает.push(`${u.to}: ${o}`)
     }
   }
   assert.deepEqual(нажимает, [], 'тур открывает формы кнопками, которые меняют данные')

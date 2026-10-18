@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service'
 import { AccountCache } from '../admin/account-cache.service'
 import { AuthService } from '../auth/auth.service'
 import { EventsGateway } from '../events/events.gateway'
-import { D } from '../common/money'
+import { D, discountOf } from '../common/money'
 import { weightedPackCost } from '../common/cost'
 import { addUnits, consumeUnitsTolerant, lockProducts, returnExpiry, shortageWorth, uppOf } from '../common/stock'
 import { Count, firstCountAfter, forgetShortageDoc, lockInventories, pruneCounted, rememberShortageDoc, shortageDocOf } from '../common/counted'
@@ -972,7 +972,9 @@ export class SyncService {
         payMethod: p.payMethod || '',
         userId: ctx.tenantUserId,
         total,
-        items: { create: p.items.map((i) => ({ id: i.id, productId: i.productId, name: i.name, qty: i.qty, pieces: i.pieces || 0, cost: D(i.cost) })) },
+        items: {
+          create: p.items.map((i) => ({ id: i.id, productId: i.productId, name: i.name, qty: i.qty, pieces: i.pieces || 0, cost: D(i.cost), discount: discountOf(i.discount) })),
+        },
       },
     })
     if (supplierId && debt.gt(0)) {

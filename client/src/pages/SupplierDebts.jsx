@@ -16,7 +16,9 @@ import { getUser } from '../db/auth'
 // Это не отдельная страница: раньше «Поставщики» и «Долги поставщикам» были двумя
 // плитками меню про одно и то же, и люди искали оплату не там.
 
-export function useDolgiPostavshikam() {
+// enabled — грузить ли вообще: экрану прихода сводка нужна только тому, кому
+// разрешены поставщики (остальным сервер её не отдаст, а ошибка всплывала бы зря)
+export function useDolgiPostavshikam({ enabled = true } = {}) {
   const t = useT()
   const toast = useToast()
   const [svodka, setSvodka] = useState(null)
@@ -29,10 +31,13 @@ export function useDolgiPostavshikam() {
     }
   }, [toast])
   useEffect(() => {
-    load()
-  }, [load])
+    if (enabled) load()
+  }, [load, enabled])
   // Долг меняется приходом в долг и оплатой — перечитываем по любому из них
-  useEffect(() => onChanged((keys) => keys.some((k) => ['suppliers', 'arrivals', 'supplierPayments'].includes(k)) && load()), [load])
+  useEffect(
+    () => (enabled ? onChanged((keys) => keys.some((k) => ['suppliers', 'arrivals', 'supplierPayments'].includes(k)) && load()) : undefined),
+    [load, enabled],
+  )
 
   const s = svodka || { total: 0, arrivals: 0, suppliers: [] }
   const exCols = [

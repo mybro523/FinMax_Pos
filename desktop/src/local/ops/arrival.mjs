@@ -31,7 +31,9 @@ export function createArrival(ctx, raw) {
     qty: c.int(it?.qty, `items.${n}.qty`, { min: 0 }),
     // Штуки (граммы) сверх целых упаковок
     pieces: it?.pieces === undefined || it?.pieces === null ? 0 : c.int(it.pieces, `items.${n}.pieces`, { min: 0, max: 99999 }),
+    // Закупочная цена — уже со скидкой поставщика; сама скидка, % — для истории
     cost: c.num(it?.cost, `items.${n}.cost`),
+    discount: it?.discount === undefined || it?.discount === null ? 0 : c.num(it.discount, `items.${n}.discount`, { max: 100 }),
     expiryDate: c.str(it?.expiryDate, `items.${n}.expiryDate`, { optional: true }),
     // Новая цена продажи, назначенная наценкой в приходе. Нет — цена прежняя
     price: it?.price === undefined || it?.price === null ? null : c.num(it.price, `items.${n}.price`, { max: MAX_MONEY }),
@@ -49,7 +51,9 @@ export function createArrival(ctx, raw) {
       // Тот же отказ и теми же словами, что у сервера: позже его прислал бы он —
       // когда товар уже стоит на полке
       unitsOk(units, 'В приходе слишком большое количество')
-      return { productId: p.id, name: p.name, qty: it.qty, pieces: it.pieces, units, cost: D(it.cost) }
+      // Скидка — до сотых процента, как её хранит сервер
+      const discount = Math.round((it.discount || 0) * 100) / 100
+      return { productId: p.id, name: p.name, qty: it.qty, pieces: it.pieces, units, cost: D(it.cost), discount }
     })
 
     // Срок годности партии не обязателен: впишут — партия под контролем сроков,
@@ -151,6 +155,7 @@ export function createArrival(ctx, raw) {
         qty: l.qty,
         pieces: l.pieces,
         cost: fromCents(toCents(l.cost)),
+        discount: l.discount,
       })),
     }
     // Новая цена продажи — сразу в карточке: касса продаёт по ней, не дожидаясь связи.

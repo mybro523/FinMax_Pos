@@ -9,7 +9,10 @@ export class ArrivalItemDto {
   @IsInt() @Min(0) qty: number
   // Штуки (граммы) сверх целых упаковок
   @IsOptional() @IsInt() @Min(0) @Max(99_999) pieces?: number
+  // Закупочная цена за упаковку (килограмм) — уже со скидкой поставщика
   @IsNumber() @Min(0) cost: number
+  // Скидка поставщика на строку, %. Только для истории: cost уже со скидкой
+  @IsOptional() @IsNumber() @Min(0) @Max(100) discount?: number
   // Срок годности партии: обязателен для товаров, необязателен для приборов и расходников
   @IsOptional() @IsString() expiryDate?: string
   // Новая цена продажи товара: владелец назначил её наценкой на закуп этого прихода.

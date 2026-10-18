@@ -1,22 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { LuTruck, LuPlus, LuPencil, LuTrash2, LuLock, LuBanknote, LuHandCoins, LuPackagePlus, LuCircleDollarSign, LuReceipt, LuWallet } from 'react-icons/lu'
+import { LuTruck, LuPlus, LuPencil, LuTrash2, LuBanknote, LuHandCoins, LuPackagePlus, LuCircleDollarSign, LuReceipt, LuWallet } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import NumberInput from '../components/NumberInput'
 import { useCollection, money, db, onChanged } from '../db/store'
 import { api } from '../db/api'
-import { paySupplier, removeSupplierPayment } from '../db/ops'
 import { fmtDate, fmtDateTime } from '../lib/time'
 import { useT } from '../lib/i18n'
 import { useCan, getUser } from '../db/auth'
-import { isDesktop } from '../lib/desktop'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { PeriodPicker, presetPeriod, periodRange, periodText, useDeepPeriod } from '../components/Period'
 import { zakupkiIOplaty } from '../lib/otchety'
 import { skachatXlsx } from '../lib/excel'
 import SupplierDebtsPanel, { useDolgiPostavshikam } from './SupplierDebts'
+import { SupplierPayPanel, SupplierPaymentsTable } from '../components/SupplierMoney'
 
 // ── Поставщики и долги перед ними ──
 // Магазин берёт товар у дистрибьюторов в долг. Приход записывался, а кому и сколько
@@ -29,9 +28,6 @@ import SupplierDebtsPanel, { useDolgiPostavshikam } from './SupplierDebts'
 
 // Какая вкладка открыта — помнится на устройстве
 const VKLADKA = 'apteka_postavshiki_vkladka'
-
-const sourceName = (s, t) => (s.deviceId ? s.deviceName || t('Касса') : t('Касса сайта'))
-const defaultSource = (list) => (list.find((s) => !s.deviceId) || list[0])?.shiftId || ''
 
 export default function Suppliers() {
   const can = useCan()
@@ -380,97 +376,24 @@ export default function Suppliers() {
 }
 
 // ── Карточка поставщика: долг, откуда он взялся, оплата ──
+// Оплата и список оплат — общие с вкладкой «Платежи и баланс» прихода (SupplierMoney.jsx)
 function SupplierCard({ id, supplier, onClose }) {
-  const can = useCan()
   const t = useT()
   const toast = useToast()
-  const dialog = useDialog()
-  const shifts = useCollection('shifts')
   const [card, setCard] = useState(null)
-  const [amount, setAmount] = useState('')
-  const [note, setNote] = useState('')
-  const [fromCash, setFromCash] = useState(false)
-  const [sources, setSources] = useState(null)
-  const [sourceId, setSourceId] = useState('')
-  const [saving, setSaving] = useState(false)
 
   const load = useCallback(() => {
     api.get('/suppliers/' + id).then(setCard).catch((e) => toast(t(e.message), 'err'))
   }, [id, toast, t])
-  const loadSources = useCallback(() => {
-    api
-      .get('/shifts/cash-sources')
-      .then((rows) => setSources(Array.isArray(rows) ? rows : []))
-      .catch(() => setSources((prev) => prev || []))
-  }, [])
   useEffect(() => {
     load()
-    loadSources()
-  }, [load, loadSources])
+  }, [load])
   // Приход в долг или оплата на другом устройстве — карточка перечитывается
   useEffect(
-    () =>
-      onChanged((keys) => {
-        if (keys.some((k) => ['suppliers', 'supplierPayments', 'arrivals'].includes(k))) load()
-        if (keys.includes('shifts')) loadSources()
-      }),
-    [load, loadSources],
+    () => onChanged((keys) => keys.some((k) => ['suppliers', 'supplierPayments', 'arrivals'].includes(k)) && load()),
+    [load],
   )
-  const openShiftId = shifts.find((s) => !s.closedAt)?.id || ''
-  useEffect(() => {
-    loadSources()
-  }, [openShiftId, loadSources])
-
-  const tills = useMemo(() => sources || [], [sources])
-  useEffect(() => {
-    if (!tills.some((s) => s.shiftId === sourceId)) setSourceId(defaultSource(tills))
-    if (sources && !tills.length) setFromCash(false)
-  }, [tills, sources, sourceId])
-
-  const closedShifts = useMemo(() => new Map(shifts.filter((s) => s.closedAt).map((s) => [s.id, s])), [shifts])
-  const locked = (p) => !!p.fromCash && !!p.shiftId && closedShifts.has(p.shiftId)
   const debt = Number(supplier?.debt ?? card?.debt ?? 0)
-
-  async function pay() {
-    if (saving) return
-    const sum = Number(amount)
-    if (!(sum > 0)) return toast(t('Укажите сумму оплаты'), 'err')
-    if (sum > debt + 0.005) return toast(`${t('Сумма больше долга поставщика')} (${money(debt)})`, 'err')
-    if (fromCash && !sourceId) return toast(t('Нет открытой смены — из кассы взять нечего.'), 'err')
-    setSaving(true)
-    try {
-      await paySupplier(id, { amount: sum, note, fromCash, shiftId: fromCash ? sourceId : null })
-      setAmount('')
-      setNote('')
-      setFromCash(false)
-      toast(t('Оплата записана'))
-      load()
-    } catch (e) {
-      toast(t(e.message), 'err')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function removePayment(p) {
-    if (locked(p)) return toast(t('Смена этой оплаты уже закрыта: она вошла в её отчёт и больше не меняется.'), 'err')
-    const ok = await dialog.confirm({
-      title: t('Отменить оплату?'),
-      message: `${money(p.amount)} · ${fmtDateTime(p.date)}. ${t('Долг поставщика вырастет на эту сумму.')}`,
-      danger: true,
-      confirmText: t('Отменить оплату'),
-    })
-    if (!ok) return
-    try {
-      await removeSupplierPayment(p.id)
-      toast(t('Оплата отменена'))
-      load()
-    } catch (e) {
-      toast(t(e.message), 'err')
-    }
-  }
-
-  const noTill = sources !== null && tills.length === 0
   const name = supplier?.name || card?.name || ''
 
   return (
@@ -481,78 +404,11 @@ function SupplierCard({ id, supplier, onClose }) {
         <div className="mini-card"><div className="m-label">{t('Телефон')}</div><div className="m-value sm">{supplier?.phone || card?.phone || '—'}</div></div>
       </div>
 
-      <div className="panel" data-tour="sup.pay" style={{ marginBottom: 14 }}>
-        <h2><span className="h2-title"><span className="ic"><LuHandCoins size={17} /></span>{t('Оплатить поставщику')}</span></h2>
-        <div className="row">
-          <div className="field" style={{ flex: 1 }}>
-            <label htmlFor="supPayAmount">{t('Сумма (сомони)')}</label>
-            <NumberInput id="supPayAmount" value={amount} placeholder="0" onChange={(e) => setAmount(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && pay()} />
-          </div>
-          <div className="field" style={{ flex: 2 }}>
-            <label htmlFor="supPayNote">{t('Примечание (необязательно)')}</label>
-            <input id="supPayNote" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && pay()} placeholder={t('напр. за накладную № 12')} />
-          </div>
-        </div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: noTill ? 'var(--muted)' : undefined }}>
-          <input type="checkbox" checked={fromCash} disabled={!tills.length} onChange={(e) => setFromCash(e.target.checked)} style={{ width: 17, height: 17 }} />
-          {t('Оплачено из кассы')}
-        </label>
-        {noTill && (
-          <div className="tag-cat" style={{ marginTop: 6 }}>
-            {t('Нет открытой смены — из кассы взять нечего.')}{' '}
-            <Link to="/shift" className="linklike" style={{ fontSize: 12 }}>{t('Откройте смену')}</Link>
-          </div>
-        )}
-        {fromCash && tills.length > 0 && (
-          <div className="tag-cat" style={{ marginTop: 6, lineHeight: 1.6 }}>
-            {t('Сумма уменьшит наличные, которые ждут в кассе при закрытии смены.')}
-          </div>
-        )}
-        {fromCash && tills.length > 1 && (
-          <div className="field" style={{ maxWidth: 320, marginTop: 10, marginBottom: 0 }}>
-            <label htmlFor="supPayTill">{t('Из какой кассы взяты деньги')}</label>
-            <select id="supPayTill" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
-              {tills.map((s) => <option key={s.shiftId} value={s.shiftId}>{sourceName(s, t)}</option>)}
-            </select>
-          </div>
-        )}
-        {fromCash && tills.length === 1 && tills[0].deviceId && !isDesktop && (
-          <div className="tag-cat" style={{ marginTop: 6 }}>{t('Касса')}: <b>{sourceName(tills[0], t)}</b></div>
-        )}
-        <div className="modal-actions" style={{ justifyContent: 'flex-start', marginTop: 12 }}>
-          {can('suppliers.pay') && <button className="btn" onClick={pay} disabled={saving || debt <= 0}>
-            <span className="ic"><LuBanknote size={16} /></span> {saving ? t('Сохраняем…') : t('Записать оплату')}
-          </button>}
-          {debt <= 0 && <span className="tag-cat">{t('Долга нет — платить нечего')}</span>}
-        </div>
-      </div>
+      <SupplierPayPanel supplierId={id} debt={debt} onPaid={load} tour="sup.pay" style={{ marginBottom: 14 }} />
 
       <h2 style={{ fontSize: 14, margin: '0 0 8px' }}>{t('Оплаты')}</h2>
       <div style={{ maxHeight: '32vh', overflow: 'auto', marginBottom: 14 }}>
-        <table>
-          <thead><tr><th>{t('Дата')}</th><th>{t('Кто')}</th><th className="num">{t('Сумма')}</th><th></th></tr></thead>
-          <tbody>
-            {(card?.payments || []).map((p) => (
-              <tr key={p.id}>
-                <td style={{ whiteSpace: 'nowrap' }}>
-                  {fmtDateTime(p.date)}
-                  {p.fromCash && <span className="badge cash" style={{ marginLeft: 8 }}><LuBanknote size={13} /> {t('из кассы')}</span>}
-                  {p.note ? <div className="tag-cat">{p.note}</div> : null}
-                </td>
-                <td>{p.user?.name || '—'}</td>
-                <td className="num" style={{ color: 'var(--green)' }}>{money(p.amount)}</td>
-                <td className="num">
-                  {locked(p) ? (
-                    <span className="tag-cat" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><LuLock size={14} /> {t('в отчёте смены')}</span>
-                  ) : (
-                    can('suppliers.pay') && <button className="btn ghost sm icon" onClick={() => removePayment(p)} title={t('Отменить оплату')} aria-label={`${t('Отменить оплату')} ${money(p.amount)}`}><LuTrash2 size={15} /></button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {card && !card.payments.length && <tr><td colSpan="4" className="empty">{t('Оплат ещё не было')}</td></tr>}
-          </tbody>
-        </table>
+        {card && <SupplierPaymentsTable payments={card.payments || []} onRemoved={load} />}
       </div>
 
       <h2 style={{ fontSize: 14, margin: '0 0 8px' }}>{t('Приходы от поставщика')}</h2>

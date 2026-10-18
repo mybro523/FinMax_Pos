@@ -49,6 +49,9 @@
   --warn-soft: #fff3d6;
   --green: #1a7f4b;
   --green-soft: #e5f4ea;
+  /* Зелёная кнопка «Добавить» в приходе — как в привычных программах приёмки */
+  --green-btn: #1a7f4b;
+  --green-btn-hover: #166c40;
   --blue: #2457c5;
   --blue-soft: #e9effc;
   --shadow-sm: 0 1px 2px rgba(18, 26, 46, 0.05);
@@ -104,6 +107,8 @@
   --warn-soft: #3a2e12;
   --green: #4fd08e;
   --green-soft: #13301f;
+  --green-btn: #1f8f55;
+  --green-btn-hover: #25a463;
   --blue: #86aaf8;
   --blue-soft: #17275c;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
@@ -305,33 +310,6 @@ a.sub:hover { text-decoration: underline !important; }
 .ret-expiry label { font-size: 12px; color: var(--muted); }
 .ret-expiry input { width: 100%; padding: 6px 8px; }
 .row { display: flex; gap: 14px; }
-
-/* ── Строки прихода товара ──
-   Количество, закупочную цену и срок годности набирают руками, часто с телефона.
-   В таблице эти поля сжимались до размера стрелочек и цифр было не разобрать,
-   поэтому каждая позиция — отдельный блок с подписанными полями. В узком окне
-   поля переносятся вниз, а не ужимаются. Шрифт 16px: на iPhone поле с меньшим
-   шрифтом заставляет браузер приближать страницу при наборе. */
-.arr-lines { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
-.arr-line { border: 1px solid var(--border); border-radius: 10px; padding: 13px 14px 15px; }
-.arr-line-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
-.arr-line-name { font-weight: 600; font-size: 14.5px; }
-.arr-fields { display: flex; flex-wrap: wrap; gap: 12px; }
-.arr-f { display: flex; flex-direction: column; gap: 6px; }
-.arr-f > span { font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
-.arr-f input { font-size: 16px; padding: 10px 12px; font-variant-numeric: tabular-nums; }
-.arr-qty { width: 112px; }
-.arr-cost { width: 136px; }
-.arr-exp { width: 196px; }
-.arr-none { font-size: 14px; color: var(--muted-2); padding: 11px 0; }
-/* Отсканировали товар, который уже в приходе — подсвечиваем его строку, чтобы
-   было видно, куда смотреть, вместо второй такой же позиции */
-.arr-flash { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
-
-@media (max-width: 560px) {
-  .arr-f { flex: 1 1 100%; }
-  .arr-qty, .arr-cost, .arr-exp { width: 100%; }
-}
 .mt { margin-top: 16px; }
 
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -1973,10 +1951,6 @@ button.supd-card { font: inherit; text-align: left; cursor: pointer; width: 100%
 .pf-prices .pf-markup input:disabled { background: var(--track); color: var(--muted-2); cursor: not-allowed; }
 label .tag-cat { font-weight: 400; }
 
-/* Строка прихода: новая цена продажи подсвечена — видно, что цена товара поменяется */
-.arr-f input.arr-mk { width: 96px; }
-.arr-f input.arr-price.changed { border-color: var(--gold); background: var(--gold-soft); }
-
 /* ═════════ Период: быстрые кнопки и даты ═════════ */
 .period { display: flex; align-items: flex-end; gap: 10px 16px; flex-wrap: wrap; }
 .period .chips { align-self: center; }
@@ -2111,3 +2085,232 @@ tfoot .zak-total td { font-weight: 700; border-top: 2px solid var(--border-stron
 .lan-section > .panel { margin-top: 0; border: none; box-shadow: none; padding: 0; max-width: none !important; }
 .sync-badge.lan.muted { background: var(--soft); color: var(--muted); border-color: var(--border); }
 .sync-warn { color: var(--warn); }
+
+/* ═════════ Приход товара ═════════
+   Один экран, как в привычных программах приёмки: слева — поставщики, сверху — период
+   и вкладки, по центру — накладная таблицей, справа — итоги тёмно-синей панелью
+   (фирменный цвет FinMax, поставщик и «Итого» — золотом), снизу — форма. На экране
+   меньше 1800 точек таблица идёт во всю ширину, а итоги встают справа от формы: иначе
+   таблице оставалось бы две трети ширины и её пришлось бы листать вбок */
+.prh { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; align-items: start; }
+.prh-main { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+
+/* ── Поставщики слева ── */
+.prh-side {
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm);
+  padding: 12px; display: flex; flex-direction: column; gap: 8px;
+  position: sticky; top: 12px; max-height: calc(100vh - 120px);
+}
+html.has-foot .prh-side { max-height: calc(100vh - 120px - var(--app-foot-h)); }
+.prh-side-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 11px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong); background: var(--card); color: var(--text);
+  font: inherit; font-size: 13.5px; font-weight: 600; text-align: left; cursor: pointer;
+}
+.prh-side-btn:hover { background: var(--hover); }
+.prh-side-btn.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-dark); }
+.prh-side-btn.new { color: var(--green); }
+.prh-side-search, .prh-sheet-search {
+  display: flex; align-items: center; gap: 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  padding: 0 10px; background: var(--input-bg); color: var(--muted-2);
+}
+.prh-side-search:focus-within, .prh-sheet-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+.prh-side-search input, .prh-sheet-search input { border: 0; padding: 8px 0; background: transparent; box-shadow: none !important; font-size: 13.5px; }
+.prh-side-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1 1 auto; min-height: 60px; display: flex; flex-direction: column; gap: 2px; }
+.prh-side-list button {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px;
+  border: 0; border-radius: 7px; background: transparent; color: var(--text); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer;
+}
+.prh-side-list button:hover { background: var(--hover); }
+.prh-side-list button.debt .prh-side-name { color: var(--danger); font-weight: 600; }
+.prh-side-list button.active { background: var(--accent-btn); color: #fff; }
+.prh-side-list button.active .prh-side-name, .prh-side-list button.active .prh-side-debt { color: #fff; }
+.prh-side-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prh-side-debt { flex-shrink: 0; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--danger); font-weight: 600; }
+.prh-side-empty { color: var(--muted-2); font-size: 13px; padding: 10px; text-align: center; }
+.prh-side-foot { border-top: 1px solid var(--border); padding-top: 8px; font-size: 12.5px; color: var(--muted); }
+
+/* ── Период ── */
+.prh-period {
+  display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 10px 14px;
+}
+.prh-period-label { font-weight: 600; font-size: 13.5px; }
+.prh-period-f { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.prh-period-f input { width: 150px; padding: 7px 10px; }
+.prh-period-chips { margin-left: auto; }
+.prh-period-chips .chip { padding: 6px 11px; }
+
+/* ── Вкладки ── */
+.prh-tabs, .prh-subtabs { display: flex; gap: 2px; overflow-x: auto; }
+.prh-tabs { border-bottom: 2px solid var(--border); }
+.prh-tabs button, .prh-subtabs button {
+  display: inline-flex; align-items: center; gap: 7px; border: 0; border-bottom: 3px solid transparent;
+  background: transparent; color: var(--muted); font: inherit; font-weight: 600; white-space: nowrap; cursor: pointer; border-radius: 8px 8px 0 0;
+}
+.prh-tabs button { padding: 10px 16px; margin-bottom: -2px; font-size: 14px; }
+.prh-tabs button:hover, .prh-subtabs button:hover { color: var(--text); background: var(--hover); }
+.prh-tabs button.active { color: var(--accent-dark); border-bottom-color: var(--accent); background: var(--card); }
+.prh-badge {
+  display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px;
+  background: var(--gold); color: var(--on-gold); font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+
+.prh-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 14px 16px 10px; }
+.prh-panel-head h2 { margin: 0; }
+.prh-panel-head .prh-sheet-search { flex: 0 1 340px; min-width: 200px; }
+.prh-scroll { max-height: 46vh; overflow: auto; }
+.table-scroll { overflow-x: auto; }
+
+/* ── Новое поступление ── */
+.prh-new {
+  display: grid; gap: 14px; align-items: stretch;
+  grid-template-columns: minmax(0, 1fr) 290px;
+  grid-template-areas: "sheet sum" "form form";
+}
+.prh-sheet { grid-area: sheet; padding: 0; display: flex; flex-direction: column; min-width: 0; }
+.prh-sum { grid-area: sum; }
+.prh-form { grid-area: form; padding: 0; min-width: 0; }
+.prh-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px 10px; flex-wrap: wrap; }
+.prh-sheet-head h2 { margin: 0; }
+.prh-sheet-head .prh-sheet-search { flex: 0 1 300px; min-width: 180px; }
+
+/* Таблица накладной: плотная, с закреплённой шапкой и итоговой строкой */
+.prh-grid-wrap { overflow: auto; max-height: 46vh; min-height: 170px; border-top: 1px solid var(--border); }
+/* Шапки колонок переносятся в две строки («Цена со / скидкой»): иначе длинные подписи
+   раздвигали таблицу шире экрана, и «Итого» уезжало за край */
+.prh-grid { font-size: 13px; min-width: 900px; }
+.prh-grid th { position: sticky; top: 0; z-index: 1; background: var(--soft); padding: 8px; font-size: 10.5px; white-space: normal; line-height: 1.3; vertical-align: bottom; }
+.prh-grid td { padding: 7px 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.prh-grid th { padding-left: 6px; padding-right: 6px; }
+.prh-grid td.prh-c-code { font-size: 12px; }
+.prh-grid tbody tr { cursor: pointer; }
+.prh-grid tbody tr.chk td { background: var(--blue-soft); }
+.prh-grid tbody tr.flash td { background: var(--gold-soft); }
+.prh-grid tbody tr.sel td { background: var(--accent-soft); }
+.prh-grid tbody tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.prh-grid td.muted { color: var(--muted); }
+.prh-c-chk { width: 30px; text-align: center !important; }
+.prh-c-chk input { width: 16px; height: 16px; padding: 0; cursor: pointer; }
+.prh-c-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.prh-c-act { width: 34px; text-align: right; padding: 3px 4px !important; }
+.prh-grid .prh-changed { color: var(--gold-ink); font-weight: 600; }
+.prh-grid tfoot td { position: sticky; bottom: 0; background: var(--soft); font-weight: 700; border-top: 1px solid var(--border-strong); padding: 8px; white-space: nowrap; }
+.prh-grid tbody tr.prh-empty { cursor: default; }
+.prh-grid tbody tr.prh-empty:hover { background: transparent; }
+.prh-grid tbody tr.prh-empty td { text-align: center; color: var(--muted-2); padding: 34px 16px; white-space: normal; }
+
+/* Итоги — тёмно-синей панелью, как табло «Итого» в кассе */
+.prh-sum {
+  background: linear-gradient(165deg, var(--sidebar-2), var(--sidebar)); color: #e6ebf7;
+  border-radius: var(--radius); border: 1px solid rgba(255, 255, 255, 0.07); box-shadow: var(--shadow);
+  padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; align-self: start;
+}
+.prh-sum-sup span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--sidebar-muted); margin-bottom: 3px; }
+.prh-sum-sup b { display: block; color: var(--gold); font-size: 19px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.prh-sum-sup b.none { color: #c9d2ea; font-weight: 600; font-size: 16px; }
+.prh-sum dl { margin: 0; display: flex; flex-direction: column; }
+.prh-sum dl > div { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 7px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.prh-sum dl > div:last-child { border-bottom: 0; }
+.prh-sum dt { color: #b9c4e4; font-size: 13px; }
+.prh-sum dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; color: #fff; }
+.prh-sum .prh-sum-total { padding: 10px 0; }
+.prh-sum .prh-sum-total dt { color: var(--gold); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; font-size: 12.5px; }
+.prh-sum .prh-sum-total dd { color: var(--gold); font-size: 21px; font-weight: 800; }
+
+/* ── Форма под таблицей ── */
+.prh-subtabs { padding: 8px 10px 0; border-bottom: 1px solid var(--border); background: var(--soft); border-radius: var(--radius) var(--radius) 0 0; }
+.prh-subtabs button { padding: 9px 14px; font-size: 13.5px; }
+.prh-subtabs button.active { color: var(--accent-dark); border-bottom-color: var(--accent); background: var(--card); }
+.prh-add, .prh-sel, .prh-finish { padding: 16px; }
+.prh-add-main { display: flex; gap: 12px; align-items: flex-start; }
+.prh-f-product { flex: 1 1 auto; min-width: 0; }
+.prh-newprod { margin-top: 23px; flex-shrink: 0; }
+.prh-search { position: relative; }
+.prh-search input[readonly] { background: var(--soft); color: var(--muted); }
+.prh-suggest {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30; list-style: none; margin: 0; padding: 4px;
+  background: var(--card); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
+  max-height: 300px; overflow-y: auto;
+}
+.prh-suggest li { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+.prh-suggest li.active, .prh-suggest li:hover { background: var(--accent-soft); }
+.prh-suggest-name { font-weight: 600; font-size: 14px; }
+.prh-f { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.prh-f > label { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+/* Обязательное и пустое поле — красной подписью, как в образце */
+.prh-f > label.req { color: var(--danger); }
+.prh-add-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 28px; margin-top: 6px; }
+/* Поля цены и срока — по размеру числа, а не во всю колонку широкого экрана */
+.prh-add-col .prh-f > input { max-width: 260px; }
+.prh-qty, .prh-price, .prh-disc { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.prh-unit {
+  display: inline-flex; align-items: stretch; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--input-bg); overflow: hidden;
+}
+.prh-unit:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+.prh-unit input { border: 0; width: 96px; box-shadow: none !important; border-radius: 0; font-variant-numeric: tabular-nums; }
+.prh-unit span { padding: 0 10px; color: var(--muted); font-size: 13px; border-left: 1px solid var(--border); display: grid; place-items: center; background: var(--soft); min-width: 36px; }
+.prh-unit.prh-mk input { width: 74px; }
+.prh-disc > input { width: 110px; }
+.prh-price > input { width: 140px; }
+.prh-price input.changed { border-color: var(--gold); background: var(--gold-soft); }
+.prh-was { font-size: 12px; color: var(--gold-ink); }
+.prh-check { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 500; color: var(--text); cursor: pointer; }
+.prh-check input { width: 16px; height: 16px; padding: 0; cursor: pointer; }
+.prh-info { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 16px; margin-bottom: 12px; }
+.prh-info > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.prh-info span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-2); font-weight: 600; }
+.prh-info b { font-size: 14px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.prh-add-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; border-top: 1px solid var(--border); padding-top: 14px; margin-top: 4px; }
+.btn.green { background: var(--green-btn); border-color: var(--green-btn); color: #fff; }
+.btn.green:hover { background: var(--green-btn-hover); border-color: var(--green-btn-hover); }
+.btn.ghost.danger-text { color: var(--danger); }
+.btn.big { padding: 12px 22px; font-size: 16px; }
+
+/* Отмеченные строки */
+.prh-sel .note { margin-bottom: 12px; }
+.prh-sel-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.prh-sel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 20px; }
+.prh-sel-row { display: flex; gap: 8px; }
+.prh-sel-row input { min-width: 0; }
+
+/* Сохранить поступление */
+.prh-finish-cols { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 22px; align-items: start; }
+.prh-finish-total { display: flex; flex-direction: column; gap: 6px; background: var(--soft); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.prh-finish-total > span { color: var(--muted); font-size: 13px; }
+.prh-finish-total > b { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.prh-finish-total > small { color: var(--muted-2); font-size: 12.5px; margin-bottom: 8px; overflow-wrap: anywhere; }
+.prh-debt-row { display: flex; align-items: flex-end; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+
+/* ── Платежи и баланс ── */
+.prh-bal-cards { margin-bottom: 16px; }
+.prh-bal-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+
+/* Правка прихода: упаковки и штуки в одной ячейке */
+.prh-edit-qty { display: inline-flex; align-items: center; gap: 6px; }
+.prh-edit-qty .disc-input { width: 76px; }
+
+/* ── Узкий экран ── */
+@media (max-width: 1799px) {
+  .prh-new { grid-template-areas: "sheet sheet" "form sum"; }
+}
+@media (max-width: 1100px) {
+  .prh { grid-template-columns: minmax(0, 1fr); }
+  .prh-side { position: static; max-height: none; }
+  html.has-foot .prh-side { max-height: none; }
+  .prh-side-list { max-height: 220px; }
+  .prh-new { grid-template-columns: minmax(0, 1fr); grid-template-areas: "sheet" "sum" "form"; }
+}
+@media (max-width: 760px) {
+  /* Шрифт 16px: на iPhone поле с меньшим шрифтом заставляет браузер приближать страницу */
+  .prh-form input, .prh-form select { font-size: 16px; }
+  .prh-add-cols, .prh-finish-cols, .prh-bal-cols { grid-template-columns: minmax(0, 1fr); }
+  .prh-add-main { flex-direction: column; align-items: stretch; }
+  .prh-newprod { margin-top: 0; }
+  .prh-period-chips { margin-left: 0; }
+  .prh-period-f input { width: 140px; }
+}
+@media print {
+  .prh { display: none !important; }
+}

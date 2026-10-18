@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
-import { D } from '../common/money'
+import { D, discountOf } from '../common/money'
 import { weightedPackCost, costFromBatches } from '../common/cost'
 import { addUnits, expiryFrom, lockProducts, syncProduct, uppOf } from '../common/stock'
 import { openShiftFor } from '../shifts/till'
@@ -135,7 +135,7 @@ export class ArrivalsService {
         if (!p) throw new BadRequestException('Товар не найден')
         const pieces = Math.max(0, Math.trunc(it.pieces || 0))
         if (it.qty * uppOf(p) + pieces <= 0) throw new BadRequestException(`Укажите количество: ${p.name}`)
-        return { productId: p.id, name: p.name, qty: it.qty, pieces, cost: D(it.cost) }
+        return { productId: p.id, name: p.name, qty: it.qty, pieces, cost: D(it.cost), discount: discountOf(it.discount) }
       })
 
       // Срок годности партии не обязателен: система универсальная, у хлеба или
@@ -356,8 +356,14 @@ export class ArrivalsService {
         await tx.arrivalItem.update({ where: { id: it.id }, data: { qty: l.qty, pieces: Math.max(0, Math.trunc(l.pieces || 0)), cost: D(l.cost) } })
       }
 
-      const kept = lines.filter((l) => l.qty > 0)
-      const total = kept.reduce((s, l) => s.plus(D(l.cost).times(l.qty)), D(0))
+      // Сумма — как при оформлении: цена за упаковку × сколько пришло, вместе со
+      // штуками сверх целых упаковок (и граммами весового). Раньше здесь считались
+      // только упаковки, и «2 уп + 5 шт» после правки стоили как 2 уп
+      const total = lines.reduce((s, l) => {
+        const upp = uppOf(byId.get(byLineId.get(l.id)?.productId || '') || {})
+        const units = this.unitsOf(l, upp)
+        return units > 0 ? s.plus(D(l.cost).times(D(units).div(upp))) : s
+      }, D(0)).toDecimalPlaces(2)
 
       // Долг поставщика переписывается вместе с приходом: прежняя неоплаченная часть
       // снимается с прежнего поставщика, новая ложится на нового (это может быть тот же)

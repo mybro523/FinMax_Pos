@@ -500,6 +500,27 @@ test('приход: срок годности не обязателен, но б
   assert.equal(createArrival(ctx(db), { items: [{ productId: 'bint', qty: 1, cost: 5 }] }).supplier, '—')
 })
 
+test('приход со скидкой поставщика: «2 уп + 5 шт», цена уже со скидкой, процент — в строке', () => {
+  // Парацетамол: 20 штук в упаковке, 9 упаковок по 120. Поставщик дал скидку 15%:
+  // 120 − 15% = 102 за упаковку. Привезли 2 упаковки и ещё 5 штук
+  const { db } = apteka()
+  const arrival = createArrival(ctx(db), { items: [{ productId: 'par', qty: 2, pieces: 5, cost: 102, discount: 15 }] })
+  // 2 уп + 5 шт = 2,25 уп × 102 = 229,50
+  assert.equal(arrival.total, 229.5)
+  assert.deepEqual(arrival.items.map((i) => [i.qty, i.pieces, i.cost, i.discount]), [[2, 5, 102, 15]])
+  // Остаток: 9 уп + 2 уп 5 шт = 11 уп 5 шт. Средняя цена — по цене со скидкой:
+  // (9 × 120 + 229,5) / 11,25 = 116,40
+  assert.deepEqual(stockOf(db, 'par'), [11, 5])
+  assert.equal(productsList(db, NOW).find((p) => p.id === 'par').cost, 116.4)
+  // Серверу уходит та же строка со скидкой
+  const op = outbox(db).at(-1)
+  assert.deepEqual(op.payload.arrival.items.map((i) => [i.qty, i.pieces, i.cost, i.discount]), [[2, 5, 102, 15]])
+  // Прежнее окно скидку не шлёт — строка без скидки
+  assert.equal(createArrival(ctx(db), { items: [{ productId: 'nur', qty: 1, cost: 90 }] }).items[0].discount, 0)
+  refused(() => createArrival(ctx(db), { items: [{ productId: 'nur', qty: 1, cost: 90, discount: 101 }] }), 400, 'items.0.discount: не больше 100')
+  refused(() => createArrival(ctx(db), { items: [{ productId: 'nur', qty: 1, cost: 90, discount: -1 }] }), 400, 'items.0.discount: не меньше 0')
+})
+
 test('приход весового товара: граммы сверх целых килограммов, цена долей, долг поставщику', () => {
   // Сахар: 5 кг по 10 с/кг на полке. Привезли 12,350 кг по 8 сомони за килограмм
   const sahar = product({ id: 'sahar', name: 'Сахар', category: 'Перевязка', unit: 'кг', unitsPerPack: 1000, price: 12, cost: 10, stock: 5, expiryDate: null })

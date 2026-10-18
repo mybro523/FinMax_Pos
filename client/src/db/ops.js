@@ -176,16 +176,24 @@ export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash
   items = items.map((i) => (i.productId ? { ...i, productId: realId(i.productId) } : i))
   if (!items.length) throw new Error('Добавьте хотя бы один товар')
 
+  const prevP = db.get('products')
   const arrItems = items.map((i) => ({
-    productId: i.productId, name: i.name, qty: Number(i.qty), pieces: Math.max(0, Number(i.pieces) || 0), cost: Number(i.cost),
+    productId: i.productId, name: i.name, qty: Number(i.qty), pieces: Math.max(0, Number(i.pieces) || 0),
+    // Закупочная цена — уже со скидкой поставщика; сам процент — для истории прихода
+    cost: Number(i.cost),
+    discount: Math.min(100, Math.max(0, Number(i.discount) || 0)),
     expiryDate: i.expiryDate || '',
     // Новая цена продажи, назначенная в приходе (наценкой). Нет — цена прежняя
     ...(Number(i.price) > 0 ? { price: Math.round(Number(i.price) * 100) / 100 } : {}),
   }))
-  // Цена за упаковку (за килограмм): граммы оплачиваются долей тысячной
-  const total = arrItems.reduce((s, i) => s + i.cost * (i.qty + i.pieces / 1000), 0)
+  // Цена за упаковку (за килограмм): штуки сверх целых упаковок (граммы весового)
+  // оплачиваются долей — как считает сервер
+  const uppById = new Map(prevP.map((p) => [p.id, uppOf(p)]))
+  const total = arrItems.reduce((s, i) => {
+    const upp = uppById.get(i.productId) || (i.pieces > 0 ? 1000 : 1)
+    return s + i.cost * (i.qty + i.pieces / upp)
+  }, 0)
 
-  const prevP = db.get('products')
   const prevA = db.get('arrivals')
 
   const tempArrival = {
@@ -222,6 +230,7 @@ export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash
         qty: i.qty,
         ...(i.pieces > 0 ? { pieces: i.pieces } : {}),
         cost: i.cost,
+        ...(i.discount > 0 ? { discount: i.discount } : {}),
         // Пустую строку не шлём: у категорий без срока сервер ждёт именно её отсутствия
         ...(i.expiryDate ? { expiryDate: i.expiryDate } : {}),
         ...(i.price ? { price: i.price } : {}),

@@ -227,13 +227,18 @@ export default function TurRunner({ id, index }) {
       if (step.t) {
         els = find(step.t)
         if (!els.length && step.open) {
-          // Элемент живёт в форме — открываем её той же кнопкой, что нажал бы человек
-          const opener = find(step.open)[0]
-          if (opener && !opener.disabled) {
-            if (baseOverlays.current === null) baseOverlays.current = countOverlays()
-            opener.click()
+          // Элемент живёт в форме — открываем её той же кнопкой, что нажал бы человек.
+          // Бывает цепочка: вкладка, а в ней своя вкладка («Новое поступление» →
+          // «Сохранить поступление»). Жмём по порядку, пока элемент не покажется
+          const openers = [].concat(step.open)
+          for (let n = 0; n < openers.length && !els.length; n++) {
+            const opener = find(openers[n])[0]
+            if (opener && !opener.disabled) {
+              if (baseOverlays.current === null) baseOverlays.current = countOverlays()
+              opener.click()
+            }
+            els = await waitFor(step.t, n === openers.length - 1 ? 2500 : 700)
           }
-          els = await waitFor(step.t, 2500)
         } else if (!els.length) {
           els = await waitFor(step.t, step.menu ? 900 : 1500)
         }
