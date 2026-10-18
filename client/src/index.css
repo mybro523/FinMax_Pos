@@ -14,6 +14,9 @@
   --gold: #efbd24;
   --gold-dark: #dcac14;
   --gold-soft: #fbf3d5;
+  /* Золото для текста на светлом: обычное золото на белом почти не читается
+     (контраст 1,7 : 1), это — 4,9 : 1 и остаётся золотистым */
+  --gold-ink: #946a00;
   --on-gold: #0b1a3a;
 
   --accent: #00359f;
@@ -73,6 +76,7 @@
   --gold: #efbd24;
   --gold-dark: #f6cc4b;
   --gold-soft: #3b3112;
+  --gold-ink: #f6cc4b;
   --on-gold: #0b1a3a;
   --accent: #6f9bf5;
   --accent-dark: #9dbaf8;
@@ -1974,13 +1978,24 @@ tfoot .zak-total td { font-weight: 700; border-top: 2px solid var(--border-stron
 .about-stat { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
 .about-stat b { display: block; font-size: 26px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; line-height: 1.2; }
 .about-stat span { font-size: 13px; color: var(--muted); }
-.about-services { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
-.about-service { display: flex; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--soft); }
-.about-service-ic { flex: 0 0 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: var(--gold-soft); color: var(--gold-dark); }
-.about-service b { display: block; font-size: 14.5px; margin-bottom: 4px; }
-.about-service p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
-.about-lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 18px; }
-.about-lists h3 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 8px; display: flex; align-items: center; gap: 6px; font-weight: 700; }
+/* Блоки услуг — как на сайте компании: золотая подпись над заголовком, конец
+   заголовка золотом, у карточки значок сверху и пункты с галочкой. Золото здесь —
+   знак бренда на странице о самой компании, как на её сайте */
+.about-head { text-align: center; margin: 2px auto 20px; }
+.about-kicker { display: block; margin-bottom: 6px; font-size: 12.5px; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; color: var(--gold-ink); }
+.panel h2.about-title { display: block; margin: 0; font-size: 26px; line-height: 1.2; font-weight: 800; text-wrap: balance; }
+.about-gold { display: block; color: var(--gold-ink); }
+.about-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; }
+.about-cards.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.about-card { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 18px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--soft); }
+.about-card-ic { width: 44px; height: 44px; margin-bottom: 6px; border-radius: 12px; display: grid; place-items: center; background: var(--gold-soft); color: var(--gold-ink); }
+.about-card h3 { margin: 0; font-size: 15px; font-weight: 700; line-height: 1.35; }
+.about-card p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--muted); }
+.about-points { list-style: none; margin: auto 0 0; padding: 8px 0 0; display: grid; gap: 5px; }
+.about-points li { display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
+.about-points svg { flex-shrink: 0; color: var(--gold-ink); }
+.about-systems { margin-top: 18px; }
+.about-systems h3 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 8px; display: flex; align-items: center; gap: 6px; font-weight: 700; }
 .about-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .about-chip { padding: 6px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-dark); font-size: 13px; font-weight: 500; }
 .about-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px; align-items: start; }
@@ -2016,7 +2031,11 @@ tfoot .zak-total td { font-weight: 700; border-top: 2px solid var(--border-stron
 @media (max-width: 860px) {
   .about-row { grid-template-columns: 1fr; }
 }
+@media (max-width: 700px) {
+  .about-cards.two { grid-template-columns: 1fr; }
+}
 @media (max-width: 520px) {
+  .panel h2.about-title { font-size: 22px; }
   .about-hero { padding: 20px; }
   .about-name .brand-word { font-size: 28px; }
   .about-stats { grid-template-columns: 1fr; }
