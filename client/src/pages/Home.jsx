@@ -17,8 +17,10 @@ import { isDesktop, bridge } from '../lib/desktop'
 // на месте, но серый: человек видит, что такой раздел есть, и понимает, что его
 // открывает владелец.
 //
-// Внизу — кто вошёл, тема и выход. В программе для Windows ещё «Закрыть программу»:
-// у кассы часто нет мыши с крестиком под рукой.
+// Кто вошёл, видно в полосе внизу окна (она одна на весь проект). Тема, выход и — в
+// программе для Windows — «Закрыть программу» стоят в правом верхнем углу шапки,
+// рядом с «О компании»: у кассы часто нет мыши с крестиком под рукой. На телефоне
+// у этих кнопок остаются значки, подпись — во всплывающей подсказке.
 
 // Закрыть программу: просим основную часть, а если её нет (сайт) — окно само
 const closeApp = () => {
@@ -41,7 +43,7 @@ export default function Home() {
     if (n.section) группа = n.section
     else items.push({ ...n, группа })
   }
-  const roleName = user?.roleName || (user?.role === 'founder' ? t('Владелец') : t('Кассир'))
+  const temaText = theme === 'dark' ? t('Светлая тема') : t('Тёмная тема')
 
   return (
     <Layout
@@ -49,9 +51,25 @@ export default function Home() {
       title={t('Главное меню')}
       subtitle={user?.pharmacy?.name || ''}
       actions={
-        <Link to="/about" className="btn ghost" data-tour="hub.about">
-          <span className="ic"><LuInfo size={16} /></span> {t('О компании')}
-        </Link>
+        // В программе для Windows рядом стоят ещё значки версии, отправки и касс в сети:
+        // на экране уже 1700 у этих кнопок остаются значки, иначе название меню
+        // сжимается в столбик (см. .hub-acts.desk в index.css)
+        <div className={'hub-acts' + (isDesktop ? ' desk' : '')}>
+          <Link to="/about" className="btn ghost" data-tour="hub.about" title={t('О компании')} aria-label={t('О компании')}>
+            <span className="ic"><LuInfo size={16} /></span> <span className="btn-text">{t('О компании')}</span>
+          </Link>
+          <button type="button" className="btn ghost" onClick={toggleTheme} data-tour="hub.theme" title={temaText} aria-label={temaText}>
+            <span className="ic">{theme === 'dark' ? <LuSun size={16} /> : <LuMoon size={16} />}</span> <span className="btn-text">{temaText}</span>
+          </button>
+          <button type="button" className="btn ghost" onClick={logout} data-tour="hub.logout" title={t('Выйти')} aria-label={t('Выйти')}>
+            <span className="ic"><LuLogOut size={16} /></span> <span className="btn-text">{t('Выйти')}</span>
+          </button>
+          {isDesktop && (
+            <button type="button" className="btn ghost" onClick={closeApp} data-tour="hub.quit" title={t('Закрыть программу')} aria-label={t('Закрыть программу')}>
+              <span className="ic"><LuPower size={16} /></span> <span className="btn-text">{t('Закрыть программу')}</span>
+            </button>
+          )}
+        </div>
       }
     >
       <div className="hub" data-tour="sidebar">
@@ -88,27 +106,6 @@ export default function Home() {
                   </div>
                 )
           })}
-        </div>
-
-        <div className="hub-user" data-tour="side.user">
-          <div className="hub-user-info">
-            <div className="hub-user-name">{user?.name || '—'}</div>
-            <div className="hub-user-role">{roleName}</div>
-          </div>
-          <div className="hub-user-actions">
-            <button className="btn ghost" onClick={toggleTheme}>
-              <span className="ic">{theme === 'dark' ? <LuSun size={16} /> : <LuMoon size={16} />}</span>
-              {theme === 'dark' ? t('Светлая тема') : t('Тёмная тема')}
-            </button>
-            <button className="btn ghost" onClick={logout} data-tour="hub.logout">
-              <span className="ic"><LuLogOut size={16} /></span> {t('Выйти')}
-            </button>
-            {isDesktop && (
-              <button className="btn ghost" onClick={closeApp}>
-                <span className="ic"><LuPower size={16} /></span> {t('Закрыть программу')}
-              </button>
-            )}
-          </div>
         </div>
       </div>
     </Layout>

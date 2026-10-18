@@ -1704,15 +1704,12 @@ tbody tr.clickable { cursor: pointer; }
 }
 .hub-badge.warn { background: var(--gold); color: var(--on-gold); }
 .hub-lock { position: absolute; top: 14px; right: 14px; z-index: 1; display: inline-flex; color: var(--muted-2); }
-/* Кто вошёл, тема, выход */
-.hub-user {
-  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
-  padding: 14px 18px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-sm);
+/* Кнопки шапки главного меню: «О компании», тема, выход, «Закрыть программу» */
+.hub-acts { display: flex; align-items: center; gap: 8px; }
+@media (max-width: 1700px) {
+  .hub-acts.desk .btn-text { display: none; }
+  .hub-acts.desk .btn { padding: 9px 11px; }
 }
-.hub-user-name { font-size: 15px; font-weight: 600; }
-.hub-user-role { font-size: 12.5px; color: var(--muted); }
-.hub-user-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.hub-user-actions .btn .ic { display: inline-flex; }
 @media (max-width: 1100px) {
   .hub-grid { grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); }
   .hub-tile { min-height: 136px; }
@@ -1726,9 +1723,6 @@ tbody tr.clickable { cursor: pointer; }
   .hub-tile .hub-name { font-size: 16px; }
   .hub-tile.gold .hub-name { font-size: 20px; }
   .hub-tile.wide .hub-pic { width: 34%; }
-  .hub-user { padding: 12px 14px; }
-  .hub-user-actions { width: 100%; }
-  .hub-user-actions .btn { flex: 1 1 auto; justify-content: center; }
 }
 @media (prefers-reduced-motion: reduce) {
   .hub-tile .hub-pic, .hub-tile { transition: none; }
