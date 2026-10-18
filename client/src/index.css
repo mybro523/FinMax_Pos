@@ -1960,7 +1960,8 @@ tfoot .zak-total td { font-weight: 700; border-top: 2px solid var(--border-stron
 .btn.ghost.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 
 /* ── О компании ── */
-.about { display: grid; gap: 16px; max-width: 1100px; }
+/* Колонка страницы — по центру окна, текст в карточках слева: так его легче читать */
+.about { display: grid; gap: 16px; max-width: 1100px; margin: 0 auto; }
 .about .panel { margin: 0; }
 .about-hero { padding: 28px; background: linear-gradient(135deg, var(--card) 0%, var(--card) 45%, var(--accent-soft) 100%); }
 .about-hero-head { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
@@ -1983,8 +1984,15 @@ tfoot .zak-total td { font-weight: 700; border-top: 2px solid var(--border-stron
 .about-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .about-chip { padding: 6px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-dark); font-size: 13px; font-weight: 500; }
 .about-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px; align-items: start; }
-.about-founder { display: flex; gap: 16px; align-items: flex-start; }
-.about-avatar { flex: 0 0 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-btn); color: #fff; font-weight: 800; font-size: 20px; letter-spacing: 0.02em; }
+.about-founder { display: flex; gap: 18px; align-items: center; }
+/* Фото основателя — круглое, лицо и плечи */
+.about-avatar {
+  flex: 0 0 120px; width: 120px; height: 120px; border-radius: 50%; object-fit: cover;
+  background: var(--soft); border: 3px solid var(--card); box-shadow: 0 0 0 1px var(--border), var(--shadow-sm);
+}
+@media (max-width: 600px) {
+  .about-avatar { flex-basis: 88px; width: 88px; height: 88px; }
+}
 .about-founder-name { font-size: 17px; }
 .about-founder-role { color: var(--muted); font-size: 13.5px; margin: 2px 0 10px; }
 .about-founder-quote { margin: 0; font-size: 14px; line-height: 1.6; font-style: italic; }

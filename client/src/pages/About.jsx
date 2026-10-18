@@ -9,6 +9,7 @@ import { useT } from '../lib/i18n'
 import { bridge, isDesktop } from '../lib/desktop'
 import { COMPANY, COMPANY_CONTACTS } from '../lib/company'
 import emblem from '../assets/brand/emblem-64.png'
+import founderPhoto from '../assets/brand/founder.jpg'
 
 // ── О компании ──
 // Кнопка в шапке главного меню. Кто сделал программу, чем ещё занимается компания
@@ -93,7 +94,7 @@ export default function About() {
 
         <div className="about-row">
           <section className="panel about-founder">
-            <div className="about-avatar" aria-hidden="true">МД</div>
+            <img src={founderPhoto} alt={t(COMPANY.founder.name)} width="120" height="120" className="about-avatar" />
             <div>
               <b className="about-founder-name">{t(COMPANY.founder.name)}</b>
               <div className="about-founder-role">{t(COMPANY.founder.role)}</div>
@@ -129,7 +130,7 @@ export default function About() {
         </div>
 
         <div className="about-foot">
-          <BrandWord /> — {t('программа для магазина от компании FinMax')}{version ? ` · ${t('версия')} ${version}` : ''}
+          <BrandWord /> — {t('программа для торговли от компании FinMax')}{version ? ` · ${t('версия')} ${version}` : ''}
         </div>
       </div>
     </Layout>

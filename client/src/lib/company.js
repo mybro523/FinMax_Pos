@@ -55,5 +55,5 @@ export const COMPANY_CONTACTS = [
   { key: 'site', label: 'Сайт', value: 'finmax.tj', href: 'https://finmax.tj/' },
   { key: 'instagram', label: 'Instagram', value: '@finmax_tj', href: 'https://www.instagram.com/finmax_tj' },
   { key: 'facebook', label: 'Facebook', value: 'finmaxtj', href: 'https://www.facebook.com/finmaxtj' },
-  { key: 'youtube', label: 'YouTube', value: '@finmaxtj', href: 'https://youtube.com/@finmaxtj' },
+  { key: 'youtube', label: 'YouTube', value: '@murod_davlatov_94', href: 'https://www.youtube.com/@murod_davlatov_94' },
 ]

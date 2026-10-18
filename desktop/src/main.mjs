@@ -53,7 +53,7 @@ const COMPANY_LINKS = {
   site: 'https://finmax.tj/',
   instagram: 'https://www.instagram.com/finmax_tj',
   facebook: 'https://www.facebook.com/finmaxtj',
-  youtube: 'https://youtube.com/@finmaxtj',
+  youtube: 'https://www.youtube.com/@murod_davlatov_94',
 }
 const RENDERER = join(ROOT, 'renderer')
 const FONTS = join(ROOT, 'assets', 'fonts')
