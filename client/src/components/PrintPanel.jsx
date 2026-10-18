@@ -6,9 +6,9 @@ import { useT } from '../lib/i18n'
 import { useToast } from './ui'
 
 // ── Печать чеков (программа для Windows) ──
-// По умолчанию чек печатается как на сайте — через окно печати Windows. Если в
+// По умолчанию чек печатается через экран печати программы — с предпросмотром. Если в
 // магазине стоит чековый принтер, владелец выбирает его здесь: тогда чек уходит в
-// принтер сразу, без окна печати, и может печататься сам после каждой продажи.
+// принтер сразу, без экрана печати, и может печататься сам после каждой продажи.
 //
 // Настройка относится к этому компьютеру, а не к магазину: у каждой кассы свой принтер.
 export default function PrintPanel() {
@@ -72,13 +72,13 @@ export default function PrintPanel() {
     <div className="panel mt" style={{ maxWidth: 640 }} data-testid="print-panel">
       <h2><span className="h2-title"><span className="ic"><LuPrinter size={17} /></span>{t('Печать чеков')}</span></h2>
       <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7, marginBottom: 12 }}>
-        {t('Настройка этого компьютера. Обычный принтер печатает через окно печати Windows; чековый — сразу, без окна.')}
+        {t('Настройка этого компьютера. Обычный принтер печатает через экран печати программы — с предпросмотром; чековый — сразу, без экрана печати.')}
       </p>
 
       <div className="field">
         <label>{t('Как печатать')}</label>
         <select value={cfg.mode} onChange={(e) => set({ mode: e.target.value })} data-testid="print-mode">
-          <option value="system">{t('Обычный принтер (окно печати Windows)')}</option>
+          <option value="system">{t('Обычный принтер (экран печати с предпросмотром)')}</option>
           <option value="network">{t('Чековый принтер по сети')}</option>
           <option value="windows">{t('Чековый принтер, подключённый к этому компьютеру')}</option>
         </select>

@@ -129,6 +129,9 @@ export function escpos({ codepage = 'cp866', width = 32 } = {}) {
     bold: (on) => raw(0x1b, 0x45, on ? 1 : 0),
     // Двойная высота: строка заметнее, а в ширину помещается столько же
     tall: (on) => raw(0x1d, 0x21, on ? 0x01 : 0x00),
+    // Белым по чёрному (GS B): так на ленте печатаются название магазина и итог.
+    // Принтер, который этого не умеет, напечатает обычным шрифтом — тоже читается
+    invert: (on) => raw(0x1d, 0x42, on ? 1 : 0),
     text(s) {
       chunks.push(encode(s, page))
       return api
@@ -173,9 +176,10 @@ export function rasterImage(img) {
 
 // ── Что печатаем ──
 // Окно программы присылает уже готовые слова и числа (на выбранном языке, с деньгами
-// в принятом виде): { head: [строки], rows: [{ name, sub, value }],
+// в принятом виде): { head: [строки], docAt, rows: [{ name, sub, value }],
 // totals: [{ label, value, big }], tail: [строки] }. Здесь это только раскладывается
 // по ленте. Размеры ограничены: чек на тысячу строк — это ошибка, а не чек.
+// docAt — какая строка шапки называет документ («Чек № …»): она печатается жирной
 const MAX_LINES = 400
 const MAX_TEXT = 200
 const str = (v) => String(v ?? '').slice(0, MAX_TEXT)
@@ -185,14 +189,70 @@ export function sanitizeTicket(raw) {
   const list = (v) => (Array.isArray(v) ? v.slice(0, MAX_LINES) : [])
   return {
     head: list(t.head).map(str),
+    docAt: Number.isInteger(t.docAt) ? t.docAt : -1,
     rows: list(t.rows).map((r) => ({ name: str(r?.name), sub: str(r?.sub), value: str(r?.value) })),
     totals: list(t.totals).map((r) => ({ label: str(r?.label), value: str(r?.value), big: !!r?.big })),
     tail: list(t.tail).map(str),
   }
 }
 
-export function renderTicket(ticket, { width = 32, codepage = 'cp866', cut = true, drawer = false, logo = null } = {}) {
+// Строка по центру, дополненная пробелами до края: белым по чёрному печатается вся
+// ширина ленты, а не только буквы
+export function fullCenter(text, width) {
+  const s = printable(text)
+  const left = Math.max(0, Math.floor((width - s.length) / 2))
+  return (' '.repeat(left) + s).padEnd(width, ' ')
+}
+
+// ── Раскладка чека по строкам ленты ──
+// То, что уйдёт на принтер, строка за строкой: текст и как его печатать (по центру,
+// жирно, крупно, белым по чёрному). По этой же раскладке экран печати программы
+// показывает ленту — поэтому предпросмотр совпадает с бумагой строка в строку.
+// Фирменный вид — как на экране и в PDF, только чёрным: название магазина и итог на
+// чёрной полосе во всю ширину ленты, строка документа — жирная
+export function layoutTicket(ticket, { width = 32 } = {}) {
   const t = sanitizeTicket(ticket)
+  const out = []
+  const push = (text, how = {}) => out.push({ text, ...how })
+  const rule = () => push('-'.repeat(width))
+
+  t.head.forEach((line, n) => {
+    if (n === 0) {
+      // Полоса: по пробелу с каждой стороны, чтобы буквы не упирались в край чёрного
+      for (const l of wrap(line, width - 2)) push(fullCenter(l, width), { bold: true, tall: true, invert: true })
+    } else {
+      for (const l of wrap(line, width)) push(l, { center: true, bold: n === t.docAt })
+    }
+  })
+
+  if (t.rows.length) {
+    rule()
+    for (const r of t.rows) {
+      for (const l of wrap(r.name, width)) push(l)
+      // Количество и цена — с отступом под названием, сумма — у правого края
+      for (const l of twoColumns(r.sub, r.value, width - 2)) push('  ' + l)
+    }
+  }
+
+  if (t.totals.length) {
+    rule()
+    for (const r of t.totals) {
+      if (r.big) {
+        for (const l of twoColumns(r.label, r.value, width - 2)) push(' ' + l + ' ', { bold: true, tall: true, invert: true })
+      } else {
+        for (const l of twoColumns(r.label, r.value, width)) push(l)
+      }
+    }
+  }
+
+  if (t.tail.length) {
+    rule()
+    for (const line of t.tail) for (const l of wrap(line, width)) push(l, { center: true })
+  }
+  return out
+}
+
+export function renderTicket(ticket, { width = 32, codepage = 'cp866', cut = true, drawer = false, logo = null } = {}) {
   const p = escpos({ codepage, width }).init()
   if (drawer) p.drawer()
 
@@ -202,39 +262,17 @@ export function renderTicket(ticket, { width = 32, codepage = 'cp866', cut = tru
     if (img.length) p.align('center').blob(img).feed(1)
   }
 
-  // Шапка: первая строка — название, крупно
-  p.align('center')
-  t.head.forEach((line, n) => {
-    if (n === 0) p.bold(true).tall(true)
-    p.lines(wrap(line, width))
-    if (n === 0) p.tall(false).bold(false)
-  })
+  for (const l of layoutTicket(ticket, { width })) {
+    p.align(l.center ? 'center' : 'left')
+    if (l.bold) p.bold(true)
+    if (l.tall) p.tall(true)
+    if (l.invert) p.invert(true)
+    p.line(l.text)
+    if (l.invert) p.invert(false)
+    if (l.tall) p.tall(false)
+    if (l.bold) p.bold(false)
+  }
   p.align('left')
-
-  if (t.rows.length) {
-    p.rule()
-    for (const r of t.rows) {
-      p.lines(wrap(r.name, width))
-      // Количество и цена — с отступом под названием, сумма — у правого края
-      p.lines(twoColumns(r.sub, r.value, width - 2).map((l) => '  ' + l))
-    }
-  }
-
-  if (t.totals.length) {
-    p.rule()
-    for (const r of t.totals) {
-      if (r.big) p.bold(true).tall(true)
-      p.lines(twoColumns(r.label, r.value, width))
-      if (r.big) p.tall(false).bold(false)
-    }
-  }
-
-  if (t.tail.length) {
-    p.rule()
-    p.align('center')
-    for (const line of t.tail) p.lines(wrap(line, width))
-    p.align('left')
-  }
 
   // Лента должна выйти из-под ножа, иначе последняя строка останется внутри
   p.feed(3)

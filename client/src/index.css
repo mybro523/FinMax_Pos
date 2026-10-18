@@ -1276,20 +1276,27 @@ tbody tr.clickable { cursor: pointer; }
 .cam-zoom input[type="range"] { flex: 1; accent-color: var(--accent); padding: 0; }
 .cam-tools .btn.active { background: var(--accent-btn); color: #fff; border-color: var(--accent-btn); }
 
-/* ───────── Этикетки со штрихкодом ───────── */
+/* ───────── Этикетки со штрихкодом ─────────
+   Фирменные: название тёмно-синим, цена на синей плашке. Наклейка для термопринтера —
+   чёрным: синий он передал бы серой сеткой точек. Полоски штрихкода всегда чёрные */
 .label-sheet { display: flex; flex-wrap: wrap; gap: 4px; background: #fff; padding: 4px; border-radius: 8px; }
 .label-sheet.roll { display: block; }
 .label-item {
-  width: 42mm; padding: 2mm 1mm; border: 1px dashed #bbb; border-radius: 2px;
-  display: flex; flex-direction: column; align-items: center; gap: 0.6mm;
-  background: #fff; color: #000; text-align: center; break-inside: avoid;
+  width: 42mm; padding: 2mm 1.5mm 1.8mm; border: 1px dashed #9aa6c6; border-radius: 2px;
+  display: flex; flex-direction: column; align-items: center; gap: 0.7mm;
+  background: #fff; color: #0a1a45; text-align: center; break-inside: avoid;
 }
-.label-sheet.roll .label-item { width: 58mm; border-style: solid; }
-.label-item .label-name { font-size: 8.5pt; font-weight: 600; line-height: 1.15; max-height: 2.4em; overflow: hidden; }
-.label-item .label-dose { font-size: 7pt; color: #444; }
+.label-sheet.roll .label-item { width: 58mm; border: none; color: #000; }
+.label-item .label-name { font-size: 8.5pt; font-weight: 700; line-height: 1.15; max-height: 2.4em; overflow: hidden; }
+.label-item .label-dose { font-size: 7pt; color: #4a5576; }
+.label-sheet.roll .label-dose { color: #222; }
 .label-item .label-bc { line-height: 0; }
 .label-item .label-bc svg { display: block; }
-.label-item .label-price { font-size: 11pt; font-weight: 700; }
+.label-item .label-price {
+  font-size: 11pt; font-weight: 800; line-height: 1.3; background: #0a1a45; color: #fff;
+  padding: 0.3mm 3mm; border-radius: 1.2mm; font-variant-numeric: tabular-nums;
+}
+.label-sheet.roll .label-price { background: #000; }
 /* Превью на тёмной теме — сама этикетка всегда белая, как на бумаге */
 .label-print .label-sheet { max-height: 46vh; overflow: auto; }
 
@@ -1357,8 +1364,6 @@ tbody tr.clickable { cursor: pointer; }
 .lightbox img { max-width: min(92vw, 900px); max-height: 82vh; border-radius: 12px; background: #fff; }
 .lightbox-name { color: #fff; font-size: 16px; font-weight: 600; text-align: center; }
 
-/* ── Печатный лист раздела (Excel-кнопке пара) ── */
-.print-sheet { display: none; }
 
 /* ── Списание: поиск товара ── */
 .wo-search-box { position: relative; }
@@ -1389,44 +1394,18 @@ tbody tr.clickable { cursor: pointer; }
 .emp-zp-total td { background: var(--soft); }
 .emp-zp-bar .tag-cat { flex: 1 1 260px; }
 .emp-zp-pay { padding: 3px 8px; font-size: 12px; vertical-align: middle; }
-@media print {
-  .print-sheet { display: block; }
-  .print-sheet .opu-table td, .print-sheet .opu-table th { border-bottom: 1px solid #c7ccd8; padding: 8px 10px; font-size: 12.5px; }
-  .print-sheet-foot { margin-top: 10px; font-size: 12px; color: #434b5e; }
-  /* Шапка таблицы на бумаге — серой заливкой: колонки читаются и на ч/б принтере */
-  .print-sheet .opu-table th { background: #eef1f7 !important; color: #1d2433 !important; font-weight: 700; }
-  .print-sheet .opu-table tbody tr:nth-child(even) td { background: #f7f9fd !important; }
-  .print-sheet .opu-table tr { break-inside: avoid; }
-  .print-svodka { margin: 0 0 16px; max-width: 520px; }
-  .print-svodka-title { font-weight: 700; font-size: 13.5px; margin: 0 0 6px; }
-  /* Ещё таблицы под основной — во всю ширину, каждая со своим заголовком */
-  .print-dop { margin: 22px 0 0; }
-  .print-dop .print-svodka-title { font-weight: 700; font-size: 13.5px; margin: 0 0 6px; }
-  /* Открыт чек (продажи, возврата, Z-отчёт) и печатают его — лист раздела на бумагу
-     не идёт, иначе лёг бы поверх чека */
-  body:has(.overlay.printable, .overlay .printable) .print-sheet { display: none !important; }
-}
 
 /* ── Отчёт ОПУ ── */
-.opu-print-head { display: none; }
 .opu-table td, .opu-table th { padding: 11px 16px; }
 .opu-b td { font-weight: 600; }
 .opu-big td { font-size: 15px; }
-@media print {
-  /* Шапка печатного листа раздела (PrintSheet): чей магазин и что за лист */
-  .opu-print-head { display: block; text-align: center; margin: 0 0 12px; font-size: 15px; }
-  .opu-print-head b { font-size: 17px; }
-  .opu-table td, .opu-table th { border-bottom: 1px solid #c7ccd8; }
-}
 
 /* ── Лист «Отчёт о прибылях и убытках» (печать раздела «Отчёт ОПУ») ──
    Как привычная бумажная форма владельца: полоса с заголовком, «Наименование | Сумма»,
    разделы полосами, суммы в белых клетках, внизу крупно итог. Цвет — тёмно-синий шапки
    программы, задан прямо (не переменной): на бумаге он одинаков на любой теме. Цвета
    печатаются как есть — без этого браузер выбросил бы заливку и оставил белый лист */
-.opu-sheet { display: none; }
 @media print {
-  .printable.opu-sheet { display: block; }
   .opu-sheet, .opu-sheet * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .opu-sheet-page { max-width: 180mm; margin: 0 auto; color: #0a1a45; font-size: 13px; }
   .opu-sheet-title { background: #0a1a45 !important; color: #fff; text-align: center; padding: 14px 16px 12px; }
@@ -1532,82 +1511,149 @@ tbody tr.clickable { cursor: pointer; }
   .set-body { columns: 1; }
 }
 
-/* ═════════ Чек (TicketView): экран, предпросмотр, печать — один вид ═════════ */
-.ticket { font-size: 14px; color: var(--text); }
+/* ═════════ Чек, чек возврата, Z-отчёт (TicketView): экран, лист, PDF ═════════
+   Фирменный, как «Отчёт о прибылях и убытках»: название магазина на тёмно-синей
+   полосе, строка документа жирной, итог синей плашкой. Чек — бумага: он белый и при
+   тёмной теме программы, поэтому цвета заданы прямо, а не переменными темы */
+.ticket {
+  --tk-ink: #0a1a45; --tk-text: #10162a; --tk-muted: #4a5576; --tk-rule: #b6c0da;
+  --brand-max-c: #00359f; --brand-pos-c: #146c3c;
+  background: #fff; color: var(--tk-text); font-size: 14px; line-height: 1.45;
+  max-width: 380px; margin: 0 auto; padding: 16px 16px 14px;
+  border: 1px solid #dfe4f0; border-radius: 10px; box-shadow: 0 8px 22px rgba(10, 26, 69, 0.1);
+}
 .ticket-emblem { display: block; margin: 0 auto 8px; }
-.ticket-head { text-align: center; line-height: 1.55; }
-.ticket-head .ticket-title { font-weight: 700; font-size: 16px; letter-spacing: 0.2px; }
-.ticket-head div:not(.ticket-title) { font-size: 13px; color: var(--muted); }
-.ticket-rule { border-top: 1px dashed var(--border-strong); margin: 10px 0; }
+.tk-band {
+  background: var(--tk-ink); color: #fff; text-align: center; font-weight: 800; font-size: 16px;
+  letter-spacing: 0.02em; line-height: 1.3; padding: 7px 10px; border-radius: 6px; overflow-wrap: anywhere;
+}
+.ticket-head { text-align: center; line-height: 1.5; margin-top: 6px; font-size: 13px; color: var(--tk-muted); }
+.ticket-head .tk-doc { color: var(--tk-ink); font-weight: 800; font-size: 15px; margin-top: 2px; }
+.ticket-rule { border-top: 1px dashed var(--tk-rule); margin: 10px 0; }
 .ticket-item + .ticket-item { margin-top: 8px; }
-.ticket-name { font-weight: 500; }
-.ticket-sub { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13px; color: var(--muted); }
-.ticket-sub b { color: var(--text); font-size: 14px; white-space: nowrap; }
-.ticket-tail { text-align: center; font-size: 13px; color: var(--muted); line-height: 1.6; }
-.ticket-tail .ticket-brand { font-weight: 600; letter-spacing: 0.4px; color: var(--text); margin-top: 2px; }
-
-/* ── Свой экран печати (программа для Windows) ── */
-.print-dlg-body { display: flex; gap: 20px; align-items: flex-start; }
-/* Бумага всегда белая, даже в тёмной теме: предпросмотр показывает будущий лист */
-.print-paper {
-  --text: #1c2130; --muted: #5b6578; --border-strong: #b9c0cf;
-  background: #fff; color: var(--text); border: 1px solid var(--border);
-  border-radius: 10px; padding: 16px 14px; margin: 0 auto;
-  max-height: 62vh; overflow: auto; flex: none;
+.ticket-name { font-weight: 600; }
+.ticket-sub { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13px; color: var(--tk-muted); }
+.ticket-sub b { color: var(--tk-text); font-size: 14px; white-space: nowrap; }
+.tk-row { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; font-size: 13.5px; }
+.tk-row span:last-child { font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.tk-total {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 6px 0;
+  background: var(--tk-ink); color: #fff; font-weight: 800; font-size: 16.5px; padding: 7px 10px; border-radius: 6px;
+  text-transform: uppercase; letter-spacing: 0.02em;
 }
-.print-paper.p58 { width: 252px; }
-.print-paper.p80 { width: 332px; }
-.print-paper.pa4 { width: 420px; padding: 26px 24px; border-radius: 6px; }
-.print-side { flex: 1; min-width: 220px; }
-.print-hint { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 2px 0 10px; }
-.print-side-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
-.print-side-actions .btn { width: 100%; justify-content: center; }
-@media (max-width: 720px) {
-  .print-dlg-body { flex-direction: column; }
-  .print-paper { max-width: 100%; }
-  .print-side { width: 100%; }
+.tk-total span:last-child { text-transform: none; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ticket-tail { text-align: center; font-size: 12.5px; color: var(--tk-muted); line-height: 1.6; }
+.ticket-tail .ticket-brand { font-weight: 700; letter-spacing: 0.4px; color: var(--tk-ink); margin-top: 2px; }
+
+/* ═════════ Экран печати программы для Windows (components/PrintPreview.jsx) ═════════
+   Слева страницы — картинками того PDF, который уйдёт на принтер, на сером «столе»;
+   справа — на чём и как печатать. Чек на ленту — строками, как у чекового принтера */
+.pp .modal { max-width: min(1180px, 96vw); width: 96vw; }
+.pp-body { display: flex; gap: 20px; align-items: stretch; }
+.pp-view { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.pp-stage {
+  height: min(70vh, 780px); min-height: 320px; overflow: auto; border-radius: 10px; padding: 16px;
+  background: #5b6479; display: flex; align-items: flex-start; justify-content: center;
+}
+.pp-page { display: block; max-width: 100%; max-height: 100%; height: auto; background: #fff; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); }
+.pp-msg { align-self: center; color: #fff; display: flex; align-items: center; gap: 10px; font-size: 14px; text-align: center; }
+.pp-spin {
+  width: 18px; height: 18px; flex: none; border: 2px solid rgba(255, 255, 255, 0.35); border-top-color: #fff;
+  border-radius: 50%; animation: ppSpin 0.8s linear infinite;
+}
+@keyframes ppSpin { to { transform: rotate(360deg); } }
+.pp-nav { display: flex; align-items: center; justify-content: center; gap: 12px; font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
+.pp-side { width: 300px; flex: none; display: flex; flex-direction: column; }
+.pp-doc { display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.pp-doc .ic { color: var(--accent); display: inline-flex; }
+.pp-doc b { overflow-wrap: anywhere; }
+.pp-seg { display: flex; gap: 6px; }
+.pp-seg .chip { flex: 1; justify-content: center; }
+.pp-hint { font-size: 13px; color: var(--muted); line-height: 1.55; margin: 2px 0 12px; min-height: 1.2em; }
+.pp-actions { display: flex; flex-direction: column; gap: 10px; margin-top: auto; }
+.pp-actions .btn { width: 100%; justify-content: center; }
+/* Лента: моноширинные строки, как у принтера; крупные — вдвое выше; инверсия —
+   белым по чёрному во всю ширину (строка уже дополнена пробелами до края) */
+.pp-tape {
+  --cols: 32; background: #fff; color: #000; font-family: Consolas, 'Cascadia Mono', 'Courier New', monospace; font-size: 13px;
+  width: calc(var(--cols) * 1ch + 28px); padding: 16px 14px 26px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+.pp-tape-logo { display: block; width: 64px; height: 64px; margin: 0 auto 8px; filter: grayscale(1) contrast(1.6); }
+.pp-tl { white-space: pre; line-height: 1.4; min-height: 1.4em; }
+.pp-tl.c { text-align: center; }
+.pp-tl.b { font-weight: 700; }
+.pp-tl.t { height: 2.8em; display: flex; align-items: center; }
+.pp-tl.t.c { justify-content: center; }
+.pp-tl.t span { display: inline-block; transform: scaleY(2); }
+.pp-tl.inv span { background: #000; color: #fff; }
+@media (max-width: 860px) {
+  .pp-body { flex-direction: column; }
+  .pp-side { width: 100%; }
+  .pp-stage { height: 56vh; }
 }
 
-/* ═════════ Печать: только чек / Z-отчёт, без интерфейса ═════════ */
+/* ═════════ Печатный слой: всё, что идёт на бумагу (components/PrintDoc.jsx) ═════════
+   На экране его не видно. При печати страница убирается целиком — display: none, а не
+   «невидимой»: невидимая она всё равно занимала бы место и давала пустые листы.
+   Печатается один документ слоя: окно (prio 2) поверх листа раздела (prio 1), из
+   равных — открытый последним (то же правило — lib/pechat.js, activeDoc). Поля и
+   номера страниц — components/PrintDoc.jsx, PrintPageStyle */
+.print-root { display: none; }
 @media print {
-  body { background: #fff; }
-  /* Прячем всё, кроме помеченного .printable */
-  body * { visibility: hidden !important; }
-  .printable, .printable * { visibility: visible !important; }
-  .printable {
-    position: absolute; left: 0; top: 0; width: 100%; display: block !important;
-    background: #fff; padding: 0 !important; overflow: visible; animation: none !important;
-    /* На бумаге всегда тёмным по белому — даже если на экране тёмная тема */
-    --text: #111623; --muted: #434b5e; --border-strong: #9aa1b1; --border: #c7ccd8;
-    color: var(--text);
-  }
-  /* Заголовок окна («Чек продажи») — часть интерфейса, на бумагу не идёт */
-  .printable .modal > h3 { display: none !important; }
-  /* Чек на листе — узкой колонкой по центру, как бумажный чек, а не во всю страницу */
-  .printable .ticket { max-width: 400px; margin: 0 auto; }
-  .printable .modal {
-    box-shadow: none !important; max-width: 100% !important; max-height: none !important;
-    border-radius: 0 !important; padding: 4mm 2mm !important; animation: none !important; overflow: visible !important;
-  }
-  .printable .modal-actions, .no-print { display: none !important; }
-  /* Открыт свой экран печати — печатается его предпросмотр, а не чек под ним */
-  body[data-print-dlg] .printable:not(.print-dlg) { display: none !important; }
-  .print-dlg .print-dlg-body { display: block; }
-  .print-dlg .print-paper {
-    width: 100% !important; max-height: none !important; overflow: visible !important;
-    border: none !important; border-radius: 0 !important; padding: 0 !important; margin: 0 !important;
-  }
-  .toast, .conn-banner { display: none !important; }
-  /* Этикетки: печатаем без рамок предпросмотра и без ограничения высоты */
-  .label-print .label-sheet { max-height: none !important; overflow: visible !important; padding: 0 !important; }
-  .label-print .modal { border: none !important; }
-  .label-item { border-color: #ddd !important; }
-  @page { margin: 8mm; }
-  /* Чек/Z-отчёт — финансовый документ: никаких анимаций, всё видимо на 100% */
-  .printable *, .printable *::before, .printable *::after {
-    animation: none !important; opacity: 1 !important; transform: none !important;
-  }
+  html, body { background: #fff !important; height: auto !important; overflow: visible !important; }
+  body > :not(.print-root) { display: none !important; }
+  .print-root { display: block !important; color: #10162a; }
+  .print-doc { display: none; }
+  .print-root > .print-doc[data-prio="2"]:not(:has(~ .print-doc[data-prio="2"])),
+  .print-root:not(:has(> .print-doc[data-prio="2"])) > .print-doc[data-prio="1"]:not(:has(~ .print-doc[data-prio="1"])) { display: block; }
+  /* Цвета печатаются как есть: без этого браузер выбросил бы синие полосы и плашки */
+  .print-doc, .print-doc * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .print-doc *, .print-doc *::before, .print-doc *::after { animation: none !important; transition: none !important; }
+  .pd-ticket { page: ticket; }
+  .pd-labels { page: labels; }
+  .pd-sticker { page: sticker; }
+  /* Чек на листе — узкой колонкой по центру, как бумажный, без тени и рамки экрана */
+  .pd-ticket .ticket { max-width: 80mm; border: none; border-radius: 0; box-shadow: none; padding: 0; }
+  .print-doc .label-sheet { padding: 0; border-radius: 0; }
 }
+
+/* ── Лист раздела: шапка и таблица как у «Отчёта о прибылях и убытках» ──
+   Тёмно-синяя полоса с эмблемой, магазином, названием и датой; синяя строка
+   заголовков (браузер повторяет её на каждом листе); строки светлые с лёгкой полосой —
+   длинный список не съедает краску; итог — синей строкой */
+.pd-band { display: flex; align-items: center; gap: 12px; background: #0a1a45; color: #fff; padding: 10px 14px; margin: 0 0 12px; }
+.pd-band-emblem { flex: none; width: 40px; height: 40px; border-radius: 9px; background: #fff; display: grid; place-items: center; }
+.pd-band-emblem img { width: 30px; height: 30px; display: block; }
+.pd-band-text { min-width: 0; }
+.pd-band-shop { font-size: 8.5pt; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: #c9d3f2; }
+.pd-band-title { font-size: 17pt; font-weight: 800; line-height: 1.2; letter-spacing: 0.01em; overflow-wrap: anywhere; }
+.pd-band-sub { margin-top: 2px; font-size: 8.5pt; color: #c9d3f2; }
+.pd-block { margin: 0 0 12px; }
+.pd-block-title {
+  font-size: 11pt; font-weight: 800; color: #0a1a45; margin: 0 0 5px; padding-left: 8px; border-left: 4px solid #0a1a45;
+  /* Заголовок не остаётся внизу листа без своей таблицы */
+  break-after: avoid; page-break-after: avoid;
+}
+.pd-svodka { max-width: 130mm; }
+.pd-dop { margin-top: 16px; }
+/* Клетки вплотную, без схлопнутых рамок: иначе между синими клетками видны светлые швы */
+.pd-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 9.5pt; color: #10162a; }
+.pd-table th {
+  background: #0a1a45; color: #fff; font-size: 7.8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  text-align: left; padding: 6px 8px; vertical-align: bottom;
+  /* Синяя тень на пиксель вправо закрывает волосок между соседними синими клетками,
+     который иначе виден при просмотре PDF на экране */
+  box-shadow: 1px 0 0 #0a1a45;
+}
+.pd-table td { padding: 5px 8px; border-bottom: 1px solid #dde3f0; vertical-align: top; }
+.pd-table tbody tr:nth-child(even) td { background: #f3f5fb; }
+.pd-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pd-table tr { break-inside: avoid; }
+.pd-table tr.pd-total td { background: #0a1a45 !important; color: #fff; font-weight: 800; border-bottom: none; box-shadow: 1px 0 0 #0a1a45; }
+/* У последней клетки строки тени нет: она выступила бы за край таблицы */
+.pd-table th:last-child, .pd-table tr.pd-total td:last-child { box-shadow: none; }
+.pd-table tr.pd-empty td { text-align: center; color: #4a5576; }
+.pd-foot { margin-top: 6px; font-size: 8pt; color: #4a5576; text-align: right; }
 
 /* Экран приостановки: причина крупно, посреди смены */
 .login-logo.stop { background: #8d241d; }

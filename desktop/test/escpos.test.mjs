@@ -7,7 +7,7 @@
 // Запуск: npm test (в папке desktop)
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { rasterImage, encode, escpos, printable, renderTicket, sanitizeTicket, twoColumns, wrap } from '../src/print/escpos.mjs'
+import { fullCenter, layoutTicket, rasterImage, encode, escpos, printable, renderTicket, sanitizeTicket, twoColumns, wrap } from '../src/print/escpos.mjs'
 
 // Байты обратно в текст — чтобы сверять раскладку глазами. Команды выкидываются
 function text866(buf) {
@@ -20,7 +20,7 @@ function text866(buf) {
       continue
     }
     if (b === 0x1d) {
-      i += buf[i + 1] === 0x56 ? 3 : 2 // GS V m n; GS ! n
+      i += buf[i + 1] === 0x56 ? 3 : 2 // GS V m n; GS ! n; GS B n
       continue
     }
     if (b === 0x0a) out += '\n'
@@ -114,10 +114,12 @@ test('чек на ленте 58 мм: всё на своих местах и н�
   assert.deepEqual([...bytes.subarray(-7)], [0x1b, 0x64, 3, 0x1d, 0x56, 0x42, 0x00])
   const lines = text866(bytes).split('\n')
   assert.ok(lines.every((l) => l.length <= 32), 'строка вылезла за ленту: ' + lines.find((l) => l.length > 32))
-  assert.deepEqual(lines.slice(0, 3), ['Магазин №1', '04.10.2026, 15:30', '-'.repeat(32)])
+  // Название магазина — во всю ширину ленты: оно печатается белым по чёрному
+  assert.deepEqual(lines.slice(0, 3), [' '.repeat(11) + 'Магазин №1' + ' '.repeat(11), '04.10.2026, 15:30', '-'.repeat(32)])
   assert.ok(lines.includes('Нурофен 200 мг №10'))
   assert.ok(lines.includes('  2 уп x 150' + ' '.repeat(10) + '300 сомони'), 'количество слева, сумма у правого края')
-  assert.ok(lines.includes('Итого' + ' '.repeat(17) + '345 сомони'))
+  // Итог — тоже полосой во всю ширину, с пробелом по краям
+  assert.ok(lines.includes(' Итого' + ' '.repeat(15) + '345 сомони '))
   assert.ok(lines.includes('Спасибо за покупку!'))
   // Длинное название перенесено, а не обрезано
   assert.ok(text866(bytes).includes('(очень длинное\nназвание товара)') || text866(bytes).includes('название товара)'))
@@ -125,7 +127,7 @@ test('чек на ленте 58 мм: всё на своих местах и н�
 
 test('лента 80 мм шире — колонки раздвигаются; без отреза и с ящиком — по настройке', () => {
   const wide = text866(renderTicket(TICKET, { width: 48 })).split('\n')
-  assert.ok(wide.includes('Итого' + ' '.repeat(33) + '345 сомони'))
+  assert.ok(wide.includes(' Итого' + ' '.repeat(31) + '345 сомони '))
   assert.ok(wide.includes('-'.repeat(48)))
 
   const noCut = renderTicket(TICKET, { cut: false })
@@ -142,15 +144,47 @@ test('итоговая строка печатается крупно и жир�
   assert.ok(on > 0 && off > on, 'крупный шрифт должен включаться перед строкой и выключаться после')
 })
 
+test('фирменный вид на ленте: название магазина и итог — белым по чёрному во всю ширину', () => {
+  const lines = layoutTicket({ ...TICKET, docAt: 1 }, { width: 32 })
+  const band = lines[0]
+  assert.equal(band.text.length, 32, 'полоса — во всю ширину ленты')
+  assert.deepEqual([band.bold, band.tall, band.invert], [true, true, true])
+  assert.equal(band.text.trim(), 'Магазин №1')
+  // Строка документа (docAt) — жирная, по центру; остальные строки шапки — обычные
+  assert.deepEqual([lines[1].text, lines[1].center, lines[1].bold], ['04.10.2026, 15:30', true, true])
+  const total = lines.find((l) => l.text.includes('345 сомони'))
+  assert.deepEqual([total.text.length, total.invert, total.bold, total.tall], [32, true, true, true])
+  // Обычные строки белым по чёрному не печатаются
+  const plain = lines.filter((l) => !l.invert)
+  assert.ok(plain.length > 5 && plain.every((l) => !l.tall))
+  // Ни одна строка не шире ленты
+  assert.ok(lines.every((l) => l.text.length <= 32))
+  // Длинное название магазина переносится, и каждая его строка — полосой
+  const long = layoutTicket({ head: ['Магазин строительных материалов «Душанбе-Сити»'] }, { width: 32 }).filter((l) => l.invert)
+  assert.ok(long.length >= 2 && long.every((l) => l.text.length === 32))
+})
+
+test('байты: полоса белым по чёрному включается перед строкой и выключается после', () => {
+  const bytes = [...renderTicket({ head: ['Магазин'], totals: [{ label: 'Итого', value: '1', big: true }] })]
+  const all = (seq) => bytes.reduce((acc, _, i) => (seq.every((b, n) => bytes[i + n] === b) ? [...acc, i] : acc), [])
+  const on = all([0x1d, 0x42, 1])
+  const off = all([0x1d, 0x42, 0])
+  assert.equal(on.length, 2, 'название и итог')
+  assert.equal(off.length, 2)
+  assert.ok(on[0] < off[0] && off[0] < on[1] && on[1] < off[1], 'включение и выключение — парами, по порядку')
+  assert.equal(fullCenter('Итого', 9), '  Итого  ')
+  assert.equal(fullCenter('слишком длинно', 5), 'слишком длинно', 'длиннее ленты — как есть (перенос делает раскладка)')
+})
+
 test('чек из мусора не роняет печать: лишнее отбрасывается, размеры ограничены', () => {
-  assert.deepEqual(sanitizeTicket(null), { head: [], rows: [], totals: [], tail: [] })
-  assert.deepEqual(sanitizeTicket({ head: 'строка', rows: {}, totals: 5 }), { head: [], rows: [], totals: [], tail: [] })
+  assert.deepEqual(sanitizeTicket(null), { head: [], docAt: -1, rows: [], totals: [], tail: [] })
+  assert.deepEqual(sanitizeTicket({ head: 'строка', rows: {}, totals: 5, docAt: '1' }), { head: [], docAt: -1, rows: [], totals: [], tail: [] })
   const huge = sanitizeTicket({ head: Array(5000).fill('x'.repeat(5000)), rows: [null, 7, { name: 12 }] })
   assert.equal(huge.head.length, 400)
   assert.equal(huge.head[0].length, 200)
   assert.deepEqual(huge.rows, [{ name: '', sub: '', value: '' }, { name: '', sub: '', value: '' }, { name: '12', sub: '', value: '' }])
   // Пустой чек — всё равно корректное задание: сброс, подача, отрез
-  assert.deepEqual([...renderTicket(null)], [0x1b, 0x40, 0x1b, 0x74, 17, 0x1b, 0x61, 1, 0x1b, 0x61, 0, 0x1b, 0x64, 3, 0x1d, 0x56, 0x42, 0x00])
+  assert.deepEqual([...renderTicket(null)], [0x1b, 0x40, 0x1b, 0x74, 17, 0x1b, 0x61, 0, 0x1b, 0x64, 3, 0x1d, 0x56, 0x42, 0x00])
 })
 test('эмблема: растровый блок GS v 0 с верной шириной в байтах, битая — не печатается', () => {
   // 16×8: две полосы — проверяем и заголовок, и сами точки

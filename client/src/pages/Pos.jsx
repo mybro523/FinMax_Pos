@@ -34,7 +34,8 @@ import { sellsBelowCost } from '../lib/pricing'
 import { saleTicket } from '../lib/ticket'
 import { autoPrint } from '../lib/print'
 import TicketView from '../components/TicketView'
-import { usePechat } from '../components/PrintDialog'
+import PrintDoc from '../components/PrintDoc'
+import { pechatTicket } from '../lib/pechat'
 import { getRekvizity } from '../lib/rekvizity'
 import { useCategories, categoryNames } from '../lib/categories'
 import NumberInput from '../components/NumberInput'
@@ -1764,7 +1765,9 @@ function UnknownBarcode({ barcode, onDefer, onClose }) {
 function Receipt({ sale, onClose }) {
   const auth = useAuth()
   const customers = useCollection('customers')
-  const { print, dialog } = usePechat()
+  const toast = useToast()
+  // Печать: чековый принтер программы, её экран печати или окно браузера (lib/pechat.js)
+  const print = (tk) => pechatTicket(tk).catch((e) => toast(tr(e.message), 'err'))
   // После продажи в долг покупатель видит в чеке, сколько он теперь должен магазину
   const dolg = sale.payment === 'debt' ? (customers.find((c) => c.id === (sale.customer?.id || sale.customerId))?.debt ?? null) : null
   const ticket = saleTicket(sale, {
@@ -1788,13 +1791,14 @@ function Receipt({ sale, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sale.id])
   return (
-    <Modal className="printable" title={<><span className="ic"><LuPrinter size={18} /></span>{tr('Чек продажи')}</>} onClose={onClose}>
+    <Modal title={<><span className="ic"><LuPrinter size={18} /></span>{tr('Чек продажи')}</>} onClose={onClose}>
       <TicketView ticket={ticket} />
+      {/* На бумагу — этот же чек, из печатного слоя */}
+      <PrintDoc prio={2} kind="ticket" title={tr('Чек продажи')}><TicketView ticket={ticket} /></PrintDoc>
       <div className="modal-actions">
         <button className="btn ghost" onClick={() => print(ticket)}><span className="ic"><LuPrinter size={16} /></span> {tr('Печать')}</button>
         <button className="btn" onClick={onClose}>{tr('Готово')}</button>
       </div>
-      {dialog}
     </Modal>
   )
 }

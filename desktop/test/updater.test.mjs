@@ -8,7 +8,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { createUpdater, feedFromRepo, feedYaml, normalizeFeed } from '../src/updater.mjs'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { createUpdater, dropOldUpdaterCache, feedFromRepo, feedYaml, normalizeFeed, OLD_UPDATER_CACHE_DIR, UPDATER_CACHE_DIR } from '../src/updater.mjs'
 import { manualTimers } from '../test-support/server.mjs'
 
 const FEED = { provider: 'github', owner: 'mybro523', repo: 'apteka-ustanovka' }
@@ -180,9 +183,40 @@ test('скачанное обновление не «забывается» от
 })
 
 test('описание источника для библиотеки: тот же источник, своя папка для скачанного', () => {
-  assert.equal(feedYaml(FEED), 'provider: github\nowner: mybro523\nrepo: apteka-ustanovka\nupdaterCacheDirName: apteka-desktop-updater\n')
+  assert.equal(feedYaml(FEED), 'provider: github\nowner: mybro523\nrepo: apteka-ustanovka\nupdaterCacheDirName: finmax-pos-desktop-updater\n')
   assert.equal(
     feedYaml({ provider: 'generic', url: 'http://127.0.0.1:8123' }),
-    'provider: generic\nurl: "http://127.0.0.1:8123"\nupdaterCacheDirName: apteka-desktop-updater\n',
+    'provider: generic\nurl: "http://127.0.0.1:8123"\nupdaterCacheDirName: finmax-pos-desktop-updater\n',
   )
+})
+
+test('папка скачанных обновлений — та же, куда установщик кладёт копию себя: тогда качаются только изменения', () => {
+  // Установщик называет папку по имени пакета (electron-builder: имя + «-updater»)
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.equal(UPDATER_CACHE_DIR, pkg.name + '-updater')
+  assert.notEqual(UPDATER_CACHE_DIR, OLD_UPDATER_CACHE_DIR)
+})
+
+test('прежняя папка обновлений убирается; нет её или занята — запуск не ломается', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'upd-old-'))
+  const old = path.join(base, OLD_UPDATER_CACHE_DIR)
+  fs.mkdirSync(path.join(old, 'pending'), { recursive: true })
+  fs.writeFileSync(path.join(old, 'installer.exe'), 'старый установщик')
+  fs.writeFileSync(path.join(old, 'pending', 'FinMax-POS-Setup-1.4.8.exe'), 'докачанное')
+  const keep = path.join(base, UPDATER_CACHE_DIR)
+  fs.mkdirSync(keep)
+  fs.writeFileSync(path.join(keep, 'installer.exe'), 'нынешний установщик')
+  const said = []
+  const log = { info: (m) => said.push(m), warn: (m) => said.push(m) }
+  assert.equal(dropOldUpdaterCache({ fs, join: path.join, localAppData: base, log }), true)
+  assert.equal(fs.existsSync(old), false)
+  assert.equal(fs.readFileSync(path.join(keep, 'installer.exe'), 'utf8'), 'нынешний установщик', 'новую папку не трогаем')
+  // Второй раз — убирать нечего
+  assert.equal(dropOldUpdaterCache({ fs, join: path.join, localAppData: base, log }), false)
+  // Папка не задана — ничего не делаем; ошибка файловой системы — только запись в журнал
+  assert.equal(dropOldUpdaterCache({ fs, join: path.join, localAppData: '', log }), false)
+  const busy = { existsSync: () => true, rmSync: () => { throw new Error('EBUSY') } }
+  assert.equal(dropOldUpdaterCache({ fs: busy, join: path.join, localAppData: base, log }), false)
+  assert.ok(said.some((m) => /EBUSY/.test(m)))
+  fs.rmSync(base, { recursive: true, force: true })
 })

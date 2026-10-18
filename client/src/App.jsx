@@ -32,6 +32,8 @@ const Returns = lazy(() => import('./pages/Returns'))
 const Obuchenie = lazy(() => import('./pages/Obuchenie'))
 // Тур лежит отдельно: главная сборка несёт только его состояние, тексты грузятся при запуске
 import TurHost from './components/TurHost'
+import { PechatHost } from './components/PrintPreview'
+import { PrintPageStyle } from './components/PrintDoc'
 import { startTour, obucheniePokazano, OBSHIY } from './lib/tur'
 const WriteOffs = lazy(() => import('./pages/WriteOffs'))
 const Inventory = lazy(() => import('./pages/Inventory'))
@@ -187,6 +189,9 @@ function AuthedApp({ user }) {
   return (
     <ErrorBoundary>
       <TurHost />
+      {/* Печать: поля и номера страниц (везде) и экран печати программы для Windows */}
+      <PrintPageStyle />
+      <PechatHost />
       <Suspense fallback={<PageFallback />}>
         <Routes>
           <Route path="/" element={<Home />} />

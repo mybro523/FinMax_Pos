@@ -16,7 +16,8 @@ import VesInput from '../components/VesInput'
 import { uppOf, lineUnits as soldUnits, isVesovoy, kgText, edinica } from '../lib/units'
 import { returnTicket } from '../lib/ticket'
 import TicketView from '../components/TicketView'
-import { usePechat } from '../components/PrintDialog'
+import PrintDoc from '../components/PrintDoc'
+import { pechatTicket } from '../lib/pechat'
 import { getRekvizity } from '../lib/rekvizity'
 import { useAuth, useCan, getUser } from '../db/auth'
 
@@ -468,7 +469,8 @@ export default function Returns() {
 function ReturnReceipt({ ret, sales, onClose }) {
   const t = useT()
   const auth = useAuth()
-  const { print, dialog } = usePechat()
+  const toast = useToast()
+  const print = (tk) => pechatTicket(tk).catch((e) => toast(t(e.message), 'err'))
   // Номер чека продажи, по которому оформлен возврат, — чтобы их сверять друг с другом
   const saleDate = sales.find((s) => s.id === ret.saleId)?.date
   const ticket = returnTicket(ret, {
@@ -482,13 +484,13 @@ function ReturnReceipt({ ret, sales, onClose }) {
     saleNomer: saleDate ? chekNomer(saleDate) : '',
   })
   return (
-    <Modal className="printable" title={<><span className="ic" style={{ color: 'var(--green)' }}><LuCircleCheck size={18} /></span>{t('Возврат оформлен')}</>} onClose={onClose}>
+    <Modal title={<><span className="ic" style={{ color: 'var(--green)' }}><LuCircleCheck size={18} /></span>{t('Возврат оформлен')}</>} onClose={onClose}>
       <TicketView ticket={ticket} />
+      <PrintDoc prio={2} kind="ticket" title={t('Чек возврата')}><TicketView ticket={ticket} /></PrintDoc>
       <div className="modal-actions">
         <button className="btn ghost" onClick={() => print(ticket)}><span className="ic"><LuPrinter size={16} /></span> {t('Печать')}</button>
         <button className="btn" onClick={onClose}>{t('Готово')}</button>
       </div>
-      {dialog}
     </Modal>
   )
 }

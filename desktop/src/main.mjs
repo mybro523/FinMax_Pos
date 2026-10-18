@@ -22,14 +22,15 @@ import { io } from 'socket.io-client'
 import { copyTime, createBackups, hostFolderOf, openOrRestore } from './backup.mjs'
 import { readBuildConfig, resolveApiUrl, resolveUpdateFeed, serverOrigin } from './config.mjs'
 import { createGateway } from './gateway.mjs'
-import { safeXlsxName, xlsxBytes } from './files.mjs'
+import { safePdfName, safeXlsxName, xlsxBytes } from './files.mjs'
 import { createLan } from './lan.mjs'
 import { createClock } from './local/clock.mjs'
 import { getMeta, openDb, setMeta } from './local/db.mjs'
 import { lastFloor, lastSeen } from './local/licence.mjs'
 import { CORE_SCHEMA, PHARMACY_SCHEMA } from './local/schema.mjs'
 import { createLog } from './log.mjs'
-import { renderTicket } from './print/escpos.mjs'
+import { layoutTicket, renderTicket } from './print/escpos.mjs'
+import { pageRequest, pdfOptions, printOptions } from './print/page.mjs'
 import { LOGO } from './print/logo.mjs'
 import { runPowerShell } from './print/powershell.mjs'
 import { checkHost, sendNetwork, sendWindows } from './print/transport.mjs'
@@ -37,7 +38,7 @@ import { isAppUrl, registerAppProtocol, registerScheme, START_URL } from './prot
 import { createRealtime } from './realtime.mjs'
 import { createSessionStore } from './session.mjs'
 import { createSettings } from './settings.mjs'
-import { createUpdater, feedYaml } from './updater.mjs'
+import { createUpdater, dropOldUpdaterCache, feedYaml } from './updater.mjs'
 import { createWindowState, MIN_SIZE, settleSize, windowKey } from './window-state.mjs'
 import { applyRestore, describeCopy, findCopies, requestRestore, RESTORE_FILE, saveCopyTo } from './restore.mjs'
 
@@ -341,6 +342,12 @@ async function start() {
     }
   }
   const updater = createUpdater({ autoUpdater, feed, log, onState: () => pushStatus(), beforeInstall: () => backupNow() })
+  // Прежняя папка скачанных обновлений больше не нужна (см. UPDATER_CACHE_DIR). Через
+  // пару минут после запуска: сразу после обновления её установщик может быть ещё занят
+  if (app.isPackaged) {
+    const dropOld = setTimeout(() => dropOldUpdaterCache({ fs, join, localAppData: process.env.LOCALAPPDATA, log }), 2 * 60 * 1000)
+    dropOld.unref?.()
+  }
   log.info(feed ? `обновления: ${feed.provider === 'github' ? feed.owner + '/' + feed.repo : feed.url}` : 'обновления выключены: источник не задан при сборке')
 
   // ── Что показать человеку о состоянии программы ──
@@ -684,26 +691,49 @@ async function start() {
   )
 
   // ── Свой экран печати ──
-  // Окно печати Chromium не умеет предпросмотр, поэтому у программы экран свой:
-  // окно показывает чек само, а сюда просит отправить его на принтер или в PDF.
-  // Лента (raw) уходит строками ESC/POS на выбранный принтер; лист (page) печатает
-  // страницу как она есть (печатным стилям виден только сам чек); pdf кладёт то же
-  // самое в файл — отправить в мессенджер или подшить.
+  // Окно печати Windows для этой программы предпросмотр не показывает, поэтому экран
+  // печати у программы свой (client/src/components/PrintPreview.jsx). Сюда он просит:
+  //   • preview — PDF печатного слоя окна: экран рисует из него страницы;
+  //   • tape — строки чека для ленты, как их разложит принтер (предпросмотр ленты);
+  //   • raw — чек строками ESC/POS на выбранный чековый принтер;
+  //   • page — те же страницы, что в предпросмотре, на выбранный принтер, без окна Windows;
+  //   • pdf — те же страницы в файл: отправить в мессенджер или подшить.
+  // preview, page и pdf собираются из одних значений (print/page.mjs) — что видно на
+  // экране, то и выходит из принтера.
+  const LENTA_WIDTHS = [32, 42, 48]
+  const lentaWidth = (v, cfg) => (LENTA_WIDTHS.includes(Number(v)) ? Number(v) : cfg.width)
+  ipcMain.handle('print:preview', async (event, req) => {
+    if (!trusted(event) || !gateway.activeRole()) return { ok: false, error: 'Требуется вход в систему' }
+    try {
+      const pdf = await win.webContents.printToPDF(pdfOptions(pageRequest(req)))
+      return { ok: true, pdf }
+    } catch (e) {
+      log.warn('предпросмотр не собран: ' + (e?.message || e))
+      return { ok: false, error: 'Не получилось подготовить страницы. Повторите.' }
+    }
+  })
+  ipcMain.handle('print:tape', (event, req) => {
+    if (!trusted(event) || !gateway.activeRole()) return { ok: false, error: 'Требуется вход в систему' }
+    const cfg = settings.get().print
+    return { ok: true, lines: layoutTicket(req?.ticket, { width: lentaWidth(req?.width, cfg) }), logo: cfg.logo !== false }
+  })
   ipcMain.handle('print:raw', async (event, req) => {
     if (!trusted(event) || !gateway.activeRole()) return { ok: false, error: 'Требуется вход в систему' }
-    const printer = typeof req?.printer === 'string' ? req.printer.slice(0, 220) : ''
+    const { printer, copies } = pageRequest(req)
     if (!printer) return { ok: false, error: 'Не удалось отправить задание на принтер.' }
     const cfg = settings.get().print
-    const width = [32, 42, 48].includes(Number(req?.width)) ? Number(req.width) : cfg.width
     try {
-      const bytes = renderTicket(req?.ticket, { width, codepage: cfg.codepage, cut: cfg.cut, drawer: false, logo: cfg.logo === false ? null : LOGO })
-      await sendWindows({
-        run: (script, env) => runPowerShell({ spawn, script, env }),
-        fs,
-        tmpFile: join(userData, `print-${process.pid}-${++printSeq}.bin`),
-        printer,
-        bytes,
-      })
+      const bytes = renderTicket(req?.ticket, { width: lentaWidth(req?.width, cfg), codepage: cfg.codepage, cut: cfg.cut, drawer: false, logo: cfg.logo === false ? null : LOGO })
+      // Копии — отдельными чеками: каждый со своим отрезом
+      for (let n = 0; n < copies; n++) {
+        await sendWindows({
+          run: (script, env) => runPowerShell({ spawn, script, env }),
+          fs,
+          tmpFile: join(userData, `print-${process.pid}-${++printSeq}.bin`),
+          printer,
+          bytes,
+        })
+      }
       return { ok: true, mode: 'windows' }
     } catch (e) {
       log.warn(`чек не напечатан (лента, ${printer}): ${e?.message || e}`)
@@ -712,29 +742,30 @@ async function start() {
   })
   ipcMain.handle('print:page', async (event, req) => {
     if (!trusted(event) || !gateway.activeRole()) return { ok: false, error: 'Требуется вход в систему' }
-    const deviceName = typeof req?.printer === 'string' ? req.printer.slice(0, 220) : ''
+    const ask = pageRequest(req)
     return await new Promise((resolve) => {
-      win.webContents.print({ silent: true, deviceName, printBackground: true }, (done, reason) => {
-        if (!done) log.warn(`чек не напечатан (лист${deviceName ? ', ' + deviceName : ''}): ${reason || ''}`)
+      win.webContents.print(printOptions(ask), (done, reason) => {
+        if (!done) log.warn(`не напечатано (лист${ask.printer ? ', ' + ask.printer : ''}): ${reason || ''}`)
         resolve(done ? { ok: true } : { ok: false, error: 'Не удалось отправить задание на принтер.' })
       })
     })
   })
-  ipcMain.handle('print:pdf', async (event) => {
+  ipcMain.handle('print:pdf', async (event, req) => {
     if (!trusted(event) || !gateway.activeRole()) return { ok: false, error: 'Требуется вход в систему' }
     try {
-      const pdf = await win.webContents.printToPDF({ printBackground: true, pageSize: 'A4' })
+      const pdf = await win.webContents.printToPDF(pdfOptions(pageRequest(req)))
       const stamp = new Date().toISOString().slice(0, 10)
       const r = await dialog.showSaveDialog(win, {
-        title: 'Сохранить чек в PDF',
-        defaultPath: join(app.getPath('documents'), `chek-${stamp}.pdf`),
+        title: 'Сохранить в PDF',
+        defaultPath: join(app.getPath('documents'), safePdfName(typeof req?.name === 'string' && req.name ? req.name : `FinMax ${stamp}`)),
         filters: [{ name: 'PDF', extensions: ['pdf'] }],
       })
       if (r.canceled || !r.filePath) return { ok: false, canceled: true }
-      fs.writeFileSync(r.filePath, pdf)
-      // Показать файл в Проводнике: человек сразу видит, куда лёг чек
-      shell.showItemInFolder(r.filePath)
-      return { ok: true, path: r.filePath }
+      const path = /\.pdf$/i.test(r.filePath) ? r.filePath : r.filePath + '.pdf'
+      fs.writeFileSync(path, pdf)
+      // Показать файл в Проводнике: человек сразу видит, куда лёг файл
+      shell.showItemInFolder(path)
+      return { ok: true, path }
     } catch (e) {
       log.warn('PDF не сохранён: ' + (e?.message || e))
       return { ok: false, error: 'Не получилось. Повторите.' }

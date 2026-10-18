@@ -19,7 +19,8 @@ import { restockedCost, shiftTotals } from '../lib/finance'
 import NumberInput from '../components/NumberInput'
 import { shiftTicket } from '../lib/ticket'
 import TicketView from '../components/TicketView'
-import { usePechat } from '../components/PrintDialog'
+import PrintDoc from '../components/PrintDoc'
+import { pechatTicket } from '../lib/pechat'
 import { getRekvizity } from '../lib/rekvizity'
 import { canCloseShift, shiftOpenerName } from '../lib/shiftOwner'
 
@@ -499,7 +500,8 @@ export default function Shift() {
 // печатают одно и то же. Зелёная или красная пометка — только на экране
 function ZReport({ shift, onClose }) {
   const auth = useAuth()
-  const { print, dialog } = usePechat()
+  const toast = useToast()
+  const print = (tk) => pechatTicket(tk).catch((e) => toast(tr(e.message), 'err'))
   const ok = Math.abs(shift.difference) < 0.01
   // Чистые числа считаем из сохранённых полей смены: у смен, закрытых до учёта
   // возвратов, они нулевые — и чистые значения совпадают с валовыми
@@ -512,7 +514,7 @@ function ZReport({ shift, onClose }) {
     rekvizity: getRekvizity(auth?.pharmacy?.code),
   })
   return (
-    <Modal className="printable" title={<><span className="ic"><LuCalculator size={18} /></span>{tr('Z-отчёт смены')}</>} onClose={onClose}>
+    <Modal title={<><span className="ic"><LuCalculator size={18} /></span>{tr('Z-отчёт смены')}</>} onClose={onClose}>
       {shift.pending && (
         <div className="note info no-print" style={{ marginBottom: 12 }}>
           {tr('Цифры предварительные — сверяются с сервером…')}
@@ -523,13 +525,13 @@ function ZReport({ shift, onClose }) {
         <span>{ok ? tr('Касса сошлась.') : tr('Есть расхождение — пересчитайте наличные.')}</span>
       </div>
       <TicketView ticket={ticket} />
+      <PrintDoc prio={2} kind="ticket" title={tr('Z-отчёт смены')}><TicketView ticket={ticket} /></PrintDoc>
       <div className="modal-actions">
         <button className="btn ghost" onClick={() => print(ticket)}>
           <span className="ic"><LuReceipt size={16} /></span> {tr('Печать')}
         </button>
         <button className="btn" onClick={onClose}>{tr('Готово')}</button>
       </div>
-      {dialog}
     </Modal>
   )
 }

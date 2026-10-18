@@ -194,3 +194,18 @@ test('на сайте чековых принтеров нет: печать и�
   assert.equal(printed, 1)
   assert.equal(await autoPrint(), false, 'сам собой чек на сайте не печатается')
 })
+
+test('строка документа в шапке («Чек № …», «Z-отчёт смены») отмечена — экран и лента печатают её жирной', () => {
+  setLang('ru')
+  const rek = { address: 'ул. Рудаки, 10', phone: '+992 900 11 22 33' }
+  const s = saleTicket(sale, { ...opts, rekvizity: rek, nomer: '1004-153000' })
+  assert.equal(s.head[s.docAt], 'Чек № 1004-153000')
+  // Без номера чека строки документа нет — и отметки нет
+  assert.equal(saleTicket(sale, opts).docAt, -1)
+  const r = returnTicket({ id: 'r1', date: sale.date, total: 150, refund: 'cash', items: [] }, { ...opts, nomer: '1004-160000' })
+  assert.equal(r.head[r.docAt], 'Чек возврата № 1004-160000')
+  const z = shiftTicket({ openedAt: sale.date, closedAt: sale.date, count: 0, discount: 0 }, { gross: 0, refunds: 0, netSales: 0, netProfit: 0 }, { ...opts, rekvizity: rek })
+  assert.equal(z.head[z.docAt], 'Z-отчёт смены')
+  // Скидок не было — в Z-отчёте ноль, а не «−0»
+  assert.equal(z.totals.find((x) => x.label === 'Скидки').value, money(0))
+})

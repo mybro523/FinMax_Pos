@@ -15,10 +15,10 @@ export const MAX_XLSX_BYTES = 25 * 1024 * 1024
 const ZAPRET = '<>:"/|?*' + String.fromCharCode(92)
 
 // Имя для окна «Сохранить как»: без путей, этих знаков и невидимых управляющих, не
-// длиннее 120 знаков и всегда с расширением .xlsx
-export function safeXlsxName(raw) {
+// длиннее 120 знаков и всегда с нужным расширением
+function safeName(raw, ext) {
   const base = String(raw ?? '')
-    .replace(/\.xlsx$/i, '')
+    .replace(new RegExp('[.]' + ext + '$', 'i'), '')
     .split('')
     .map((ch) => (ch.charCodeAt(0) < 32 || ZAPRET.includes(ch) ? ' ' : ch))
     .join('')
@@ -26,8 +26,12 @@ export function safeXlsxName(raw) {
     .replace(/^[\s.]+|[\s.]+$/g, '')
     .slice(0, 120)
     .trim()
-  return (base || 'FinMax') + '.xlsx'
+  return (base || 'FinMax') + '.' + ext
 }
+
+export const safeXlsxName = (raw) => safeName(raw, 'xlsx')
+// PDF из экрана печати: «Товары 2026-10-18.pdf», «Чек продажи 2026-10-18.pdf»
+export const safePdfName = (raw) => safeName(raw, 'pdf')
 
 // Похоже ли на настоящий .xlsx: байты, разумный размер и подпись zip («PK») в начале.
 // Возвращает Buffer для записи или null

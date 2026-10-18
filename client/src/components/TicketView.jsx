@@ -1,20 +1,28 @@
-import emblem from '../assets/brand/emblem-64.png'
+import emblem from '../assets/brand/emblem-192.webp'
 import { BrandWord } from './ui'
 
-// ── Чек на экране ──
+// ── Чек на экране и на листе ──
 // Рисует то, что собрал lib/ticket.js, и ровно в том же порядке, что уйдёт на
 // ленту и в PDF: эмблема, шапка, позиции, итоги, подвал. Никаких собственных
 // строк здесь нет — иначе экран и бумага снова разойдутся.
+//
+// Оформление фирменное, как у «Отчёта о прибылях и убытках»: название магазина на
+// тёмно-синей полосе, строка документа («Чек № …») жирной, итог — синей плашкой.
+// Чек — бумага, поэтому он белый и при тёмной теме программы.
 export default function TicketView({ ticket, logo = true }) {
-  const { head = [], rows = [], totals = [], tail = [] } = ticket || {}
+  const { head = [], rows = [], totals = [], tail = [], docAt = -1 } = ticket || {}
+  const [shop, ...rest] = head
   return (
     <div className="ticket">
-      {logo && <img className="ticket-emblem" src={emblem} alt="" width="44" height="44" />}
-      <div className="ticket-head">
-        {head.map((line, i) => (
-          <div key={i} className={i === 0 ? 'ticket-title' : ''}>{line}</div>
-        ))}
-      </div>
+      {logo && <img className="ticket-emblem" src={emblem} alt="" width="48" height="48" />}
+      {shop !== undefined && <div className="tk-band">{shop}</div>}
+      {rest.length > 0 && (
+        <div className="ticket-head">
+          {rest.map((line, i) => (
+            <div key={i} className={i + 1 === docAt ? 'tk-doc' : undefined}>{line}</div>
+          ))}
+        </div>
+      )}
       {rows.length > 0 && (
         <>
           <div className="ticket-rule" aria-hidden="true" />
@@ -30,12 +38,19 @@ export default function TicketView({ ticket, logo = true }) {
         </>
       )}
       <div className="ticket-rule" aria-hidden="true" />
-      {totals.map((r, i) => (
-        <div className={'total-row' + (r.big ? ' big' : '')} key={i}>
-          <span>{r.label}</span>
-          <span>{r.value}</span>
-        </div>
-      ))}
+      {totals.map((r, i) =>
+        r.big ? (
+          <div className="tk-total" key={i}>
+            <span>{r.label}</span>
+            <span>{r.value}</span>
+          </div>
+        ) : (
+          <div className="tk-row" key={i}>
+            <span>{r.label}</span>
+            <span>{r.value}</span>
+          </div>
+        ),
+      )}
       {tail.length > 0 && (
         <>
           <div className="ticket-rule" aria-hidden="true" />

@@ -29,7 +29,9 @@ function payLabel(payment, t) {
 }
 
 // Шапка одна на все бумаги: название магазина, затем адрес и телефон, если владелец
-// вписал их в Настройках (lib/rekvizity.js)
+// вписал их в Настройках (lib/rekvizity.js). Сразу за ней — строка документа («Чек №…»,
+// «Z-отчёт смены»): её номер в шапке чек несёт в docAt — экран и лента печатают
+// эту строку жирной (-1 — такой строки нет)
 function shapka(pharmacy, rekvizity, t) {
   const r = rekvizity || {}
   return [pharmacy || t('Магазин'), ...(r.address ? [r.address] : []), ...(r.phone ? [`${t('Тел.')} ${r.phone}`] : [])]
@@ -69,8 +71,10 @@ export function saleTicket(sale, { t, money, when, pharmacy = '', cashier = '', 
     totals.push({ label: t('Долг клиента'), value: money(customerDebt) })
   }
   const who = cashier || sale.user?.name || ''
+  const top = shapka(pharmacy, rekvizity, t)
   return {
-    head: [...shapka(pharmacy, rekvizity, t), ...(nomer ? [`${t('Чек')} № ${nomer}`] : []), when(sale.date)],
+    head: [...top, ...(nomer ? [`${t('Чек')} № ${nomer}`] : []), when(sale.date)],
+    docAt: nomer ? top.length : -1,
     rows: items.map((i) => ({
       name: i.name,
       sub: qtyPriceText(i, t, money) + (i.discount > 0 ? ` · ${t('скидка')} −${money(i.discount)}` : ''),
@@ -94,8 +98,10 @@ export function returnTicket(ret, { t, money, when, pharmacy = '', cashier = '',
         : ret.refund === 'debt'
           ? t('Уменьшен долг клиента')
           : t('Наличными из кассы')
+  const top = shapka(pharmacy, rekvizity, t)
   return {
-    head: [...shapka(pharmacy, rekvizity, t), `${t('Чек возврата')}${nomer ? ` № ${nomer}` : ''}`, when(ret.date)],
+    head: [...top, `${t('Чек возврата')}${nomer ? ` № ${nomer}` : ''}`, when(ret.date)],
+    docAt: top.length,
     rows: items.map((i) => ({
       name: i.name,
       // Списанная упаковка на полку не вернётся — об этом прямо в чеке.
@@ -130,7 +136,8 @@ export function shiftTicket(shift, totals, { t, money, when, pharmacy = '', rekv
     for (const [via, sum] of Object.entries(shift.transferBy || {})) rows.push({ label: '  ' + via, value: money(sum) })
   }
   if ((shift.debtPaid || 0) > 0) rows.push({ label: t('Погашено долгов (нал.)'), value: money(shift.debtPaid) })
-  rows.push({ label: t('Скидки'), value: '−' + money(shift.discount) })
+  // Скидок не было — просто ноль, без «−0»
+  rows.push({ label: t('Скидки'), value: (Number(shift.discount) > 0 ? '−' : '') + money(shift.discount) })
   if (totals.refunds > 0) {
     rows.push({ label: t('Продано за смену'), value: money(totals.gross) })
     rows.push({ label: t('Возвраты покупателям'), value: '−' + money(totals.refunds) })
@@ -153,6 +160,7 @@ export function shiftTicket(shift, totals, { t, money, when, pharmacy = '', rekv
   const period = `${when(shift.openedAt)} — ${shift.closedAt ? when(shift.closedAt) : ''}`.trim()
   return {
     head: [...shapka(pharmacy, rekvizity, t), t('Z-отчёт смены'), period, ...(shift.deviceName ? [shift.deviceName] : [])],
+    docAt: shapka(pharmacy, rekvizity, t).length,
     rows: [],
     totals: rows,
     tail: podval(shift.user?.name || '', rekvizity, t, false),

@@ -1,15 +1,20 @@
 import { useState } from 'react'
 import { LuPrinter, LuTag } from 'react-icons/lu'
 import { Modal } from './ui'
+import PrintDoc from './PrintDoc'
 import { ean13Svg, isValidEan13 } from '../lib/barcode'
 import { money } from '../db/store'
 import { translate as tr } from '../lib/i18n'
+import { pechat } from '../lib/pechat'
 import NumberInput from './NumberInput'
 
 // ── Печать этикеток со штрихкодом ──
 // Два режима: лист A4 с сеткой (режется ножницами) и одиночная наклейка 58 мм
 // для термопринтера. Штрихкод рисуется в SVG в миллиметрах, поэтому размеры
 // на бумаге точные и код читается сканером.
+//
+// Оформление фирменное: название тёмно-синим, цена — на синей плашке. Наклейка для
+// термопринтера печатается чёрным: синий он всё равно передал бы серой сеткой точек.
 
 export default function LabelPrint({ product, onClose }) {
   const [mode, setMode] = useState('a4') // a4 | roll
@@ -47,41 +52,44 @@ export default function LabelPrint({ product, onClose }) {
       <div className="label-price">{money(product.price)}</div>
     </div>
   )
+  const sheet = <div className={'label-sheet ' + mode}>{Array.from({ length: count }, (_, i) => label(i))}</div>
 
   return (
     <Modal
-      className="printable label-print"
+      className="label-print"
       title={<><span className="ic"><LuTag size={18} /></span>{tr('Печать этикеток')}</>}
       onClose={onClose}
       wide
     >
-      <div className="no-print">
-        <div className="chips" style={{ marginBottom: 12 }}>
-          <button className={'chip ' + (mode === 'a4' ? 'active' : '')} onClick={() => setMode('a4')}>
-            {tr('Лист A4')}
-          </button>
-          <button className={'chip ' + (mode === 'roll' ? 'active' : '')} onClick={() => setMode('roll')}>
-            {tr('Наклейка 58 мм')}
-          </button>
+      <div className="chips" style={{ marginBottom: 12 }}>
+        <button className={'chip ' + (mode === 'a4' ? 'active' : '')} onClick={() => setMode('a4')}>
+          {tr('Лист A4')}
+        </button>
+        <button className={'chip ' + (mode === 'roll' ? 'active' : '')} onClick={() => setMode('roll')}>
+          {tr('Наклейка 58 мм')}
+        </button>
+      </div>
+      {mode === 'a4' && (
+        <div className="field" style={{ maxWidth: 200 }}>
+          <label>{tr('Сколько этикеток')}</label>
+          <NumberInput integer value={copies} onChange={(e) => setCopies(e.target.value)} />
         </div>
-        {mode === 'a4' && (
-          <div className="field" style={{ maxWidth: 200 }}>
-            <label>{tr('Сколько этикеток')}</label>
-            <NumberInput integer value={copies} onChange={(e) => setCopies(e.target.value)} />
-          </div>
-        )}
-        <div className="note info" style={{ marginBottom: 12 }}>
-          {mode === 'a4'
-            ? tr('Печать на обычном принтере: лист с этикетками, разрежьте по рамкам.')
-            : tr('Печать на термопринтере этикеток шириной 58 мм — по одной наклейке.')}
-        </div>
+      )}
+      <div className="note info" style={{ marginBottom: 12 }}>
+        {mode === 'a4'
+          ? tr('Печать на обычном принтере: лист с этикетками, разрежьте по рамкам.')
+          : tr('Печать на термопринтере этикеток шириной 58 мм — по одной наклейке.')}
       </div>
 
-      <div className={'label-sheet ' + mode}>{Array.from({ length: count }, (_, i) => label(i))}</div>
+      {sheet}
+      {/* На бумагу — те же этикетки, из печатного слоя */}
+      <PrintDoc prio={2} kind={mode === 'roll' ? 'sticker' : 'labels'} title={`${tr('Этикетки')} — ${product.name}`}>
+        {sheet}
+      </PrintDoc>
 
-      <div className="modal-actions no-print">
+      <div className="modal-actions">
         <button className="btn ghost" onClick={onClose}>{tr('Закрыть')}</button>
-        <button className="btn" onClick={() => window.print()}>
+        <button className="btn" onClick={() => pechat({ kind: mode === 'roll' ? 'sticker' : 'labels' })}>
           <span className="ic"><LuPrinter size={16} /></span> {tr('Печать')}
         </button>
       </div>

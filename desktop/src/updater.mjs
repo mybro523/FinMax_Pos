@@ -62,8 +62,32 @@ export function feedFromRepo(text) {
 // Она берёт его из файла. Упаковщик кладёт такой файл только в установщик, а в
 // распакованную папку — нет; поэтому программа пишет его сама, из зашитого при
 // сборке, и ведёт себя одинаково, как бы её ни собрали.
-// updaterCacheDirName — папка, куда складывается скачанное обновление
-export const UPDATER_CACHE_DIR = 'apteka-desktop-updater'
+// updaterCacheDirName — папка, куда складывается скачанное обновление. Она обязана
+// совпадать с той, куда установщик кладёт копию самого себя (installer.exe): по этой
+// копии библиотека докачивает только изменившиеся куски нового установщика — пару
+// мегабайт вместо всех ста двадцати. Установщик называет папку по имени пакета
+// (electron-builder пишет её в app-update.yml): finmax-pos-desktop-updater. До 1.4.9
+// здесь стояло прежнее имя пакета, копии в той папке не было, и каждое обновление
+// скачивалось целиком
+export const UPDATER_CACHE_DIR = 'finmax-pos-desktop-updater'
+// Прежняя папка: в ней остались устаревший установщик и докачанное — сотни мегабайт
+export const OLD_UPDATER_CACHE_DIR = 'apteka-desktop-updater'
+
+// Убрать прежнюю папку скачанных обновлений. localAppData — папка %LOCALAPPDATA%.
+// Не вышло (файл ещё занят установщиком) — не беда: попробуем при следующем запуске
+export function dropOldUpdaterCache({ fs, join, localAppData, log }) {
+  if (!localAppData) return false
+  const dir = join(localAppData, OLD_UPDATER_CACHE_DIR)
+  try {
+    if (!fs.existsSync(dir)) return false
+    fs.rmSync(dir, { recursive: true, force: true })
+    log?.info?.('убрана прежняя папка обновлений: ' + dir)
+    return true
+  } catch (e) {
+    log?.warn?.('прежняя папка обновлений пока не убрана: ' + (e?.message || e))
+    return false
+  }
+}
 
 export function feedYaml(feed) {
   const lines =

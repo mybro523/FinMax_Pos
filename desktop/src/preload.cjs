@@ -98,10 +98,13 @@ contextBridge.exposeInMainWorld('apteka', {
     // Чек или Z-отчёт готовыми строками (client/src/lib/ticket.js)
     ticket: (ticket) => ipcRenderer.invoke('print:ticket', ticket),
     test: () => ipcRenderer.invoke('print:test'),
-    // Свой экран печати: лента на выбранный принтер, лист как страница, PDF в файл
+    // Свой экран печати: страницы для предпросмотра (PDF), лента строками, печать
+    // ленты на чековый принтер, печать страниц на выбранный принтер, PDF в файл
+    preview: (req) => ipcRenderer.invoke('print:preview', req),
+    tape: (req) => ipcRenderer.invoke('print:tape', req),
     raw: (req) => ipcRenderer.invoke('print:raw', req),
     page: (req) => ipcRenderer.invoke('print:page', req),
-    pdf: () => ipcRenderer.invoke('print:pdf'),
+    pdf: (req) => ipcRenderer.invoke('print:pdf', req),
   },
 
   // Выгрузка в Excel: страница собирает файл, основная часть спрашивает, куда его

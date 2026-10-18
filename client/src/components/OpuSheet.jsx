@@ -1,11 +1,12 @@
 import { getUser } from '../db/auth'
+import PrintDoc from './PrintDoc'
 import { useT } from '../lib/i18n'
 import { opuSheet } from '../lib/opu'
 import { fmtDate, fmtDateTime } from '../lib/time'
 
 // ── Лист «Отчёт о прибылях и убытках» ──
 // На экране не виден; при печати раздела «Отчёт ОПУ» — единственное, что уходит на
-// бумагу (в обеих вкладках). Форма — как привычный бумажный отчёт владельца: полоса с
+// бумагу (в обеих вкладках): рисуется в печатном слое (PrintDoc). Форма — как привычный бумажный отчёт владельца: полоса с
 // заголовком, «Наименование | Сумма», разделы тёмно-синими полосами, суммы в белых
 // клетках, внизу крупно чистый доход и касса. Цвет — тёмно-синий шапки программы; на
 // бумаге он печатается как есть, на любой теме программы (см. index.css, .opu-sheet).
@@ -28,7 +29,8 @@ export default function OpuSheet({ d, from, to }) {
   const end = to ? new Date(new Date(to).getTime() - 1) : new Date()
   const period = !start || start.getTime() < OLD ? t('за всё время') : `${fmtDate(start)} — ${fmtDate(end)}`
   return (
-    <div className="printable print-sheet opu-sheet" data-testid="opu-sheet">
+    <PrintDoc prio={1} kind="opu" title={t('Отчёт о прибылях и убытках')}>
+    <div className="opu-sheet" data-testid="opu-sheet">
       <div className="opu-sheet-page">
         <div className="opu-sheet-title">
           <div className="opu-sheet-h">{t('Отчёт о прибылях и убытках')}</div>
@@ -62,9 +64,11 @@ export default function OpuSheet({ d, from, to }) {
           </tbody>
         </table>
         <div className="opu-sheet-foot">
-          FinMax POS · {t('Напечатано')}: {fmtDateTime(new Date())}
+          {/* «FinMax POS» и номер страницы — в нижнем поле листа (PrintPageStyle) */}
+          {t('Напечатано')}: {fmtDateTime(new Date())}
         </div>
       </div>
     </div>
+    </PrintDoc>
   )
 }
