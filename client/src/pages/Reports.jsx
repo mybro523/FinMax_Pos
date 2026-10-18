@@ -11,7 +11,8 @@ import { startOfDay, startOfDaysAgo, fmtShort, fmtDateTime } from '../lib/time'
 import { useT, translate as tr } from '../lib/i18n'
 import { periodFinance } from '../lib/finance'
 import { opuFinance } from '../lib/opu'
-import ExportPechat, { PrintSheet } from '../components/ExportPechat'
+import ExportPechat from '../components/ExportPechat'
+import OpuSheet from '../components/OpuSheet'
 import { skachatXlsx } from '../lib/excel'
 import { useCan, getUser } from '../db/auth'
 
@@ -265,12 +266,9 @@ function Opu({ onExcelRef }) {
   if (onExcelRef) onExcelRef.current = opuExcel
 
   return (
-    <div className="printable opu">
-      {/* Шапка видна только на бумаге: чей магазин и за какой период отчёт */}
-      <div className="opu-print-head">
-        <b>{apt}</b>
-        <div>{t('Отчёт ОПУ')} · {applied.from} — {applied.to}</div>
-      </div>
+    <div className="opu">
+      {/* На бумагу идёт только лист «Отчёт о прибылях и убытках» — те же суммы */}
+      <OpuSheet d={d} from={range.from} to={range.to} />
 
       <div className="row no-print" data-tour="opu.period" style={{ maxWidth: 620, marginBottom: 14, gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div className="field" style={{ flex: 1, minWidth: 140, marginBottom: 0 }}>
@@ -340,6 +338,11 @@ export default function Reports() {
   const expenses = useCollection('expenses')
   // Доходы вне продаж: аренда, услуги, бонусы — к чистой прибыли
   const incomes = useCollection('incomes')
+  // Для листа «Отчёт о прибылях и убытках» за период этой вкладки: погашения долгов
+  // клиентов, оплаты поставщикам и приходы (см. lib/opu.js)
+  const debtPayments = useCollection('payments')
+  const supplierPayments = useCollection('supplierPayments')
+  const arrivals = useCollection('arrivals')
   const t = useT()
   // Вкладки: «Отчёт ОПУ» открывается первой, подробная аналитика — рядом.
   // Выбор запоминается: кто живёт в ОПУ, тот в нём и остаётся
@@ -379,7 +382,12 @@ export default function Reports() {
   // которой их сюда и добавляли.
   const needSales = needsServerFor('sales', range.from)
   const needJournals = needsServerFor('returns', range.from)
-  const needsServer = needSales || needJournals
+  // Погашения долгов, оплаты поставщикам и приходы — для листа печати (у каждого своя
+  // глубина кэша)
+  const needPay = needsServerFor('payments', range.from)
+  const needSupPay = needsServerFor('supplierPayments', range.from)
+  const needArr = needsServerFor('arrivals', range.from)
+  const needsServer = needSales || needJournals || needPay || needSupPay || needArr
   const [deep, setDeep] = useState(null) // отрезок, загруженный с сервера
   const [loadingOlder, setLoadingOlder] = useState(false)
 
@@ -397,12 +405,17 @@ export default function Reports() {
       some(needJournals, 'writeoffs'),
       some(needJournals, 'expenses'),
       some(needJournals, 'incomes'),
+      some(needPay, 'payments'),
+      some(needSupPay, 'supplierPayments'),
+      some(needArr, 'arrivals'),
     ])
-      .then(([s, r, w, x, inc]) => { if (!cancelled) setDeep({ sales: s, returns: r, writeoffs: w, expenses: x, incomes: inc }) })
+      .then(([s, r, w, x, inc, pay, sup, arr]) => {
+        if (!cancelled) setDeep({ sales: s, returns: r, writeoffs: w, expenses: x, incomes: inc, payments: pay, supplierPayments: sup, arrivals: arr })
+      })
       .catch(() => { if (!cancelled) setDeep(null) })
       .finally(() => { if (!cancelled) setLoadingOlder(false) })
     return () => { cancelled = true }
-  }, [needsServer, needSales, needJournals, range.from, range.to])
+  }, [needsServer, needSales, needJournals, needPay, needSupPay, needArr, range.from, range.to])
 
   const data = useMemo(
     () =>
@@ -416,6 +429,24 @@ export default function Reports() {
         to: range.to,
       }),
     [sales, returns, writeOffs, expenses, incomes, deep, range],
+  )
+
+  // Лист «Отчёт о прибылях и убытках» за период этой вкладки — его и печатает «Печать»
+  const opuDetail = useMemo(
+    () =>
+      opuFinance({
+        sales: (deep && deep.sales) || sales,
+        returns: (deep && deep.returns) || returns,
+        writeOffs: (deep && deep.writeoffs) || writeOffs,
+        expenses: (deep && deep.expenses) || expenses,
+        incomes: (deep && deep.incomes) || incomes,
+        debtPayments: (deep && deep.payments) || debtPayments,
+        supplierPayments: (deep && deep.supplierPayments) || supplierPayments,
+        arrivals: (deep && deep.arrivals) || arrivals,
+        from: range.from,
+        to: range.to,
+      }),
+    [sales, returns, writeOffs, expenses, incomes, debtPayments, supplierPayments, arrivals, deep, range],
   )
 
   // Снимок склада (не зависит от периода)
@@ -588,7 +619,9 @@ export default function Reports() {
         <button className={'chip ' + (tab === 'detail' ? 'active' : '')} data-tour="rep.tab-detail" onClick={() => setTab('detail')}>{t('Подробно')}</button>
       </div>
 
-      {tab === 'detail' && <PrintSheet zagolovok={t('Отчёты')} podzag={detPodzag} cols={salesCols} rows={salesRows} itogi={salesItogi} />}
+      {/* «Печать» и здесь печатает отчёт о прибылях и убытках — за период этой вкладки.
+          Список продаж уходит в «Экспорт Excel» */}
+      {tab === 'detail' && <OpuSheet d={opuDetail} from={range.from} to={range.to} />}
 
       {tab === 'opu' && <Opu onExcelRef={opuExcelRef} />}
 

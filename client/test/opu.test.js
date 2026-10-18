@@ -11,7 +11,10 @@
 // Запуск: npm test (в папке client)
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { opuFinance, OPU_ZARPLATA, OPU_NALOGI, OPU_MAGAZIN } from '../src/lib/opu.js'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { opuFinance, opuSheet, OPU_ZARPLATA, OPU_NALOGI, OPU_MAGAZIN } from '../src/lib/opu.js'
 
 const from = new Date('2026-01-01T00:00:00Z')
 const to = new Date('2026-02-01T00:00:00Z')
@@ -93,4 +96,47 @@ test('ОПУ: старый приход без способа оплаты — �
     to,
   })
   assert.equal(d.supplierPaid, 250)
+})
+
+// ── Лист «Отчёт о прибылях и убытках» для печати ──
+// Бумага не должна спорить с экраном: на листе — те же суммы, что в расчёте ОПУ, и
+// каждая строка экрана на своём месте
+
+test('лист для печати: все строки таблицы ОПУ и касса, в порядке экрана, с теми же суммами', () => {
+  const e = (category, amount) => ({ date: D, category, amount })
+  const d = opuFinance({
+    sales: [sale(1000, 600, 400), sale(500, 300, 200, 'card')],
+    expenses: [e(OPU_MAGAZIN, 30), e(OPU_NALOGI, 50), e(OPU_ZARPLATA, 100), e('Реклама', 20)],
+    incomes: [{ date: D, amount: 70, category: 'Аренда' }],
+    supplierPayments: [{ date: D, amount: 200 }],
+    debtPayments: [{ createdAt: D, amount: 40 }],
+    from,
+    to,
+  })
+  const rows = opuSheet(d)
+  const value = (label) => rows.find((r) => r.label === label)?.value
+  assert.deepEqual(
+    rows.filter((r) => r.kind !== 'gap' && r.kind !== 'section').map((r) => r.label),
+    ['Продажа', 'Себестоимость', 'Валовой доход', 'Прочие доходы', 'Оплата поставщику', 'Расход магазина', 'Налоги', 'Зарплата', 'Другие расходы', 'Все расходы', 'Чистый доход', 'Касса'],
+  )
+  assert.equal(value('Продажа'), d.prodazha)
+  assert.equal(value('Себестоимость'), d.sebestoimost)
+  assert.equal(value('Валовой доход'), d.valovoy)
+  assert.equal(value('Прочие доходы'), 70)
+  assert.equal(value('Оплата поставщику'), 200)
+  assert.equal(value('Все расходы'), 200)
+  assert.equal(value('Чистый доход'), d.chistiy)
+  assert.equal(value('Касса'), 1000 + 40)
+  // Разделы: доходы, затем расходы; внизу — чистый доход и касса крупно
+  assert.deepEqual(rows.filter((r) => r.kind === 'section').map((r) => r.label), ['Доходы', 'Расходы'])
+  assert.deepEqual(rows.filter((r) => r.kind === 'final').map((r) => r.label), ['Чистый доход', 'Касса'])
+})
+
+test('лист для печати: у каждой подписи есть перевод на таджикский', () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib', 'i18n.js'), 'utf8')
+  const start = src.indexOf('const TG = {')
+  const block = src.slice(start, src.indexOf('\n}', start))
+  const keys = new Set([...block.matchAll(/^\s*'((?:[^'\\]|\\.)*)':/gm)].map((m) => m[1]))
+  const missing = opuSheet(opuFinance({ from, to })).filter((r) => r.label && !keys.has(r.label)).map((r) => r.label)
+  assert.deepEqual(missing, [])
 })

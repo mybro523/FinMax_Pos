@@ -1427,12 +1427,45 @@ tbody tr.clickable { cursor: pointer; }
 .opu-b td { font-weight: 600; }
 .opu-big td { font-size: 15px; }
 @media print {
-  /* На бумаге — шапка и таблица; карточки повторяют те же числа и лист не нужен им */
+  /* Шапка печатного листа раздела (PrintSheet): чей магазин и что за лист */
   .opu-print-head { display: block; text-align: center; margin: 0 0 12px; font-size: 15px; }
   .opu-print-head b { font-size: 17px; }
-  .opu .opu-cards { display: none !important; }
-  .opu .opu-panel { border: none; box-shadow: none; margin-top: 0; }
   .opu-table td, .opu-table th { border-bottom: 1px solid #c7ccd8; }
+}
+
+/* ── Лист «Отчёт о прибылях и убытках» (печать раздела «Отчёт ОПУ») ──
+   Как привычная бумажная форма владельца: полоса с заголовком, «Наименование | Сумма»,
+   разделы полосами, суммы в белых клетках, внизу крупно итог. Цвет — тёмно-синий шапки
+   программы, задан прямо (не переменной): на бумаге он одинаков на любой теме. Цвета
+   печатаются как есть — без этого браузер выбросил бы заливку и оставил белый лист */
+.opu-sheet { display: none; }
+@media print {
+  .printable.opu-sheet { display: block; }
+  .opu-sheet, .opu-sheet * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .opu-sheet-page { max-width: 180mm; margin: 0 auto; color: #0a1a45; font-size: 13px; }
+  .opu-sheet-title { background: #0a1a45 !important; color: #fff; text-align: center; padding: 14px 16px 12px; }
+  .opu-sheet-h { font-size: 22px; font-weight: 800; letter-spacing: 0.01em; line-height: 1.25; }
+  .opu-sheet-sub { margin-top: 4px; font-size: 12px; color: #c9d3f2; }
+  .opu-sheet-table { width: 100%; border-collapse: separate; border-spacing: 0; background: #0a1a45 !important; table-layout: fixed; }
+  .opu-sheet-table th {
+    background: #fff !important; color: #0a1a45; border: 3px solid #0a1a45; padding: 7px 12px;
+    font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; text-align: center;
+  }
+  .opu-sheet-table th:last-child { width: 34%; }
+  .opu-sheet-table td { color: #fff; padding: 6px 14px; border-bottom: 1px dotted rgba(255, 255, 255, 0.35); vertical-align: middle; }
+  .opu-sheet-table td.num {
+    background: #fff !important; color: #0a1a45; border: 3px solid #0a1a45; padding: 4px 12px;
+    text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .opu-sheet-table tr.opu-r-section td { text-align: center; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; font-size: 13.5px; padding: 8px; border-bottom: none; }
+  .opu-sheet-table tr.opu-r-total td:first-child { text-align: right; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; }
+  .opu-sheet-table tr.opu-r-total td.num { font-weight: 800; }
+  .opu-sheet-table tr.opu-r-gap td { height: 10px; padding: 0; border: none; }
+  .opu-sheet-table tr.opu-r-final td:first-child { text-align: right; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; font-size: 15px; padding: 10px 14px; border-bottom: none; }
+  .opu-sheet-table tr.opu-r-final td.num { font-weight: 800; font-size: 17px; padding: 8px 12px; }
+  .opu-sheet-table tr.neg td.num { color: #b42318; }
+  .opu-sheet-table tr { break-inside: avoid; }
+  .opu-sheet-foot { margin-top: 8px; font-size: 10.5px; color: #4a5576; text-align: right; }
 }
 
 /* ── Приход: чем заплатили ── */

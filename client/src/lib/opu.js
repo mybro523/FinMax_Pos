@@ -110,3 +110,33 @@ export function opuFinance({ sales = [], returns = [], writeOffs = [], expenses 
     fin,
   }
 }
+
+// ── Лист «Отчёт о прибылях и убытках» для печати ──
+// Те же строки и суммы, что в таблице вкладки «Отчёт ОПУ» (и «Касса» из карточек), —
+// разложенные по разделам, как в привычной бумажной форме владельца: доходы, оплата
+// поставщику, расходы, внизу крупно итог. Бумага и экран не спорят: суммы берутся из
+// того же расчёта.
+// kind: section — полоса раздела; row — строка; total — итог раздела; gap — пустая
+// полоса между разделами; final — крупные строки в самом низу. Подписи — по-русски,
+// перевод — в словаре (lib/i18n.js)
+export function opuSheet(d) {
+  return [
+    { kind: 'section', label: 'Доходы' },
+    { kind: 'row', label: 'Продажа', value: d.prodazha },
+    { kind: 'row', label: 'Себестоимость', value: d.sebestoimost },
+    { kind: 'total', label: 'Валовой доход', value: d.valovoy },
+    { kind: 'row', label: 'Прочие доходы', value: d.prochieDohody },
+    { kind: 'gap' },
+    { kind: 'row', label: 'Оплата поставщику', value: d.supplierPaid },
+    { kind: 'gap' },
+    { kind: 'section', label: 'Расходы' },
+    { kind: 'row', label: 'Расход магазина', value: d.magazin },
+    { kind: 'row', label: 'Налоги', value: d.nalogi },
+    { kind: 'row', label: 'Зарплата', value: d.zarplata },
+    { kind: 'row', label: 'Другие расходы', value: d.other },
+    { kind: 'total', label: 'Все расходы', value: d.allExpenses },
+    { kind: 'gap' },
+    { kind: 'final', label: 'Чистый доход', value: d.chistiy },
+    { kind: 'final', label: 'Касса', value: d.kassa },
+  ]
+}
