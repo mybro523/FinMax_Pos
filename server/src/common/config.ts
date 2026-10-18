@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common'
+import { passwordProblem } from '../auth/password'
 
 // ── Проверка настроек перед запуском ──
 // Раньше сервер молча стартовал с ключом подписи по умолчанию, если AUTH_SECRET
@@ -45,6 +46,26 @@ export function configProblems(env: NodeJS.ProcessEnv = process.env): string[] {
   }
 
   return out
+}
+
+// ── Пароль владельца сервиса ──
+// Проверяется НЕ при каждом запуске, а только когда владельца сервиса заводят впервые
+// (accounts.service.ts): под ним заводятся все магазины, поэтому слабый или стандартный
+// пароль здесь — то же самое, что открытая дверь ко всем данным. Отдельно от
+// configProblems, чтобы не требовать ADMIN_PASSWORD там, где владелец уже есть и пароль
+// давно сменён, а переменную окружения убрали.
+// Пусто — пароль годится.
+export function superadminPasswordProblem(env: NodeJS.ProcessEnv = process.env): string | null {
+  const pw = env.ADMIN_PASSWORD || ''
+  if (!pw) {
+    return 'ADMIN_PASSWORD не задан — владелец сервиса завёлся бы с паролем «admin», а под ним заводятся все магазины.'
+  }
+  if (pw.toLowerCase() === 'admin') {
+    return 'ADMIN_PASSWORD равен «admin» — это общеизвестный пароль. Задайте свой.'
+  }
+  const weak = passwordProblem(pw)
+  if (weak) return `ADMIN_PASSWORD не годится для владельца сервиса: ${weak.charAt(0).toLowerCase()}${weak.slice(1)}`
+  return null
 }
 
 // Как получить хороший ключ — подсказка прямо в логе, чтобы не искать

@@ -1,7 +1,7 @@
 // Тесты проверки настроек перед запуском. Запуск: npm test (в папке server).
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { configProblems, assertSecureConfig, ConfigError, DEV_SECRET } = require('../dist/common/config')
+const { configProblems, assertSecureConfig, ConfigError, DEV_SECRET, superadminPasswordProblem } = require('../dist/common/config')
 
 const GOOD = 'LzYWQDeljex41vT2QJ05i5dFyxiFemsOfSDJiw38B99L'
 const DB = 'postgresql://user:pw@host:5432/apteka'
@@ -79,4 +79,27 @@ test('в разработке предупреждаем, но работать 
   assert.doesNotThrow(() => assertSecureConfig(log, env({ AUTH_SECRET: DEV_SECRET })))
   assert.equal(log.warns.length, 1)
   assert.match(log.warns[0], /Небезопасные настройки/)
+})
+
+// ── Пароль владельца сервиса ──
+// Под ним заводятся все магазины, поэтому слабый пароль здесь — открытая дверь ко всему
+test('надёжный ADMIN_PASSWORD нареканий не вызывает', () => {
+  assert.equal(superadminPasswordProblem({ ADMIN_PASSWORD: 'K7m-ztv2Qp9wE4' }), null)
+})
+
+test('ADMIN_PASSWORD не задан — завёлся бы admin/admin', () => {
+  assert.match(superadminPasswordProblem({}), /не задан/)
+  assert.match(superadminPasswordProblem({ ADMIN_PASSWORD: '' }), /не задан/)
+  assert.match(superadminPasswordProblem({}), /все магазины/, 'объясняем последствие')
+})
+
+test('ADMIN_PASSWORD = admin распознаётся как общеизвестный', () => {
+  assert.match(superadminPasswordProblem({ ADMIN_PASSWORD: 'admin' }), /общеизвестн/)
+  assert.match(superadminPasswordProblem({ ADMIN_PASSWORD: 'ADMIN' }), /общеизвестн/)
+})
+
+test('короткий или очевидный ADMIN_PASSWORD не годится', () => {
+  assert.match(superadminPasswordProblem({ ADMIN_PASSWORD: '12345' }), /короткий/)
+  assert.match(superadminPasswordProblem({ ADMIN_PASSWORD: '123456' }), /перв/)
+  assert.match(superadminPasswordProblem({ ADMIN_PASSWORD: 'admin123' }), /перв/)
 })
