@@ -1234,6 +1234,8 @@ test('возврат поставщику без связи: товар и до�
   t.srv.state.online = false
   const r1 = await supplierReturn(t)
   assert.equal(r1.status, 201, JSON.stringify(r1.data))
+  // Второй — минутой позже: журнал идёт по времени, новые сверху
+  t.time.now += 60_000
   const r2 = await supplierReturn(t, { refund: 'cash', items: [{ productId: 'nur', qty: 1, price: 95 }] })
   assert.equal(r2.status, 201, JSON.stringify(r2.data))
   assert.equal(await stock(), 2, 'отданный поставщику товар не ушёл со склада')
