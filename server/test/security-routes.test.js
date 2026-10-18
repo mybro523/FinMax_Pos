@@ -48,7 +48,7 @@ test('всё в admin/ — только владельцу сервиса', () =
 test('чувствительные разделы закрыты правами (@Perm)', () => {
   // У этих корней каждое действие обязано спрашивать право: деньги, сотрудники,
   // роли, копии, настройки, устройства
-  const MUST = ['users/', 'roles/', 'backup/backup.controller.ts', 'expenses/', 'incomes/', 'suppliers/', 'categories/']
+  const MUST = ['users/', 'roles/', 'backup/backup.controller.ts', 'expenses/', 'incomes/', 'suppliers/', 'supplier-returns/', 'categories/']
   const offenders = []
   for (const p of controllers) {
     const r = rel(p)

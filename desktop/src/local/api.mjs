@@ -4,12 +4,12 @@
 // не знает разницы: оно просит «/sales», а откуда придёт ответ, решает основная
 // часть программы. Здесь перечислено всё, что касса умеет без интернета:
 // продажа, возврат, смена, долг и его погашение, приход и списание уже заведённого
-// товара, отложенные штрихкоды, новый расход магазина, внесение и изъятие наличных,
-// просмотр товаров, поставщиков и журналов.
+// товара, возврат его поставщику, отложенные штрихкоды, новый расход магазина,
+// внесение и изъятие наличных, просмотр товаров, поставщиков и журналов.
 //
 // Остального здесь нет намеренно — заведение и правка товаров, сотрудники,
-// пересчёт остатков, настройки, правка прихода и расхода, оплата поставщику,
-// история движения товара. Такой запрос уходит на сервер.
+// пересчёт остатков, настройки, правка прихода и расхода, удаление возврата
+// поставщику, оплата поставщику, история движения товара. Такой запрос уходит на сервер.
 import { hasPerm } from './accounts.mjs'
 import { categoriesList, productTypesList, customersList, deferredList, productByBarcode, productsList, productView1 } from './catalog.mjs'
 import { bad, forbidden, q } from './db.mjs'
@@ -22,6 +22,7 @@ import { createIncome, incomeCategoriesList } from './ops/income.mjs'
 import { createCashMove } from './ops/cash.mjs'
 import { suppliersDebts, payServicesList, suppliersList } from './suppliers.mjs'
 import { createReturn } from './ops/return.mjs'
+import { createSupplierReturn } from './ops/supplierreturn.mjs'
 import { checkout, NO_SHIFT_SALE } from './ops/sale.mjs'
 import { closeShift, openShift, shiftView } from './ops/shift.mjs'
 import { createWriteOff } from './ops/writeoff.mjs'
@@ -112,6 +113,8 @@ const ROUTES = [
   ['GET', /^\/returns$/, journal('return')],
   // Журнал приходов — закупочные цены: только с правом на раздел, как на сервере
   ['GET', /^\/arrivals$/, perm(['arrivals.view'], journal('arrival'))],
+  // Возвраты поставщикам — тоже закупочные цены: по тому же праву
+  ['GET', /^\/supplier-returns$/, perm(['arrivals.view'], journal('supplierreturn'))],
   // Списание — это убыток, поэтому журнал видит только владелец
   ['GET', /^\/writeoffs$/, perm(['writeoffs.view', 'reports.view', 'dashboard.view'], journal('writeoff'))],
   ['GET', /^\/payments$/, journal('payment')],
@@ -134,6 +137,7 @@ const ROUTES = [
   ['POST', /^\/sales$/, perm(['pos.sell'], canSell)],
   ['POST', /^\/returns$/, perm(['returns.create'], (ctx) => createReturn(ctx, ctx.body))],
   ['POST', /^\/arrivals$/, perm(['arrivals.create'], canArrive)],
+  ['POST', /^\/supplier-returns$/, perm(['arrivals.return'], (ctx) => createSupplierReturn(ctx, ctx.body))],
   ['POST', /^\/writeoffs$/, perm(['writeoffs.create'], (ctx) => createWriteOff(ctx, ctx.body))],
   ['POST', /^\/expenses$/, perm(['expenses.create'], (ctx) => createExpense(ctx, ctx.body))],
   ['POST', /^\/incomes$/, perm(['incomes.create'], (ctx) => createIncome(ctx, ctx.body))],

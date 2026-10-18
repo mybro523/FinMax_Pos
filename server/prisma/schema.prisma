@@ -37,6 +37,7 @@ model Product {
   batches      Batch[]
   returnItems  SaleReturnItem[]
   writeOffItems WriteOffItem[]
+  supplierReturnItems SupplierReturnItem[]
   inventoryItems InventoryItem[]
   stockEdits   StockEdit[]
 }
@@ -156,6 +157,7 @@ model Supplier {
   createdAt   DateTime          @default(now())
   arrivals    Arrival[]
   payments    SupplierPayment[]
+  returns     SupplierReturn[]
 }
 
 // Оплата поставщику. С отметкой «из кассы» привязана к открытой смене и уменьшает
@@ -178,6 +180,51 @@ model SupplierPayment {
   @@index([supplierId])
   @@index([date])
   @@index([shiftId])
+}
+
+// ── Возврат товара поставщику ──
+// Просрочку, брак или пересорт отдают поставщику назад. Товар уходит со склада (из
+// партий с ближайшим сроком — просроченное тоже: его чаще всего и возвращают), а деньги
+// поставщик возвращает одним из способов: debt — в счёт долга (долг уменьшается),
+// cash — в кассу (наличные в ящик смены shiftId), own — наличными мимо кассы,
+// card — на карту. Владелец может удалить возврат: товар вернётся в те же партии
+model SupplierReturn {
+  id          String               @id @default(cuid())
+  date        DateTime             @default(now())
+  supplierId  String?
+  supplierRef Supplier?            @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  supplier    String               @default("—") // название поставщика — снимком, для истории
+  total       Decimal              @db.Decimal(12, 2) // сумма возврата по цене возврата
+  refund      String               @default("debt")
+  shiftId     String? // смена, в ящик которой положили деньги (refund = cash)
+  note        String               @default("") // причина: просрочка, брак…
+  userId      String?
+  user        User?                @relation(fields: [userId], references: [id])
+  items       SupplierReturnItem[]
+  createdAt   DateTime             @default(now())
+
+  @@index([date])
+  @@index([supplierId])
+  @@index([shiftId])
+}
+
+model SupplierReturnItem {
+  id        String         @id @default(cuid())
+  returnId  String
+  ret       SupplierReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  productId String?
+  product   Product?       @relation(fields: [productId], references: [id])
+  name      String
+  qty       Int // целые упаковки (у весового — килограммы)
+  pieces    Int            @default(0) // штуки (граммы) сверх целых упаковок
+  price     Decimal        @db.Decimal(12, 2) // цена возврата за упаковку (килограмм)
+  cost      Decimal        @default(0) @db.Decimal(12, 2) // закупочная из карточки на момент возврата — снимок
+  // Из каких партий ушёл товар: [{ units, cost, expiryDate }]. Удалили возврат —
+  // товар возвращается в такие же партии, со своими сроками и ценами
+  batches   Json?
+
+  @@index([returnId])
+  @@index([productId])
 }
 
 // ── Внесение и изъятие наличных ──
@@ -300,6 +347,8 @@ model Shift {
   cashOut      Decimal   @default(0) @db.Decimal(12, 2)
   // Оплачено поставщикам наличными из этой кассы
   supplierCash Decimal   @default(0) @db.Decimal(12, 2)
+  // Вернули поставщики наличными в эту кассу (возврат товара поставщику «в кассу»)
+  supplierRefund Decimal @default(0) @db.Decimal(12, 2)
   // Оплачено переводом (в ящик не попадает) и то же по сервисам: { "Alif": 120 }
   salesTransfer Decimal  @default(0) @db.Decimal(12, 2)
   transferBy   Json?
@@ -353,6 +402,7 @@ model User {
   incomes      Income[]
   arrivals     Arrival[]
   supplierPayments SupplierPayment[]
+  supplierReturns  SupplierReturn[]
   cashMoves    CashMove[]
   stockEdits   StockEdit[]
 }

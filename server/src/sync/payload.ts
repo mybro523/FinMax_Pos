@@ -40,6 +40,7 @@ export const OP_TYPES = [
   'expense',
   'cash.move',
   'income',
+  'supplier.return',
 ] as const
 export type OpType = (typeof OP_TYPES)[number]
 
@@ -258,6 +259,38 @@ export function parseArrival(p: any, now?: number) {
     paidCash,
     shiftId: idOrNull(a.shiftId, 'смена'),
     items: items.map((it, n) => ({ ...it, expiryDate: dateOrNull(expiry[n], 'срок годности') })),
+  }
+}
+
+// ── Возврат товара поставщику ──
+// Товар отдан поставщику без связи: со склада кассы он уже ушёл. Деньги — в счёт
+// долга, в кассу (в ящик своей смены), наличными мимо кассы или на карту
+export function parseSupplierReturn(p: any, now?: number) {
+  const r = obj(obj(p, 'возврат поставщику').ret, 'возврат поставщику')
+  const items = list(r.items, 'позиции возврата', (i) => {
+    const row = {
+      id: id(i.id, 'позиция возврата'),
+      productId: id(i.productId, 'товар'),
+      name: text(i.name, 300),
+      qty: int(i.qty, 'упаковки', 0),
+      // Штуки (у весового — граммы) сверх целых упаковок
+      pieces: i.pieces === undefined || i.pieces === null ? 0 : int(i.pieces, 'штуки', 0),
+      price: money(i.price, 'цена возврата'),
+    }
+    if (row.qty <= 0 && row.pieces <= 0) throw new Reject('Пустая позиция возврата')
+    return row
+  })
+  return {
+    id: id(r.id, 'возврат поставщику'),
+    date: when(r.date, 'возврат поставщику', now),
+    // Возвращают конкретному поставщику — без него возврата не бывает
+    supplierId: idOrNull(r.supplierId, 'поставщик') ?? reject('Возврат без поставщика'),
+    supplier: text(r.supplier, 200) || '—',
+    refund: oneOf(r.refund, ['debt', 'cash', 'own', 'card'] as const, 'как вернули деньги'),
+    shiftId: idOrNull(r.shiftId, 'смена'),
+    note: text(r.note, 500),
+    total: money(r.total, 'сумма возврата'),
+    items,
   }
 }
 

@@ -15,15 +15,15 @@ import { Pagination, usePagination } from '../../components/Pagination'
 // Долг на начало и конец считается от нынешнего долга назад, поэтому приходы и
 // оплаты загружены от начала периода до сегодняшнего дня (см. lib/otchety.js).
 
-export function useReports({ suppliers, arrivals, payments, products, range, supplierId, t }) {
+export function useReports({ suppliers, arrivals, payments, returns = [], products, range, supplierId, t }) {
   return useMemo(() => {
-    const sv = sverkaPostavshikov({ suppliers, arrivals, supplierPayments: payments, from: range.from, to: range.to })
+    const sv = sverkaPostavshikov({ suppliers, arrivals, supplierPayments: payments, supplierReturns: returns, from: range.from, to: range.to })
     const rows = supplierId ? sv.rows.filter((r) => r.supplierId === supplierId) : sv.rows
     const sum = (k) => Math.round(rows.reduce((s, r) => s + r[k], 0) * 100) / 100
-    const sverka = { rows, itogo: { nachalo: sum('nachalo'), zakupleno: sum('zakupleno'), oplacheno: sum('oplacheno'), konec: sum('konec') } }
-    const zak = zakupkiIOplaty({ arrivals, supplierPayments: payments, products, from: range.from, to: range.to, supplierId, t })
+    const sverka = { rows, itogo: { nachalo: sum('nachalo'), zakupleno: sum('zakupleno'), vozvrat: sum('vozvrat'), oplacheno: sum('oplacheno'), konec: sum('konec') } }
+    const zak = zakupkiIOplaty({ arrivals, supplierPayments: payments, supplierReturns: returns, products, from: range.from, to: range.to, supplierId, t })
     return { sverka, zak }
-  }, [suppliers, arrivals, payments, products, range, supplierId, t])
+  }, [suppliers, arrivals, payments, returns, products, range, supplierId, t])
 }
 
 export default function Reports({ rep, suppliers, loading, periodLabel }) {
@@ -52,7 +52,7 @@ export default function Reports({ rep, suppliers, loading, periodLabel }) {
             <thead>
               <tr>
                 <th>{t('Поставщик')}</th><th className="num">{t('Долг на начало')}</th><th className="num">{t('Закуплено')}</th>
-                <th className="num">{t('Оплачено')}</th><th className="num">{t('Долг на конец')}</th>
+                <th className="num">{t('Возвращено')}</th><th className="num">{t('Оплачено')}</th><th className="num">{t('Долг на конец')}</th>
               </tr>
             </thead>
             <tbody>
@@ -61,11 +61,12 @@ export default function Reports({ rep, suppliers, loading, periodLabel }) {
                   <td className="cell-main"><b>{nameOf(x)}</b></td>
                   <td className="num" data-label={t('Долг на начало')}>{money(x.nachalo)}</td>
                   <td className="num" data-label={t('Закуплено')}>{money(x.zakupleno)}</td>
+                  <td className="num" data-label={t('Возвращено')}>{money(x.vozvrat)}</td>
                   <td className="num" data-label={t('Оплачено')} style={{ color: x.oplacheno > 0 ? 'var(--green)' : undefined }}>{money(x.oplacheno)}</td>
                   <td className="num" data-label={t('Долг на конец')}><b style={{ color: x.konec > 0 ? 'var(--danger)' : undefined }}>{money(x.konec)}</b></td>
                 </tr>
               ))}
-              {!rep.sverka.rows.length && <tr><td colSpan="5" className="empty">{loading ? t('Загружаем…') : t('За этот период движений по поставщикам нет')}</td></tr>}
+              {!rep.sverka.rows.length && <tr><td colSpan="6" className="empty">{loading ? t('Загружаем…') : t('За этот период движений по поставщикам нет')}</td></tr>}
             </tbody>
             {rep.sverka.rows.length > 1 && (
               <tfoot>
@@ -73,6 +74,7 @@ export default function Reports({ rep, suppliers, loading, periodLabel }) {
                   <td>{t('Итого')}</td>
                   <td className="num">{money(rep.sverka.itogo.nachalo)}</td>
                   <td className="num">{money(rep.sverka.itogo.zakupleno)}</td>
+                  <td className="num">{money(rep.sverka.itogo.vozvrat)}</td>
                   <td className="num">{money(rep.sverka.itogo.oplacheno)}</td>
                   <td className="num">{money(rep.sverka.itogo.konec)}</td>
                 </tr>
@@ -80,7 +82,7 @@ export default function Reports({ rep, suppliers, loading, periodLabel }) {
             )}
           </table>
         </div>
-        <div className="tag-cat" style={{ padding: '10px 16px 14px' }}>{t('Долг на конец = долг на начало + закуплено − оплачено.')}</div>
+        <div className="tag-cat" style={{ padding: '10px 16px 14px' }}>{t('Долг на конец = долг на начало + закуплено − возвращено − оплачено.')}</div>
       </div>
 
       <div className="panel" data-tour="rep.zak" style={{ padding: 0 }}>
@@ -101,7 +103,7 @@ export default function Reports({ rep, suppliers, loading, periodLabel }) {
             </thead>
             <tbody>
               {pg.slice.map((r) => (
-                <tr key={r.id} className={r.kind === 'pay' ? 'zak-pay' : ''}>
+                <tr key={r.id} className={r.kind === 'pay' ? 'zak-pay' : r.kind === 'ret' ? 'zak-ret' : ''}>
                   <td data-label={t('Дата')} style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.date)}</td>
                   <td data-label={t('Поставщик')}>{supName(r)}</td>
                   <td className="cell-main">
@@ -110,9 +112,9 @@ export default function Reports({ rep, suppliers, loading, periodLabel }) {
                     ) : <b>{r.name}</b>}
                   </td>
                   <td className="num" data-label={t('Кол-во')}>{r.qty || '—'}</td>
-                  <td className="num" data-label={t('Цена')}>{r.kind === 'buy' ? money(r.price) : '—'}</td>
-                  <td className="num" data-label={t('Сумма')}>{r.kind === 'buy' ? <b>{money(r.sum)}</b> : '—'}</td>
-                  <td className="num" data-label={t('Оплачено')} style={{ color: r.paid > 0 ? 'var(--green)' : undefined }}>{money(r.paid)}</td>
+                  <td className="num" data-label={t('Цена')}>{r.kind !== 'pay' ? money(r.price) : '—'}</td>
+                  <td className="num" data-label={t('Сумма')}>{r.kind === 'buy' ? <b>{money(r.sum)}</b> : r.kind === 'ret' ? <b>−{money(-r.sum)}</b> : '—'}</td>
+                  <td className="num" data-label={t('Оплачено')} style={{ color: r.paid > 0 ? 'var(--green)' : undefined }}>{r.paid < 0 ? '−' + money(-r.paid) : money(r.paid)}</td>
                   <td className="num" data-label={t('Долг')} style={{ color: r.debt > 0 ? 'var(--danger)' : r.debt < 0 ? 'var(--green)' : undefined }}>
                     {r.debt < 0 ? '−' + money(-r.debt) : money(r.debt)}
                   </td>

@@ -139,6 +139,8 @@ export function shiftTicket(shift, totals, { t, money, when, pharmacy = '', rekv
   rows.push({ label: t('Прибыль'), value: money(totals.netProfit) })
   rows.push({ label: t('Касса на старте'), value: money(shift.openingCash) })
   if ((shift.cashIn || 0) > 0) rows.push({ label: t('Внесено в кассу'), value: '+' + money(shift.cashIn) })
+  // Возврат товара поставщику «в кассу»: поставщик отдал деньги, их положили в ящик
+  if ((shift.supplierRefund || 0) > 0) rows.push({ label: t('Вернули поставщики (нал.)'), value: '+' + money(shift.supplierRefund) })
   if ((shift.refundCash || 0) > 0) rows.push({ label: t('Выдано за возвраты (нал.)'), value: '−' + money(shift.refundCash) })
   // Деньги, взятые из ящика на расходы магазина: без этой строки «ожидалось» не сходится
   // с продажами на бумаге

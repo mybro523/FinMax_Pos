@@ -20,7 +20,7 @@ const inRange = (d, r) => {
   return Number.isFinite(ts) && (!r.from || ts >= r.from.getTime()) && (!r.to || ts < r.to.getTime())
 }
 
-export function useBalance({ supplier, arrivals, payments, range }) {
+export function useBalance({ supplier, arrivals, payments, returns = [], range }) {
   return useMemo(() => {
     if (!supplier) return null
     const myArr = arrivals.filter((a) => a.supplierId === supplier.id && inRange(a.date, range))
@@ -30,8 +30,12 @@ export function useBalance({ supplier, arrivals, payments, range }) {
     const zakupleno = myArr.reduce((s, a) => s + (Number(a.total) || 0), 0)
     const srazu = myArr.reduce((s, a) => s + Math.max(0, (Number(a.total) || 0) - (Number(a.debt) || 0)), 0)
     const pogasheno = myPay.filter((p) => !oplataPrihoda(p)).reduce((s, p) => s + (Number(p.amount) || 0), 0)
-    return { arrivals: myArr, payments: myPay, zakupleno, oplacheno: srazu + pogasheno }
-  }, [supplier, arrivals, payments, range])
+    // Возвраты поставщику: возвращено всего; деньгами — уменьшает оплаченное
+    const myRet = returns.filter((r) => r.supplierId === supplier.id && inRange(r.date, range))
+    const vozvrat = myRet.reduce((s, r) => s + (Number(r.total) || 0), 0)
+    const dengami = myRet.filter((r) => r.refund !== 'debt').reduce((s, r) => s + (Number(r.total) || 0), 0)
+    return { arrivals: myArr, payments: myPay, returns: myRet, zakupleno, vozvrat, oplacheno: srazu + pogasheno - dengami }
+  }, [supplier, arrivals, payments, returns, range])
 }
 
 export default function Balance({ supplier, bal, dolgi, periodLabel, onSelect, onOpenArrival, loading }) {
@@ -54,6 +58,7 @@ export default function Balance({ supplier, bal, dolgi, periodLabel, onSelect, o
       <div className="mini-cards prh-bal-cards" data-tour="bal.cards">
         <div className="mini-card"><div className="m-label">{t('Долг сейчас')}</div><div className="m-value sm" style={{ color: debt > 0 ? 'var(--danger)' : undefined }}>{money(debt)}</div></div>
         <div className="mini-card"><div className="m-label">{t('Закуплено за период')}</div><div className="m-value sm">{money(bal.zakupleno)}</div></div>
+        <div className="mini-card"><div className="m-label">{t('Возвращено за период')}</div><div className="m-value sm">{money(bal.vozvrat)}</div></div>
         <div className="mini-card"><div className="m-label">{t('Оплачено за период')}</div><div className="m-value sm" style={{ color: bal.oplacheno > 0 ? 'var(--green)' : undefined }}>{money(bal.oplacheno)}</div></div>
         <div className="mini-card"><div className="m-label">{t('Начальный долг')}</div><div className="m-value sm">{money(supplier.openingDebt || 0)}</div></div>
         <div className="mini-card"><div className="m-label">{t('Телефон')}</div><div className="m-value sm">{supplier.phone || '—'}</div></div>

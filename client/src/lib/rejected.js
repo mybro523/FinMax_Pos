@@ -99,6 +99,17 @@ export function rejectedDetail(r, t, money = String, fmt = {}) {
       fact(t('Что'), d.kind === 'out' ? t('Изъятие из кассы') : t('Внесение в кассу'))
       fact(t('Примечание'), d.note)
       break
+    case 'supplier.return':
+      // Возврат поставщику сервер не принял — товар по нему на складе снова, долг прежний.
+      // По этим строкам его оформляют заново
+      fact(t('Поставщик'), d.supplier && d.supplier !== '—' ? d.supplier : '')
+      fact(t('Как вернули деньги'), supplierRefundLabel(d.refund, t))
+      fact(t('Причина'), d.note)
+      lines = list(d.lines).map((i) => ({
+        name: i.name || '',
+        text: `${i.qty || 0} ${t('уп')}${i.pieces > 0 ? ` + ${i.pieces} ${t('шт')}` : ''} × ${money(i.price)}`,
+      }))
+      break
     case 'shift.open':
       fact(t('касса на старте'), money(d.openingCash || 0))
       break
@@ -113,6 +124,15 @@ export function rejectedDetail(r, t, money = String, fmt = {}) {
       break
   }
   return { facts, lines }
+}
+
+// Как поставщик вернул деньги за возвращённый ему товар
+function supplierRefundLabel(refund, t) {
+  if (refund === 'debt') return t('В счёт долга')
+  if (refund === 'cash') return t('В кассу')
+  if (refund === 'own') return t('Наличными')
+  if (refund === 'card') return t('На карту')
+  return refund || ''
 }
 
 // Есть ли что показать под «Что было в операции»

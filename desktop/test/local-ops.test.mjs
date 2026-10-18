@@ -662,7 +662,7 @@ test('смена: открытие, привязка чеков, итоги пр
   )
   assert.deepEqual(Object.keys(closed), [
     'id', 'openedAt', 'closedAt', 'openingCash', 'countedCash', 'totalSales', 'salesCash', 'salesCard', 'salesDebt', 'debtPaid',
-    'refundCash', 'refundTotal', 'refundCost', 'expenseCash', 'cashIn', 'cashOut', 'supplierCash', 'salesTransfer', 'transferBy', 'profit',
+    'refundCash', 'refundTotal', 'refundCost', 'expenseCash', 'cashIn', 'cashOut', 'supplierCash', 'supplierRefund', 'salesTransfer', 'transferBy', 'profit',
     'discount', 'count', 'expectedCash', 'difference', 'userId', 'user',
   ])
   // Расходов из кассы за смену не было

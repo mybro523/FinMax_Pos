@@ -17,6 +17,7 @@ export function discrepancyTitle(kind, t) {
   if (kind === 'return') return t('По чеку вернули больше, чем продали')
   if (kind === 'counted') return t('Операция кассы пришла после пересчёта остатка')
   if (kind === 'debt') return t('Сумма больше долга клиента')
+  if (kind === 'supreturn') return t('Поставщику отдали больше, чем было на складе')
   return t('Расхождение')
 }
 

@@ -297,6 +297,67 @@ export function deleteArrival(id) {
     .finally(() => endMutate(['products', 'arrivals']))
 }
 
+// ── Возврат товара поставщику ──
+// Мгновенно, как приход: товар уходит со склада сразу, при отказе сервера — откат.
+// items: [{ productId, name, qty, pieces, price }] — цена возврата за упаковку (кг).
+// refund — как поставщик вернул деньги: debt (в счёт долга) · cash (в кассу смены
+// shiftId) · own (наличными мимо кассы) · card (на карту)
+export function createSupplierReturn({ supplierId, supplier, refund, shiftId, note, items }) {
+  items = items.map((i) => ({ ...i, productId: realId(i.productId) }))
+  if (!items.length) throw new Error('Добавьте хотя бы один товар')
+  const prevP = db.get('products')
+  const prevR = db.get('supplierReturns')
+  const byId = new Map(prevP.map((p) => [p.id, p]))
+  const unitsOf = (i) => i.qty * uppOf(byId.get(i.productId) || {}) + (i.pieces || 0)
+  const total = Math.round(items.reduce((s, i) => s + i.price * (unitsOf(i) / uppOf(byId.get(i.productId) || {})), 0) * 100) / 100
+  const temp = { id: 'tmp_' + uid(), date: serverNow().toISOString(), supplierId, supplier: supplier || '—', refund, note: note || '', total, items }
+
+  setCollection('products', prevP.map((p) => {
+    const it = items.find((i) => i.productId === p.id)
+    return it ? { ...p, ...splitUnits(Math.max(0, stockUnits(p) - unitsOf(it)), p) } : p
+  }))
+  setCollection('supplierReturns', [temp, ...prevR])
+
+  const keys = ['products', 'supplierReturns', 'suppliers', 'shifts']
+  beginMutate(keys)
+  return api
+    .post('/supplier-returns', {
+      supplierId,
+      refund,
+      ...(refund === 'cash' && shiftId ? { shiftId } : {}),
+      ...(note ? { note } : {}),
+      items: items.map((i) => ({ productId: i.productId, qty: i.qty, ...(i.pieces > 0 ? { pieces: i.pieces } : {}), price: i.price })),
+    })
+    .then((ret) => {
+      setCollection('supplierReturns', db.get('supplierReturns').map((r) => (r.id === temp.id ? ret : r)))
+      // Себестоимость и остатки считает сервер; в счёт долга — изменился долг, в кассу — смена
+      refresh('products', 'suppliers', ...(refund === 'cash' ? ['shifts'] : []))
+      return ret
+    })
+    .catch((e) => {
+      setCollection('products', prevP)
+      setCollection('supplierReturns', prevR)
+      throw new Error('Возврат не сохранён: ' + e.message)
+    })
+    .finally(() => endMutate(keys))
+}
+
+// Удалить возврат (владелец): товар снова на складе, долг или деньги в кассе — назад
+export function deleteSupplierReturn(id) {
+  const prevR = db.get('supplierReturns')
+  setCollection('supplierReturns', prevR.filter((r) => r.id !== id))
+  const keys = ['products', 'supplierReturns', 'suppliers', 'shifts']
+  beginMutate(keys)
+  return api
+    .del(`/supplier-returns/${realId(id)}`)
+    .then(() => refresh('products', 'suppliers', 'shifts'))
+    .catch((e) => {
+      setCollection('supplierReturns', prevR)
+      throw e
+    })
+    .finally(() => endMutate(keys))
+}
+
 // Погасить долг клиента — мгновенно, сверка с сервером
 export function payDebt(customerId, amount) {
   customerId = realId(customerId)

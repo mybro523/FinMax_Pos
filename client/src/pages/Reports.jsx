@@ -92,9 +92,10 @@ function OpuModal({ kind, d, onClose }) {
       rows: [
         ['Оплаты поставщикам (долги и «из кассы»)', d.paidZapisi],
         ['Оплачено сразу при приходе', d.paidPriPrihode],
+        ...(d.vozvratDengami > 0 ? [['Вернули поставщики деньгами за возвращённый товар', -d.vozvratDengami]] : []),
       ],
       total: ['Отдано поставщикам', d.supplierPaid],
-      text: 'Все деньги, отданные поставщикам за период: оплаты из раздела «Поставщики» и приходы, оплаченные сразу. Долг перед поставщиком попадает сюда только после оплаты.',
+      text: 'Все деньги, отданные поставщикам за период: оплаты из раздела «Поставщики» и приходы, оплаченные сразу, минус деньги, которые поставщики вернули за возвращённый им товар. Долг перед поставщиком попадает сюда только после оплаты.',
     },
     dohody: {
       title: 'Прочие доходы',
@@ -170,7 +171,7 @@ function OpuModal({ kind, d, onClose }) {
   )
 }
 
-const OPU_KEYS = ['sales', 'returns', 'writeoffs', 'expenses', 'incomes', 'payments', 'supplierPayments', 'arrivals']
+const OPU_KEYS = ['sales', 'returns', 'writeoffs', 'expenses', 'incomes', 'payments', 'supplierPayments', 'arrivals', 'supplierReturns']
 const dstr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 function Opu({ onExcelRef }) {
@@ -184,6 +185,8 @@ function Opu({ onExcelRef }) {
   const debtPayments = useCollection('payments')
   const supplierPayments = useCollection('supplierPayments')
   const arrivals = useCollection('arrivals')
+  // Возвраты товара поставщикам: деньги, которые они вернули, уменьшают «Оплату поставщику»
+  const supplierReturns = useCollection('supplierReturns')
 
   // По умолчанию — текущий месяц: даты сразу видны в полях, цифры считаются сразу.
   // «Показать» применяет то, что введено, — цифры не прыгают при каждом нажатии клавиши
@@ -229,10 +232,11 @@ function Opu({ onExcelRef }) {
         debtPayments: (deep && deep.payments) || debtPayments,
         supplierPayments: (deep && deep.supplierPayments) || supplierPayments,
         arrivals: (deep && deep.arrivals) || arrivals,
+        supplierReturns: (deep && deep.supplierReturns) || supplierReturns,
         from: range.from,
         to: range.to,
       }),
-    [deep, sales, returns, writeOffs, expenses, incomes, debtPayments, supplierPayments, arrivals, range],
+    [deep, sales, returns, writeOffs, expenses, incomes, debtPayments, supplierPayments, arrivals, supplierReturns, range],
   )
 
   const apt = getUser()?.pharmacy?.name || ''
@@ -343,6 +347,7 @@ export default function Reports() {
   const debtPayments = useCollection('payments')
   const supplierPayments = useCollection('supplierPayments')
   const arrivals = useCollection('arrivals')
+  const supplierReturns = useCollection('supplierReturns')
   const t = useT()
   // Вкладки: «Отчёт ОПУ» открывается первой, подробная аналитика — рядом.
   // Выбор запоминается: кто живёт в ОПУ, тот в нём и остаётся
@@ -387,7 +392,8 @@ export default function Reports() {
   const needPay = needsServerFor('payments', range.from)
   const needSupPay = needsServerFor('supplierPayments', range.from)
   const needArr = needsServerFor('arrivals', range.from)
-  const needsServer = needSales || needJournals || needPay || needSupPay || needArr
+  const needSupRet = needsServerFor('supplierReturns', range.from)
+  const needsServer = needSales || needJournals || needPay || needSupPay || needArr || needSupRet
   const [deep, setDeep] = useState(null) // отрезок, загруженный с сервера
   const [loadingOlder, setLoadingOlder] = useState(false)
 
@@ -408,14 +414,15 @@ export default function Reports() {
       some(needPay, 'payments'),
       some(needSupPay, 'supplierPayments'),
       some(needArr, 'arrivals'),
+      some(needSupRet, 'supplierReturns'),
     ])
-      .then(([s, r, w, x, inc, pay, sup, arr]) => {
-        if (!cancelled) setDeep({ sales: s, returns: r, writeoffs: w, expenses: x, incomes: inc, payments: pay, supplierPayments: sup, arrivals: arr })
+      .then(([s, r, w, x, inc, pay, sup, arr, supRet]) => {
+        if (!cancelled) setDeep({ sales: s, returns: r, writeoffs: w, expenses: x, incomes: inc, payments: pay, supplierPayments: sup, arrivals: arr, supplierReturns: supRet })
       })
       .catch(() => { if (!cancelled) setDeep(null) })
       .finally(() => { if (!cancelled) setLoadingOlder(false) })
     return () => { cancelled = true }
-  }, [needsServer, needSales, needJournals, needPay, needSupPay, needArr, range.from, range.to])
+  }, [needsServer, needSales, needJournals, needPay, needSupPay, needArr, needSupRet, range.from, range.to])
 
   const data = useMemo(
     () =>
@@ -443,10 +450,11 @@ export default function Reports() {
         debtPayments: (deep && deep.payments) || debtPayments,
         supplierPayments: (deep && deep.supplierPayments) || supplierPayments,
         arrivals: (deep && deep.arrivals) || arrivals,
+        supplierReturns: (deep && deep.supplierReturns) || supplierReturns,
         from: range.from,
         to: range.to,
       }),
-    [sales, returns, writeOffs, expenses, incomes, debtPayments, supplierPayments, arrivals, deep, range],
+    [sales, returns, writeOffs, expenses, incomes, debtPayments, supplierPayments, arrivals, supplierReturns, deep, range],
   )
 
   // Снимок склада (не зависит от периода)

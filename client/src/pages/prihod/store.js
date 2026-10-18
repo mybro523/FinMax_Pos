@@ -30,6 +30,12 @@ export const blankForm = () => ({
 
 const blankPay = (sourceId = '') => ({ method: '', paid: '', fromCash: false, sourceId })
 
+// ── Возврат поставщику, начатый, но не оформленный ──
+// Строки (lib/prihod.js: retLineFromProduct), форма добавления, как поставщик вернул
+// деньги (debt · cash · own · card) и причина
+export const blankRetForm = () => ({ productId: '', q: '', qty: '1', pieces: '', price: '', editKey: '' })
+const blankRet = (sourceId = '') => ({ lines: [], form: blankRetForm(), refund: '', note: '', sourceId })
+
 const blank = (owner = '') => ({
   owner,
   supplierId: '',
@@ -42,6 +48,7 @@ const blank = (owner = '') => ({
   form: blankForm(),
   pay: blankPay(),
   flash: '', // строка, которую только что добавили или нашли сканером
+  ret: blankRet(), // возврат поставщику (вкладка «Возврат»)
 })
 
 let state = blank()
@@ -81,3 +88,8 @@ export const setPay = (patch) => setPrihod((s) => ({ pay: { ...s.pay, ...patch }
 export function resetDraft() {
   setPrihod((s) => ({ lines: [], checked: [], discAll: false, form: blankForm(), pay: blankPay(s.pay.sourceId), sub: 'add', flash: '' }))
 }
+
+export const setRet = (patch) => setPrihod((s) => ({ ret: { ...s.ret, ...(typeof patch === 'function' ? patch(s.ret) : patch) } }))
+export const setRetForm = (patch) => setRet((r) => ({ form: { ...r.form, ...(typeof patch === 'function' ? patch(r.form) : patch) } }))
+// Возврат оформлен — чистый лист; касса, в которую клали деньги, остаётся
+export const resetRet = () => setPrihod((s) => ({ ret: blankRet(s.ret.sourceId) }))

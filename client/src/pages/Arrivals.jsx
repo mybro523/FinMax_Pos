@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { LuTrash2, LuPencil, LuList, LuPackagePlus, LuWallet, LuChartColumn, LuSearch, LuRotateCcw } from 'react-icons/lu'
+import { LuTrash2, LuPencil, LuList, LuPackagePlus, LuWallet, LuChartColumn, LuSearch, LuRotateCcw, LuUndo2 } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { isVesovoy, uppOf, gramsOfKg, kgText, edinica } from '../lib/units'
 import { Modal, useToast, useDialog } from '../components/ui'
@@ -22,6 +22,7 @@ import { SupplierPick } from './prihod/SupplierPick'
 import NewArrival from './prihod/NewArrival'
 import Balance, { useBalance } from './prihod/Balance'
 import Reports, { useReports } from './prihod/Reports'
+import ReturnTab, { REFUNDS } from './prihod/ReturnTab'
 
 // ── Приход товара ──
 // Один экран, как в привычных программах приёмки: слева — поставщики, сверху — период
@@ -71,6 +72,7 @@ export default function Arrivals() {
   const suppliers = useCollection('suppliers')
   const arrivalsCached = useCollection('arrivals')
   const paymentsCached = useCollection('supplierPayments')
+  const returnsCached = useCollection('supplierReturns')
   const supView = can('suppliers.view')
 
   // ── Период сверху — общий для всех вкладок ──
@@ -79,9 +81,10 @@ export default function Arrivals() {
   const range = useMemo(() => periodRange(period), [period])
   const periodLabel = periodText(period, t)
   // От начала периода до сегодня: сверке нужны и оплаты после периода
-  const { deep, loading } = useDeepPeriod(supView ? ['arrivals', 'supplierPayments'] : ['arrivals'], range, { untilNow: true })
+  const { deep, loading } = useDeepPeriod(supView ? ['arrivals', 'supplierPayments', 'supplierReturns'] : ['arrivals', 'supplierReturns'], range, { untilNow: true })
   const arrivals = useMemo(() => mergeById(deep.arrivals, arrivalsCached).sort(byDateDesc), [deep.arrivals, arrivalsCached])
   const payments = useMemo(() => (supView ? mergeById(deep.supplierPayments, paymentsCached) : []), [supView, deep.supplierPayments, paymentsCached])
+  const supReturns = useMemo(() => mergeById(deep.supplierReturns, returnsCached), [deep.supplierReturns, returnsCached])
 
   // ── Поставщик слева ──
   const sup = suppliers.find((s) => s.id === st.supplierId) || null
@@ -94,6 +97,7 @@ export default function Arrivals() {
   const TABS = [
     { key: 'journal', label: t('Поступления'), Icon: LuList, tour: 'arr.tab-journal', ok: true },
     { key: 'new', label: t('Новое поступление'), Icon: LuPackagePlus, tour: 'arr.new', ok: can('arrivals.create'), badge: st.lines.length },
+    { key: 'return', label: t('Возврат'), Icon: LuUndo2, tour: 'arr.tab-return', ok: true, badge: st.ret.lines.length },
     { key: 'balance', label: t('Платежи и баланс'), Icon: LuWallet, tour: 'arr.tab-balance', ok: supView },
     { key: 'reports', label: t('Отчёты'), Icon: LuChartColumn, tour: 'arr.tab-reports', ok: supView },
   ].filter((x) => x.ok)
@@ -158,9 +162,9 @@ export default function Arrivals() {
           : num(a.debt) > 0 ? `${t('В долг')} (${money(a.debt)})` : '—'
 
   // ── Платежи и баланс, отчёты ──
-  const bal = useBalance({ supplier: sup, arrivals, payments, range })
+  const bal = useBalance({ supplier: sup, arrivals, payments, returns: supReturns, range })
   const dolgi = useDolgiPostavshikam({ enabled: supView })
-  const rep = useReports({ suppliers, arrivals, payments, products, range, supplierId: st.supplierId, t })
+  const rep = useReports({ suppliers, arrivals, payments, returns: supReturns, products, range, supplierId: st.supplierId, t })
 
   // ── Excel и печать — того, что на открытой вкладке ──
   const shop = getUser()?.pharmacy?.name || ''
@@ -177,6 +181,19 @@ export default function Arrivals() {
     const rows = journal.map((a) => ({ date: fmtDateTime(a.date), supplier: a.supplier || '—', pay: sposob(a), poz: (a.items || []).length, total: num(a.total) }))
     const itogi = { date: t('Итого'), poz: journal.reduce((s, a) => s + (a.items || []).length, 0), total: journalSum }
     sheet = { zagolovok: t('Приход товара'), podzag: `${podzag} · ${t('Найдено записей')}: ${journal.length}`, cols, rows, itogi }
+  } else if (tab === 'return') {
+    const list = supReturns.filter((r) => inRange(r.date, range) && (!st.supplierId || r.supplierId === st.supplierId)).sort(byDateDesc)
+    const cols = [
+      { header: t('Дата'), key: 'date', width: 18 },
+      { header: t('Поставщик'), key: 'supplier', width: 28 },
+      { header: t('Позиций'), key: 'poz', width: 10, num: true },
+      { header: t('Сумма'), key: 'total', width: 14, money: true },
+      { header: t('Как вернули деньги'), key: 'refund', width: 18 },
+      { header: t('Причина'), key: 'note', width: 26 },
+      { header: t('Принял'), key: 'user', width: 14 },
+    ]
+    const rows = list.map((r) => ({ date: fmtDateTime(r.date), supplier: r.supplier || '—', poz: (r.items || []).length, total: num(r.total), refund: t(REFUNDS[r.refund]?.[0] || '—'), note: r.note || '', user: r.user?.name || '' }))
+    sheet = { zagolovok: t('Возвраты поставщикам'), podzag: `${podzag} · ${t('Найдено записей')}: ${list.length}`, cols, rows, itogi: { date: t('Итого'), total: Math.round(list.reduce((s, r) => s + num(r.total), 0) * 100) / 100 } }
   } else if (tab === 'balance' && sup && bal) {
     const cols = [
       { header: t('Дата'), key: 'date', width: 18 },
@@ -210,10 +227,11 @@ export default function Arrivals() {
       { header: t('Поставщик'), key: 'name', width: 34 },
       { header: t('Долг на начало'), key: 'nachalo', width: 16, money: true },
       { header: t('Закуплено'), key: 'zakupleno', width: 16, money: true },
+      { header: t('Возвращено'), key: 'vozvrat', width: 16, money: true },
       { header: t('Оплачено'), key: 'oplacheno', width: 16, money: true },
       { header: t('Долг на конец'), key: 'konec', width: 16, money: true },
     ]
-    const svRows = rep.sverka.rows.map((x) => ({ name: nameOf(x), nachalo: x.nachalo, zakupleno: x.zakupleno, oplacheno: x.oplacheno, konec: x.konec }))
+    const svRows = rep.sverka.rows.map((x) => ({ name: nameOf(x), nachalo: x.nachalo, zakupleno: x.zakupleno, vozvrat: x.vozvrat, oplacheno: x.oplacheno, konec: x.konec }))
     const zCols = [
       { header: t('Дата'), key: 'date', width: 17 },
       { header: t('Поставщик'), key: 'supplier', width: 24 },
@@ -226,7 +244,7 @@ export default function Arrivals() {
       { header: t('Принял'), key: 'user', width: 14 },
     ]
     const supName = (r) => r.supplier || (r.supplierId ? suppliers.find((s) => s.id === r.supplierId)?.name : '') || t('без поставщика')
-    const zRows = rep.zak.rows.map((r) => ({ date: fmtDateTime(r.date), supplier: supName(r), name: r.name, qty: r.qty, price: r.kind === 'buy' ? r.price : '', sum: r.kind === 'buy' ? r.sum : '', paid: r.paid, debt: r.debt, user: r.user || '' }))
+    const zRows = rep.zak.rows.map((r) => ({ date: fmtDateTime(r.date), supplier: supName(r), name: r.name, qty: r.qty, price: r.kind !== 'pay' ? r.price : '', sum: r.kind !== 'pay' ? r.sum : '', paid: r.paid, debt: r.debt, user: r.user || '' }))
     sheet = {
       zagolovok: t('Закупки и оплаты поставщикам'),
       podzag,
@@ -330,6 +348,10 @@ export default function Arrivals() {
           )}
 
           {tab === 'new' && <NewArrival products={products} suppliers={suppliers} onSaved={() => setPrihod({ tab: 'journal' })} />}
+
+          {tab === 'return' && (
+            <ReturnTab products={products} suppliers={suppliers} sup={sup} arrivals={arrivals} returns={supReturns} range={range} loading={loading} periodLabel={periodLabel} />
+          )}
 
           {tab === 'balance' && (
             <Balance supplier={sup} bal={bal} dolgi={dolgi} periodLabel={periodLabel} loading={loading} onSelect={(id) => setPrihod({ supplierId: id })} onOpenArrival={setView} />

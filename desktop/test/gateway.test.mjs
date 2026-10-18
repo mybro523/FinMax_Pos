@@ -1218,6 +1218,78 @@ test('сервер отверг расход: владелец видит его
   assert.ok(t.events.some((x) => x.type === 'changed' && [].concat(x.payload).includes('expenses')))
 })
 
+// ── Возврат товара поставщику ──
+
+const supplierReturn = (t, over = {}) =>
+  t.req('POST', '/supplier-returns', { supplierId: 'sup-1', refund: 'debt', note: 'брак', items: [{ productId: 'nur', qty: 2, price: 90 }], ...over })
+
+test('возврат поставщику без связи: товар и долг — сразу, на сервер уходит один раз, ничего не задваивается', async (tt) => {
+  const t = await loggedIn()
+  tt.after(() => t.gw.close())
+  const stock = async () => (await t.req('GET', '/products')).data.find((p) => p.id === 'nur').stock
+  const debt = async () => (await t.req('GET', '/suppliers')).data.find((s) => s.id === 'sup-1').debt
+  const refund = async () => (await t.req('GET', '/shifts')).data.find((s) => !s.closedAt).supplierRefund
+
+  // Интернета нет — поставщик забирает брак: часть в счёт долга, часть деньгами в кассу
+  t.srv.state.online = false
+  const r1 = await supplierReturn(t)
+  assert.equal(r1.status, 201, JSON.stringify(r1.data))
+  const r2 = await supplierReturn(t, { refund: 'cash', items: [{ productId: 'nur', qty: 1, price: 95 }] })
+  assert.equal(r2.status, 201, JSON.stringify(r2.data))
+  assert.equal(await stock(), 2, 'отданный поставщику товар не ушёл со склада')
+  assert.equal(await debt(), 320, 'возврат в счёт долга не уменьшил долг')
+  assert.equal(await refund(), 95, 'деньги поставщика не легли в ящик смены')
+  assert.deepEqual((await t.req('GET', '/supplier-returns?days=180')).data.map((r) => r.id), [r2.data.id, r1.data.id])
+  await settle(t)
+  assert.equal(t.gw.status().pending, 2)
+  assert.equal(t.srv.state.received.filter((o) => o.type === 'supplier.return').length, 0)
+
+  // Связь вернулась: возвраты уходят сами, по одному разу, и цифры те же
+  t.srv.state.online = true
+  await t.gw.syncNow()
+  const sent = t.srv.state.received.filter((o) => o.type === 'supplier.return')
+  assert.deepEqual(sent.map((o) => o.payload.ret.id), [r1.data.id, r2.data.id])
+  assert.equal(sent[0].deviceId, t.gw.deviceId)
+  assert.equal(t.gw.status().pending, 0)
+  assert.equal(t.srv.state.data.suppliers.find((s) => s.id === 'sup-1').debt, 320)
+  assert.equal(await debt(), 320, 'принятый возврат вычтен из долга дважды или потерян')
+  assert.equal(await stock(), 2)
+  assert.equal(await refund(), 95, 'принятый возврат «в кассу» посчитан дважды или потерян')
+  const journal = (await t.req('GET', '/supplier-returns?days=180')).data
+  assert.deepEqual(journal.map((r) => [r.id, r.server]), [[r2.data.id, true], [r1.data.id, true]])
+
+  // Смена сходится: 0 на начало + 95 от поставщика
+  const closed = await t.req('POST', '/shifts/close', { countedCash: 95 })
+  assert.deepEqual([closed.data.supplierRefund, closed.data.expectedCash, closed.data.difference], [95, 95, 0])
+})
+
+test('удалить возврат поставщику умеет только сервер: неотправленный — нельзя, без связи — честное объяснение', async (tt) => {
+  const t = await loggedIn()
+  tt.after(() => t.gw.close())
+  t.srv.state.online = false
+  const r = await supplierReturn(t)
+  t.srv.reset()
+  const del = await t.req('DELETE', '/supplier-returns/' + r.data.id)
+  assert.equal(del.status, 409)
+  assert.equal(del.data.message, MESSAGES.notSent)
+  assert.equal(t.srv.state.calls.length, 0)
+
+  // Ушёл на сервер; связь пропала — объяснение про возврат, а не общее «только с интернетом»
+  t.srv.state.online = true
+  await t.gw.syncNow()
+  t.srv.state.online = false
+  const off = await t.req('DELETE', '/supplier-returns/' + r.data.id)
+  assert.equal(off.status, 0)
+  assert.equal(off.data.message, MESSAGES.supplierReturnOnline)
+
+  // Со связью — удаляет сервер, и касса сразу знает: товар и долг вернулись
+  t.srv.state.online = true
+  assert.equal((await t.req('DELETE', '/supplier-returns/' + r.data.id)).status, 200)
+  assert.deepEqual((await t.req('GET', '/supplier-returns?days=180')).data, [])
+  assert.equal((await t.req('GET', '/suppliers')).data.find((s) => s.id === 'sup-1').debt, 500)
+  assert.equal((await t.req('GET', '/products')).data.find((p) => p.id === 'nur').stock, 5)
+})
+
 // ── Объяснения для человека переведены ──
 
 test('у каждого объяснения программы есть таджикский перевод в интерфейсе', () => {

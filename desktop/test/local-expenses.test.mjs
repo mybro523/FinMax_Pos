@@ -156,7 +156,7 @@ test('расход из кассы ложится в смену этой кас�
   assert.equal(closed.profit, 50)
   assert.deepEqual(Object.keys(closed), [
     'id', 'openedAt', 'closedAt', 'openingCash', 'countedCash', 'totalSales', 'salesCash', 'salesCard', 'salesDebt', 'debtPaid',
-    'refundCash', 'refundTotal', 'refundCost', 'expenseCash', 'cashIn', 'cashOut', 'supplierCash', 'salesTransfer', 'transferBy', 'profit',
+    'refundCash', 'refundTotal', 'refundCost', 'expenseCash', 'cashIn', 'cashOut', 'supplierCash', 'supplierRefund', 'salesTransfer', 'transferBy', 'profit',
     'discount', 'count', 'expectedCash', 'difference', 'userId', 'user',
   ])
   // Смена закрыта — брать из неё деньги больше нельзя

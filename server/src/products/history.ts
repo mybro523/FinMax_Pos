@@ -5,7 +5,7 @@ import { totalUnits, uppOf } from '../common/stock'
 // ── История движения товара ──
 // «Куда делись пять упаковок?» — раньше ответ собирали по четырём журналам. Здесь все
 // движения одного товара в одном списке: приход, продажа, возврат, списание, пересчёт,
-// правка остатка в карточке. У каждой строки — дата, сколько штук, кто сделал и
+// правка остатка в карточке, возврат поставщику. У каждой строки — дата, сколько штук, кто сделал и
 // остаток после неё.
 //
 // Остаток после каждой строки считается от нынешнего назад: сегодняшний остаток
@@ -18,7 +18,7 @@ type Db = Prisma.TransactionClient | { [k: string]: any }
 type Range = { gte?: Date; lte?: Date; gt?: Date } | undefined
 
 export interface HistoryRow {
-  kind: 'arrival' | 'sale' | 'return' | 'writeoff' | 'inventory' | 'edit'
+  kind: 'arrival' | 'sale' | 'return' | 'writeoff' | 'inventory' | 'edit' | 'supreturn'
   date: Date
   // Сколько штук прибавилось (плюс) или ушло (минус)
   delta: number
@@ -46,7 +46,7 @@ const who = (u: { name: string } | null | undefined) => u?.name || ''
 
 async function rowsOf(db: Db, productId: string, upp: number, range: Range): Promise<HistoryRow[]> {
   const dated = range ? { date: range } : {}
-  const [sales, returns, arrivals, writeoffs, counts, edits] = await Promise.all([
+  const [sales, returns, arrivals, writeoffs, counts, edits, supReturns] = await Promise.all([
     db.saleItem.findMany({
       where: { productId, sale: dated },
       include: { sale: { select: { id: true, date: true, user: { select: { name: true } } } } },
@@ -73,6 +73,11 @@ async function rowsOf(db: Db, productId: string, upp: number, range: Range): Pro
       take: 5000,
     }),
     db.stockEdit.findMany({ where: { productId, ...dated }, include: { user: { select: { name: true } } }, take: 5000 }),
+    db.supplierReturnItem.findMany({
+      where: { productId, ret: dated },
+      include: { ret: { select: { id: true, date: true, supplier: true, note: true, user: { select: { name: true } } } } },
+      take: 5000,
+    }),
   ])
 
   const out: HistoryRow[] = []
@@ -80,8 +85,9 @@ async function rowsOf(db: Db, productId: string, upp: number, range: Range): Pro
     out.push({
       kind: 'arrival',
       date: a.arrival.date,
-      // Приход хранит упаковки — в штуки переводим по нынешней упаковке товара
-      delta: a.qty * upp,
+      // Приход хранит упаковки и штуки сверх них (у весового — граммы) — в штуки
+      // переводим по нынешней упаковке товара
+      delta: a.qty * upp + (a.pieces || 0),
       moves: true,
       docId: a.arrival.id,
       who: who(a.arrival.user),
@@ -145,6 +151,20 @@ async function rowsOf(db: Db, productId: string, upp: number, range: Range): Pro
   }
   for (const e of edits) {
     out.push({ kind: 'edit', date: e.date, delta: e.toUnits - e.fromUnits, moves: true, docId: e.id, who: who(e.user), expected: e.fromUnits, actual: e.toUnits })
+  }
+  for (const r of supReturns) {
+    // Отдали поставщику — товар ушёл со склада, как при продаже
+    out.push({
+      kind: 'supreturn',
+      date: r.ret.date,
+      delta: -(r.qty * upp + (r.pieces || 0)),
+      moves: true,
+      docId: r.ret.id,
+      who: who(r.ret.user),
+      price: n(r.price),
+      supplier: r.ret.supplier,
+      note: r.ret.note,
+    })
   }
   return out
 }

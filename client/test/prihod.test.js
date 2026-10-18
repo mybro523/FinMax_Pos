@@ -2,7 +2,7 @@
 // строка для отправки. Запуск: npm test (в папке client)
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { discCost, discPct, lineFromProduct, lineUnits, linePacks, lineTotal, lineBase, lineRetail, summary, qtyText, packText, lineProblem, toItem, piecePrice } from '../src/lib/prihod.js'
+import { discCost, discPct, lineFromProduct, lineUnits, linePacks, lineTotal, lineBase, lineRetail, summary, qtyText, packText, lineProblem, toItem, piecePrice, lastSupplierCost, retLineFromProduct, retLineSum, retSummary, retProblem, toRetItem } from '../src/lib/prihod.js'
 
 const par = { id: 'par', name: 'Парацетамол', barcode: '4870001', category: 'Таблетки', unit: 'уп', unitsPerPack: 20, cost: 120, price: 150 }
 const voda = { id: 'voda', name: 'Вода', barcode: '4870002', unit: 'шт', unitsPerPack: 1, cost: 4, price: 6 }
@@ -96,4 +96,40 @@ test('строка для отправки: цена со скидкой, про
     toItem(line(sahar, { qty: '12,35', base: '8' })),
     { productId: 'sahar', name: 'Сахар', qty: 12, pieces: 350, cost: 8, discount: 0, expiryDate: '' },
   )
+})
+
+// ── Возврат поставщику ──
+const arrivals = [
+  // свежие первыми
+  { supplierId: 'sup-b', items: [{ productId: 'par', cost: 99 }] },
+  { supplierId: 'sup-a', items: [{ productId: 'voda', cost: 3.5 }, { productId: 'par', cost: 102 }] },
+  { supplierId: 'sup-a', items: [{ productId: 'par', cost: 110 }] },
+]
+
+test('цена возврата — по последнему приходу от этого поставщика, иначе закупочная', () => {
+  assert.equal(lastSupplierCost(arrivals, 'sup-a', 'par'), 102, 'берётся самый свежий приход именно этого поставщика')
+  assert.equal(lastSupplierCost(arrivals, 'sup-b', 'par'), 99)
+  assert.equal(lastSupplierCost(arrivals, 'sup-c', 'par'), null)
+  assert.equal(lastSupplierCost(arrivals, '', 'par'), null, 'поставщик не выбран — искать не у кого')
+  const fromA = retLineFromProduct({ ...par, stock: 9, looseUnits: 4 }, { arrivals, supplierId: 'sup-a' })
+  assert.deepEqual([fromA.price, fromA.fromArrival, fromA.stock], ['102', true, 184])
+  const fromCard = retLineFromProduct({ ...par, stock: 9, looseUnits: 4 }, { arrivals, supplierId: 'sup-c' })
+  assert.deepEqual([fromCard.price, fromCard.fromArrival], ['120', false])
+})
+
+test('возврат: «2 уп + 5 шт» × цена, больше остатка — нельзя, просроченное — можно', () => {
+  const l = { ...retLineFromProduct({ ...par, stock: 3, looseUnits: 0 }, { arrivals, supplierId: 'sup-a' }), qty: '2', pieces: '5' }
+  assert.equal(retLineSum(l), 229.5)
+  assert.equal(retProblem(l), '')
+  assert.equal(retProblem({ ...l, qty: '3', pieces: '1' }), 'на складе меньше', '3 уп = 60 шт на складе, 61 не вернуть')
+  assert.equal(retProblem({ ...l, qty: '3', pieces: '' }), '', 'весь остаток вернуть можно')
+  assert.equal(retProblem({ ...l, qty: '0', pieces: '' }), 'укажите количество')
+  assert.equal(retProblem({ ...l, price: '' }), 'укажите цену возврата')
+  assert.equal(retProblem({ ...l, price: '0' }), '', 'поставщик может и не засчитать денег — это его решение')
+  assert.deepEqual(toRetItem({ ...l, qty: '1', pieces: '25' }), { productId: 'par', name: 'Парацетамол', qty: 2, pieces: 5, price: 102 })
+  const kg = { ...retLineFromProduct({ ...sahar, stock: 20, looseUnits: 0 }), qty: '1,5', price: '8' }
+  assert.equal(retLineSum(kg), 12)
+  assert.equal(retProblem({ ...kg, qty: '0' }), 'укажите вес')
+  assert.deepEqual(toRetItem(kg), { productId: 'sahar', name: 'Сахар', qty: 1, pieces: 500, price: 8 })
+  assert.deepEqual(retSummary([l, kg]), { count: 2, packs: 3.75, total: 241.5 })
 })

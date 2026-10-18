@@ -16,6 +16,8 @@ const RULES: { test: RegExp; keys: string[] }[] = [
   // Оплата поставщику из кассы меняет и ожидаемые наличные в смене
   { test: /^\/suppliers/, keys: ['suppliers', 'supplierPayments', 'shifts'] },
   { test: /^\/supplier-payments/, keys: ['supplierPayments', 'suppliers', 'shifts'] },
+  // Возврат поставщику: склад, долг поставщика, деньги «в кассу» — в смене
+  { test: /^\/supplier-returns/, keys: ['supplierReturns', 'products', 'suppliers', 'shifts'] },
   { test: /^\/shifts\/cash/, keys: ['cashMoves', 'shifts'] },
   { test: /^\/cash-moves/, keys: ['cashMoves', 'shifts'] },
   { test: /^\/pay-services/, keys: ['payServices'] },
@@ -46,7 +48,7 @@ const RULES: { test: RegExp; keys: string[] }[] = [
     test: /^\/backup/,
     keys: [
       'products', 'sales', 'arrivals', 'customers', 'deferred', 'shifts', 'payments', 'returns', 'writeoffs', 'expenses', 'expenseCategories',
-      'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'productTypes', 'incomes', 'incomeCategories',
+      'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'productTypes', 'incomes', 'incomeCategories', 'supplierReturns',
     ],
   },
 ]

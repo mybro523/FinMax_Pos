@@ -22,7 +22,8 @@ import { forgetCountedAfter } from '../common/counted'
 // 5 — поставщики и оплаты им, внесение/изъятие наличных, сервисы перевода, правки остатка
 // 6 — типы товаров, ФИО/оклад/бонус сотрудников, кому выдана зарплата
 // 7 — доходы вне продаж и их статьи
-const FORMAT = 7
+// 8 — возвраты товара поставщикам
+const FORMAT = 8
 
 @Injectable()
 export class BackupService {
@@ -32,7 +33,7 @@ export class BackupService {
   async dump() {
     const [
       products, customers, sales, arrivals, shifts, payments, users, deferred, returns, writeOffs, batches, inventories, categories, expenses, expenseCategories,
-      suppliers, supplierPayments, cashMoves, payServices, stockEdits, productTypes, incomes, incomeCategories,
+      suppliers, supplierPayments, cashMoves, payServices, stockEdits, productTypes, incomes, incomeCategories, supplierReturns,
     ] = await Promise.all([
         this.prisma.product.findMany(),
         this.prisma.customer.findMany(),
@@ -66,6 +67,9 @@ export class BackupService {
         // восстановления оказался бы занижен
         this.prisma.income.findMany(),
         this.prisma.incomeCategory.findMany(),
+        // Возвраты поставщикам — товар ушёл, долг или деньги вернулись: без них после
+        // восстановления не сошлись бы ни склад, ни долги поставщикам
+        this.prisma.supplierReturn.findMany({ include: { items: true } }),
       ])
 
     return {
@@ -82,10 +86,11 @@ export class BackupService {
         expenses: expenses.length,
         incomes: incomes.length,
         suppliers: suppliers.length,
+        supplierReturns: supplierReturns.length,
       },
       data: {
         categories, products, customers, sales, arrivals, shifts, payments, users, deferred, returns, writeOffs, batches, inventories, expenses, expenseCategories,
-        suppliers, supplierPayments, cashMoves, payServices, stockEdits, productTypes, incomes, incomeCategories,
+        suppliers, supplierPayments, cashMoves, payServices, stockEdits, productTypes, incomes, incomeCategories, supplierReturns,
       },
     }
   }
@@ -111,6 +116,9 @@ export class BackupService {
       await tx.sale.deleteMany({})
       await tx.arrivalItem.deleteMany({})
       await tx.arrival.deleteMany({})
+      // Возвраты поставщикам — так же: копия, снятая до их появления, отменяет сделанные после
+      await tx.supplierReturnItem.deleteMany({})
+      await tx.supplierReturn.deleteMany({})
       await tx.debtPayment.deleteMany({})
       // Расходы заменяются вместе со всем остальным — и когда в копии их нет (она
       // снята до появления раздела): внесённое после копии отменяется, как и чеки
@@ -276,6 +284,10 @@ export class BackupService {
       }
       if (d.stockEdits?.length) {
         await tx.stockEdit.createMany({ data: strip(d.stockEdits, ['user']).map((e: any) => ({ ...e, userId: ref(e.userId) })) })
+      }
+      for (const r of d.supplierReturns || []) {
+        const { items, user, supplierRef, ...ret } = r
+        await tx.supplierReturn.create({ data: { ...ret, userId: ref(ret.userId), items: { create: strip(items, ['returnId']) } } })
       }
     }, TX_LONG)
 

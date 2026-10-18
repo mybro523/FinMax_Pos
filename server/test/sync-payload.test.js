@@ -318,8 +318,11 @@ test('внесение и изъятие наличных: смена, вид и
 
 test('список операций закрыт, а списание и расход — только владельцу', () => {
   assert.deepEqual([...OP_TYPES].sort(), [
-    'arrival', 'cash.move', 'customer.create', 'debt.pay', 'deferred.add', 'deferred.remove', 'expense', 'income', 'return', 'sale', 'shift.close', 'shift.open', 'writeoff',
+    'arrival', 'cash.move', 'customer.create', 'debt.pay', 'deferred.add', 'deferred.remove', 'expense', 'income', 'return', 'sale', 'shift.close', 'shift.open',
+    'supplier.return', 'writeoff',
   ])
+  // Возврат поставщику — по праву «возврат поставщику», как на сайте, а не только владельцу
+  assert.equal(FOUNDER_ONLY.has('supplier.return'), false)
   // Внести размен и отдать выручку может и кассир — как на сайте
   assert.equal(FOUNDER_ONLY.has('cash.move'), false)
   // На сайте списание закрыто для кассира. Касса без интернета не должна стать обходом

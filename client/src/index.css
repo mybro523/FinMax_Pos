@@ -1963,6 +1963,8 @@ label .tag-cat { font-weight: 400; }
 .zak-table td { vertical-align: top; }
 .zak-pay td { background: color-mix(in srgb, var(--green-soft) 55%, transparent); }
 .zak-pay-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--green); flex-wrap: wrap; }
+/* Возврат товара поставщику — строка со знаком минус */
+.zak-ret td { background: color-mix(in srgb, var(--danger-soft) 45%, transparent); }
 tfoot .zak-total td { font-weight: 700; border-top: 2px solid var(--border-strong); background: var(--soft); font-variant-numeric: tabular-nums; }
 @media (max-width: 760px) {
   tfoot .zak-total td { display: block; text-align: right; }
@@ -2290,6 +2292,32 @@ html.has-foot .prh-side { max-height: calc(100vh - 120px - var(--app-foot-h)); }
 /* Правка прихода: упаковки и штуки в одной ячейке */
 .prh-edit-qty { display: inline-flex; align-items: center; gap: 6px; }
 .prh-edit-qty .disc-input { width: 76px; }
+
+/* ── Возврат поставщику ── */
+.prh-ret { display: flex; flex-direction: column; gap: 14px; }
+.prh-ret-new { padding: 16px; }
+.prh-ret-sup { font-weight: 700; font-size: 15px; color: var(--accent-dark); overflow-wrap: anywhere; text-align: right; }
+.prh-ret-sup.none { color: var(--muted); font-weight: 500; font-size: 13.5px; }
+/* Строка добавления: товар — широкое поле, количество, цена и кнопка — по размеру.
+   Подписи сверху у всех полей одной высоты, поэтому поля стоят на одной линии */
+.prh-ret-form { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 12px 16px; align-items: start; margin-bottom: 14px; }
+.prh-ret-form .prh-f { margin-bottom: 0; }
+.prh-ret-form .prh-f-price input { width: 130px; font-variant-numeric: tabular-nums; }
+.prh-ret-actions { display: flex; gap: 8px; align-items: center; margin-top: 24px; }
+.prh-ret-grid { border: 1px solid var(--border); border-radius: var(--radius-sm); min-height: 130px; }
+.prh-ret-grid .prh-grid { min-width: 720px; }
+.prh-ret-finish { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; margin-top: 16px; }
+.prh-ret-label { display: block; font-size: 12.5px; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+@media (max-width: 1100px) {
+  .prh-ret-form { grid-template-columns: auto auto minmax(0, 1fr); }
+  .prh-ret-form .prh-f-product { grid-column: 1 / -1; }
+  .prh-ret-actions { justify-content: flex-end; }
+}
+@media (max-width: 760px) {
+  .prh-ret-form, .prh-ret-finish { grid-template-columns: minmax(0, 1fr); }
+  .prh-ret-actions { margin-top: 0; }
+  .prh-ret-new input, .prh-ret-new select { font-size: 16px; }
+}
 
 /* ── Узкий экран ── */
 @media (max-width: 1799px) {

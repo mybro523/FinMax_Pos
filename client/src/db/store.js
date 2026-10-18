@@ -23,16 +23,16 @@ const EMPTY = []
 //
 // «suppliers» — поставщики (всем; долги в них видит только владелец), «supplierPayments» —
 // оплаты им (владельцу), «cashMoves» — внесения и изъятия наличных, «payServices» —
-// сервисы перевода для кассы.
+// сервисы перевода для кассы. «supplierReturns» — возвраты товара поставщикам.
 const COLLECTIONS = [
   'products', 'sales', 'arrivals', 'customers', 'deferred', 'shifts', 'payments', 'returns', 'writeoffs', 'categories',
   'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'productTypes',
-  'incomes', 'incomeCategories',
+  'incomes', 'incomeCategories', 'supplierReturns',
 ]
 // Адрес раздела на сервере — там, где он не совпадает с названием раздела здесь
 const PATHS = {
   expenseCategories: 'expense-categories', supplierPayments: 'supplier-payments', cashMoves: 'cash-moves', payServices: 'pay-services',
-  productTypes: 'product-types', incomeCategories: 'income-categories',
+  productTypes: 'product-types', incomeCategories: 'income-categories', supplierReturns: 'supplier-returns',
 }
 export const pathOf = (key) => '/' + (PATHS[key] || key)
 // ── Кэш принадлежит своему магазину ──
@@ -82,6 +82,7 @@ export const CACHE_DAYS = {
   incomes: JOURNAL_CACHE_DAYS,
   supplierPayments: JOURNAL_CACHE_DAYS,
   cashMoves: JOURNAL_CACHE_DAYS,
+  supplierReturns: JOURNAL_CACHE_DAYS,
 }
 
 const QUERY = Object.fromEntries(Object.entries(CACHE_DAYS).map(([k, d]) => [k, `?days=${d}`]))
@@ -370,7 +371,7 @@ export function refreshAll() {
 // берём их заметно реже, а при возвращении на вкладку — сразу и все.
 const SLOW_KEYS = new Set([
   'arrivals', 'returns', 'writeoffs', 'payments', 'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices',
-  'incomes', 'incomeCategories',
+  'incomes', 'incomeCategories', 'supplierReturns',
 ])
 const SLOW_EVERY = 8 // каждый восьмой тик ≈ раз в минуту
 

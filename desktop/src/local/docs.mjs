@@ -1,16 +1,19 @@
-// ── Документы: чеки, возвраты, приходы, списания, погашения долга, смены, расходы ──
+// ── Документы: чеки, возвраты, приходы, списания, погашения долга, смены, расходы,
+// возвраты поставщикам ──
 //
 // Все лежат в одной таблице, каждый — в том виде, в каком его отдаёт сервер.
 // Рядом с документом вынесено только то, по чему его ищут: дата, смена, чек,
 // ключ повтора. Остальное читается из самого документа.
 import { q } from './db.mjs'
 
-export const KINDS = ['sale', 'return', 'arrival', 'writeoff', 'payment', 'shift', 'expense', 'cashmove', 'supplierpayment', 'income']
+export const KINDS = ['sale', 'return', 'arrival', 'writeoff', 'payment', 'shift', 'expense', 'cashmove', 'supplierpayment', 'income', 'supplierreturn']
 
 // За какой срок касса держит журналы у себя. Столько же по умолчанию отдаёт сервер
 // (server/src/*/…service.ts) и столько же держит в памяти окно (client/src/db/store.js).
 // Смены сервер отдаёт все — у них срока нет.
-export const WINDOW_DAYS = { sale: 60, return: 180, arrival: 180, writeoff: 180, payment: 180, expense: 180, cashmove: 180, supplierpayment: 180, income: 180 }
+export const WINDOW_DAYS = {
+  sale: 60, return: 180, arrival: 180, writeoff: 180, payment: 180, expense: 180, cashmove: 180, supplierpayment: 180, income: 180, supplierreturn: 180,
+}
 
 // Какое поле документа считается его датой
 const dateOf = (kind, body) => (kind === 'payment' ? body.createdAt : kind === 'shift' ? body.openedAt : body.date)

@@ -8,23 +8,33 @@ import { D, fromCents, fromCentsD, toCents } from './money.mjs'
 
 const byName = new Intl.Collator('ru', { numeric: true, sensitivity: 'base' })
 
-// Неоплаченная часть приходов этой кассы, которые сервер ещё не принял. Долг
-// поставщика сервер ведёт сам и присылает с каждым обменом; своё неотправленное в
-// него не входит — прибавляем сами. Принял — прибавка переходит в долг сервера
+// Неоплаченная часть приходов этой кассы, которые сервер ещё не принял, минус её же
+// возвраты товара «в счёт долга». Долг поставщика сервер ведёт сам и присылает с
+// каждым обменом; своё неотправленное в него не входит — прибавляем и вычитаем сами.
+// Принял — поправка переходит в долг сервера (outbox.mjs)
 export function pendingDebtOf(db, supplierId) {
   let sum = D(0)
   for (const r of q(db, "SELECT body FROM docs WHERE kind = 'arrival' AND sync = 'pending'").all()) {
     const a = JSON.parse(r.body)
     if (a.supplierId === supplierId) sum = sum.plus(a.debt || 0)
   }
+  for (const x of pendingDebtReturns(db)) if (x.supplierId === supplierId) sum = sum.minus(x.total || 0)
   return sum
+}
+
+// Свои неотправленные возвраты поставщикам «в счёт долга»
+function pendingDebtReturns(db) {
+  return q(db, "SELECT body FROM docs WHERE kind = 'supplierreturn' AND sync = 'pending'")
+    .all()
+    .map((r) => JSON.parse(r.body))
+    .filter((x) => x.supplierId && x.refund === 'debt')
 }
 
 export const supplierRow = (db, id) => q(db, 'SELECT * FROM suppliers WHERE id = ?').get(id) || null
 
 // ── Кому сколько должны ──
 // Сводка для раздела «Долги поставщикам»: как на сервере, плюс свои непосланные
-// приходы в долг — их сервер ещё не видел, а долг уже есть
+// приходы в долг и минус непосланные возвраты в счёт долга — их сервер ещё не видел
 export function suppliersDebts(db) {
   const pendDebt = new Map() // supplierId -> D(долг непосланных приходов)
   const pendCount = new Map() // supplierId -> сколько таких приходов
@@ -34,6 +44,8 @@ export function suppliersDebts(db) {
     pendDebt.set(a.supplierId, (pendDebt.get(a.supplierId) || D(0)).plus(a.debt))
     pendCount.set(a.supplierId, (pendCount.get(a.supplierId) || 0) + 1)
   }
+  // Возврат товара «в счёт долга» долг уменьшает; счёт долговых приходов — нет
+  for (const x of pendingDebtReturns(db)) pendDebt.set(x.supplierId, (pendDebt.get(x.supplierId) || D(0)).minus(x.total || 0))
   let total = D(0)
   let arrivals = 0
   const suppliers = []

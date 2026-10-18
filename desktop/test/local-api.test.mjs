@@ -44,6 +44,7 @@ test('касса отвечает сама ровно на то, что умее
     ['GET', '/sales?days=60'],
     ['GET', '/returns'],
     ['GET', '/arrivals?days=180'],
+    ['GET', '/supplier-returns?days=180'],
     ['GET', '/writeoffs'],
     ['GET', '/payments'],
     ['GET', '/expenses?days=180'],
@@ -59,6 +60,7 @@ test('касса отвечает сама ровно на то, что умее
     ['POST', '/sales'],
     ['POST', '/returns'],
     ['POST', '/arrivals'],
+    ['POST', '/supplier-returns'],
     ['POST', '/writeoffs'],
     ['POST', '/shifts/open'],
     ['POST', '/shifts/close'],
@@ -72,7 +74,7 @@ test('касса отвечает сама ровно на то, что умее
   // Всё остальное — дело сервера: заведение и правка товаров, сотрудники, пересчёт,
   // настройки, правка и удаление прихода, удаление клиента, правка и удаление расхода,
   // статьи расходов, заведение и оплата поставщиков, отмена внесения и изъятия,
-  // сервисы перевода, история движения товара
+  // удаление возврата поставщику, сервисы перевода, история движения товара
   const remote = [
     ['POST', '/products'],
     ['PATCH', '/products/abc'],
@@ -98,6 +100,7 @@ test('касса отвечает сама ровно на то, что умее
     ['POST', '/suppliers/abc/pay'],
     ['DELETE', '/supplier-payments/abc'],
     ['DELETE', '/cash-moves/abc'],
+    ['DELETE', '/supplier-returns/abc'],
     ['POST', '/pay-services'],
     ['DELETE', '/pay-services/abc'],
     ['GET', '/products/abc/history'],

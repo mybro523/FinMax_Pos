@@ -63,27 +63,29 @@ export default function Suppliers() {
 
   // ── Закупки и оплаты за период ──
   // Одна таблица по датам: что у кого купили, сколько, почём, сколько оплатили
-  // сразу и сколько ушло в долг; погашения долга — отдельными строками
+  // сразу и сколько ушло в долг; погашения долга и возвраты товара — отдельными строками
   const arrivalsCached = useCollection('arrivals')
   const paymentsCached = useCollection('supplierPayments')
+  const returnsCached = useCollection('supplierReturns')
   const products = useCollection('products')
   const [period, setPeriod] = useState(() => presetPeriod('month'))
   const [supFilter, setSupFilter] = useState('')
   const [hq, setHq] = useState('')
   const range = useMemo(() => periodRange(period), [period])
-  const { deep, loading: loadingOlder } = useDeepPeriod(['arrivals', 'supplierPayments'], range)
+  const { deep, loading: loadingOlder } = useDeepPeriod(['arrivals', 'supplierPayments', 'supplierReturns'], range)
   const zak = useMemo(
     () =>
       zakupkiIOplaty({
         arrivals: deep.arrivals || arrivalsCached,
         supplierPayments: deep.supplierPayments || paymentsCached,
+        supplierReturns: deep.supplierReturns || returnsCached,
         products,
         from: range.from,
         to: range.to,
         supplierId: supFilter,
         t,
       }),
-    [deep, arrivalsCached, paymentsCached, products, range, supFilter, t],
+    [deep, arrivalsCached, paymentsCached, returnsCached, products, range, supFilter, t],
   )
   const zakRows = useMemo(() => {
     const needle = hq.trim().toLowerCase()
@@ -113,8 +115,8 @@ export default function Suppliers() {
     supplier: supName(r),
     name: r.name,
     qty: r.qty,
-    price: r.kind === 'buy' ? r.price : '',
-    sum: r.kind === 'buy' ? r.sum : '',
+    price: r.kind !== 'pay' ? r.price : '',
+    sum: r.kind !== 'pay' ? r.sum : '',
     paid: r.paid,
     debt: r.debt,
     user: r.user || '',
@@ -252,7 +254,7 @@ export default function Suppliers() {
             </thead>
             <tbody>
               {pgH.slice.map((r) => (
-                <tr key={r.id} className={r.kind === 'pay' ? 'zak-pay' : ''}>
+                <tr key={r.id} className={r.kind === 'pay' ? 'zak-pay' : r.kind === 'ret' ? 'zak-ret' : ''}>
                   <td data-label={t('Дата')} style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.date)}</td>
                   <td data-label={t('Поставщик')}>{supName(r)}</td>
                   <td className="cell-main">
@@ -261,9 +263,9 @@ export default function Suppliers() {
                     ) : <b>{r.name}</b>}
                   </td>
                   <td className="num" data-label={t('Кол-во')}>{r.qty || '—'}</td>
-                  <td className="num" data-label={t('Цена')}>{r.kind === 'buy' ? money(r.price) : '—'}</td>
-                  <td className="num" data-label={t('Сумма')}>{r.kind === 'buy' ? <b>{money(r.sum)}</b> : '—'}</td>
-                  <td className="num" data-label={t('Оплачено')} style={{ color: r.paid > 0 ? 'var(--green)' : undefined }}>{money(r.paid)}</td>
+                  <td className="num" data-label={t('Цена')}>{r.kind !== 'pay' ? money(r.price) : '—'}</td>
+                  <td className="num" data-label={t('Сумма')}>{r.kind === 'buy' ? <b>{money(r.sum)}</b> : r.kind === 'ret' ? <b>−{money(-r.sum)}</b> : '—'}</td>
+                  <td className="num" data-label={t('Оплачено')} style={{ color: r.paid > 0 ? 'var(--green)' : undefined }}>{r.paid < 0 ? '−' + money(-r.paid) : money(r.paid)}</td>
                   <td className="num" data-label={t('Долг')} style={{ color: r.debt > 0 ? 'var(--danger)' : r.debt < 0 ? 'var(--green)' : undefined }}>
                     {r.debt < 0 ? '−' + money(-r.debt) : money(r.debt)}
                   </td>
@@ -278,8 +280,8 @@ export default function Suppliers() {
               <tfoot>
                 <tr className="zak-total">
                   <td colSpan="5">{t('Итого за период')}</td>
-                  <td className="num">{money(zakItogo.sum)}</td>
-                  <td className="num">{money(zakItogo.paid)}</td>
+                  <td className="num">{zakItogo.sum < 0 ? '−' + money(-zakItogo.sum) : money(zakItogo.sum)}</td>
+                  <td className="num">{zakItogo.paid < 0 ? '−' + money(-zakItogo.paid) : money(zakItogo.paid)}</td>
                   <td className="num">{zakItogo.debt < 0 ? '−' + money(-zakItogo.debt) : money(zakItogo.debt)}</td>
                   <td></td>
                 </tr>

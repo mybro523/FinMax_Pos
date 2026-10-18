@@ -92,6 +92,7 @@ export const MESSAGES = {
   incomeCatsOnline: 'Статьи доходов меняются только с интернетом.',
   supplierOnline: 'Заводить и менять поставщиков, платить им можно только с интернетом. Приход в долг известному поставщику оформляется и без него.',
   cashMoveOnline: 'Отменить внесение или изъятие можно только с интернетом. Внести и изъять наличные можно и без него.',
+  supplierReturnOnline: 'Удалить возврат поставщику можно только с интернетом. Оформить новый возврат можно и без него.',
   payServicesOnline: 'Сервисы перевода меняются только с интернетом.',
   historyOnline: 'История движения товара открывается только с интернетом.',
   noOfflineLogin: 'Нет связи с сервером. Под этим именем на этом компьютере ещё не входили — первый вход возможен только с интернетом.',
@@ -114,6 +115,7 @@ const SERVER_ONLY_ONE = [
   { re: /^\/expenses\/([^/]+)$/, kind: 'expense' },
   { re: /^\/incomes\/([^/]+)$/, kind: 'income' },
   { re: /^\/cash-moves\/([^/]+)$/, kind: 'cashmove' },
+  { re: /^\/supplier-returns\/([^/]+)$/, kind: 'supplierreturn' },
 ]
 
 // Что сказать, когда связи нет, а действие умеет только сервер. Для большинства
@@ -126,6 +128,7 @@ const OFFLINE_TEXT = [
   { re: /^\/suppliers(\/|$)/, text: 'supplierOnline' },
   { re: /^\/supplier-payments(\/|$)/, text: 'supplierOnline' },
   { re: /^\/cash-moves\/[^/]+$/, text: 'cashMoveOnline' },
+  { re: /^\/supplier-returns\/[^/]+$/, text: 'supplierReturnOnline' },
   { re: /^\/pay-services(\/|$)/, text: 'payServicesOnline' },
   { re: /^\/products\/[^/]+\/history/, text: 'historyOnline' },
 ]
@@ -135,7 +138,7 @@ const offlineText = (route) => MESSAGES[OFFLINE_TEXT.find((x) => x.re.test(route
 const LOCAL_SECTIONS = new Set([
   'products', 'categories', 'customers', 'deferred', 'shifts', 'sales', 'returns', 'arrivals', 'writeoffs', 'payments',
   'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'productTypes',
-  'incomes', 'incomeCategories',
+  'incomes', 'incomeCategories', 'supplierReturns',
 ])
 
 // Имя файла из кода магазина. Код приходит с сервера, но в путь на диске попадает

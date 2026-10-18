@@ -38,6 +38,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       ['arrivals.create', 'Приход товара: оформить приход'],
       ['arrivals.edit', 'Приход товара: изменить и удалить'],
       ['arrivals.debt', 'Приход товара: в долг поставщику'],
+      ['arrivals.return', 'Приход товара: возврат поставщику'],
       ['expiry.view', 'Срок годности'],
       ['writeoffs.view', 'Списание: журнал'],
       ['writeoffs.create', 'Списание: списать товар'],
@@ -173,4 +174,5 @@ export const OP_PERMISSIONS: Record<string, string[]> = {
   expense: ['expenses.create'],
   income: ['incomes.create'],
   'cash.move': ['shift.cash'],
+  'supplier.return': ['arrivals.return'],
 }

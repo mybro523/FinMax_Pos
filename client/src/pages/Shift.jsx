@@ -101,15 +101,17 @@ export default function Shift() {
     const cashIn = Number(current.cashIn) || 0
     const cashOut = Number(current.cashOut) || 0
     const supplierCash = Number(current.supplierCash) || 0
+    // Вернули поставщики наличными в ящик (возврат товара «в кассу») — тоже сумма смены
+    const supplierRefund = Number(current.supplierRefund) || 0
     const total = cash + card + debt + transfer
     return {
       cash, card, debt, transfer, transferBy, debtPaid, discount, profit, refundCash, refundTotal, refundCost, expenseCash,
-      cashIn, cashOut, supplierCash,
+      cashIn, cashOut, supplierCash, supplierRefund,
       total,
       netSales: total - refundTotal,
       netProfit: profit - refundTotal + refundCost,
       count: ss.length,
-      expectedCash: (current.openingCash || 0) + cash + debtPaid + cashIn - refundCash - expenseCash - supplierCash - cashOut,
+      expectedCash: (current.openingCash || 0) + cash + debtPaid + cashIn + supplierRefund - refundCash - expenseCash - supplierCash - cashOut,
     }
   }, [current, sales, payments, returns])
 
@@ -171,7 +173,7 @@ export default function Shift() {
   async function doClose() {
     const r = await dialog.prompt({
       title: t('Закрытие смены'),
-      message: `${t('Ожидается в кассе')}: ${money(live.expectedCash)} (${t('касса на старте + наличные продажи + погашения долга + внесено − возвраты наличными − расходы и оплаты поставщикам из кассы − изъято')}). ${t('Пересчитайте наличные и введите фактическую сумму.')}`,
+      message: `${t('Ожидается в кассе')}: ${money(live.expectedCash)} (${t('касса на старте + наличные продажи + погашения долга + внесено + вернули поставщики − возвраты наличными − расходы и оплаты поставщикам из кассы − изъято')}). ${t('Пересчитайте наличные и введите фактическую сумму.')}`,
       fields: [{ name: 'counted', label: t('Наличные в кассе по факту (сомони)'), type: 'number', defaultValue: String(Math.round(live.expectedCash * 100) / 100) }],
       confirmText: t('Закрыть смену'),
     })
@@ -189,6 +191,7 @@ export default function Shift() {
         cashIn: live.cashIn,
         cashOut: live.cashOut,
         supplierCash: live.supplierCash,
+        supplierRefund: live.supplierRefund,
         debtPaid: live.debtPaid,
         refundCash: live.refundCash,
         refundTotal: live.refundTotal,
@@ -251,6 +254,7 @@ export default function Shift() {
       { k: t('Продажи наличными'), v: kop(live.cash) },
       { k: t('Погашено долгов'), v: kop(live.debtPaid) },
       { k: t('Внесено'), v: kop(live.cashIn) },
+      { k: t('Вернули поставщики'), v: kop(live.supplierRefund) },
       { k: t('Изъято'), v: -kop(live.cashOut) },
       { k: t('Расходы из кассы'), v: -kop(live.expenseCash) },
       { k: t('Оплачено поставщикам'), v: -kop(live.supplierCash) },
@@ -347,7 +351,7 @@ export default function Shift() {
             />
             <Metric tour="shift.expected" label={t('Ожидается в кассе')} value={money(live.expectedCash)} Icon={LuWallet} tint="accent" />
           </div>
-          {(live.debt > 0 || live.debtPaid > 0 || live.refundTotal > 0 || live.expenseCash > 0 || live.cashIn > 0 || live.cashOut > 0 || live.supplierCash > 0) && (
+          {(live.debt > 0 || live.debtPaid > 0 || live.refundTotal > 0 || live.expenseCash > 0 || live.cashIn > 0 || live.cashOut > 0 || live.supplierCash > 0 || live.supplierRefund > 0) && (
             <div className="panel mt" style={{ maxWidth: 460 }}>
               {live.debt > 0 && <div className="total-row"><span>{t('В долг за смену')}</span><span>{money(live.debt)}</span></div>}
               {live.cashIn > 0 && (
@@ -355,6 +359,9 @@ export default function Shift() {
               )}
               {live.cashOut > 0 && (
                 <div className="total-row" data-tour="shift.cash-rows"><span>{t('Изъято из кассы')}</span><span style={{ color: 'var(--danger)' }}>−{money(live.cashOut)}</span></div>
+              )}
+              {live.supplierRefund > 0 && (
+                <div className="total-row"><span>{t('Вернули поставщики (нал.)')}</span><span style={{ color: 'var(--green)' }}>+{money(live.supplierRefund)}</span></div>
               )}
               {live.supplierCash > 0 && (
                 <div className="total-row"><span>{t('Оплачено поставщикам (нал.)')}</span><span style={{ color: 'var(--danger)' }}>−{money(live.supplierCash)}</span></div>

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { LuScale, LuReceipt, LuWallet, LuTruck } from 'react-icons/lu'
+import { LuScale, LuReceipt, LuWallet, LuTruck, LuUndo2 } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { PeriodPicker, presetPeriod, periodRange, periodText, useDeepPeriod } from '../components/Period'
@@ -12,7 +12,8 @@ import { sverkaPostavshikov } from '../lib/otchety'
 
 // ── Отчёт поставщиков ──
 // Сверка за период по каждому поставщику: долг на начало, сколько закуплено,
-// сколько оплачено (сразу при приходе и погашениями долга) и долг на конец.
+// сколько возвращено ему товаром, сколько оплачено (сразу при приходе и погашениями
+// долга) и долг на конец.
 // Такую таблицу показывают поставщику при сверке. Подробности — что именно купили
 // и какими оплатами гасили — в разделе «Поставщики».
 //
@@ -24,9 +25,10 @@ export default function SupplierReport() {
   const suppliers = useCollection('suppliers')
   const arrivalsCached = useCollection('arrivals')
   const paymentsCached = useCollection('supplierPayments')
+  const returnsCached = useCollection('supplierReturns')
   const [period, setPeriod] = useState(() => presetPeriod('month'))
   const range = useMemo(() => periodRange(period), [period])
-  const { deep, loading } = useDeepPeriod(['arrivals', 'supplierPayments'], range, { untilNow: true })
+  const { deep, loading } = useDeepPeriod(['arrivals', 'supplierPayments', 'supplierReturns'], range, { untilNow: true })
 
   const r = useMemo(
     () =>
@@ -34,10 +36,11 @@ export default function SupplierReport() {
         suppliers,
         arrivals: deep.arrivals || arrivalsCached,
         supplierPayments: deep.supplierPayments || paymentsCached,
+        supplierReturns: deep.supplierReturns || returnsCached,
         from: range.from,
         to: range.to,
       }),
-    [suppliers, deep, arrivalsCached, paymentsCached, range],
+    [suppliers, deep, arrivalsCached, paymentsCached, returnsCached, range],
   )
 
   const podzag = periodText(period, t)
@@ -46,10 +49,11 @@ export default function SupplierReport() {
     { header: t('Поставщик'), key: 'name', width: 34 },
     { header: t('Долг на начало'), key: 'nachalo', width: 16, money: true },
     { header: t('Закуплено'), key: 'zakupleno', width: 16, money: true },
+    { header: t('Возвращено'), key: 'vozvrat', width: 16, money: true },
     { header: t('Оплачено'), key: 'oplacheno', width: 16, money: true },
     { header: t('Долг на конец'), key: 'konec', width: 16, money: true },
   ]
-  const rows = r.rows.map((x) => ({ name: nameOf(x), nachalo: x.nachalo, zakupleno: x.zakupleno, oplacheno: x.oplacheno, konec: x.konec }))
+  const rows = r.rows.map((x) => ({ name: nameOf(x), nachalo: x.nachalo, zakupleno: x.zakupleno, vozvrat: x.vozvrat, oplacheno: x.oplacheno, konec: x.konec }))
   const itogi = { name: t('Итого'), ...r.itogo }
   const exportExcel = () =>
     skachatXlsx({ fayl: t('Отчёт поставщиков'), zagolovok: `${getUser()?.pharmacy?.name || ''} — ${t('Отчёт поставщиков')}`, podzag, cols, rows, itogi })
@@ -63,6 +67,7 @@ export default function SupplierReport() {
       <div className="cards" data-tour="spr.cards" style={{ margin: '14px 0 16px' }}>
         <Metric label={t('Долг на начало')} value={money(r.itogo.nachalo)} Icon={LuScale} />
         <Metric label={t('Закуплено')} value={money(r.itogo.zakupleno)} Icon={LuReceipt} />
+        {r.itogo.vozvrat > 0 && <Metric label={t('Возвращено')} value={money(r.itogo.vozvrat)} Icon={LuUndo2} />}
         <Metric label={t('Оплачено')} value={money(r.itogo.oplacheno)} Icon={LuWallet} good />
         <Metric label={t('Долг на конец')} value={money(r.itogo.konec)} Icon={LuTruck} bad={r.itogo.konec > 0} />
       </div>
@@ -72,7 +77,7 @@ export default function SupplierReport() {
           <table className="table-cards">
             <thead>
               <tr>
-                <th>{t('Поставщик')}</th><th className="num">{t('Долг на начало')}</th><th className="num">{t('Закуплено')}</th>
+                <th>{t('Поставщик')}</th><th className="num">{t('Долг на начало')}</th><th className="num">{t('Закуплено')}</th><th className="num">{t('Возвращено')}</th>
                 <th className="num">{t('Оплачено')}</th><th className="num">{t('Долг на конец')}</th>
               </tr>
             </thead>
@@ -82,11 +87,12 @@ export default function SupplierReport() {
                   <td className="cell-main"><b>{nameOf(x)}</b></td>
                   <td className="num" data-label={t('Долг на начало')}>{money(x.nachalo)}</td>
                   <td className="num" data-label={t('Закуплено')}>{money(x.zakupleno)}</td>
+                  <td className="num" data-label={t('Возвращено')}>{x.vozvrat > 0 ? '−' + money(x.vozvrat) : money(0)}</td>
                   <td className="num" data-label={t('Оплачено')} style={{ color: x.oplacheno > 0 ? 'var(--green)' : undefined }}>{money(x.oplacheno)}</td>
                   <td className="num" data-label={t('Долг на конец')}><b style={{ color: x.konec > 0 ? 'var(--danger)' : undefined }}>{money(x.konec)}</b></td>
                 </tr>
               ))}
-              {r.rows.length === 0 && <tr><td colSpan="5" className="empty">{loading ? t('Загружаем…') : t('За этот период движений по поставщикам нет')}</td></tr>}
+              {r.rows.length === 0 && <tr><td colSpan="6" className="empty">{loading ? t('Загружаем…') : t('За этот период движений по поставщикам нет')}</td></tr>}
             </tbody>
             {r.rows.length > 0 && (
               <tfoot>
@@ -94,6 +100,7 @@ export default function SupplierReport() {
                   <td>{t('Итого')}</td>
                   <td className="num">{money(r.itogo.nachalo)}</td>
                   <td className="num">{money(r.itogo.zakupleno)}</td>
+                  <td className="num">{r.itogo.vozvrat > 0 ? '−' + money(r.itogo.vozvrat) : money(0)}</td>
                   <td className="num">{money(r.itogo.oplacheno)}</td>
                   <td className="num">{money(r.itogo.konec)}</td>
                 </tr>
@@ -103,7 +110,7 @@ export default function SupplierReport() {
         </div>
       </div>
       <div className="tag-cat" style={{ marginTop: 12 }}>
-        {t('Долг на конец = долг на начало + закуплено − оплачено. Что именно купили и какими оплатами гасили — в разделе')}{' '}
+        {t('Долг на конец = долг на начало + закуплено − возвращено − оплачено. Что именно купили, вернули и какими оплатами гасили — в разделе')}{' '}
         <Link to="/suppliers" className="linklike">{t('Поставщики')}</Link>.
       </div>
     </Layout>

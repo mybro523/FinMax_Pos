@@ -22,7 +22,7 @@ import { packsToUnits, uppOf, wholeNonNeg } from './units.mjs'
 // Раздел ответа сервера → вид документа в локальной базе
 export const DOC_KEYS = {
   sales: 'sale', returns: 'return', arrivals: 'arrival', writeoffs: 'writeoff', payments: 'payment', shifts: 'shift', expenses: 'expense',
-  cashMoves: 'cashmove', supplierPayments: 'supplierpayment', incomes: 'income',
+  cashMoves: 'cashmove', supplierPayments: 'supplierpayment', incomes: 'income', supplierReturns: 'supplierreturn',
 }
 
 const rows = (v) => (Array.isArray(v) ? v : [])

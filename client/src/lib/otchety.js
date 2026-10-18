@@ -121,7 +121,7 @@ function arrivalLineSum(it, product) {
 // оплачено сразу и сколько ушло в долг. Оплата и долг прихода делятся между его
 // строками пропорционально сумме, остаток округления — последней строке: так
 // итоги колонок сходятся с приходом до дирама. Строка оплаты — погашение долга.
-export function zakupkiIOplaty({ arrivals, supplierPayments, products, from, to, supplierId = '', t = (s) => s }) {
+export function zakupkiIOplaty({ arrivals, supplierPayments, supplierReturns = [], products, from, to, supplierId = '', t = (s) => s }) {
   const byId = new Map((products || []).map((p) => [p.id, p]))
   const rows = []
   for (const a of arrivals || []) {
@@ -152,6 +152,33 @@ export function zakupkiIOplaty({ arrivals, supplierPayments, products, from, to,
         paid: kop(sums[n] - debt),
         debt,
         user: a.user?.name || '',
+      })
+    })
+  }
+  // Возврат поставщику — строками со знаком минус: закупка уменьшилась. В счёт долга —
+  // уменьшился долг; деньгами (в кассу, наличными, на карту) — уменьшилось оплаченное
+  for (const r of supplierReturns || []) {
+    if (!vPeriode(r.date, from, to)) continue
+    if (supplierId && r.supplierId !== supplierId) continue
+    const vDolg = r.refund === 'debt'
+    ;(r.items || []).forEach((it, n) => {
+      const p = byId.get(it.productId)
+      const like = p || { unitsPerPack: num(it.pieces) > 0 ? KG : 1, unit: num(it.pieces) > 0 ? 'кг' : 'уп' }
+      const units = num(it.qty) * uppOf(like) + num(it.pieces)
+      const sum = kop(num(it.price) * (units / uppOf(like)))
+      rows.push({
+        kind: 'ret',
+        id: `ret:${r.id}:${n}`,
+        date: r.date,
+        supplierId: r.supplierId || null,
+        supplier: r.supplier && r.supplier !== '—' ? r.supplier : '',
+        name: `${t('Возврат')}: ${it.name}`,
+        qty: qtyText(units, like, t),
+        price: num(it.price),
+        sum: -sum,
+        paid: vDolg ? 0 : -sum,
+        debt: vDolg ? -sum : 0,
+        user: r.user?.name || '',
       })
     })
   }
@@ -187,10 +214,10 @@ export function zakupkiIOplaty({ arrivals, supplierPayments, products, from, to,
 // добавилось в долг после конца периода, и возвращаем оплаты, сделанные после.
 // Поэтому списки приходов и оплат нужны от начала периода до сегодняшнего дня.
 // Сходится всегда: конец = начало + закуплено − оплачено.
-export function sverkaPostavshikov({ suppliers, arrivals, supplierPayments, from, to }) {
+export function sverkaPostavshikov({ suppliers, arrivals, supplierPayments, supplierReturns = [], from, to }) {
   const rows = new Map()
   const row = (id, name, debtNow) => {
-    if (!rows.has(id)) rows.set(id, { supplierId: id, name, debtNow: num(debtNow), zakupleno: 0, oplacheno: 0, vDolg: 0, oplatyDolga: 0, posle: 0 })
+    if (!rows.has(id)) rows.set(id, { supplierId: id, name, debtNow: num(debtNow), zakupleno: 0, vozvrat: 0, oplacheno: 0, vDolg: 0, oplatyDolga: 0, vozvratDolga: 0, posle: 0 })
     return rows.get(id)
   }
   for (const s of suppliers || []) row(s.id, s.name, s.debt)
@@ -219,25 +246,43 @@ export function sverkaPostavshikov({ suppliers, arrivals, supplierPayments, from
     r.oplacheno += num(p.amount)
     r.oplatyDolga += num(p.amount)
   }
+  // Возврат поставщику: возвращённое — отдельной колонкой. В счёт долга — долг
+  // уменьшился (как оплатой); деньгами — долг не менялся, зато оплаченное уменьшилось:
+  // поставщик отдал деньги назад. Так сходится конец = начало + закуплено − возвращено − оплачено
+  for (const r of supplierReturns || []) {
+    if (from && ts(r.date) < ts(from)) continue
+    const id = r.supplierId || ''
+    const row_ = row(id, id ? r.supplier : '', 0)
+    const sum = num(r.total)
+    const vDolg = r.refund === 'debt'
+    if (afterTo(r.date)) {
+      if (vDolg) row_.posle += sum // уменьшил долг уже после периода — в конце периода долг был больше
+      continue
+    }
+    row_.vozvrat += sum
+    if (vDolg) row_.vozvratDolga += sum
+    else row_.oplacheno -= sum
+  }
   const list = [...rows.values()]
     .map((r) => {
       // У прихода без поставщика долга нет: «должны» некому
       const konec = r.supplierId ? kop(r.debtNow + r.posle) : 0
-      const nachalo = r.supplierId ? kop(konec - r.vDolg + r.oplatyDolga) : 0
+      const nachalo = r.supplierId ? kop(konec - r.vDolg + r.oplatyDolga + r.vozvratDolga) : 0
       return {
         supplierId: r.supplierId,
         name: r.name,
         nachalo,
         zakupleno: kop(r.zakupleno),
+        vozvrat: kop(r.vozvrat),
         oplacheno: kop(r.oplacheno),
         konec,
       }
     })
     // Поставщик без движения и без долга в отчёте только мешает
-    .filter((r) => r.nachalo || r.zakupleno || r.oplacheno || r.konec)
+    .filter((r) => r.nachalo || r.zakupleno || r.vozvrat || r.oplacheno || r.konec)
   list.sort((a, b) => (a.supplierId ? 0 : 1) - (b.supplierId ? 0 : 1) || b.konec - a.konec || a.name.localeCompare(b.name, 'ru'))
   const sum = (k) => kop(list.reduce((s, r) => s + r[k], 0))
-  return { rows: list, itogo: { nachalo: sum('nachalo'), zakupleno: sum('zakupleno'), oplacheno: sum('oplacheno'), konec: sum('konec') } }
+  return { rows: list, itogo: { nachalo: sum('nachalo'), zakupleno: sum('zakupleno'), vozvrat: sum('vozvrat'), oplacheno: sum('oplacheno'), konec: sum('konec') } }
 }
 
 // ── Зарплата ──

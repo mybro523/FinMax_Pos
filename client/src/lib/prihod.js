@@ -7,7 +7,7 @@
 //
 // Цена поставщика и цена продажи — за упаковку (у весового — за килограмм), как в
 // карточке товара. Штуки сверх целых упаковок оплачиваются долей упаковки.
-import { uppOf, isDivisible, isVesovoy, edinica, gramsOfKg, kgText } from './units.js'
+import { uppOf, isDivisible, isVesovoy, edinica, gramsOfKg, kgText, stockUnits } from './units.js'
 
 // Число из поля: пусто и мусор — ноль, запятая — как точка
 export const num = (v) => {
@@ -149,4 +149,63 @@ export function toItem(l) {
     expiryDate: l.expiryDate || '',
     ...(price !== undefined ? { price } : {}),
   }
+}
+
+// ══════════ Возврат поставщику ══════════
+// Строка возврата: что отдаём поставщику, сколько (упаковки и штуки сверх них, у
+// весового — килограммы) и по какой цене он засчитывает. Сколько лежит на складе —
+// снимком при добавлении: больше, чем есть, вернуть нельзя (просроченное отдать
+// можно — его чаще всего и возвращают).
+
+// Цена возврата по умолчанию — по которой этот поставщик привёз товар в последний
+// раз (уже со скидкой). Не привозил или поставщик не выбран — закупочная из карточки.
+// arrivals — журнал приходов, свежие первыми
+export function lastSupplierCost(arrivals, supplierId, productId) {
+  if (!supplierId) return null
+  for (const a of arrivals || []) {
+    if (a.supplierId !== supplierId) continue
+    const it = (a.items || []).find((i) => i.productId === productId)
+    if (it) return Number(it.cost) || 0
+  }
+  return null
+}
+
+export function retLineFromProduct(p, { arrivals, supplierId } = {}) {
+  const last = lastSupplierCost(arrivals, supplierId, p.id)
+  return {
+    ...lineFromProduct(p),
+    // Здесь price — цена возврата за упаковку (килограмм), а не цена продажи
+    price: String(last ?? (Number(p.cost) || '')),
+    fromArrival: last !== null,
+    stock: stockUnits(p),
+  }
+}
+
+export const retLineSum = (l) => Math.max(0, num(l.price)) * linePacks(l)
+
+export function retSummary(lines) {
+  const s = { count: lines.length, packs: 0, total: 0 }
+  for (const l of lines) {
+    s.packs += linePacks(l)
+    s.total += retLineSum(l)
+  }
+  s.packs = Math.round(s.packs * 1000) / 1000
+  s.total = kop(s.total)
+  return s
+}
+
+// Пусто — строка годится, иначе — что не так
+export function retProblem(l) {
+  const units = lineUnits(l)
+  if (units <= 0) return l.ves ? 'укажите вес' : 'укажите количество'
+  if (units > Math.max(0, Number(l.stock) || 0)) return 'на складе меньше'
+  if (String(l.price ?? '').trim() === '' || num(l.price) < 0) return 'укажите цену возврата'
+  return ''
+}
+
+// Строка для отправки: штуки сверх целой упаковки — в упаковки, цена — до дирама
+export function toRetItem(l) {
+  const units = lineUnits(l)
+  const upp = l.ves ? 1000 : uppOf(l)
+  return { productId: l.productId, name: l.name, qty: Math.floor(units / upp), pieces: units % upp, price: kop(num(l.price)) }
 }

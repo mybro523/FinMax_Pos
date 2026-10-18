@@ -73,6 +73,8 @@ export function docsOf(op) {
       return [['income', p.income?.id]]
     case 'cash.move':
       return [['cashmove', p.move?.id]]
+    case 'supplier.return':
+      return [['supplierreturn', p.ret?.id]]
     default:
       return []
   }
@@ -119,6 +121,20 @@ function supplierDebtAccepted(db, op) {
   q(db, 'UPDATE suppliers SET sDebtC = sDebtC + ? WHERE id = ? AND sDebtC IS NOT NULL').run(toCents(a.debt), a.supplierId)
 }
 
+// ── Возврат поставщику «в счёт долга» принят сервером ──
+// То же, что с приходом в долг, только в другую сторону: сервер, приняв возврат, уже
+// уменьшил долг, а касса до сих пор вычитала его сама (suppliers.mjs). С этой минуты
+// вычет переходит в долг, известный от сервера
+function supplierReturnAccepted(db, op) {
+  const id = op.payload?.ret?.id
+  if (op.type !== 'supplier.return' || !id) return
+  const row = q(db, "SELECT body FROM docs WHERE kind = 'supplierreturn' AND id = ? AND sync = 'pending'").get(id)
+  if (!row) return
+  const r = JSON.parse(row.body)
+  if (!r.supplierId || r.refund !== 'debt' || !(Number(r.total) > 0)) return
+  q(db, 'UPDATE suppliers SET sDebtC = sDebtC - ? WHERE id = ? AND sDebtC IS NOT NULL').run(toCents(r.total), r.supplierId)
+}
+
 // Ждёт ли этот документ ещё чего-то в очереди. Смена — единственный документ,
 // который меняют две операции: открытие и закрытие
 function stillQueued(db, kind, id, exceptOpId) {
@@ -144,6 +160,7 @@ export function ackOp(db, op, fate = null) {
     // До того как расход перестанет быть «неотправленным» — см. выше
     cashExpenseAccepted(db, op)
     supplierDebtAccepted(db, op)
+    supplierReturnAccepted(db, op)
     for (const [kind, id] of docsOf(op)) {
       if (id && !stillQueued(db, kind, id, op.id)) {
         q(db, "UPDATE docs SET sync = 'synced' WHERE kind = ? AND id = ? AND sync = 'pending'").run(kind, id)
@@ -343,6 +360,19 @@ export function describeOp(op, find = () => null) {
       const e = p.income || {}
       return { sum: e.amount ?? null, title: e.category || '', detail: { category: e.category || '', note: e.note || '', date: e.date || '' } }
     }
+    case 'supplier.return': {
+      const r = p.ret || {}
+      return {
+        sum: r.total ?? null,
+        title: r.supplier && r.supplier !== '—' ? r.supplier : names(r.items),
+        detail: {
+          supplier: r.supplier || '',
+          refund: r.refund || '',
+          note: r.note || '',
+          lines: lines(r.items, (i) => ({ name: i.name, qty: i.qty, pieces: i.pieces || 0, price: i.price })),
+        },
+      }
+    }
     case 'customer.create':
       return { sum: null, title: p.customer?.name || '', detail: { phone: p.customer?.phone || '', debt: p.customer?.debt || 0 } }
     case 'shift.open':
@@ -382,5 +412,7 @@ const TOUCHES = {
   expense: ['expenses', 'shifts'],
   'cash.move': ['cashMoves', 'shifts'],
   income: ['incomes'],
+  // Возврат поставщику: склад, долг поставщика, деньги «в кассу» — в смене
+  'supplier.return': ['supplierReturns', 'products', 'suppliers', 'shifts'],
 }
 export const touchedBy = (op) => TOUCHES[op?.type] || []

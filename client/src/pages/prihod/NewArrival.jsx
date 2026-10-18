@@ -9,7 +9,7 @@ import NewProductModal from '../../components/NewProductModal'
 import { productPayload } from '../../components/ProductForm'
 import { useCashSources, sourceName } from '../../components/SupplierMoney'
 import { db, money, stockText } from '../../db/store'
-import { receiveArrival, findByBarcode } from '../../db/ops'
+import { receiveArrival } from '../../db/ops'
 import { useCan } from '../../db/auth'
 import { useT, translate as tr } from '../../lib/i18n'
 import { normalizeScan, canonBarcode } from '../../lib/scan'
@@ -22,6 +22,7 @@ import {
 } from '../../lib/prihod'
 import { usePrihod, setPrihod, setForm, setPay, resetDraft, blankForm } from './store'
 import { SupplierPick } from './SupplierPick'
+import ProductSearch from './ProductSearch'
 
 // ── Новое поступление ──
 // Как в привычных программах приёмки: по центру — накладная таблицей, справа — итоги
@@ -97,27 +98,6 @@ export default function NewArrival({ products, suppliers, onSaved }) {
     setForm({ productId: p.id, q: p.name, qty: l.qty, pieces: '', base: l.base, disc, price: l.price, price0: l.price0, mk: null, expiryDate: '', editKey: '' })
     beepOk()
     setFocusQty((n) => n + 1)
-  }
-
-  // Подсказки по названию или штрихкоду
-  const [active, setActive] = useState(0)
-  const suggest = useMemo(() => {
-    const q = String(form.q || '').trim().toLowerCase()
-    if (!q || (chosen && form.q === chosen.name) || editing) return []
-    return products.filter((p) => p.name.toLowerCase().includes(q) || String(p.barcode || '').includes(q)).slice(0, 8)
-  }, [form.q, products, chosen, editing])
-  useEffect(() => setActive(0), [form.q])
-
-  // Сканер или Enter в поле «Товар»
-  function pickByCode(raw) {
-    const val = String(raw || '').trim()
-    if (!val) return
-    const p = findByBarcode(val) // понимает и обычный штрихкод, и DataMatrix маркировки
-    if (p) return choose(p)
-    // Набрали название, а не код — берём выбранную подсказку
-    if (suggest.length && val.replace(/\D/g, '').length < 6) return choose(suggest[Math.min(active, suggest.length - 1)])
-    beepError()
-    setNewProduct({ barcode: normalizeScan(val) })
   }
 
   function clearForm() {
@@ -347,42 +327,18 @@ export default function NewArrival({ products, suppliers, onSaved }) {
             <div className="prh-add-main">
               <div className="prh-f prh-f-product" data-tour="af.scan">
                 <label htmlFor="prh-q">{t('Товар — штрихкод или название')}</label>
-                <div className="prh-search">
-                  <input
-                    id="prh-q"
-                    ref={scanRef}
-                    className="scan-input"
-                    value={form.q}
-                    autoFocus
-                    autoComplete="off"
-                    readOnly={!!editing}
-                    onChange={(e) => setForm({ q: e.target.value, productId: '' })}
-                    onKeyDown={(e) => {
-                      if (e.key === 'ArrowDown' && suggest.length) {
-                        e.preventDefault()
-                        setActive((a) => Math.min(a + 1, suggest.length - 1))
-                      } else if (e.key === 'ArrowUp' && suggest.length) {
-                        e.preventDefault()
-                        setActive((a) => Math.max(a - 1, 0))
-                      } else if (e.key === 'Enter') {
-                        e.preventDefault()
-                        if (chosen && form.q === chosen.name) setFocusQty((n) => n + 1)
-                        else pickByCode(form.q)
-                      }
-                    }}
-                    placeholder={t('Наведите сканер на товар…')}
-                  />
-                  {suggest.length > 0 && (
-                    <ul className="prh-suggest" role="listbox">
-                      {suggest.map((p, i) => (
-                        <li key={p.id} role="option" aria-selected={i === active} className={i === active ? 'active' : ''} onMouseDown={(e) => { e.preventDefault(); choose(p) }}>
-                          <span className="prh-suggest-name">{p.name}</span>
-                          <span className="tag-cat">{p.barcode} · {t('остаток')} {stockText(p)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+                <ProductSearch
+                  id="prh-q"
+                  inputRef={scanRef}
+                  products={products}
+                  q={form.q}
+                  setQ={(v) => setForm({ q: v, productId: '' })}
+                  chosenName={chosen?.name}
+                  readOnly={!!editing}
+                  onPick={choose}
+                  onEnterChosen={() => setFocusQty((n) => n + 1)}
+                  onUnknown={(barcode) => setNewProduct({ barcode })}
+                />
                 <div className="scan-hint">
                   <span className="ic"><LuScanLine size={15} /></span>
                   {editing ? t('Правите строку из таблицы. Enter — сохранить её.') : t('USB-сканер работает как клавиатура. Незнакомый штрихкод — заведём карточку прямо здесь')}

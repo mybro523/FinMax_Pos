@@ -28,7 +28,7 @@ export const OPU_NALOGI = 'Налоги'
 export const OPU_MAGAZIN = 'Расход магазина'
 const norm = (s) => String(s || '').trim().toLowerCase()
 
-export function opuFinance({ sales = [], returns = [], writeOffs = [], expenses = [], incomes = [], debtPayments = [], supplierPayments = [], arrivals = [], from, to }) {
+export function opuFinance({ sales = [], returns = [], writeOffs = [], expenses = [], incomes = [], debtPayments = [], supplierPayments = [], arrivals = [], supplierReturns = [], from, to }) {
   const fin = periodFinance({ sales, returns, writeOffs, expenses, incomes, from, to })
 
   // Расходы по статьям: зарплата, налоги, магазин, всё прочее — «другие»
@@ -68,7 +68,14 @@ export function opuFinance({ sales = [], returns = [], writeOffs = [], expenses 
     const paidNow = num(a.total) - num(a.debt) - (paidByClient.get(a.id + ':pay') || 0)
     if (paidNow > 0) paidPriPrihode += paidNow
   }
-  const supplierPaid = paidZapisi + paidPriPrihode
+  // Возврат товара поставщику: деньги, которые он отдал назад (в кассу, наличными, на
+  // карту), уменьшают отданное поставщикам. Возврат в счёт долга денег не двигает —
+  // уменьшается только долг, а он в кассовый чистый доход не входит
+  let vozvratDengami = 0
+  for (const r of supplierReturns) {
+    if (r && r.date && inRange(r.date, from, to) && r.refund && r.refund !== 'debt') vozvratDengami += num(r.total)
+  }
+  const supplierPaid = paidZapisi + paidPriPrihode - vozvratDengami
 
   // Касса — наличные, пришедшие за период: продажи налом и погашения долгов
   // клиентов минус возвраты, выданные наличными
@@ -95,6 +102,7 @@ export function opuFinance({ sales = [], returns = [], writeOffs = [], expenses 
     // Составляющие — модалка «из чего сложилось» показывает их по отдельности
     paidZapisi,
     paidPriPrihode,
+    vozvratDengami,
     debtPaid,
     refundsCash,
     cashSales: fin.byPay.cash,

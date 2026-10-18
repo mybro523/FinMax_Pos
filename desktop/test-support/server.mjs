@@ -19,7 +19,7 @@ const json = (status, body, date) => ({
 
 const KEYS = [
   'products', 'batches', 'categories', 'customers', 'deferred', 'shifts', 'sales', 'returns', 'arrivals', 'writeoffs', 'payments',
-  'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices',
+  'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'supplierReturns',
 ]
 // Разделы, которые сервер отдаёт только владельцу
 const FOUNDER_KEYS = new Set(['writeoffs', 'expenses', 'expenseCategories', 'supplierPayments'])
@@ -193,6 +193,22 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
         put('shifts', { ...shift, cashIn: sum('in'), cashOut: sum('out') })
       }
     }
+    else if (op.type === 'supplier.return') {
+      const r = p.ret
+      put('supplierReturns', { ...r, items: r.items.map((i) => ({ ...i, returnId: r.id })), user: { id: 'tenant-' + op.by, name: op.by }, server: true })
+      for (const it of r.items) {
+        const prod = s.data.products.find((x) => x.id === it.productId)
+        if (prod) put('products', { ...prod, stock: Math.max(0, prod.stock - it.qty) })
+      }
+      // В счёт долга — долг поставщика меньше; в кассу — деньги в смене
+      const sup = s.data.suppliers.find((x) => x.id === r.supplierId)
+      if (sup && r.refund === 'debt') put('suppliers', { ...sup, debt: Math.round((Number(sup.debt) - Number(r.total)) * 100) / 100 })
+      const shift = r.refund === 'cash' ? s.data.shifts.find((x) => x.id === r.shiftId) : null
+      if (shift) {
+        const sum = s.data.supplierReturns.filter((x) => x.shiftId === shift.id && x.refund === 'cash').reduce((a, x) => a + Number(x.total || 0), 0)
+        put('shifts', { ...shift, supplierRefund: Math.round(sum * 100) / 100 })
+      }
+    }
     else if (op.type === 'shift.open' || op.type === 'shift.close') put('shifts', { ...p.shift, deviceId: op.deviceId, server: true })
     else if (op.type === 'debt.pay') put('payments', { ...p.payment, server: true })
     else if (op.type === 'customer.create') put('customers', p.customer)
@@ -209,7 +225,7 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
   // Каким документом стала операция — как у настоящего сервера
   function docIdOf(op) {
     const p = op.payload || {}
-    const map = { sale: p.sale, return: p.ret, writeoff: p.writeOff, arrival: p.arrival, 'shift.open': p.shift, 'shift.close': p.shift, 'debt.pay': p.payment, 'customer.create': p.customer, 'deferred.add': p.deferred, expense: p.expense, 'cash.move': p.move }
+    const map = { sale: p.sale, return: p.ret, writeoff: p.writeOff, arrival: p.arrival, 'shift.open': p.shift, 'shift.close': p.shift, 'debt.pay': p.payment, 'customer.create': p.customer, 'deferred.add': p.deferred, expense: p.expense, 'cash.move': p.move, 'supplier.return': p.ret }
     return map[op.type]?.id ?? null
   }
 
@@ -374,6 +390,21 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
     if (cashMove && method === 'DELETE') {
       if (u.role !== 'founder') return json(403, { statusCode: 403, message: 'Недостаточно прав' }, date)
       remove('cashMoves', decodeURIComponent(cashMove[1]))
+      return json(200, { ok: true }, date)
+    }
+    // Удалить возврат поставщику — только сервер: товар обратно, долг обратно
+    const supRet = route.match(/^\/supplier-returns\/([^/]+)$/)
+    if (supRet && method === 'DELETE') {
+      if (u.role !== 'founder') return json(403, { statusCode: 403, message: 'Недостаточно прав' }, date)
+      const was = s.data.supplierReturns.find((x) => x.id === decodeURIComponent(supRet[1]))
+      if (!was) return json(404, { statusCode: 404, message: 'Возврат не найден' }, date)
+      remove('supplierReturns', was.id)
+      for (const it of was.items || []) {
+        const prod = s.data.products.find((x) => x.id === it.productId)
+        if (prod) put('products', { ...prod, stock: prod.stock + it.qty })
+      }
+      const sup = was.refund === 'debt' ? s.data.suppliers.find((x) => x.id === was.supplierId) : null
+      if (sup) put('suppliers', { ...sup, debt: Math.round((Number(sup.debt) + Number(was.total)) * 100) / 100 })
       return json(200, { ok: true }, date)
     }
     const history = route.match(/^\/products\/([^/]+)\/history$/)

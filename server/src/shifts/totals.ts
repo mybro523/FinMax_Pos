@@ -61,6 +61,20 @@ export async function setSupplierCash(tx: Tx, shiftId: string) {
   return supplierCash
 }
 
+// ── Вернули поставщики наличными в кассу за смену ──
+// Возврат товара поставщику «в кассу»: поставщик отдал деньги, их положили в ящик.
+// Прибавляются к наличным, которые ждут при закрытии, — как внесение
+export async function supplierRefundOf(tx: Tx, shiftId: string) {
+  const sum = await tx.supplierReturn.aggregate({ where: { shiftId, refund: 'cash' }, _sum: { total: true } })
+  return D(sum._sum.total ?? 0)
+}
+
+export async function setSupplierRefund(tx: Tx, shiftId: string) {
+  const supplierRefund = await supplierRefundOf(tx, shiftId)
+  await tx.shift.update({ where: { id: shiftId }, data: { supplierRefund } })
+  return supplierRefund
+}
+
 export async function shiftTotals(
   tx: Tx,
   shift: { id: string; openingCash: Prisma.Decimal | number | string },
@@ -118,15 +132,18 @@ export async function shiftTotals(
 
   const expenseCash = await expenseCashOf(tx, shift.id)
   const supplierCash = await supplierCashOf(tx, shift.id)
+  const supplierRefund = await supplierRefundOf(tx, shift.id)
   const { cashIn, cashOut } = await cashMovesOf(tx, shift.id)
 
   const totalSales = salesCash.plus(salesCard).plus(salesDebt).plus(salesTransfer)
-  // В ящике: что было + наличные продажи + погашения долга + внесено − возвраты
-  // наличными − расходы из кассы − оплаты поставщикам из кассы − изъято
+  // В ящике: что было + наличные продажи + погашения долга + внесено + вернули
+  // поставщики в кассу − возвраты наличными − расходы из кассы − оплаты поставщикам
+  // из кассы − изъято
   const expectedCash = D(shift.openingCash)
     .plus(salesCash)
     .plus(debtPaid)
     .plus(cashIn)
+    .plus(supplierRefund)
     .minus(refundCash)
     .minus(expenseCash)
     .minus(supplierCash)
@@ -147,6 +164,7 @@ export async function shiftTotals(
     refundCost,
     expenseCash,
     supplierCash,
+    supplierRefund,
     cashIn,
     cashOut,
     profit,

@@ -35,6 +35,7 @@ export const PERMISSION_GROUPS = [
       ['arrivals.create', 'Приход товара: оформить приход'],
       ['arrivals.edit', 'Приход товара: изменить и удалить'],
       ['arrivals.debt', 'Приход товара: в долг поставщику'],
+      ['arrivals.return', 'Приход товара: возврат поставщику'],
       ['expiry.view', 'Срок годности'],
       ['writeoffs.view', 'Списание: журнал'],
       ['writeoffs.create', 'Списание: списать товар'],

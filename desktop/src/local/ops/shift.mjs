@@ -11,6 +11,7 @@ import { docsOfShift, enqueue, myOpenShift, putDoc } from '../docs.mjs'
 import { D, fromCents, toCents } from '../money.mjs'
 import { expenseCashOf } from './expense.mjs'
 import { cashMovesOf } from './cash.mjs'
+import { supplierRefundOf } from './supplierreturn.mjs'
 
 const money = (d) => fromCents(toCents(d))
 
@@ -46,6 +47,8 @@ export function shiftView(db, shift) {
     supplierCash: money(D(shift.supplierCash || 0).plus(pendingPaidOf(db, shift.id))),
     cashIn: money(cashIn),
     cashOut: money(cashOut),
+    // Вернули поставщики в ящик — по возвратам этой смены, своим и серверным
+    supplierRefund: money(supplierRefundOf(db, shift.id)),
   }
 }
 
@@ -86,6 +89,7 @@ export function openShift(ctx, raw) {
       cashIn: 0,
       cashOut: 0,
       supplierCash: 0,
+      supplierRefund: 0,
       salesTransfer: 0,
       transferBy: {},
       profit: 0,
@@ -155,12 +159,15 @@ export function shiftTotals(db, shift, countedCash) {
   const supplierCash = D(shift.supplierCash || 0).plus(pendingPaidOf(db, shift.id))
   // Внесено в ящик и изъято из него
   const { cashIn, cashOut } = cashMovesOf(db, shift.id)
+  // Вернули поставщики наличными в ящик (возврат товара «в кассу») — как внесение
+  const supplierRefund = supplierRefundOf(db, shift.id)
 
   const totalSales = salesCash.plus(salesCard).plus(salesDebt).plus(salesTransfer)
   const expectedCash = D(shift.openingCash)
     .plus(salesCash)
     .plus(debtPaid)
     .plus(cashIn)
+    .plus(supplierRefund)
     .minus(refundCash)
     .minus(expenseCash)
     .minus(supplierCash)
@@ -181,6 +188,7 @@ export function shiftTotals(db, shift, countedCash) {
     cashIn: money(cashIn),
     cashOut: money(cashOut),
     supplierCash: money(supplierCash),
+    supplierRefund: money(supplierRefund),
     salesTransfer: money(salesTransfer),
     transferBy: Object.fromEntries([...byService].map(([k, v]) => [k, money(v)])),
     profit: money(profit),

@@ -88,6 +88,8 @@ export function opTitle(type, t) {
       return t('Наличные в смене')
     case 'income':
       return t('Доход')
+    case 'supplier.return':
+      return t('Возврат поставщику')
     default:
       return t('Операция')
   }

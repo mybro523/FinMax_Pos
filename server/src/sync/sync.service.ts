@@ -10,7 +10,8 @@ import { weightedPackCost } from '../common/cost'
 import { addUnits, consumeUnitsTolerant, lockProducts, returnExpiry, shortageWorth, uppOf } from '../common/stock'
 import { Count, firstCountAfter, forgetShortageDoc, lockInventories, pruneCounted, rememberShortageDoc, shortageDocOf } from '../common/counted'
 import { TX, TX_SNAPSHOT } from '../common/tx'
-import { setCashMoves, setExpenseCash, setSupplierCash, shiftTotals } from '../shifts/totals'
+import { setCashMoves, setExpenseCash, setSupplierCash, setSupplierRefund, shiftTotals } from '../shifts/totals'
+import { batchesOf } from '../supplier-returns/supplier-returns.service'
 import { withDeviceNames } from '../shifts/shifts.service'
 import { mayCloseShift, NOT_YOUR_SHIFT } from '../shifts/closer'
 import { AUTH_SECRET } from '../common/config'
@@ -33,6 +34,7 @@ import {
   parseSale,
   parseShiftClose,
   parseShiftOpen,
+  parseSupplierReturn,
   parseWriteOff,
   when,
 } from './payload'
@@ -90,7 +92,7 @@ interface Ctx {
 //   debt           — клиент заплатил (или ему зачли) больше, чем он был должен:
 //                    checkPrice — сумма операции, basePrice — долг на тот момент.
 type Flag = {
-  kind: 'sale' | 'writeoff' | 'price' | 'return' | 'counted' | 'debt'
+  kind: 'sale' | 'writeoff' | 'price' | 'return' | 'counted' | 'debt' | 'supreturn'
   productId?: string | null
   name: string
   units: number
@@ -126,6 +128,8 @@ const TOUCHES: Record<OpType, string[]> = {
   expense: ['expenses', 'shifts'],
   'cash.move': ['cashMoves', 'shifts'],
   income: ['incomes'],
+  // Возврат поставщику: склад, долг поставщика, деньги «в кассу» — в смене
+  'supplier.return': ['supplierReturns', 'products', 'suppliers', 'shifts'],
 }
 
 // Сколько журнал изменений хранится. Касса без связи работает не больше недели;
@@ -367,6 +371,8 @@ export class SyncService {
         return this.applyCashMove(tx, parseCashMove(payload), ctx)
       case 'income':
         return this.applyIncome(tx, parseIncome(payload), ctx)
+      case 'supplier.return':
+        return this.applySupplierReturn(tx, parseSupplierReturn(payload), ctx)
     }
   }
 
@@ -1110,6 +1116,79 @@ export class SyncService {
     return p.id
   }
 
+  // ── Возврат товара поставщику ──
+  // Касса уже отдала товар без связи — отказать задним числом нельзя: берём со склада
+  // сколько есть, нехватку записываем расхождением. Поставщика могли удалить, пока
+  // касса была без связи: возврат остаётся (товар отдан), только без поставщика
+  private async applySupplierReturn(tx: Tx, p: ReturnType<typeof parseSupplierReturn>, ctx: Ctx): Promise<string> {
+    if (await tx.supplierReturn.findUnique({ where: { id: p.id }, select: { id: true } })) return p.id
+
+    const ids = [...new Set(p.items.map((i) => i.productId))]
+    await lockProducts(tx, ids)
+    const byId = new Map((await tx.product.findMany({ where: { id: { in: ids } } })).map((x) => [x.id, x]))
+    // Цену касса присылает как ввели — сумма сходится до дирама (допуск — на строку)
+    let total = D(0)
+    for (const it of p.items) {
+      const upp = uppOf(byId.get(it.productId) || {})
+      total = total.plus(D(it.price).times(D(it.qty * upp + it.pieces).div(upp)))
+    }
+    if (cents(total).minus(p.total).abs().gt(D(0.01).times(p.items.length))) throw new Reject('Сумма возврата не сходится с его позициями')
+    total = D(p.total)
+
+    // Остаток пересчитали уже после возврата: товара на полке и не было
+    const counted = await this.countsAfter(tx, ids, p.date)
+    const sup = await lockSupplier(tx, p.supplierId)
+    if (!sup) ctx.extra.add('suppliers')
+    const shiftId = p.refund === 'cash' ? await this.shiftRef(tx, p.shiftId, ctx) : null
+
+    const rows: Prisma.SupplierReturnItemUncheckedCreateWithoutRetInput[] = []
+    for (const it of p.items) {
+      const product = byId.get(it.productId)
+      if (!product) {
+        rows.push({ id: it.id, productId: null, name: it.name, qty: it.qty, pieces: it.pieces, price: D(it.price), cost: D(0), batches: [] })
+        continue
+      }
+      const units = it.qty * uppOf(product) + it.pieces
+      const count = counted.get(product.id)
+      if (count) {
+        await this.absorb(tx, ctx, p, count, product, -units)
+        rows.push({ id: it.id, productId: product.id, name: product.name, qty: it.qty, pieces: it.pieces, price: D(it.price), cost: product.cost, batches: [] })
+        continue
+      }
+      // Первой уходит партия с ближайшим сроком — в том числе просроченная
+      const { taken, short } = await consumeUnitsTolerant(tx, product.id, units, { atDate: p.date })
+      if (short > 0) await this.flag(tx, ctx, p, { kind: 'supreturn', productId: product.id, name: product.name, units: short })
+      rows.push({ id: it.id, productId: product.id, name: product.name, qty: it.qty, pieces: it.pieces, price: D(it.price), cost: product.cost, batches: batchesOf(taken) })
+    }
+
+    await tx.supplierReturn.create({
+      data: {
+        id: p.id,
+        date: p.date,
+        supplierId: sup?.id ?? null,
+        supplier: sup?.name || p.supplier,
+        total,
+        refund: p.refund,
+        shiftId,
+        note: p.note,
+        userId: ctx.tenantUserId,
+        items: { create: rows },
+      },
+    })
+    // В счёт долга: долг уменьшается на всю сумму. Касса проверила его по своим данным;
+    // если за это время долг успели погасить, он уходит в минус — поставщик должен магазину
+    if (sup && p.refund === 'debt') {
+      await tx.supplier.update({ where: { id: sup.id }, data: { debt: { decrement: total } } })
+      ctx.extra.add('suppliers')
+    }
+    if (shiftId) {
+      await setSupplierRefund(tx, shiftId)
+      // Смену могли закрыть раньше, чем возврат дошёл, — итоги пересчитываются вместе с ним
+      await this.recountClosed(tx, shiftId)
+    }
+    return p.id
+  }
+
   // ── Внесение и изъятие наличных ──
   // Операция живёт в смене: без неё денег не внести и не изъять. Смену сервер может
   // не знать (её открытие он отверг) — тогда отвергается и это, и владелец увидит
@@ -1311,6 +1390,8 @@ export class SyncService {
       suppliers: all(await this.supplierRows(tx, founder, await tx.supplier.findMany({ orderBy: { name: 'asc' } }))),
       payServices: all(await tx.payService.findMany({ orderBy: [{ ord: 'asc' }, { name: 'asc' }] })),
       cashMoves: all(await tx.cashMove.findMany({ where: { date: { gte: journalFrom } }, include: userOnly, orderBy: { date: 'desc' } })),
+      // Возвраты поставщикам — как приходы: всем, журнал в программе читается по праву на приход
+      supplierReturns: all(await tx.supplierReturn.findMany({ where: { date: { gte: journalFrom } }, include: { items: true, user: { select: { id: true, name: true } } }, orderBy: { date: 'desc' } })),
       ...(founder
         ? {
             writeoffs: all(await tx.writeOff.findMany({ where: { date: { gte: journalFrom } }, include: withUser, orderBy: { date: 'desc' } })),
@@ -1374,6 +1455,7 @@ export class SyncService {
       suppliers: await load('Supplier', async (part) => this.supplierRows(tx, founder, await tx.supplier.findMany({ where: inIds(part) }))),
       payServices: await load('PayService', (part) => tx.payService.findMany({ where: inIds(part) })),
       cashMoves: await load('CashMove', (part) => tx.cashMove.findMany({ where: inIds(part), include: userOnly })),
+      supplierReturns: await load('SupplierReturn', (part) => tx.supplierReturn.findMany({ where: inIds(part), include: { items: true, user: { select: { id: true, name: true } } } })),
       ...(founder
         ? {
             writeoffs: await load('WriteOff', (part) => tx.writeOff.findMany({ where: inIds(part), include: withUser })),
