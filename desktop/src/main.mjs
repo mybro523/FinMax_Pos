@@ -38,7 +38,7 @@ import { createRealtime } from './realtime.mjs'
 import { createSessionStore } from './session.mjs'
 import { createSettings } from './settings.mjs'
 import { createUpdater, feedYaml } from './updater.mjs'
-import { createWindowState, MIN_SIZE } from './window-state.mjs'
+import { createWindowState, MIN_SIZE, settleSize, windowKey } from './window-state.mjs'
 import { applyRestore, describeCopy, findCopies, requestRestore, RESTORE_FILE, saveCopyTo } from './restore.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -457,6 +457,12 @@ async function start() {
     app.quit()
     return true
   })
+  // «Свернуть»: программа открыта на весь экран, и системной кнопки у неё не видно
+  ipcMain.handle('app:minimize', (event) => {
+    if (!trusted(event) || !win) return false
+    win.minimize()
+    return true
+  })
   // Ссылка со страницы «О компании» — во внешнем браузере, почте или звонилке.
   // Только из списка COMPANY_LINKS и только по имени
   ipcMain.handle('app:open', async (event, key) => {
@@ -865,14 +871,45 @@ function createWindow(ses, userData) {
     },
   })
 
+  // ── На весь экран при каждом запуске ──
+  // Касса — главное окно на компьютере магазина: ни заголовка окна, ни панели задач
+  // Windows. Свернуть и закрыть программу можно её собственными кнопками (полоса внизу,
+  // экран входа), F11 выходит в обычное окно — то, каким его закрыли в прошлый раз.
   win.once('ready-to-show', () => {
-    if (saved.maximized) win.maximize()
+    win.setFullScreen(true)
     win.show()
   })
+  // Окно, в которое программа выходит по F11: при запуске — каким его закрыли в прошлый
+  // раз, дальше — каким оно было перед возвратом на весь экран
+  let windowed = { maximized: saved.maximized, width: saved.width, height: saved.height }
+  const keepMaximized = () => {
+    if (win && !win.isDestroyed() && !win.isFullScreen() && !win.isMinimized() && !win.isMaximized()) win.maximize()
+  }
+  const toggleFullScreen = () => {
+    // Свёрнутое окно сначала разворачивают — переключать его вслепую незачем
+    if (win.isMinimized()) return
+    if (!win.isFullScreen()) {
+      windowed = { maximized: win.isMaximized(), ...win.getNormalBounds() }
+      win.setFullScreen(true)
+      return
+    }
+    // Выход из полного экрана Windows делает сам и возвращает окно, каким оно было до
+    // него. Окно своего размера — точно, до точки: оно и создано этого размера. А
+    // развёрнутым окно перед полным экраном могло и не быть (при запуске оно скрытое,
+    // после сворачивания Windows возвращает его неразвёрнутым) — разворачиваем сами.
+    // И через мгновение проверяем ещё дважды: если Windows закончит возврат позже, он
+    // перебил бы наше «развернуть»
+    win.setFullScreen(false)
+    if (!windowed.maximized) return
+    keepMaximized()
+    setTimeout(keepMaximized, 150)
+    setTimeout(keepMaximized, 600)
+  }
   win.on('close', () => {
-    const maximized = win.isMaximized()
-    const bounds = maximized ? win.getNormalBounds() : win.getBounds()
-    state.save({ width: bounds.width, height: bounds.height, maximized })
+    // Закрыли на весь экран — запоминаем окно, в которое вышли бы по F11
+    const max = win.isMaximized()
+    const now = win.isFullScreen() ? windowed : { maximized: max, ...(max ? win.getNormalBounds() : win.getBounds()) }
+    state.save(settleSize({ width: now.width, height: now.height, maximized: now.maximized }, saved))
   })
   win.on('closed', () => {
     win = null
@@ -883,11 +920,16 @@ function createWindow(ses, userData) {
     if (win && !win.isDestroyed() && details?.reason !== 'clean-exit') win.reload()
   })
 
-  if (DEV) {
-    win.webContents.on('before-input-event', (_event, input) => {
-      if (input.type === 'keyDown' && input.key === 'F12') win.webContents.toggleDevTools()
-    })
-  }
+  // F11 — весь экран / обычное окно; F12 — инструменты разработчика (только из исходников)
+  win.webContents.on('before-input-event', (event, input) => {
+    const action = windowKey(input, { dev: DEV })
+    if (action === 'fullscreen') {
+      event.preventDefault()
+      toggleFullScreen()
+    } else if (action === 'devtools') {
+      win.webContents.toggleDevTools()
+    }
+  })
 
   win.loadURL(DEV_URL || START_URL).catch((e) => log.error('страница не открылась', e))
 }

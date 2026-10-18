@@ -4,8 +4,11 @@ import { LuKeyboard, LuLock, LuUserRound } from 'react-icons/lu'
 import { useAuth, logout } from '../db/auth'
 import { useT } from '../lib/i18n'
 import VirtualKeyboard from './VirtualKeyboard'
+import WindowButtons from './WindowButtons'
 
 // ── Полоса внизу окна: кто работает, экранная клавиатура, блокировка ──
+// В программе для Windows — ещё «Свернуть» и «Закрыть программу»: она открыта на весь
+// экран, и своих кнопок у окна не видно (см. WindowButtons.jsx).
 // Одна на весь проект, как шапка сверху, только внизу: на любой странице видно, под
 // чьим именем работают, и экран можно закрыть, отходя от компьютера. Раньше она
 // была только в кассе.
@@ -56,6 +59,7 @@ export default function AppFoot() {
           <button type="button" className="btn ghost sm" onClick={() => logout()} data-tour="app.lock">
             <span className="ic"><LuLock size={15} /></span> {t('Блокировка')}
           </button>
+          <WindowButtons />
         </div>
       </footer>
     </>

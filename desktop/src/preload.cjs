@@ -18,8 +18,10 @@ contextBridge.exposeInMainWorld('apteka', {
   request: (req) => ipcRenderer.invoke('api:request', req),
 
   app: {
-    // «Закрыть программу» с главного экрана
+    // «Закрыть программу» и «Свернуть»: программа открыта на весь экран, системных
+    // кнопок окна не видно — эти стоят в полосе внизу и на экране входа
     quit: () => ipcRenderer.invoke('app:quit'),
+    minimize: () => ipcRenderer.invoke('app:minimize'),
     // Ссылка со страницы «О компании». Окно называет только имя ссылки (site, phone…),
     // адрес знает основная часть: произвольный адрес отсюда не открыть
     open: (key) => ipcRenderer.invoke('app:open', key),

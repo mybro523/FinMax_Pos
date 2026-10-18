@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { LuLogIn, LuTriangleAlert, LuScanLine, LuBoxes, LuTrendingUp, LuWifiOff } from 'react-icons/lu'
 import { login } from '../db/auth'
 import { PasswordInput, BrandWord } from './ui'
+import WindowButtons from './WindowButtons'
 import { useT, useLang, setLang, LANGS } from '../lib/i18n'
+import { isDesktop } from '../lib/desktop'
 import emblem from '../assets/brand/emblem-192.webp'
 import logo320 from '../assets/brand/logo-320.webp'
 import logo640 from '../assets/brand/logo-640.webp'
@@ -76,6 +78,12 @@ export default function Login() {
       </aside>
 
       <main className="auth-pane">
+        {/* Программа для Windows открыта на весь экран: свернуть и закрыть — здесь */}
+        {isDesktop && (
+          <div className="auth-win">
+            <WindowButtons />
+          </div>
+        )}
         <form className="auth-card" onSubmit={submit}>
           <div className="auth-brandline">
             <img src={emblem} alt="" width="40" height="40" />

@@ -6,7 +6,8 @@ import { useAuth, logout } from '../db/auth'
 import { expiringProducts } from '../lib/expiry'
 import { useT } from '../lib/i18n'
 import { useTheme, toggleTheme } from '../lib/theme'
-import { isDesktop, bridge } from '../lib/desktop'
+import { isDesktop } from '../lib/desktop'
+import { useCloseApp } from '../components/WindowButtons'
 
 // ── Главный экран ──
 // Открывается после входа вместо бокового меню: квадратные плитки с объёмными
@@ -22,15 +23,11 @@ import { isDesktop, bridge } from '../lib/desktop'
 // рядом с «О компании»: у кассы часто нет мыши с крестиком под рукой. На телефоне
 // у этих кнопок остаются значки, подпись — во всплывающей подсказке.
 
-// Закрыть программу: просим основную часть, а если её нет (сайт) — окно само
-const closeApp = () => {
-  if (bridge?.app?.quit) bridge.app.quit().catch(() => window.close())
-  else window.close()
-}
-
 export default function Home() {
   const user = useAuth()
   const t = useT()
+  // Закрыть программу — с тем же вопросом, что и кнопка в полосе внизу
+  const closeApp = useCloseApp()
   const theme = useTheme()
   const deferred = useCollection('deferred')
   const products = useCollection('products')

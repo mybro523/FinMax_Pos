@@ -14,7 +14,7 @@ import os from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createLog } from '../src/log.mjs'
-import { createWindowState, sanitizeState } from '../src/window-state.mjs'
+import { createWindowState, sanitizeState, settleSize, windowKey } from '../src/window-state.mjs'
 import { electronEnv, loadEnv } from '../scripts/env.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -141,6 +141,47 @@ test('размер окна запоминается и читается обр�
   // Положение не сохраняем: окно, открывшееся за краем отключённого монитора, не достать
   assert.deepEqual(JSON.parse(fs.readFileSync(join(dir, 'window.json'), 'utf8')), { width: 1100, height: 720, maximized: false })
   assert.deepEqual(st.load(), { width: 1100, height: 720, maximized: false })
+})
+
+// ── Весь экран ──
+
+test('F11 переключает весь экран один раз, чужие сочетания не трогает', () => {
+  const key = (k, extra = {}) => ({ type: 'keyDown', key: k, ...extra })
+  assert.equal(windowKey(key('F11')), 'fullscreen')
+  assert.equal(windowKey(key('F11', { shift: true })), 'fullscreen')
+  // Удержанная клавиша повторяется — окно не должно мигать туда-сюда
+  assert.equal(windowKey(key('F11', { isAutoRepeat: true })), null)
+  assert.equal(windowKey({ type: 'keyUp', key: 'F11' }), null)
+  for (const mod of ['control', 'alt', 'meta']) assert.equal(windowKey(key('F11', { [mod]: true })), null, mod)
+  assert.equal(windowKey(key('F10')), null)
+  assert.equal(windowKey(null), null)
+})
+
+test('F12 открывает инструменты разработчика только из исходников', () => {
+  assert.equal(windowKey({ type: 'keyDown', key: 'F12' }), null)
+  assert.equal(windowKey({ type: 'keyDown', key: 'F12' }, { dev: true }), 'devtools')
+})
+
+test('размер окна: округление экрана с масштабом не копится от запуска к запуску', () => {
+  const before = { width: 1000, height: 700, maximized: false }
+  // 125%: просили 700 — Windows дал 702. Остаётся 700
+  assert.deepEqual(settleSize({ width: 1000, height: 702, maximized: false }, before), before)
+  assert.deepEqual(settleSize({ width: 1003, height: 697, maximized: true }, before), { width: 1000, height: 700, maximized: true })
+  // Человек сам потянул окно — это новый размер
+  assert.deepEqual(settleSize({ width: 1200, height: 704, maximized: false }, before), { width: 1200, height: 704, maximized: false })
+  // Сравнивать не с чем — как есть
+  assert.deepEqual(settleSize({ width: 1001, height: 702, maximized: false }, null), { width: 1001, height: 702, maximized: false })
+})
+
+test('окно открывается на весь экран, и свернуть его можно кнопкой программы', () => {
+  const main = read('src/main.mjs')
+  const ready = main.slice(main.indexOf("win.once('ready-to-show'"), main.indexOf('const toggleFullScreen'))
+  assert.match(ready, /setFullScreen\(true\)[\s\S]*win\.show\(\)/, 'на весь экран — до показа окна, без мигания обычным окном')
+  assert.match(main, /state\.save\(settleSize\(/, 'размер окна записывается без округления экрана')
+  // F11 работает и в собранной программе, а не только из исходников
+  assert.doesNotMatch(main, /if \(DEV\) \{\s*win\.webContents\.on\('before-input-event'/)
+  assert.match(main, /ipcMain\.handle\('app:minimize', \(event\) => \{\s*if \(!trusted\(event\)/)
+  assert.match(read('src/preload.cjs'), /minimize: \(\) => ipcRenderer\.invoke\('app:minimize'\)/)
 })
 
 // ── Журнал ──
