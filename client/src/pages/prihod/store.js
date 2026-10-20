@@ -16,7 +16,8 @@ import { getUser } from '../../db/auth'
 
 export const blankForm = () => ({
   productId: '', // товар, выбранный в форме
-  q: '', // что набрали в поле «Товар»: название или штрихкод
+  code: '', // поле «Штрихкод»: отсканированный или вписанный код
+  q: '', // поле «Наименование»: название выбранного товара или то, что набрали для поиска
   qty: '1',
   pieces: '',
   base: '', // цена поставщика за упаковку (до скидки)
@@ -33,7 +34,7 @@ const blankPay = (sourceId = '') => ({ method: '', paid: '', fromCash: false, so
 // ── Возврат поставщику, начатый, но не оформленный ──
 // Строки (lib/prihod.js: retLineFromProduct), форма добавления, как поставщик вернул
 // деньги (debt · cash · own · card) и причина
-export const blankRetForm = () => ({ productId: '', q: '', qty: '1', pieces: '', price: '', editKey: '' })
+export const blankRetForm = () => ({ productId: '', code: '', q: '', qty: '1', pieces: '', price: '', editKey: '' })
 const blankRet = (sourceId = '') => ({ lines: [], form: blankRetForm(), refund: '', note: '', sourceId })
 
 const blank = (owner = '') => ({

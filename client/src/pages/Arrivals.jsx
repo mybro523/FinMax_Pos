@@ -285,7 +285,14 @@ export default function Arrivals() {
         <SupplierColumn
           suppliers={suppliers}
           value={st.supplierId}
-          onChange={(id) => setPrihod({ supplierId: id })}
+          onChange={(id) => {
+            setPrihod({ supplierId: id })
+            // Поставщика выбрали — дальше сканируют товар: курсор в «Штрихкод» открытой
+            // формы. Иначе он остался бы на кнопке поставщика, и Enter от сканера снял бы
+            // выбор. На телефоне не трогаем: там фокус в поле открывает клавиатуру
+            const field = tab === 'new' ? 'prh-q' : tab === 'return' ? 'ret-q' : ''
+            if (id && field && window.matchMedia?.('(pointer: fine)').matches) setTimeout(() => document.getElementById(field)?.focus(), 0)
+          }}
           showDebt={supView}
           canAdd={can('suppliers.edit')}
           dialog={dialog}

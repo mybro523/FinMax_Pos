@@ -14,7 +14,7 @@ import { stockUnits, uppOf } from '../../lib/units'
 import { qtyText as unitsText } from '../../lib/otchety'
 import { retLineFromProduct, retLineSum, retSummary, retProblem, toRetItem, qtyText, n2, num } from '../../lib/prihod'
 import { usePrihod, setRet, setRetForm, resetRet, blankRetForm } from './store'
-import ProductSearch from './ProductSearch'
+import ProductPick from './ProductPick'
 
 // ── Возврат товара поставщику ──
 // Товар уходит со склада (просроченное — тоже: его чаще всего и возвращают), деньги
@@ -121,7 +121,7 @@ function NewReturn({ products, suppliers, sup, arrivals }) {
   const draft = base ? { ...base, qty: form.qty, pieces: form.pieces, price: form.price } : null
 
   function editLine(l) {
-    setRetForm({ productId: l.productId, q: l.name, qty: l.qty, pieces: l.pieces, price: l.price, editKey: l.key })
+    setRetForm({ productId: l.productId, code: l.barcode || '', q: l.name, qty: l.qty, pieces: l.pieces, price: l.price, editKey: l.key })
     setFocusQty((n) => n + 1)
   }
   function choose(p) {
@@ -136,7 +136,7 @@ function NewReturn({ products, suppliers, sup, arrivals }) {
       return toast(`«${p.name}»: ${tr('на складе нет — возвращать нечего')}`, 'err')
     }
     const l = retLineFromProduct(p, { arrivals, supplierId: sup?.id })
-    setRetForm({ productId: p.id, q: p.name, qty: '1', pieces: '', price: l.price, editKey: '' })
+    setRetForm({ productId: p.id, code: p.barcode || '', q: p.name, qty: '1', pieces: '', price: l.price, editKey: '' })
     beepOk()
     setFocusQty((n) => n + 1)
   }
@@ -217,28 +217,31 @@ function NewReturn({ products, suppliers, sup, arrivals }) {
       {!sup && <div className="note info" style={{ marginBottom: 12 }}>{t('Выберите поставщика слева — товар возвращают конкретному поставщику.')}</div>}
 
       <div className="prh-ret-form">
-        <div className="prh-f prh-f-product" data-tour="ret.scan">
-          <label htmlFor="ret-q">{t('Товар — штрихкод или название')}</label>
-          <ProductSearch
-            id="ret-q"
-            inputRef={scanRef}
-            products={products}
-            q={form.q}
-            setQ={(v) => setRetForm({ q: v, productId: '' })}
-            chosenName={chosen?.name}
-            readOnly={!!editing}
-            autoFocus={false}
-            onPick={choose}
-            onEnterChosen={() => setFocusQty((n) => n + 1)}
-            onUnknown={() => toast(tr('Товар с таким штрихкодом не найден'), 'err')}
-          />
-          <div className="scan-hint">
-            <span className="ic"><LuScanLine size={15} /></span>
-            {draft
-              ? `${t('На складе')}: ${stockText(products.find((p) => p.id === draft.productId) || {})} · ${draft.fromArrival ? t('цена — из последнего прихода от этого поставщика') : t('цена — закупочная из карточки')}`
-              : t('Отсканируйте товар, который отдаёте поставщику')}
-          </div>
-        </div>
+        <ProductPick
+          ids={{ code: 'ret-q', name: 'ret-name' }}
+          tour="ret.scan"
+          codeRef={scanRef}
+          products={products}
+          code={form.code || ''}
+          name={form.q}
+          chosen={chosen}
+          onCode={(v) => setRetForm({ code: v, q: '', productId: '' })}
+          onName={(v) => setRetForm({ q: v, code: '', productId: '' })}
+          readOnly={!!editing}
+          autoFocus={false}
+          onPick={choose}
+          onEnterChosen={() => setFocusQty((n) => n + 1)}
+          onUnknownCode={() => toast(tr('Товар с таким штрихкодом не найден'), 'err')}
+          onUnknownName={() => toast(tr('Товар не найден'), 'err')}
+          hint={
+            <>
+              <span className="ic"><LuScanLine size={15} /></span>
+              {draft
+                ? `${t('На складе')}: ${stockText(products.find((p) => p.id === draft.productId) || {})} · ${draft.fromArrival ? t('цена — из последнего прихода от этого поставщика') : t('цена — закупочная из карточки')}`
+                : t('Отсканируйте товар, который отдаёте поставщику')}
+            </>
+          }
+        />
         <div className="prh-f">
           <label>{t('Количество')}</label>
           <div className="prh-qty">

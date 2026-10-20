@@ -113,7 +113,8 @@ test('каждая метка тура указывает на настоящи�
     // Кнопки разделов настроек размечаются в цикле по списку разделов
     if (id.startsWith('set.nav-')) return !разделыНастроек().includes(id.slice('set.nav-'.length))
     // Метка бывает и полем списка, из которого кнопки рисуются в цикле: { tour: 'arr.new' }
-    return !src.includes(`data-tour="${id}"`) && !src.includes(`tour="${id}"`) && !src.includes(`tour: '${id}'`)
+    // …или свойством компонента, который ставит её на своё поле: codeTour="af.scan"
+    return !src.includes(`data-tour="${id}"`) && !src.includes(`tour="${id}"`) && !src.includes(`Tour="${id}"`) && !src.includes(`tour: '${id}'`)
   })
   assert.deepEqual(нет, [], `тур указывает в пустоту — таких меток нет на страницах: ${нет.join(', ')}`)
 })

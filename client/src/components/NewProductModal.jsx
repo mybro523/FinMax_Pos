@@ -12,8 +12,9 @@ import { translate as tr } from '../lib/i18n'
 // arrival — форма открыта из прихода: «Остаток» из карточки становится количеством в
 // строке прихода (для весового — в килограммах), а сам товар заводится с нулём —
 // иначе остаток задвоился бы.
-export default function NewProductModal({ barcode, note, confirmText, arrival = false, stock = '', onSave, onDefer, onClose }) {
-  const [f, setF] = useState({ ...emptyProduct, barcode, stock, minStock: '5' })
+export default function NewProductModal({ barcode, name = '', note, confirmText, arrival = false, stock = '', onSave, onDefer, onClose }) {
+  // name — название, которое набрали и не нашли: карточка начинается с него
+  const [f, setF] = useState({ ...emptyProduct, barcode, name: name || emptyProduct.name, stock, minStock: '5' })
   const [saving, setSaving] = useState(false)
 
   async function submit() {

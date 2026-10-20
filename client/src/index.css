@@ -2190,13 +2190,16 @@ html.has-foot .prh-side { max-height: calc(100vh - 120px - var(--app-foot-h)); }
 .prh-period-chips .chip { padding: 6px 11px; }
 
 /* ── Вкладки ── */
-.prh-tabs, .prh-subtabs { display: flex; gap: 2px; overflow-x: auto; }
-.prh-tabs { border-bottom: 2px solid var(--border); }
+.prh-tabs, .prh-subtabs { display: flex; gap: 2px; overflow-x: auto; overflow-y: hidden; }
+/* Линия под вкладками — тенью внутри ряда, а не рамкой: подчёркивание активной вкладки
+   ложится поверх неё само. Прежде вкладки заходили на рамку отступом -2px, вылезали
+   за край ряда — и Windows рисовал у ряда полосу прокрутки со стрелками */
+.prh-tabs { box-shadow: inset 0 -2px 0 var(--border); }
 .prh-tabs button, .prh-subtabs button {
   display: inline-flex; align-items: center; gap: 7px; border: 0; border-bottom: 3px solid transparent;
   background: transparent; color: var(--muted); font: inherit; font-weight: 600; white-space: nowrap; cursor: pointer; border-radius: 8px 8px 0 0;
 }
-.prh-tabs button { padding: 10px 16px; margin-bottom: -2px; font-size: 14px; }
+.prh-tabs button { padding: 10px 16px; font-size: 14px; }
 .prh-tabs button:hover, .prh-subtabs button:hover { color: var(--text); background: var(--hover); }
 .prh-tabs button.active { color: var(--accent-dark); border-bottom-color: var(--accent); background: var(--card); }
 .prh-badge {
@@ -2272,10 +2275,18 @@ html.has-foot .prh-side { max-height: calc(100vh - 120px - var(--app-foot-h)); }
 .prh-subtabs button.active { color: var(--accent-dark); border-bottom-color: var(--accent); background: var(--card); }
 .prh-add, .prh-sel, .prh-finish { padding: 16px; }
 .prh-add-main { display: flex; gap: 12px; align-items: flex-start; }
-.prh-f-product { flex: 1 1 auto; min-width: 0; }
+/* Товар двумя полями (ProductPick): штрихкод — по размеру кода, наименование — остальное */
+.prh-pick { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: minmax(150px, 200px) minmax(0, 1fr); gap: 0 12px; align-items: start; }
+.prh-pick .prh-f { margin-bottom: 0; }
+.prh-add-main .prh-pick { margin-bottom: 12px; }
+.prh-pick-hint { grid-column: 1 / -1; }
+.prh-pick .prh-search input { padding-right: 38px; }
+.prh-pick.found .prh-f-name input { font-weight: 600; border-color: var(--green); }
+.prh-pick-ok { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: var(--green); display: inline-flex; pointer-events: none; }
 .prh-newprod { margin-top: 23px; flex-shrink: 0; }
 .prh-search { position: relative; }
-.prh-search input[readonly] { background: var(--soft); color: var(--muted); }
+/* Правят строку из таблицы: товар в ней не меняют — оба поля серые */
+.prh-pick input[readonly] { background: var(--soft); color: var(--muted); }
 .prh-suggest {
   position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30; list-style: none; margin: 0; padding: 4px;
   background: var(--card); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
@@ -2356,7 +2367,7 @@ html.has-foot .prh-side { max-height: calc(100vh - 120px - var(--app-foot-h)); }
 .prh-ret-label { display: block; font-size: 12.5px; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
 @media (max-width: 1100px) {
   .prh-ret-form { grid-template-columns: auto auto minmax(0, 1fr); }
-  .prh-ret-form .prh-f-product { grid-column: 1 / -1; }
+  .prh-ret-form .prh-pick { grid-column: 1 / -1; }
   .prh-ret-actions { justify-content: flex-end; }
 }
 @media (max-width: 760px) {
@@ -2381,6 +2392,7 @@ html.has-foot .prh-side { max-height: calc(100vh - 120px - var(--app-foot-h)); }
   .prh-form input, .prh-form select { font-size: 16px; }
   .prh-add-cols, .prh-finish-cols, .prh-bal-cols { grid-template-columns: minmax(0, 1fr); }
   .prh-add-main { flex-direction: column; align-items: stretch; }
+  .prh-pick { grid-template-columns: minmax(0, 1fr); gap: 10px 0; }
   .prh-newprod { margin-top: 0; }
   .prh-period-chips { margin-left: 0; }
   .prh-period-f input { width: 140px; }

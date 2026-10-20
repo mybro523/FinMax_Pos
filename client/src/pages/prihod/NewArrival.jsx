@@ -22,12 +22,13 @@ import {
 } from '../../lib/prihod'
 import { usePrihod, setPrihod, setForm, setPay, resetDraft, blankForm } from './store'
 import { SupplierPick } from './SupplierPick'
-import ProductSearch from './ProductSearch'
+import ProductPick from './ProductPick'
 
 // ── Новое поступление ──
 // Как в привычных программах приёмки: по центру — накладная таблицей, справа — итоги
 // тёмно-синей панелью, снизу — форма. Форма добавляет товар (сканер стреляет в поле
-// «Товар», курсор сам уходит в количество, Enter — строка в таблице), правит строку
+// «Штрихкод», название встаёт в «Наименование» само, курсор уходит в количество,
+// Enter — строка в таблице), правит строку
 // (щелчок по строке открывает её в форме), правит сразу отмеченные строки и проводит
 // приход: чем заплатили и «Оприходовать».
 //
@@ -79,7 +80,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
   function editLine(l) {
     setPrihod({
       sub: 'add',
-      form: { productId: l.productId, q: l.name, qty: l.qty, pieces: l.pieces, base: l.base, disc: l.disc, price: l.price, price0: l.price0, mk: null, expiryDate: l.expiryDate, editKey: l.key },
+      form: { productId: l.productId, code: l.barcode || '', q: l.name, qty: l.qty, pieces: l.pieces, base: l.base, disc: l.disc, price: l.price, price0: l.price0, mk: null, expiryDate: l.expiryDate, editKey: l.key },
     })
     setFocusQty((n) => n + 1)
   }
@@ -95,7 +96,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
     }
     const disc = st.discAll ? form.disc : ''
     const l = lineFromProduct(p, { disc })
-    setForm({ productId: p.id, q: p.name, qty: l.qty, pieces: '', base: l.base, disc, price: l.price, price0: l.price0, mk: null, expiryDate: '', editKey: '' })
+    setForm({ productId: p.id, code: p.barcode || '', q: p.name, qty: l.qty, pieces: '', base: l.base, disc, price: l.price, price0: l.price0, mk: null, expiryDate: '', editKey: '' })
     beepOk()
     setFocusQty((n) => n + 1)
   }
@@ -325,25 +326,30 @@ export default function NewArrival({ products, suppliers, onSaved }) {
         {sub === 'add' && (
           <div className="prh-add">
             <div className="prh-add-main">
-              <div className="prh-f prh-f-product" data-tour="af.scan">
-                <label htmlFor="prh-q">{t('Товар — штрихкод или название')}</label>
-                <ProductSearch
-                  id="prh-q"
-                  inputRef={scanRef}
-                  products={products}
-                  q={form.q}
-                  setQ={(v) => setForm({ q: v, productId: '' })}
-                  chosenName={chosen?.name}
-                  readOnly={!!editing}
-                  onPick={choose}
-                  onEnterChosen={() => setFocusQty((n) => n + 1)}
-                  onUnknown={(barcode) => setNewProduct({ barcode })}
-                />
-                <div className="scan-hint">
-                  <span className="ic"><LuScanLine size={15} /></span>
-                  {editing ? t('Правите строку из таблицы. Enter — сохранить её.') : t('USB-сканер работает как клавиатура. Незнакомый штрихкод — заведём карточку прямо здесь')}
-                </div>
-              </div>
+              <ProductPick
+                ids={{ code: 'prh-q', name: 'prh-name' }}
+                codeTour="af.scan"
+                nameTour="af.name"
+                codeRef={scanRef}
+                products={products}
+                code={form.code || ''}
+                name={form.q}
+                chosen={chosen}
+                // Поменяли одно поле — другое относится к прежнему товару и очищается
+                onCode={(v) => setForm({ code: v, q: '', productId: '' })}
+                onName={(v) => setForm({ q: v, code: '', productId: '' })}
+                readOnly={!!editing}
+                onPick={choose}
+                onEnterChosen={() => setFocusQty((n) => n + 1)}
+                onUnknownCode={(barcode) => (can('products.create') ? setNewProduct({ barcode }) : toast(tr('Товар с таким штрихкодом не найден'), 'err'))}
+                onUnknownName={(name) => (can('products.create') ? setNewProduct({ barcode: '', name }) : toast(tr('Товар не найден'), 'err'))}
+                hint={
+                  <>
+                    <span className="ic"><LuScanLine size={15} /></span>
+                    {editing ? t('Правите строку из таблицы. Enter — сохранить её.') : t('USB-сканер работает как клавиатура. Незнакомый штрихкод — заведём карточку прямо здесь')}
+                  </>
+                }
+              />
               {can('products.create') && !editing && (
                 <button type="button" className="btn ghost prh-newprod" data-tour="af.newprod" onClick={() => setNewProduct({ barcode: '' })}>
                   <span className="ic"><LuPackagePlus size={15} /></span> {t('Новый товар')}
@@ -458,6 +464,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
       {newProduct && (
         <NewProductModal
           barcode={newProduct.barcode}
+          name={newProduct.name}
           arrival
           note={tr('Заполните карточку — товар заведётся и сразу встанет в этот приход. «Остаток» и закупочная цена из карточки станут количеством и ценой в строке прихода, там их можно поправить (весовой — в килограммах).')}
           confirmText={tr('Завести и добавить в приход')}
