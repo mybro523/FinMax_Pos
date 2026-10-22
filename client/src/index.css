@@ -148,26 +148,35 @@ svg { display: block; }
 
 /* ───────── Раскладка ─────────
    Бокового меню нет: разделы открываются с главного экрана (плитки) и занимают
-   весь экран. В шапке слева — кнопка «Меню», она возвращает к плиткам. */
+   весь экран. Шапка есть только у главного экрана; в разделах «Меню» (назад к
+   плиткам) и «?» стоят в полосе внизу, кнопки раздела — строкой вверху страницы. */
 .app { min-height: 100vh; }
 
-/* Кнопка «Меню» в шапке: светлая плашка на тёмно-синей шапке, значок плиток золотой */
-.menu-btn {
-  display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;
-  height: 40px; padding: 0 14px 0 12px; border-radius: 9px;
-  background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.24); color: #fff; text-decoration: none;
-  font-size: 13.5px; font-weight: 600; transition: background 0.13s, border-color 0.13s;
+/* Скрыто с экрана, но читается экранным диктором: название раздела */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
-.menu-btn:hover { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.4); }
-.menu-btn svg { color: var(--gold); }
-/* Имя системы на главном экране вместо кнопки */
+
+/* Кнопки раздела — «Экспорт Excel», «Печать», «Добавить…»: строкой вверху страницы,
+   справа. Слева в той же строке — сводка раздела, если она есть («Общая
+   задолженность: …»): длинная обрезается многоточием, строка не растёт.
+   Главное действие раздела, как и раньше в шапке, — золотое */
+.page-acts { display: flex; align-items: center; justify-content: flex-end; gap: 8px 14px; margin-bottom: 14px; }
+.page-acts .pa-note { flex: 1 1 auto; min-width: 0; color: var(--muted); font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.page-acts .pa-btns { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-left: auto; }
+.page-acts .pa-btns:empty { display: none; }
+.page-acts .btn:not(.ghost):not(.danger) { background: var(--gold); border-color: var(--gold); color: var(--on-gold); }
+.page-acts .btn:not(.ghost):not(.danger):hover { background: var(--gold); border-color: rgba(11, 26, 58, 0.45); box-shadow: 0 2px 10px rgba(239, 189, 36, 0.55); }
+
+/* Имя системы в шапке главного экрана */
 .brand-mini { display: inline-flex; align-items: center; gap: 9px; flex-shrink: 0; }
 .brand-mini img { width: 30px; height: 30px; }
 .brand-mini .brand-word { font-size: 17px; }
 .topbar-title { min-width: 0; }
 
 .main { display: flex; flex-direction: column; min-height: 100vh; min-width: 0; }
-/* Шапка — фирменным тёмно-синим на всех страницах, как табло «Итого» в кассе:
+/* Шапка главного экрана — фирменным тёмно-синим, как табло «Итого» в кассе:
    белый заголовок, светлый подзаголовок, кнопки действий — золотая главная и светлые остальные */
 .topbar {
   background: var(--sidebar);
@@ -743,7 +752,6 @@ input::placeholder { color: var(--muted-2); }
   .kassa .kassa-cart { padding: 12px; overflow: visible; }
   .kassa .kc-cats { padding: 0 10px 8px; }
   .kassa .kc-cats-head { padding: 8px 10px; }
-  .kassa-itogo .total-row.big { font-size: 26px; }
   .kassa .kp-bills button { padding: 8px 11px; }
   .kassa .chek-tab-main { padding: 9px 11px; }
 }
@@ -758,7 +766,6 @@ input::placeholder { color: var(--muted-2); }
   .kassa-table .qty-ctrl { gap: 4px; }
   .kassa-table .qty-ctrl button { width: 29px; height: 29px; }
   .kassa-table .disc-input { width: 54px; }
-  .kassa-itogo .total-row.big { font-size: 24px; }
   .kassa-oplata .pay-methods { gap: 6px; }
   .kassa-oplata .pay-methods button { font-size: 12.5px; padding: 9px 3px; gap: 4px; }
 }
@@ -813,7 +820,7 @@ input::placeholder { color: var(--muted-2); }
 @media (min-width: 1280px) and (min-height: 600px) {
   /* Второй селектор сильнее правила «над полосой внизу» (html.has-foot .toast):
      иначе у сообщения были бы и верх, и низ, и оно растянулось бы на весь экран */
-  .kassa-open .toast, html.has-foot.kassa-open .toast { top: 74px; bottom: auto; animation-name: down; }
+  .kassa-open .toast, html.has-foot.kassa-open .toast { top: 14px; bottom: auto; animation-name: down; }
 }
 @keyframes down { from { opacity: 0; transform: translate(-50%, -10px); } }
 @keyframes up { from { opacity: 0; transform: translate(-50%, 10px); } }
@@ -826,9 +833,16 @@ input::placeholder { color: var(--muted-2); }
 @media (max-width: 600px) {
   .topbar { padding: 12px 14px; }
   .topbar h1 { font-size: 16px; }
-  .menu-btn { padding: 0 10px; }
-  .menu-btn-text { display: none; }
   .topbar .sub { font-size: 11.5px; }
+  /* Кнопки раздела: «Экспорт Excel» и «Печать» — одними значками (подпись — во
+     всплывающей подсказке), главное действие — с подписью */
+  .page-acts { gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  /* Сводка — своей строкой целиком: в ряд с кнопками от неё остались бы два слова */
+  .page-acts .pa-note { flex-basis: 100%; white-space: normal; font-size: 13px; }
+  .page-acts .pa-btns { gap: 6px; }
+  .page-acts .btn { padding: 9px 12px; font-size: 13px; }
+  .page-acts .btn.ghost .btn-text { display: none; }
+  .page-acts .btn.ghost { padding: 9px 11px; }
   .topbar-actions .btn { padding: 9px 12px; font-size: 13px; }
   /* Заголовок — первым, кнопки — рядом или следующей строкой, если не влезли: иначе
      подзаголовок рассыпался по слову в строку, а кнопки уезжали за край. «Экспорт
@@ -869,7 +883,7 @@ input::placeholder { color: var(--muted-2); }
 
 @media (max-width: 430px) {
   .cards, .cards.six { grid-template-columns: 1fr; }
-  .topbar-actions .btn { padding: 8px 10px; font-size: 12.5px; }
+  .topbar-actions .btn, .page-acts .btn { padding: 8px 10px; font-size: 12.5px; }
 }
 
 /* ═════════ Обучение ═════════
@@ -1479,7 +1493,7 @@ tbody tr.clickable { cursor: pointer; }
 /* ═════════ Настройки: разделы слева, содержимое справа ═════════ */
 .set-wrap { display: flex; gap: 22px; align-items: flex-start; }
 .set-nav {
-  position: sticky; top: 76px;
+  position: sticky; top: 12px;
   width: 248px; flex: none;
   display: flex; flex-direction: column; gap: 4px;
   background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
@@ -1718,6 +1732,8 @@ tbody tr.clickable { cursor: pointer; }
 
 /* Телефон: карточка стоит снизу во всю ширину, элемент поднимается над ней */
 .tur-card.tur-sheet { left: 10px; right: 10px; bottom: 10px; top: auto; width: auto; }
+/* Элемент прикреплён к низу экрана (полоса внизу) — карточка сверху */
+.tur-card.tur-sheet.tur-sheet-up { top: 10px; bottom: auto; }
 .tur-sheet .tur-body { max-height: 38vh; }
 /* Три кнопки с подписями на 320–360 пикселях в ряд не влезали, и «Дальше»
    вылезал за край карточки. На телефоне «Назад» — одна стрелка, отступы меньше */
@@ -1730,8 +1746,6 @@ tbody tr.clickable { cursor: pointer; }
    поднимались выше карточки, а не оставались под ней */
 .tur-uzko .content { padding-bottom: calc(100vh - 140px); }
 
-/* Кнопка тура в шапке раздела */
-.tur-help { color: var(--accent); }
 
 @media (prefers-reduced-motion: reduce) {
   .tur-spot, .tur-card { transition: none; }
@@ -1847,8 +1861,27 @@ tbody tr.clickable { cursor: pointer; }
 /* Итоги крупнее и жирнее: их читают с расстояния вытянутой руки, в том числе покупатель */
 .kassa-itogo .total-row { font-size: 16.5px; font-weight: 600; margin: 4px 0; }
 .kassa-itogo .total-row span:last-child { font-weight: 700; font-size: 17.5px; }
-.kassa-itogo .total-row.big { font-size: 36px; }
-.kassa-itogo .total-row.big span:first-child { font-size: 13px; }
+/* «ИТОГО» и сумма — самое крупное на экране кассы: их ищут взглядом первыми.
+   Размеры — прямо на подписи и на сумме: правило строк выше иначе уменьшало сумму
+   итога до размера обычной строки (17,5) */
+.kassa-itogo .total-row.big span:first-child { font-size: 22px; font-weight: 700; letter-spacing: 0.06em; }
+.kassa-itogo .total-row.big span:last-child { font-size: 36px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+/* «ИТОГО» — всегда своей строкой, сумма — под ним, справа. В одну строку они на
+   ноутбуке помещались только при маленькой сумме: панель прыгала бы с одной строки
+   на две прямо во время сканирования */
+.kassa-itogo .total-row.big { row-gap: 2px; }
+.kassa-itogo .total-row.big > span:first-child { flex: 0 0 100%; line-height: 1.2; }
+.kassa-itogo .ki-sum { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; column-gap: 0.25em; }
+.kassa-itogo .ki-sum b { font-weight: inherit; white-space: nowrap; }
+.kassa-itogo .ki-sum small { font-size: 0.6em; font-weight: inherit; white-space: nowrap; letter-spacing: 0; }
+/* Телефон: столбик узкий — чуть мельче, но всё так же крупнее всего на экране */
+@media (max-width: 600px) {
+  .kassa-itogo .total-row.big span:first-child { font-size: 17px; }
+  .kassa-itogo .total-row.big span:last-child { font-size: 30px; }
+}
+@media (max-width: 380px) {
+  .kassa-itogo .total-row.big span:last-child { font-size: 27px; }
+}
 /* Скидка на весь чек: поле и переключатель «сомони | %» на тёмной плашке итога */
 .chek-skidka { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-bottom: 9px; margin-bottom: 6px; border-bottom: 1px dashed var(--sidebar-line); }
 .chek-skidka .cs-label { font-size: 13.5px; font-weight: 600; color: var(--sidebar-text); flex: 1 0 100%; }
@@ -1868,11 +1901,11 @@ tbody tr.clickable { cursor: pointer; }
 
 .kassa-wrap { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 
-/* ── Полоса внизу окна: кто работает, клавиатура, блокировка ──
-   Одна на весь проект — как шапка сверху, только внизу: фирменный тёмно-синий во всю
-   ширину, всегда на виду, страница листается между шапкой и ею. Прикреплена к низу
-   окна (sticky здесь не держится — у страницы задан overflow-x), а место под неё
-   оставляет класс has-foot на <html>. На телефоне — просто в конце страницы */
+/* ── Полоса внизу окна: кто работает, «Меню», тур, клавиатура, блокировка ──
+   Одна на весь проект: фирменный тёмно-синий во всю ширину, всегда на виду — и на
+   телефоне тоже. Шапки в разделах нет, её кнопки «Меню» и «?» стоят здесь, справа.
+   Прикреплена к низу окна (sticky здесь не держится — у страницы задан overflow-x),
+   а место под неё оставляет класс has-foot на <html> */
 :root { --app-foot-h: 52px; }
 .app-foot {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; height: var(--app-foot-h);
@@ -1885,7 +1918,12 @@ html.has-foot .main { padding-bottom: var(--app-foot-h); }
 .app-foot .kf-user .ic { display: inline-flex; color: var(--gold); flex-shrink: 0; }
 .app-foot .kf-user b { color: #fff; font-weight: 700; }
 .app-foot .kf-role { color: var(--sidebar-muted); }
-.app-foot .kf-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.app-foot .kf-left { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.app-foot .kf-status { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.app-foot .kf-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.app-foot a.btn { text-decoration: none; }
+/* «Меню» и «?» — значки золотом, как прежде в шапке: их ищут взглядом первыми */
+.app-foot .kf-menu .ic, .app-foot .kf-help svg { color: var(--gold); }
 /* Кнопки на тёмно-синем: светлые полупрозрачные плашки с белой надписью */
 .app-foot .btn.ghost { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.26); color: #fff; }
 .app-foot .btn.ghost:hover { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.46); }
@@ -1900,13 +1938,35 @@ html.has-foot .vkb { bottom: calc(var(--app-foot-h) + 10px); }
 html.has-foot.kb-open .content { padding-bottom: 272px !important; }
 html.has-foot.kb-open .overlay { padding-bottom: 342px; }
 html.has-foot.kb-open .modal { max-height: calc(100vh - 372px); }
+/* Программа для Windows: в полосе ещё значки версии, отправки и касс в сети и кнопки
+   «Свернуть» и «Закрыть программу». Становится тесно — подписи уходят по очереди:
+   сначала у версии и касс в сети, потом у остальных значков и роль, потом у кнопок.
+   Подпись видна во всплывающей подсказке, у значков — ещё и по нажатию */
+@media (max-width: 1439px) {
+  .app-foot.desk .sync-badge.ver .sync-label, .app-foot.desk .sync-badge.lan .sync-label { display: none; }
+  .app-foot.desk .sync-badge.ver, .app-foot.desk .sync-badge.lan { padding: 0 9px; }
+}
+@media (max-width: 1279px) {
+  .app-foot.desk .kf-status .sync-label { display: none; }
+  .app-foot.desk .kf-status .sync-badge { padding: 0 9px; }
+  .app-foot.desk .kf-role { display: none; }
+}
+@media (max-width: 1099px) {
+  .app-foot.desk { padding: 0 16px; }
+  .app-foot.desk .kf-actions .btn-text { display: none; }
+  .app-foot.desk .kf-actions .btn { padding-left: 10px; padding-right: 10px; }
+}
+/* Телефон: полоса так же закреплена внизу. Остаются имя, «?», «Меню» с подписью и
+   значки клавиатуры и блокировки */
 @media (max-width: 600px) {
-  .app-foot { position: static; height: auto; padding: 10px 14px; flex-wrap: wrap; gap: 8px 12px; }
-  html.has-foot .main { padding-bottom: 0; }
-  html.has-foot .toast { bottom: 24px; }
+  .app-foot { padding: 0 12px; gap: 10px; font-size: 13px; }
+  .app-foot .kf-pre, .app-foot .kf-role { display: none; }
+  .app-foot .kf-actions { gap: 6px; }
+  .app-foot .kf-kb .btn-text, .app-foot .kf-lock .btn-text { display: none; }
+  .app-foot .kf-actions .btn { padding-left: 10px; padding-right: 10px; }
 }
 @media print {
-  .app-foot { display: none !important; }
+  .app-foot, .page-acts { display: none !important; }
   html.has-foot .main { padding-bottom: 0; }
 }
 
@@ -2147,9 +2207,10 @@ tfoot .zak-total td { font-weight: 700; border-top: 2px solid var(--border-stron
 .prh-side {
   background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm);
   padding: 12px; display: flex; flex-direction: column; gap: 8px;
-  position: sticky; top: 12px; max-height: calc(100vh - 120px);
+  position: sticky; top: 12px; max-height: calc(100vh - 56px);
 }
-html.has-foot .prh-side { max-height: calc(100vh - 120px - var(--app-foot-h)); }
+/* 56 — отступы страницы сверху и снизу; шапки над ней больше нет */
+html.has-foot .prh-side { max-height: calc(100vh - 56px - var(--app-foot-h)); }
 .prh-side-btn {
   display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 11px; border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong); background: var(--card); color: var(--text);

@@ -89,7 +89,8 @@ const разметка = () => {
 }
 
 const меткиТуров = () => {
-  const out = new Set(['page.title', 'topbar.help'])
+  // «Меню» и «?» в полосе внизу: на них показывает общий тур
+  const out = new Set(['app.help', 'app.menu'])
   for (const u of OBUCHENIE) {
     for (const [, , s] of u.ekran) {
       const x = spec(s)

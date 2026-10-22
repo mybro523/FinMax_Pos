@@ -89,7 +89,7 @@ export default function Deferred() {
   return (
     <Layout
       title={t('Отложенные штрихкоды')}
-      subtitle={`${deferred.length} ${t('ожидают оформления')}`}
+      note={`${deferred.length} ${t('ожидают оформления')}`}
       actions={<ExportPechat onExcel={exportExcel} />}
     >
       <PrintSheet zagolovok={t('Отложенные штрихкоды')} podzag={exPodzag} cols={exCols} rows={exRows} />

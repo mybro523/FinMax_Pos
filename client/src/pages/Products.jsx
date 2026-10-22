@@ -157,7 +157,7 @@ export default function Products() {
   return (
     <Layout
       title={t('Товары')}
-      subtitle={`${products.length} ${t('наименований · склад на')} ${money(totalValue)}`}
+      note={`${products.length} ${t('наименований · склад на')} ${money(totalValue)}`}
       actions={<>
         <ExportPechat onExcel={exportExcel} />
         {can('products.create') && <button className="btn" data-tour="prod.add" onClick={() => setEdit({ ...empty })}><span className="ic"><LuPlus size={16} /></span> {t('Добавить товар')}</button>}

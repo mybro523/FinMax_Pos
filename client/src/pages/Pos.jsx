@@ -1507,7 +1507,7 @@ export default function Pos() {
               <div className="total-row"><span>{t('Сумма')}</span><span>{money(total + discountTotal)}</span></div>
               <div className="total-row"><span>{t('Скидка')}</span><span>{discountTotal > 0 ? '−' : ''}{money(discountTotal)}</span></div>
               <div className="total-row"><span>{t('Товаров')}</span><span>{cart.length ? countText : '0'}</span></div>
-              <div className="total-row big"><span>{t('Итого')}</span><span>{money(total)}</span></div>
+              <div className="total-row big"><span>{t('Итого')}</span><SummaItogo text={money(total)} /></div>
             </div>
 
             <div className="kassa-oplata">
@@ -1728,6 +1728,19 @@ export default function Pos() {
           />
         ))}
     </Layout>
+  )
+}
+
+// ── Сумма «Итого»: число крупно, «сомони» мельче ──
+// Так и сумма с тысячами («12 345,50 сомони») встаёт в одну строку узкой панели итога.
+// Не влезла совсем — «сомони» переносится под число, а не рвёт его
+function SummaItogo({ text }) {
+  const i = text.lastIndexOf(' ')
+  if (i <= 0) return <span className="ki-sum"><b>{text}</b></span>
+  return (
+    <span className="ki-sum">
+      <b>{text.slice(0, i)}</b> <small>{text.slice(i + 1)}</small>
+    </span>
   )
 }
 

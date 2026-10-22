@@ -285,7 +285,11 @@ export default function TurRunner({ id, index }) {
     const card = cardRef.current
     if (!card) return
     if (narrow) {
-      if (ready) setPos({ sheet: true })
+      // Карточка — снизу во всю ширину. Но кнопки полосы внизу («Меню», «?»,
+      // «Блокировка») прикреплены к низу экрана и не поднимаются прокруткой — для них
+      // карточка встаёт сверху, иначе закрыла бы ровно то, что показывает
+      const up = !!rect && rect.top > window.innerHeight / 2
+      if (ready) setPos((prev) => (prev?.sheet && prev.up === up ? prev : { sheet: true, up }))
       return
     }
     const w = window.innerWidth
@@ -351,7 +355,7 @@ export default function TurRunner({ id, index }) {
 
       <div
         ref={cardRef}
-        className={'tur-card' + (pos?.sheet ? ' tur-sheet' : '')}
+        className={'tur-card' + (pos?.sheet ? ' tur-sheet' + (pos.up ? ' tur-sheet-up' : '') : '')}
         style={cardStyle}
         role="dialog"
         aria-modal="true"

@@ -1,16 +1,15 @@
 import { useEffect } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
-  LuLayoutDashboard, LuShoppingCart, LuPill, LuPackagePlus, LuLayoutGrid,
+  LuLayoutDashboard, LuShoppingCart, LuPill, LuPackagePlus,
   LuClipboardList, LuReceipt, LuTrendingUp, LuSettings, LuClock, LuTag, LuCalculator, LuWifiOff,
   LuUsers, LuCalendarClock, LuUndo2, LuTrash2, LuClipboardCheck, LuTriangleAlert,
-  LuGraduationCap, LuCircleHelp, LuHandCoins, LuTruck, LuShieldCheck, LuChartColumn, LuScale, LuCoins,
+  LuGraduationCap, LuHandCoins, LuTruck, LuShieldCheck, LuChartColumn, LuScale, LuCoins,
 } from 'react-icons/lu'
 import { useConnection } from '../db/store'
 import { useAuth, leavePharmacy } from '../db/auth'
 import { can } from '../lib/permissions'
 import { useT } from '../lib/i18n'
-import { startTour } from '../lib/tur'
 import { isDesktop } from '../lib/desktop'
 import SyncBadge from './SyncBadge'
 import AppFoot from './AppFoot'
@@ -61,10 +60,14 @@ export const NAV = [
 // Открыт ли раздел этому сотруднику
 export const allowedNav = (user, n) => (n.owner ? user?.role === 'founder' : !n.perm || can(user, n.perm))
 
-// hub — это сам главный экран: вместо кнопки «Меню» в шапке стоит имя системы.
+// hub — это сам главный экран: у него одного есть шапка с именем системы.
 // fill — раздел сам занимает всю высоту окна и листается внутри себя (касса
 // на широком экране). Остальные разделы растут вниз и листаются страницей.
-export default function Layout({ title, subtitle, actions, fill, hub, children }) {
+// title и subtitle в разделах на экране не пишутся (шапки там нет): title остаётся
+// заголовком для экранного диктора. actions — кнопки раздела, строкой вверху страницы;
+// note — сводка раздела слева от них («Общая задолженность: …»), если без неё цифра
+// пропала бы с экрана вместе с шапкой
+export default function Layout({ title, subtitle, note, actions, fill, hub, children }) {
   const conn = useConnection()
   const user = useAuth()
   const t = useT()
@@ -108,42 +111,40 @@ export default function Layout({ title, subtitle, actions, fill, hub, children }
             {t('Нет связи с сервером — показаны сохранённые данные, изменения синхронизируются автоматически')}
           </div>
         )}
-        <header className="topbar">
-          <div className="topbar-left">
-            {hub ? (
+        {/* Шапка — только у главного экрана: имя системы и его кнопки. В разделах её
+            нет, место отдано странице: «Меню» и «?» стоят в полосе внизу (AppFoot.jsx),
+            кнопки раздела — строкой вверху страницы */}
+        {hub && (
+          <header className="topbar">
+            <div className="topbar-left">
               <span className="brand-mini" aria-hidden="true">
                 <img src={emblem} alt="" width="30" height="30" />
                 <BrandWord />
               </span>
-            ) : (
-              <Link to="/" className="menu-btn" data-tour="topbar.menu" title={t('Главное меню')}>
-                <LuLayoutGrid size={18} />
-                <span className="menu-btn-text">{t('Меню')}</span>
-              </Link>
-            )}
-            <div className="topbar-title">
-              <h1 data-tour="page.title">{title}</h1>
-              {subtitle && <div className="sub">{subtitle}</div>}
+              <div className="topbar-title">
+                <h1>{title}</h1>
+                {subtitle && <div className="sub">{subtitle}</div>}
+              </div>
             </div>
-          </div>
-          <div className="topbar-actions">
-            {isDesktop && <SyncBadge />}
-            {hasTour && (
-              <button
-                className="btn ghost icon tur-help"
-                data-tour="topbar.help"
-                onClick={() => startTour(location.pathname)}
-                title={t('Тур по разделу')}
-                aria-label={t('Тур по разделу')}
-              >
-                <LuCircleHelp size={18} />
-              </button>
-            )}
-            {actions}
-          </div>
-        </header>
-        <main className="content" key={location.pathname}>{children}</main>
-        <AppFoot />
+            <div className="topbar-actions">
+              {isDesktop && <SyncBadge />}
+              {actions}
+            </div>
+          </header>
+        )}
+        <main className="content" key={location.pathname}>
+          {/* Название раздела на экране не пишется, но остаётся заголовком страницы
+              для экранного диктора */}
+          {!hub && <h1 className="sr-only">{title}</h1>}
+          {!hub && (actions || note) ? (
+            <div className="page-acts">
+              {note && <span className="pa-note" title={note}>{note}</span>}
+              <div className="pa-btns">{actions}</div>
+            </div>
+          ) : null}
+          {children}
+        </main>
+        <AppFoot razdel={!hub} tour={hasTour} />
       </div>
 
       {/* Хост для модалок страницы. Лежит внутри .app (у неё нет transform, поэтому

@@ -36,11 +36,12 @@ export default function WindowButtons({ className = 'btn ghost sm' }) {
   if (!isDesktop) return null
   return (
     <>
-      <button type="button" className={className} onClick={minimize} data-tour="app.minimize" title={t('Свернуть программу. F11 — выйти из полноэкранного режима')}>
-        <span className="ic"><LuMinus size={15} /></span> {t('Свернуть')}
+      {/* Подпись — отдельным span: в узком окне полоса внизу оставляет одни значки */}
+      <button type="button" className={className} onClick={minimize} data-tour="app.minimize" title={t('Свернуть программу. F11 — выйти из полноэкранного режима')} aria-label={t('Свернуть')}>
+        <span className="ic"><LuMinus size={15} /></span> <span className="btn-text">{t('Свернуть')}</span>
       </button>
-      <button type="button" className={className} onClick={closeApp} data-tour="app.quit" title={t('Закрыть программу')}>
-        <span className="ic"><LuPower size={15} /></span> {t('Закрыть программу')}
+      <button type="button" className={className} onClick={closeApp} data-tour="app.quit" title={t('Закрыть программу')} aria-label={t('Закрыть программу')}>
+        <span className="ic"><LuPower size={15} /></span> <span className="btn-text">{t('Закрыть программу')}</span>
       </button>
     </>
   )

@@ -31,8 +31,9 @@ export function stepsFor(id, user, sreda) {
 
   const ekran = u.ekran.map(([title, text, s]) => ({ title, text, ...spec(s) })).filter(can)
   return [
-    // Первый шаг — заголовок страницы и зачем раздел нужен
-    { t: 'page.title', text: u.zachem, intro: true },
+    // Первый шаг — название раздела и зачем он нужен. Карточкой по центру экрана:
+    // шапки с названием в разделах нет, подсвечивать нечего
+    { text: u.zachem, intro: true },
     ...ekran,
     { title: 'Как это делается', list: u.shagi, numbered: true },
     { title: 'Частые ошибки', list: u.oshibki, warn: true },

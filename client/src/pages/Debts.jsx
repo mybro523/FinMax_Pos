@@ -89,7 +89,7 @@ export default function Debts() {
   return (
     <Layout
       title={t('Долги клиентов')}
-      subtitle={`${t('Общая задолженность')}: ${money(totalDebt)}`}
+      note={`${t('Общая задолженность')}: ${money(totalDebt)}`}
       actions={
         <>
           <ExportPechat onExcel={exportExcel} />
