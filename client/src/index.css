@@ -11,6 +11,8 @@
   /* Корзина кассы — светло-серая плашка: чек выделяется среди белых панелей */
   --cart-bg: #f1f3f8;
   --cart-line: #d8dee8;
+  /* Рамка корзины — фирменный тёмно-синий, как панель «Итого» */
+  --cart-frame: #0a1a45;
   --gold: #efbd24;
   --gold-dark: #dcac14;
   --gold-soft: #fbf3d5;
@@ -76,6 +78,8 @@
   /* В тёмной теме — чуть светлее карточек: светлый текст на светло-сером не читался бы */
   --cart-bg: #19244f;
   --cart-line: #2e3d7a;
+  /* Тёмно-синий «Итого» на тёмной странице не виден — рамка светлее того же синего */
+  --cart-frame: #3a50a0;
   --gold: #efbd24;
   --gold-dark: #f6cc4b;
   --gold-soft: #3b3112;
@@ -511,7 +515,9 @@ input::placeholder { color: var(--muted-2); }
 .kassa-izm .chek-x { color: inherit; padding: 2px; border-radius: 6px; flex-shrink: 0; }
 
 /* ── Чек ── */
-.kassa-cart { display: flex; flex-direction: column; padding: 16px; background: var(--cart-bg); border-color: var(--cart-line); }
+/* Рамка корзины — фирменным тёмно-синим, как панель «Итого»: корзина и итог читаются
+   одним блоком кассы */
+.kassa-cart { display: flex; flex-direction: column; padding: 16px; background: var(--cart-bg); border: 2px solid var(--cart-frame); }
 .kassa-cart h2 { margin-bottom: 10px; flex-wrap: wrap; }
 .kassa-cart-tools { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .kassa-cart-tools .btn { font-weight: 500; }
@@ -1759,6 +1765,9 @@ tbody tr.clickable { cursor: pointer; }
    виден, но не нажимается, картинка приглушена. */
 /* Меню на всю ширину окна: плитки прежнего размера, в ряд встаёт столько, сколько помещается */
 .hub { width: 100%; display: flex; flex-direction: column; gap: 22px; }
+/* Экран выше меню — плитки стоят посередине по высоте, а не прижаты к верху с пустотой
+   внизу. Не помещаются — меню, как и раньше, начинается сверху и листается */
+.app-hub .content { display: flex; flex-direction: column; justify-content: center; }
 .hub-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); grid-auto-flow: dense; gap: 12px; }
 .hub-tile {
   position: relative; display: flex; flex-direction: column; align-items: flex-start; overflow: hidden;
@@ -2344,7 +2353,23 @@ html.has-foot .prh-side { max-height: calc(100vh - 56px - var(--app-foot-h)); }
 .prh-pick .prh-search input { padding-right: 38px; }
 .prh-pick.found .prh-f-name input { font-weight: 600; border-color: var(--green); }
 .prh-pick-ok { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: var(--green); display: inline-flex; pointer-events: none; }
-.prh-newprod { margin-top: 23px; flex-shrink: 0; }
+/* Новый товар (его нет в базе — заведётся из формы): поле названия обведено золотом,
+   внутри метка «новый»; справа в форме — единица, штук в упаковке и категория */
+.prh-pick.nov .prh-f-name input { border-color: var(--gold); box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 24%, transparent); }
+.prh-pick.nov .prh-search input { padding-right: 84px; }
+.prh-pick-new {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none;
+  padding: 3px 9px; border-radius: 999px; background: var(--gold); color: var(--on-gold);
+  font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+}
+.prh-nov { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 12px; }
+.prh-nov .prh-nov-cat { grid-column: 1 / -1; }
+.prh-nov select { width: 100%; }
+/* Телефон: в два столбца «уп — упаковка» обрезалась — поля друг под другом */
+@media (max-width: 600px) {
+  .prh-nov { grid-template-columns: minmax(0, 1fr); }
+  .prh-nov > div:empty { display: none; }
+}
 .prh-search { position: relative; }
 /* Правят строку из таблицы: товар в ней не меняют — оба поля серые */
 .prh-pick input[readonly] { background: var(--soft); color: var(--muted); }
@@ -2355,6 +2380,9 @@ html.has-foot .prh-side { max-height: calc(100vh - 56px - var(--app-foot-h)); }
 }
 .prh-suggest li { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
 .prh-suggest li.active, .prh-suggest li:hover { background: var(--accent-soft); }
+/* У нового товара над подсказками — пояснение: это то, что уже есть в базе */
+.prh-suggest li.prh-suggest-cap { padding: 6px 10px 4px; font-size: 12px; font-weight: 600; color: var(--muted); cursor: default; }
+.prh-suggest li.prh-suggest-cap:hover { background: none; }
 .prh-suggest-name { font-weight: 600; font-size: 14px; }
 .prh-f { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 .prh-f > label { font-size: 12.5px; color: var(--muted); font-weight: 600; }
@@ -2454,7 +2482,6 @@ html.has-foot .prh-side { max-height: calc(100vh - 56px - var(--app-foot-h)); }
   .prh-add-cols, .prh-finish-cols, .prh-bal-cols { grid-template-columns: minmax(0, 1fr); }
   .prh-add-main { flex-direction: column; align-items: stretch; }
   .prh-pick { grid-template-columns: minmax(0, 1fr); gap: 10px 0; }
-  .prh-newprod { margin-top: 0; }
   .prh-period-chips { margin-left: 0; }
   .prh-period-f input { width: 140px; }
 }

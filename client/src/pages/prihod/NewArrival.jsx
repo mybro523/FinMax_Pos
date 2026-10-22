@@ -5,8 +5,7 @@ import {
 } from 'react-icons/lu'
 import { useToast, useDialog } from '../../components/ui'
 import NumberInput from '../../components/NumberInput'
-import NewProductModal from '../../components/NewProductModal'
-import { productPayload } from '../../components/ProductForm'
+import { productPayload, emptyProduct } from '../../components/ProductForm'
 import { useCashSources, sourceName } from '../../components/SupplierMoney'
 import { db, money, stockText } from '../../db/store'
 import { receiveArrival } from '../../db/ops'
@@ -14,7 +13,9 @@ import { useCan } from '../../db/auth'
 import { useT, translate as tr } from '../../lib/i18n'
 import { normalizeScan, canonBarcode } from '../../lib/scan'
 import { beepOk, beepError } from '../../lib/sound'
-import { isVesovoy } from '../../lib/units'
+import { isVesovoy, KG, EDINICY } from '../../lib/units'
+import { generateEan13 } from '../../lib/barcode'
+import { useCategories, categoryOptions } from '../../lib/categories'
 import { priceFromMarkup, markupOf } from '../../lib/pricing'
 import {
   lineFromProduct, lineCost, lineTotal, lineRetail, summary, qtyText, packText, lineProblem, toItem,
@@ -28,7 +29,9 @@ import ProductPick from './ProductPick'
 // Как в привычных программах приёмки: по центру — накладная таблицей, справа — итоги
 // тёмно-синей панелью, снизу — форма. Форма добавляет товар (сканер стреляет в поле
 // «Штрихкод», название встаёт в «Наименование» само, курсор уходит в количество,
-// Enter — строка в таблице), правит строку
+// Enter — строка в таблице), заводит новый товар (кода или названия нет в базе —
+// форма сама становится «новым товаром»: название, единица, категория, количество и
+// цены; «Завести и добавить» кладёт его в «Товары» и строкой в приход), правит строку
 // (щелчок по строке открывает её в форме), правит сразу отмеченные строки и проводит
 // приход: чем заплатили и «Оприходовать».
 //
@@ -48,9 +51,11 @@ export default function NewArrival({ products, suppliers, onSaved }) {
   const s = useMemo(() => summary(lines), [lines])
 
   const scanRef = useRef(null)
+  const nameRef = useRef(null)
   const qtyRef = useRef(null)
   const [focusQty, setFocusQty] = useState(0)
-  const [newProduct, setNewProduct] = useState(null)
+  const [savingNew, setSavingNew] = useState(false)
+  const catList = useCategories()
   const focusScan = () => setTimeout(() => scanRef.current?.focus(), 0)
 
   useEffect(() => {
@@ -72,7 +77,18 @@ export default function NewArrival({ products, suppliers, onSaved }) {
   // ── Товар в форме ──
   const chosen = form.productId ? products.find((p) => p.id === form.productId) || null : null
   const editing = form.editKey ? lines.find((l) => l.key === form.editKey) || null : null
-  const baseLine = editing || (chosen ? lineFromProduct(chosen) : null)
+  // Новый товар — его ещё нет в базе: строку собираем из того, что вписано в форме.
+  // Штук в упаковке у дробного (кг, л…) — тысячные, у штуки — одна
+  const novUnit = form.novUnit || 'уп'
+  const novUpp = isVesovoy({ unit: novUnit }) ? KG : novUnit === 'шт' ? 1 : Math.max(1, Math.trunc(Number(form.novUpp) || 1))
+  const nov = !!form.nov && !editing && !chosen
+  const novLine = nov
+    ? {
+        ...lineFromProduct({ id: null, name: String(form.q || '').trim(), barcode: String(form.code || '').trim(), category: form.novCat || '', unit: novUnit, unitsPerPack: novUpp }),
+        key: 'nov',
+      }
+    : null
+  const baseLine = editing || (chosen ? lineFromProduct(chosen) : novLine)
   const draft = baseLine
     ? { ...baseLine, qty: form.qty, pieces: form.pieces, base: form.base, disc: form.disc, price: form.price, expiryDate: form.expiryDate }
     : null
@@ -80,7 +96,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
   function editLine(l) {
     setPrihod({
       sub: 'add',
-      form: { productId: l.productId, code: l.barcode || '', q: l.name, qty: l.qty, pieces: l.pieces, base: l.base, disc: l.disc, price: l.price, price0: l.price0, mk: null, expiryDate: l.expiryDate, editKey: l.key },
+      form: { ...blankForm(), productId: l.productId, code: l.barcode || '', q: l.name, qty: l.qty, pieces: l.pieces, base: l.base, disc: l.disc, price: l.price, price0: l.price0, mk: null, expiryDate: l.expiryDate, editKey: l.key },
     })
     setFocusQty((n) => n + 1)
   }
@@ -96,9 +112,19 @@ export default function NewArrival({ products, suppliers, onSaved }) {
     }
     const disc = st.discAll ? form.disc : ''
     const l = lineFromProduct(p, { disc })
-    setForm({ productId: p.id, code: p.barcode || '', q: p.name, qty: l.qty, pieces: '', base: l.base, disc, price: l.price, price0: l.price0, mk: null, expiryDate: '', editKey: '' })
+    setForm({ productId: p.id, code: p.barcode || '', q: p.name, qty: l.qty, pieces: '', base: l.base, disc, price: l.price, price0: l.price0, mk: null, expiryDate: '', editKey: '', nov: false })
     beepOk()
     setFocusQty((n) => n + 1)
+  }
+
+  // ── Новый товар: кода или названия нет в базе ──
+  // Форма сама становится «новым товаром». Пришёл код — впишут название; пришло
+  // название — отсканируют код упаковки (или оставят пустым: тогда код даст программа)
+  function startNew({ code = '', q = '' }) {
+    setPrihod((x) => ({
+      form: { ...blankForm(), disc: x.discAll ? x.form.disc : '', nov: true, code, q },
+    }))
+    setTimeout(() => (q ? scanRef : nameRef).current?.focus(), 0)
   }
 
   function clearForm() {
@@ -142,6 +168,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
       toast(tr('Сначала выберите товар: отсканируйте штрихкод или найдите по названию'), 'err')
       return focusScan()
     }
+    if (nov) return commitNew()
     const problem = lineProblem(draft)
     if (problem) return toast(`«${draft.name}»: ${tr(problem)}`, 'err')
     const l = { ...draft, mk: null }
@@ -168,26 +195,56 @@ export default function NewArrival({ products, suppliers, onSaved }) {
     }))
   }
 
-  // ── Товара нет в базе: заводим карточку и сразу ставим строкой в этот приход ──
-  // «Остаток» из карточки — это сколько пришло (весовой — в килограммах),
-  // закупочная — цена поставщика. Сам товар заводится с нулём: остаток даст приход
-  async function saveNewProduct(f) {
-    if (!f.name.trim() || !(f.barcode || '').trim()) return toast(tr('Укажите название и штрихкод'), 'err')
-    const data = productPayload(f, { normalizeBarcode: normalizeScan })
-    const dup = products.find((p) => canonBarcode(p.barcode) === canonBarcode(data.barcode))
+  // ── Новый товар: заводим карточку и сразу ставим строкой в этот приход ──
+  // В «Товарах» он появляется с тем же названием, штрихкодом, единицей, категорией,
+  // закупочной (цена поставщика со скидкой), ценой продажи и сроком, что в строке.
+  // Сам товар заводится с нулём: остаток даст «Оприходовать», как у всех товаров.
+  // Штрихкода нет — даём свой внутренний код (его можно распечатать этикеткой)
+  async function commitNew() {
+    if (savingNew) return
+    const name = String(form.q || '').trim()
+    if (!name) {
+      toast(tr('Впишите название нового товара'), 'err')
+      return nameRef.current?.focus()
+    }
+    const problem = lineProblem(draft)
+    if (problem) return toast(`«${name}»: ${tr(problem)}`, 'err')
+    const barcode = normalizeScan(String(form.code || '').trim()) || generateEan13(products.map((p) => p.barcode))
+    if (!barcode) return toast(tr('Не удалось сгенерировать код'), 'err')
+    const dup = products.find((p) => p.barcode && canonBarcode(p.barcode) === canonBarcode(barcode))
     if (dup) return toast(tr('Такой штрихкод уже есть') + ': ' + dup.name, 'err')
+    const f = {
+      ...emptyProduct,
+      name,
+      barcode,
+      category: form.novCat || '',
+      unit: novUnit,
+      unitsPerPack: String(novUpp),
+      cost: String(lineCost(draft)),
+      price: String(form.price ?? ''),
+      expiryDate: form.expiryDate || '',
+      minStock: '5',
+    }
+    setSavingNew(true)
     try {
-      const created = await db.push('products', { ...data, stock: 0, looseUnits: 0 })
-      setNewProduct(null)
-      const raw = String(f.stock ?? '').trim()
-      const n = Number(raw.replace(',', '.'))
-      const l = lineFromProduct(created, { disc: st.discAll ? form.disc : '' })
-      l.qty = !raw || !(n > 0) ? '1' : isVesovoy(created) ? raw : String(Math.max(1, Math.floor(n)))
+      const created = await db.push('products', { ...productPayload(f), stock: 0, looseUnits: 0 })
+      const l = {
+        ...lineFromProduct(created, { disc: form.disc }),
+        qty: form.qty,
+        pieces: form.pieces,
+        base: form.base,
+        disc: form.disc,
+        price: form.price,
+        expiryDate: form.expiryDate,
+      }
       setPrihod((x) => ({ lines: [...x.lines, l], flash: l.key, form: { ...blankForm(), disc: x.discAll ? x.form.disc : '' } }))
-      toast(`«${created.name}» ${tr('добавлен в базу')}`)
+      beepOk()
+      toast(`«${created.name}» ${tr('заведён в «Товарах» и добавлен в приход')}`)
       focusScan()
     } catch (e) {
       toast(tr(e.message), 'err')
+    } finally {
+      setSavingNew(false)
     }
   }
 
@@ -335,26 +392,28 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                 code={form.code || ''}
                 name={form.q}
                 chosen={chosen}
-                // Поменяли одно поле — другое относится к прежнему товару и очищается
-                onCode={(v) => setForm({ code: v, q: '', productId: '' })}
-                onName={(v) => setForm({ q: v, code: '', productId: '' })}
+                // Поменяли одно поле — другое относится к прежнему товару и очищается.
+                // У нового товара оба поля — его собственные и друг друга не трогают
+                onCode={(v) => (nov ? setForm({ code: v }) : setForm({ code: v, q: '', productId: '' }))}
+                onName={(v) => (nov ? setForm({ q: v }) : setForm({ q: v, code: '', productId: '' }))}
                 readOnly={!!editing}
+                nov={nov}
+                nameRef={nameRef}
                 onPick={choose}
                 onEnterChosen={() => setFocusQty((n) => n + 1)}
-                onUnknownCode={(barcode) => (can('products.create') ? setNewProduct({ barcode }) : toast(tr('Товар с таким штрихкодом не найден'), 'err'))}
-                onUnknownName={(name) => (can('products.create') ? setNewProduct({ barcode: '', name }) : toast(tr('Товар не найден'), 'err'))}
+                onUnknownCode={(barcode) => (can('products.create') ? startNew({ code: barcode }) : toast(tr('Товар с таким штрихкодом не найден'), 'err'))}
+                onUnknownName={(name) => (can('products.create') ? startNew({ q: name }) : toast(tr('Товар не найден'), 'err'))}
                 hint={
                   <>
-                    <span className="ic"><LuScanLine size={15} /></span>
-                    {editing ? t('Правите строку из таблицы. Enter — сохранить её.') : t('USB-сканер работает как клавиатура. Незнакомый штрихкод — заведём карточку прямо здесь')}
+                    <span className="ic">{nov ? <LuPackagePlus size={15} /> : <LuScanLine size={15} />}</span>
+                    {editing
+                      ? t('Правите строку из таблицы. Enter — сохранить её.')
+                      : nov
+                        ? t('Нового товара нет в базе — он заведётся в «Товарах», когда нажмёте «Завести и добавить». Без штрихкода программа даст свой код.')
+                        : t('USB-сканер работает как клавиатура. Незнакомый штрихкод — заведём товар прямо в этой форме')}
                   </>
                 }
               />
-              {can('products.create') && !editing && (
-                <button type="button" className="btn ghost prh-newprod" data-tour="af.newprod" onClick={() => setNewProduct({ barcode: '' })}>
-                  <span className="ic"><LuPackagePlus size={15} /></span> {t('Новый товар')}
-                </button>
-              )}
             </div>
 
             <div className="prh-add-cols">
@@ -395,22 +454,56 @@ export default function NewArrival({ products, suppliers, onSaved }) {
               </div>
 
               <div className="prh-add-col">
-                <div className="prh-info">
-                  <div><span>{t('В упаковке')}</span><b>{draft ? packText(draft, t) : '—'}</b></div>
-                  <div><span>{t('Категория')}</span><b>{draft?.category || '—'}</b></div>
-                  <div><span>{t('На складе')}</span><b>{chosen || editing ? stockText(products.find((p) => p.id === draft.productId) || {}) : '—'}</b></div>
-                  <div><span>{t('Цена со скидкой')}</span><b>{draft ? money(discCost(form.base, form.disc)) : '—'}</b></div>
-                </div>
+                {nov ? (
+                  <div className="prh-nov" data-tour="af.nov">
+                    <div className="prh-f">
+                      <label htmlFor="prh-nov-unit">{t('Единица измерения')}</label>
+                      <select
+                        id="prh-nov-unit"
+                        value={novUnit}
+                        // Дробная единица и штука — без «штук в упаковке»: штуки сверх упаковок обнуляем
+                        onChange={(e) => setForm({ novUnit: e.target.value, ...(isVesovoy({ unit: e.target.value }) || e.target.value === 'шт' ? { novUpp: '1', pieces: '' } : {}) })}
+                      >
+                        {EDINICY.map((x) => (
+                          <option key={x.v} value={x.v}>{t(x.v) === t(x.name) ? t(x.v) : `${t(x.v)} — ${t(x.name)}`}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {!isVesovoy({ unit: novUnit }) && novUnit !== 'шт' ? (
+                      <div className="prh-f">
+                        <label htmlFor="prh-nov-upp">{t('Штук в упаковке')}</label>
+                        <NumberInput id="prh-nov-upp" integer value={form.novUpp} placeholder="1" onChange={numField('novUpp')} onKeyDown={onEnter} />
+                      </div>
+                    ) : <div />}
+                    <div className="prh-f prh-nov-cat">
+                      <label htmlFor="prh-nov-cat">{t('Категория')}</label>
+                      <select id="prh-nov-cat" value={form.novCat || ''} onChange={(e) => setForm({ novCat: e.target.value })}>
+                        <option value="">{t('— без категории —')}</option>
+                        {categoryOptions(form.novCat || '', catList).map((o) => <option key={o.value} value={o.value}>{t(o.value)}</option>)}
+                      </select>
+                    </div>
+                    <div className="prh-info prh-nov-cat">
+                      <div><span>{t('Цена со скидкой')}</span><b>{money(discCost(form.base, form.disc))}</b></div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="prh-info">
+                    <div><span>{t('В упаковке')}</span><b>{draft ? packText(draft, t) : '—'}</b></div>
+                    <div><span>{t('Категория')}</span><b>{draft?.category || '—'}</b></div>
+                    <div><span>{t('На складе')}</span><b>{chosen || editing ? stockText(products.find((p) => p.id === draft.productId) || {}) : '—'}</b></div>
+                    <div><span>{t('Цена со скидкой')}</span><b>{draft ? money(discCost(form.base, form.disc)) : '—'}</b></div>
+                  </div>
+                )}
                 <div className="prh-f" data-tour="af.markup">
                   <label>{t('Розничная цена')}</label>
                   <div className="prh-price">
                     <NumberInput
-                      className={draft && num(form.price) !== form.price0 ? 'changed' : ''}
+                      className={draft && !nov && num(form.price) !== form.price0 ? 'changed' : ''}
                       value={form.price}
                       onChange={(e) => setForm({ price: e.target.value, mk: null })}
                       onKeyDown={onEnter}
                       disabled={!draft}
-                      title={draft && num(form.price) !== form.price0 ? `${t('Было')}: ${money(form.price0)}` : undefined}
+                      title={draft && !nov && num(form.price) !== form.price0 ? `${t('Было')}: ${money(form.price0)}` : undefined}
                     />
                     <label className="prh-unit prh-mk">
                       <NumberInput
@@ -425,7 +518,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                       <span>%</span>
                     </label>
                   </div>
-                  {draft && num(form.price) !== form.price0 && <div className="prh-was">{t('Было')}: {money(form.price0)}</div>}
+                  {draft && !nov && num(form.price) !== form.price0 && <div className="prh-was">{t('Было')}: {money(form.price0)}</div>}
                 </div>
                 {draft?.div && (
                   <div className="prh-info">
@@ -447,8 +540,9 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                   <span className="ic"><LuTrash2 size={15} /></span> {t('Убрать строку')}
                 </button>
               )}
-              <button type="button" className="btn green" data-tour="af.add" onClick={commit} disabled={!draft}>
-                <span className="ic">{editing ? <LuCheck size={16} /> : <LuPlus size={16} />}</span> {editing ? t('Сохранить строку') : t('Добавить')}
+              <button type="button" className="btn green" data-tour="af.add" onClick={commit} disabled={!draft || savingNew}>
+                <span className="ic">{editing ? <LuCheck size={16} /> : nov ? <LuPackagePlus size={16} /> : <LuPlus size={16} />}</span>{' '}
+                {editing ? t('Сохранить строку') : nov ? (savingNew ? t('Сохранение…') : t('Завести и добавить')) : t('Добавить')}
               </button>
             </div>
           </div>
@@ -461,20 +555,6 @@ export default function NewArrival({ products, suppliers, onSaved }) {
         )}
       </section>
 
-      {newProduct && (
-        <NewProductModal
-          barcode={newProduct.barcode}
-          name={newProduct.name}
-          arrival
-          note={tr('Заполните карточку — товар заведётся и сразу встанет в этот приход. «Остаток» и закупочная цена из карточки станут количеством и ценой в строке прихода, там их можно поправить (весовой — в килограммах).')}
-          confirmText={tr('Завести и добавить в приход')}
-          onSave={saveNewProduct}
-          onClose={() => {
-            setNewProduct(null)
-            focusScan()
-          }}
-        />
-      )}
     </div>
   )
 }

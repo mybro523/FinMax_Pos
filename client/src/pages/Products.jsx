@@ -9,6 +9,7 @@ import { normalizeScan, canonBarcode } from '../lib/scan'
 import { expiryStatus, expiryLabel } from '../lib/expiry'
 import { fmtDate } from '../lib/time'
 import { useT } from '../lib/i18n'
+import { poiskZapros, tovarPodhodit } from '../lib/poisk'
 import { getUser, useCan } from '../db/auth'
 import { useCategories, categoryNames } from '../lib/categories'
 import { sellsBelowCost } from '../lib/pricing'
@@ -54,9 +55,11 @@ export default function Products() {
   const catList = useCategories()
   const categories = useMemo(() => ['Все', ...categoryNames(catList)], [catList])
 
+  // Поиск — по названию или штрихкоду, в том числе сканером (и маркировкой DataMatrix)
+  const z = useMemo(() => poiskZapros(q), [q])
   const filtered = products.filter((p) => {
     const okCat = cat === 'Все' || p.category === cat
-    const okQ = !q || p.name.toLowerCase().includes(q.toLowerCase()) || p.barcode.includes(q)
+    const okQ = tovarPodhodit(z, p.name, p.barcode)
     return okCat && okQ
   })
   const pg = usePagination(filtered, 10, q + '|' + cat)

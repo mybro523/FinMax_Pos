@@ -27,6 +27,12 @@ export const blankForm = () => ({
   mk: null, // наценка, пока её вписывают
   expiryDate: '',
   editKey: '', // строка таблицы, открытая в форме для правки
+  // Новый товар: кода или названия нет в базе — товар заводится прямо из формы
+  // («Завести и добавить»). Его единица, штук в упаковке и категория
+  nov: false,
+  novUnit: 'уп',
+  novUpp: '1',
+  novCat: '',
 })
 
 const blankPay = (sourceId = '') => ({ method: '', paid: '', fromCash: false, sourceId })

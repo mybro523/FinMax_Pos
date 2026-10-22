@@ -63,6 +63,8 @@ export function prodazhiPoTovaram({ sales, products, from, to, t = (s) => s }) {
     return {
       ...r,
       name: p?.name || r.name,
+      // Штрихкод — для поиска по нему (у удалённого товара его уже не узнать)
+      barcode: p?.barcode || '',
       category: p?.category || '',
       qty: qtyText(r.units, like, t),
       revenue,
@@ -87,6 +89,8 @@ export function vseProdazhi({ sales, products, from, to, t = (s) => s }) {
       const p = byId.get(i.productId) || { unitsPerPack: uppOf(i), unit: uppOf(i) === KG ? 'кг' : 'уп' }
       rows.push({
         saleId: s.id,
+        productId: i.productId || null,
+        barcode: byId.get(i.productId)?.barcode || '',
         date: s.date,
         cashier: s.user?.name || '',
         userId: s.userId || s.user?.id || null,
@@ -146,6 +150,8 @@ export function zakupkiIOplaty({ arrivals, supplierPayments, supplierReturns = [
         supplierId: a.supplierId || null,
         supplier: a.supplier && a.supplier !== '—' ? a.supplier : '',
         name: it.name,
+        productId: it.productId || null,
+        barcode: p?.barcode || '',
         qty: qtyText(units, p || { unitsPerPack: num(it.pieces) > 0 ? KG : 1, unit: num(it.pieces) > 0 ? 'кг' : 'уп' }, t),
         price: num(it.cost),
         sum: sums[n],
@@ -173,6 +179,8 @@ export function zakupkiIOplaty({ arrivals, supplierPayments, supplierReturns = [
         supplierId: r.supplierId || null,
         supplier: r.supplier && r.supplier !== '—' ? r.supplier : '',
         name: `${t('Возврат')}: ${it.name}`,
+        productId: it.productId || null,
+        barcode: p?.barcode || '',
         qty: qtyText(units, like, t),
         price: num(it.price),
         sum: -sum,

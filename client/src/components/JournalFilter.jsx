@@ -3,6 +3,7 @@ import { LuSearch } from 'react-icons/lu'
 import { useCollection, loadRange, needsServerFor } from '../db/store'
 import { startOfDay, startOfDaysAgo } from '../lib/time'
 import { useT, translate as tr } from '../lib/i18n'
+import { poiskZapros, kodyPodhodyat } from '../lib/poisk'
 
 // ── Поиск и период в журналах ──
 // В возвратах, списаниях и приходах была только листалка по десять строк. Найти
@@ -26,8 +27,9 @@ const inRange = (date, from, to) => {
   return (!from || t >= from.getTime()) && (!to || t < to.getTime())
 }
 
-// key — раздел общего слоя данных; dateOf/textOf — где у записи дата и по чему искать
-export function useJournalFilter(key, { dateOf = (r) => r.date, textOf = () => '' } = {}) {
+// key — раздел общего слоя данных; dateOf/textOf — где у записи дата и по чему искать;
+// codesOf — штрихкоды товаров записи: поиск находит её и по коду, и по скану
+export function useJournalFilter(key, { dateOf = (r) => r.date, textOf = () => '', codesOf = () => [] } = {}) {
   const cached = useCollection(key)
   const [period, setPeriod] = useState('30')
   const [fromDate, setFromDate] = useState('')
@@ -70,11 +72,11 @@ export function useJournalFilter(key, { dateOf = (r) => r.date, textOf = () => '
 
   const rows = useMemo(() => {
     const source = deep && older ? older : cached
-    const needle = q.trim().toLowerCase()
+    const z = poiskZapros(q)
     return source
       .filter((r) => r && inRange(dateOf(r), range.from, range.to))
-      .filter((r) => !needle || String(textOf(r) || '').toLowerCase().includes(needle))
-    // dateOf/textOf задаются на месте и при каждом рендере новые — в зависимости
+      .filter((r) => !z || String(textOf(r) || '').toLowerCase().includes(z.text) || kodyPodhodyat(z, codesOf(r)))
+    // dateOf/textOf/codesOf задаются на месте и при каждом рендере новые — в зависимости
     // их не берём, иначе список пересчитывался бы вхолостую без конца
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cached, older, deep, range, q])

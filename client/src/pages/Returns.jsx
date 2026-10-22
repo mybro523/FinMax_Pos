@@ -10,6 +10,7 @@ import { useCollection, money } from '../db/store'
 import { returnGoods } from '../db/ops'
 import { fmtDateTime, dayKey, chekNomer } from '../lib/time'
 import { useT } from '../lib/i18n'
+import { poiskZapros, kodyPodhodyat, shtrihkodyPoId } from '../lib/poisk'
 import { useCategories, needsExpiry } from '../lib/categories'
 import NumberInput from '../components/NumberInput'
 import VesInput from '../components/VesInput'
@@ -41,8 +42,11 @@ export default function Returns() {
   const products = useCollection('products')
   const categories = useCategories()
   // Отдельный срез для истории: со своим поиском и периодом
+  // Поиск в истории и чека — по товару, кассиру или штрихкоду товара (в том числе сканером)
+  const kodPoId = useMemo(() => shtrihkodyPoId(products), [products])
   const journal = useJournalFilter('returns', {
     textOf: (r) => (r.items || []).map((i) => i.name).join(' ') + ' ' + (r.user?.name || ''),
+    codesOf: (r) => (r.items || []).map((i) => kodPoId.get(i.productId)),
   })
   const t = useT()
   const toast = useToast()
@@ -59,12 +63,17 @@ export default function Returns() {
   // Последние продажи для поиска чека
   const found = useMemo(() => {
     const list = sales.filter((s) => s && Array.isArray(s.items))
-    if (!q.trim()) return list.slice(0, 40)
-    const needle = q.trim().toLowerCase()
+    const z = poiskZapros(q)
+    if (!z) return list.slice(0, 40)
     return list
-      .filter((s) => s.items.some((i) => (i.name || '').toLowerCase().includes(needle)) || money(s.total).includes(needle))
+      .filter(
+        (s) =>
+          s.items.some((i) => (i.name || '').toLowerCase().includes(z.text)) ||
+          money(s.total).includes(z.text) ||
+          kodyPodhodyat(z, s.items.map((i) => kodPoId.get(i.productId))),
+      )
       .slice(0, 40)
-  }, [sales, q])
+  }, [sales, q, kodPoId])
 
   // Сколько уже возвращено по конкретному чеку — больше него отдать нельзя.
   // Считаем по переданному чеку, а не по выбранному в state: на момент выбора
@@ -235,7 +244,7 @@ export default function Returns() {
             <input
               className="search"
               data-tour="ret.search"
-              placeholder={t('Поиск чека по товару или сумме…')}
+              placeholder={t('Поиск чека: товар, штрихкод или сумма…')}
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
@@ -397,7 +406,7 @@ export default function Returns() {
           <span className="h2-title"><span className="ic"><LuUndo2 size={17} /></span>{t('История возвратов')}</span>
         </h2>
         <div style={{ padding: '12px 16px 0' }}>
-          <JournalFilter controls={journal.controls} placeholder={t('Поиск по товару или кассиру…')} />
+          <JournalFilter controls={journal.controls} placeholder={t('Товар, штрихкод или кассир…')} />
           <JournalCount rows={journal.rows.length} loading={journal.loading} />
         </div>
         <table>

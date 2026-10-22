@@ -3,6 +3,7 @@ import { LuScale, LuReceipt, LuBanknote } from 'react-icons/lu'
 import { money } from '../../db/store'
 import { fmtDateTime } from '../../lib/time'
 import { useT } from '../../lib/i18n'
+import { poiskZapros, tovarPodhodit } from '../../lib/poisk'
 import { sverkaPostavshikov, zakupkiIOplaty } from '../../lib/otchety'
 import { Pagination, usePagination } from '../../components/Pagination'
 
@@ -32,10 +33,11 @@ export default function Reports({ rep, suppliers, loading, periodLabel }) {
   const nameOf = (x) => x.name || (x.supplierId ? '—' : t('Без поставщика'))
   const supName = (r) => r.supplier || (r.supplierId ? suppliers.find((s) => s.id === r.supplierId)?.name : '') || t('без поставщика')
 
+  // Поиск — по товару, поставщику или штрихкоду товара
   const zakRows = useMemo(() => {
-    const needle = q.trim().toLowerCase()
-    if (!needle) return rep.zak.rows
-    return rep.zak.rows.filter((r) => `${r.name} ${r.supplier}`.toLowerCase().includes(needle))
+    const z = poiskZapros(q)
+    if (!z) return rep.zak.rows
+    return rep.zak.rows.filter((r) => tovarPodhodit(z, `${r.name} ${r.supplier}`, r.barcode))
   }, [rep.zak.rows, q])
   const itogo = useMemo(() => zakRows.reduce((s, r) => ({ sum: s.sum + r.sum, paid: s.paid + r.paid, debt: s.debt + r.debt }), { sum: 0, paid: 0, debt: 0 }), [zakRows])
   const pg = usePagination(zakRows, 15, `${q}|${periodLabel}|${rep.zak.rows.length}`)
@@ -91,7 +93,7 @@ export default function Reports({ rep, suppliers, loading, periodLabel }) {
           <span className="tag-cat">{periodLabel}</span>
         </div>
         <div className="toolbar" style={{ padding: '0 16px 10px' }}>
-          <input className="search" placeholder={t('Поиск по товару или поставщику…')} value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="search" placeholder={t('Товар, штрихкод или поставщик…')} value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <div className="table-cards-wrap">
           <table className="table-cards zak-table">

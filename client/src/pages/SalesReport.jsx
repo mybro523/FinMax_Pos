@@ -11,11 +11,15 @@ import { fmtDateTime, chekNomer } from '../lib/time'
 import { useT } from '../lib/i18n'
 import { skachatXlsx } from '../lib/excel'
 import { prodazhiPoTovaram, vseProdazhi } from '../lib/otchety'
+import { poiskZapros, tovarPodhodit } from '../lib/poisk'
 
 // ── Отчёт продажи ──
 // Две вкладки. «По товарам» — сколько продано каждого товара, выручка после скидок,
 // себестоимость и прибыль: видно, что кормит магазин, а что лежит. «Все продажи» —
 // каждая позиция каждого чека: когда, кто продал, что, сколько, скидка и оплата.
+// Кассир выбирается в обеих вкладках: «По товарам» тогда считает только его продажи
+// (что продаёт этот сотрудник). Карточки сверху — всегда по всем. Поиск — по названию
+// и по штрихкоду, в том числе сканером.
 // Расчёты — в lib/otchety.js; Excel и печать берут те же строки, что на экране.
 
 const VKLADKA = 'apteka_otchet_prodazh_vkladka'
@@ -52,23 +56,28 @@ export default function SalesReport() {
 
   const poTov = useMemo(() => prodazhiPoTovaram({ sales, products, from: range.from, to: range.to, t }), [sales, products, range, t])
   const vse = useMemo(() => vseProdazhi({ sales, products, from: range.from, to: range.to, t }), [sales, products, range, t])
+  // «По товарам» у одного кассира — та же сводка, только по его чекам
+  const poTovKassira = useMemo(
+    () => (cashier ? prodazhiPoTovaram({ sales: sales.filter((s) => (s.user?.name || '') === cashier), products, from: range.from, to: range.to, t }) : poTov),
+    [cashier, sales, products, range, t, poTov],
+  )
 
-  const needle = q.trim().toLowerCase()
+  const z = useMemo(() => poiskZapros(q), [q])
   const tovRows = useMemo(
-    () => poTov.rows.filter((r) => (!needle || r.name.toLowerCase().includes(needle)) && (!cat || r.category === cat)),
-    [poTov.rows, needle, cat],
+    () => poTovKassira.rows.filter((r) => tovarPodhodit(z, r.name, r.barcode) && (!cat || r.category === cat)),
+    [poTovKassira.rows, z, cat],
   )
   const vseRows = useMemo(
     () =>
       vse.rows.filter(
         (r) =>
-          (!needle || r.name.toLowerCase().includes(needle)) &&
+          tovarPodhodit(z, r.name, r.barcode) &&
           (!cashier || r.cashier === cashier) &&
           (!pay || r.payment === pay),
       ),
-    [vse.rows, needle, cashier, pay],
+    [vse.rows, z, cashier, pay],
   )
-  const reset = `${tab}|${needle}|${cat}|${cashier}|${pay}|${period.from}|${period.to}`
+  const reset = `${tab}|${q.trim()}|${cat}|${cashier}|${pay}|${period.from}|${period.to}`
   const pgT = usePagination(tovRows, 20, reset)
   const pgV = usePagination(vseRows, 20, reset)
 
@@ -80,7 +89,8 @@ export default function SalesReport() {
   const vseItogo = { sum: sum(vseRows, 'sum'), discount: sum(vseRows, 'discount') }
 
   // ── Excel и печать: активная вкладка, с учётом фильтров ──
-  const podzag = periodText(period, t)
+  // Выбран кассир — он виден и в подзаголовке листа: иначе цифры выглядели бы общими
+  const podzag = periodText(period, t) + (cashier ? ` · ${t('Кассир')}: ${cashier}` : '')
   const ex =
     tab === 'products'
       ? {
@@ -142,23 +152,22 @@ export default function SalesReport() {
       <div className="panel" data-tour="sr.table" style={{ padding: 0 }}>
         <div style={{ padding: '16px 16px 0' }}>
           <div className="toolbar">
-            <input className="search" placeholder={t('Поиск по товару…')} value={q} onChange={(e) => setQ(e.target.value)} />
-            {tab === 'products' ? (
+            <input className="search" data-tour="sr.search" placeholder={t('Поиск по товару или штрихкоду…')} value={q} onChange={(e) => setQ(e.target.value)} />
+            {tab === 'products' && (
               <select value={cat} onChange={(e) => setCat(e.target.value)} aria-label={t('Категория')} style={{ maxWidth: 220 }}>
                 <option value="">{t('Все категории')}</option>
                 {categories.map((c) => <option key={c} value={c}>{t(c)}</option>)}
               </select>
-            ) : (
-              <>
-                <select value={cashier} onChange={(e) => setCashier(e.target.value)} aria-label={t('Кассир')} style={{ maxWidth: 200 }}>
-                  <option value="">{t('Все кассиры')}</option>
-                  {cashiers.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <select value={pay} onChange={(e) => setPay(e.target.value)} aria-label={t('Оплата')} style={{ maxWidth: 200 }}>
-                  <option value="">{t('Любая оплата')}</option>
-                  {Object.entries(PAYMENTS).map(([k, m]) => <option key={k} value={k}>{t(m.label)}</option>)}
-                </select>
-              </>
+            )}
+            <select value={cashier} onChange={(e) => setCashier(e.target.value)} aria-label={t('Кассир')} data-tour="sr.cashier" style={{ maxWidth: 200 }}>
+              <option value="">{t('Все кассиры')}</option>
+              {cashiers.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            {tab === 'all' && (
+              <select value={pay} onChange={(e) => setPay(e.target.value)} aria-label={t('Оплата')} style={{ maxWidth: 200 }}>
+                <option value="">{t('Любая оплата')}</option>
+                {Object.entries(PAYMENTS).map(([k, m]) => <option key={k} value={k}>{t(m.label)}</option>)}
+              </select>
             )}
             {loading && <span className="tag-cat">{t('загружаем…')}</span>}
           </div>

@@ -10,6 +10,7 @@ import { getArrival, updateArrival, deleteArrival } from '../db/ops'
 import { useCan, getUser } from '../db/auth'
 import { fmtDateTime } from '../lib/time'
 import { useT } from '../lib/i18n'
+import { poiskZapros, kodyPodhodyat, shtrihkodyPoId } from '../lib/poisk'
 import NumberInput from '../components/NumberInput'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
@@ -105,15 +106,19 @@ export default function Arrivals() {
 
   // ── Поступления: журнал ──
   const [jq, setJq] = useState('')
+  // Поиск — по поставщику, товару или штрихкоду товара (в том числе сканером)
+  const kodPoId = useMemo(() => shtrihkodyPoId(products), [products])
   const journal = useMemo(() => {
-    const needle = jq.trim().toLowerCase()
+    const z = poiskZapros(jq)
     return arrivals.filter(
       (a) =>
         inRange(a.date, range) &&
         (!st.supplierId || a.supplierId === st.supplierId) &&
-        (!needle || `${a.supplier || ''} ${(a.items || []).map((i) => i.name).join(' ')}`.toLowerCase().includes(needle)),
+        (!z ||
+          `${a.supplier || ''} ${(a.items || []).map((i) => i.name).join(' ')}`.toLowerCase().includes(z.text) ||
+          kodyPodhodyat(z, (a.items || []).map((i) => kodPoId.get(i.productId)))),
     )
-  }, [arrivals, range, st.supplierId, jq])
+  }, [arrivals, range, st.supplierId, jq, kodPoId])
   const pg = usePagination(journal, 15, `${jq}|${st.supplierId}|${period.from}|${period.to}`)
   const journalSum = useMemo(() => journal.reduce((s, a) => s + num(a.total), 0), [journal])
 
@@ -316,7 +321,7 @@ export default function Arrivals() {
               <div className="prh-panel-head">
                 <label className="prh-sheet-search">
                   <LuSearch size={15} aria-hidden="true" />
-                  <input value={jq} onChange={(e) => setJq(e.target.value)} placeholder={t('Поиск по поставщику или товару…')} aria-label={t('Поиск по поставщику или товару…')} />
+                  <input value={jq} onChange={(e) => setJq(e.target.value)} placeholder={t('Поставщик, товар или штрихкод…')} aria-label={t('Поставщик, товар или штрихкод…')} />
                 </label>
                 <span className="tag-cat">
                   {loading ? t('Загружаем историю за выбранный период…') : `${t('Найдено записей')}: ${journal.length} · ${money(journalSum)}`}

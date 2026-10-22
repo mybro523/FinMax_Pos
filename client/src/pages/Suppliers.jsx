@@ -9,6 +9,7 @@ import { useCollection, money, db, onChanged } from '../db/store'
 import { api } from '../db/api'
 import { fmtDate, fmtDateTime } from '../lib/time'
 import { useT } from '../lib/i18n'
+import { poiskZapros, tovarPodhodit } from '../lib/poisk'
 import { useCan, getUser } from '../db/auth'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { PeriodPicker, presetPeriod, periodRange, periodText, useDeepPeriod } from '../components/Period'
@@ -87,10 +88,11 @@ export default function Suppliers() {
       }),
     [deep, arrivalsCached, paymentsCached, returnsCached, products, range, supFilter, t],
   )
+  // Поиск — по товару, поставщику или штрихкоду товара
   const zakRows = useMemo(() => {
-    const needle = hq.trim().toLowerCase()
-    if (!needle) return zak.rows
-    return zak.rows.filter((r) => `${r.name} ${r.supplier}`.toLowerCase().includes(needle))
+    const z = poiskZapros(hq)
+    if (!z) return zak.rows
+    return zak.rows.filter((r) => tovarPodhodit(z, `${r.name} ${r.supplier}`, r.barcode))
   }, [zak.rows, hq])
   const pgH = usePagination(zakRows, 15, `${hq}|${supFilter}|${period.from}|${period.to}`)
   const zakItogo = useMemo(
@@ -237,7 +239,7 @@ export default function Suppliers() {
           </h2>
           <PeriodPicker value={period} onChange={setPeriod} tour="sup.period" />
           <div className="toolbar" style={{ marginTop: 10 }}>
-            <input className="search" placeholder={t('Поиск по товару или поставщику…')} value={hq} onChange={(e) => setHq(e.target.value)} />
+            <input className="search" placeholder={t('Товар, штрихкод или поставщик…')} value={hq} onChange={(e) => setHq(e.target.value)} />
             <select value={supFilter} onChange={(e) => setSupFilter(e.target.value)} aria-label={t('Поставщик')} style={{ maxWidth: 260 }}>
               <option value="">{t('Все поставщики')}</option>
               {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}

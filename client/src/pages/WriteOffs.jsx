@@ -13,6 +13,7 @@ import { beepOk, beepError, unlockAudio } from '../lib/sound'
 import { skachatXlsx } from '../lib/excel'
 import { fmtDateTime } from '../lib/time'
 import { useT } from '../lib/i18n'
+import { shtrihkodyPoId } from '../lib/poisk'
 import NumberInput from '../components/NumberInput'
 import VesInput from '../components/VesInput'
 import { useCan, getUser } from '../db/auth'
@@ -59,18 +60,12 @@ export default function WriteOffs() {
   // с других устройств, а страница не ждёт отдельного запроса
   const list = useCollection('writeoffs')
   const [reasonFilter, setReasonFilter] = useState('all')
-  // Поиск находит и по штрихкоду: имя товара в строке списания уже есть,
-  // а штрихкод достаём из карточки товара по его id
-  const barcodeById = useMemo(() => new Map(products.map((p) => [p.id, p.barcode || ''])), [products])
+  // Поиск находит и по штрихкоду (в том числе сканом маркировки): имя товара в строке
+  // списания уже есть, а штрихкод достаём из карточки товара по его id
+  const barcodeById = useMemo(() => shtrihkodyPoId(products), [products])
   const journal = useJournalFilter('writeoffs', {
-    textOf: (w) =>
-      (w.items || []).map((i) => i.name).join(' ') +
-      ' ' +
-      (w.items || []).map((i) => barcodeById.get(i.productId) || '').join(' ') +
-      ' ' +
-      (w.note || '') +
-      ' ' +
-      (w.user?.name || ''),
+    textOf: (w) => (w.items || []).map((i) => i.name).join(' ') + ' ' + (w.note || '') + ' ' + (w.user?.name || ''),
+    codesOf: (w) => (w.items || []).map((i) => barcodeById.get(i.productId)),
   })
   // Причина — свой фильтр: «что мы списали по сроку за месяц» спрашивают чаще всего
   const journalRows = useMemo(
@@ -412,7 +407,7 @@ export default function WriteOffs() {
           <span className="tag-cat">{t('убыток за период')}: <b style={{ color: 'var(--danger)' }}>{money(periodLoss)}</b></span>
         </h2>
         <div style={{ padding: '12px 16px 0' }}>
-          <JournalFilter controls={journal.controls} placeholder={t('Поиск по товару, примечанию или сотруднику…')}>
+          <JournalFilter controls={journal.controls} placeholder={t('Товар, штрихкод, примечание или сотрудник…')}>
             <select value={reasonFilter} onChange={(e) => setReasonFilter(e.target.value)} style={{ maxWidth: 220 }}>
               <option value="all">{t('Все причины')}</option>
               {REASONS.map((r) => <option key={r.key} value={r.key}>{t(r.label)}</option>)}
