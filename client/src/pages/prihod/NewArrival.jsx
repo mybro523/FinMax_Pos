@@ -13,12 +13,13 @@ import { useCan } from '../../db/auth'
 import { useT, translate as tr } from '../../lib/i18n'
 import { normalizeScan, canonBarcode } from '../../lib/scan'
 import { beepOk, beepError } from '../../lib/sound'
-import { isVesovoy, KG, EDINICY } from '../../lib/units'
+import { isVesovoy, KG, EDINICY, uppOf } from '../../lib/units'
+import { AddCategoryBtn } from '../../components/CategorySelect'
 import { generateEan13 } from '../../lib/barcode'
-import { useCategories, categoryOptions } from '../../lib/categories'
+import { useCategories, categoryOptions, categoryNames } from '../../lib/categories'
 import { priceFromMarkup, markupOf } from '../../lib/pricing'
 import {
-  lineFromProduct, lineCost, lineTotal, lineRetail, summary, qtyText, packText, lineProblem, toItem,
+  lineFromProduct, lineCost, lineTotal, lineRetail, lineUnits, summary, qtyText, packText, lineProblem, toItem,
   piecePrice, discCost, n2, pct, num,
 } from '../../lib/prihod'
 import { usePrihod, setPrihod, setForm, setPay, resetDraft, blankForm } from './store'
@@ -27,7 +28,9 @@ import ProductPick from './ProductPick'
 
 // ── Новое поступление ──
 // Как в привычных программах приёмки: по центру — накладная таблицей, справа — итоги
-// тёмно-синей панелью, снизу — форма. Форма добавляет товар (сканер стреляет в поле
+// тёмно-синей панелью, снизу — форма: подписи слева от полей, два плотных столбца
+// (слева — что, сколько и почём пришло; справа — упаковка, категория и цена продажи).
+// Форма добавляет товар (сканер стреляет в поле
 // «Штрихкод», название встаёт в «Наименование» само, курсор уходит в количество,
 // Enter — строка в таблице), заводит новый товар (кода или названия нет в базе —
 // форма сама становится «новым товаром»: название, единица, категория, количество и
@@ -157,6 +160,11 @@ export default function NewArrival({ products, suppliers, onSaved }) {
 
   // Наценка ↔ цена продажи: вписали процент — цена посчиталась от закупа со скидкой
   const cost = draft ? lineCost(draft) : 0
+  // Наценка в подписи «Розничная цена 40%» — зелёным, как в привычных программах приёмки
+  const mkRaw = form.mk ?? markupOf(cost, form.price)
+  const mkShown = draft && cost > 0 && String(form.price).trim() !== '' && mkRaw !== '' && mkRaw !== null && mkRaw !== undefined ? String(mkRaw).replace('.', ',') : ''
+  // «Штук в упаковке» есть у упаковки и рулона; у штуки и дробных единиц (кг, л…) — нет
+  const novUppEditable = nov && !isVesovoy({ unit: novUnit }) && novUnit !== 'шт'
   function setMarkup(v) {
     const p = priceFromMarkup(cost, v)
     setForm({ mk: v, ...(p !== null ? { price: String(p) } : {}) })
@@ -382,45 +390,34 @@ export default function NewArrival({ products, suppliers, onSaved }) {
 
         {sub === 'add' && (
           <div className="prh-add">
-            <div className="prh-add-main">
-              <ProductPick
-                ids={{ code: 'prh-q', name: 'prh-name' }}
-                codeTour="af.scan"
-                nameTour="af.name"
-                codeRef={scanRef}
-                products={products}
-                code={form.code || ''}
-                name={form.q}
-                chosen={chosen}
-                // Поменяли одно поле — другое относится к прежнему товару и очищается.
-                // У нового товара оба поля — его собственные и друг друга не трогают
-                onCode={(v) => (nov ? setForm({ code: v }) : setForm({ code: v, q: '', productId: '' }))}
-                onName={(v) => (nov ? setForm({ q: v }) : setForm({ q: v, code: '', productId: '' }))}
-                readOnly={!!editing}
-                nov={nov}
-                nameRef={nameRef}
-                onPick={choose}
-                onEnterChosen={() => setFocusQty((n) => n + 1)}
-                onUnknownCode={(barcode) => (can('products.create') ? startNew({ code: barcode }) : toast(tr('Товар с таким штрихкодом не найден'), 'err'))}
-                onUnknownName={(name) => (can('products.create') ? startNew({ q: name }) : toast(tr('Товар не найден'), 'err'))}
-                hint={
-                  <>
-                    <span className="ic">{nov ? <LuPackagePlus size={15} /> : <LuScanLine size={15} />}</span>
-                    {editing
-                      ? t('Правите строку из таблицы. Enter — сохранить её.')
-                      : nov
-                        ? t('Нового товара нет в базе — он заведётся в «Товарах», когда нажмёте «Завести и добавить». Без штрихкода программа даст свой код.')
-                        : t('USB-сканер работает как клавиатура. Незнакомый штрихкод — заведём товар прямо в этой форме')}
-                  </>
-                }
-              />
-            </div>
-
-            <div className="prh-add-cols">
-              <div className="prh-add-col">
+            <div className="prh-av">
+              <div className="prh-av-col">
+                <ProductPick
+                  rows
+                  ids={{ code: 'prh-q', name: 'prh-name' }}
+                  labels={{ code: t('Штрих-код | Код'), name: t('Наименование') }}
+                  codeTour="af.scan"
+                  nameTour="af.name"
+                  codeRef={scanRef}
+                  products={products}
+                  code={form.code || ''}
+                  name={form.q}
+                  chosen={chosen}
+                  // Поменяли одно поле — другое относится к прежнему товару и очищается.
+                  // У нового товара оба поля — его собственные и друг друга не трогают
+                  onCode={(v) => (nov ? setForm({ code: v }) : setForm({ code: v, q: '', productId: '' }))}
+                  onName={(v) => (nov ? setForm({ q: v }) : setForm({ q: v, code: '', productId: '' }))}
+                  readOnly={!!editing}
+                  nov={nov}
+                  nameRef={nameRef}
+                  onPick={choose}
+                  onEnterChosen={() => setFocusQty((n) => n + 1)}
+                  onUnknownCode={(barcode) => (can('products.create') ? startNew({ code: barcode }) : toast(tr('Товар с таким штрихкодом не найден'), 'err'))}
+                  onUnknownName={(name) => (can('products.create') ? startNew({ q: name }) : toast(tr('Товар не найден'), 'err'))}
+                />
                 <div className="prh-f" data-tour="af.qty">
-                  <label>{t('Количество')}</label>
-                  <div className="prh-qty">
+                  <label className={draft && lineUnits(draft) <= 0 ? 'req' : ''}>{t('Количество')}<span className="prh-star" aria-hidden="true">*</span></label>
+                  <div className="prh-ctl prh-qty">
                     <label className="prh-unit">
                       <NumberInput ref={qtyRef} integer={!draft?.ves} value={form.qty} onChange={numField('qty')} onKeyDown={onEnter} disabled={!draft} aria-label={t('Количество')} />
                       <span>{draft ? t(draft.unit) : t('уп')}</span>
@@ -434,13 +431,20 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                   </div>
                 </div>
                 <div className="prh-f">
-                  <label className={draft && String(form.base).trim() === '' ? 'req' : ''}>{t('Цена поставщика')}</label>
-                  <NumberInput value={form.base} onChange={numField('base')} onKeyDown={onEnter} disabled={!draft} placeholder="0" />
+                  <label className={draft && String(form.base).trim() === '' ? 'req' : ''}>{t('Цена поставщика')}<span className="prh-star" aria-hidden="true">*</span></label>
+                  <div className="prh-ctl">
+                    <NumberInput className="prh-num" value={form.base} onChange={numField('base')} onKeyDown={onEnter} disabled={!draft} placeholder="0" aria-label={t('Цена поставщика')} />
+                    {/* Цена поставщика со скидкой — именно она станет закупочной на складе */}
+                    {draft && <span className="prh-note">{t('включая скидку')}: <b>{money(discCost(form.base, form.disc))}</b></span>}
+                  </div>
                 </div>
                 <div className="prh-f" data-tour="af.disc">
-                  <label>{t('Скидка, %')}</label>
-                  <div className="prh-disc">
-                    <NumberInput value={form.disc} onChange={(e) => setDisc(e.target.value)} onKeyDown={onEnter} placeholder="0" aria-label={t('Скидка, %')} />
+                  <label>{t('Скидка')}</label>
+                  <div className="prh-ctl prh-disc">
+                    <label className="prh-unit">
+                      <NumberInput value={form.disc} onChange={(e) => setDisc(e.target.value)} onKeyDown={onEnter} placeholder="0" aria-label={t('Скидка, %')} />
+                      <span>%</span>
+                    </label>
                     <label className="prh-check">
                       <input type="checkbox" checked={st.discAll} onChange={(e) => toggleDiscAll(e.target.checked)} />
                       {t('На все товары')}
@@ -449,60 +453,81 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                 </div>
                 <div className="prh-f">
                   <label>{t('Срок годности')}</label>
-                  <input type="date" value={form.expiryDate} onChange={(e) => setForm({ expiryDate: e.target.value })} onKeyDown={onEnter} disabled={!draft} />
+                  <div className="prh-ctl">
+                    <input type="date" value={form.expiryDate} onChange={(e) => setForm({ expiryDate: e.target.value })} onKeyDown={onEnter} disabled={!draft} aria-label={t('Срок годности')} />
+                    <span className="prh-note">{t('Текущий остаток')}: <b>{chosen || editing ? stockText(products.find((p) => p.id === draft.productId) || {}) : '—'}</b></span>
+                  </div>
                 </div>
               </div>
 
-              <div className="prh-add-col">
-                {nov ? (
-                  <div className="prh-nov" data-tour="af.nov">
-                    <div className="prh-f">
-                      <label htmlFor="prh-nov-unit">{t('Единица измерения')}</label>
-                      <select
-                        id="prh-nov-unit"
-                        value={novUnit}
-                        // Дробная единица и штука — без «штук в упаковке»: штуки сверх упаковок обнуляем
-                        onChange={(e) => setForm({ novUnit: e.target.value, ...(isVesovoy({ unit: e.target.value }) || e.target.value === 'шт' ? { novUpp: '1', pieces: '' } : {}) })}
-                      >
-                        {EDINICY.map((x) => (
-                          <option key={x.v} value={x.v}>{t(x.v) === t(x.name) ? t(x.v) : `${t(x.v)} — ${t(x.name)}`}</option>
-                        ))}
-                      </select>
-                    </div>
-                    {!isVesovoy({ unit: novUnit }) && novUnit !== 'шт' ? (
-                      <div className="prh-f">
-                        <label htmlFor="prh-nov-upp">{t('Штук в упаковке')}</label>
-                        <NumberInput id="prh-nov-upp" integer value={form.novUpp} placeholder="1" onChange={numField('novUpp')} onKeyDown={onEnter} />
-                      </div>
-                    ) : <div />}
-                    <div className="prh-f prh-nov-cat">
-                      <label htmlFor="prh-nov-cat">{t('Категория')}</label>
-                      <select id="prh-nov-cat" value={form.novCat || ''} onChange={(e) => setForm({ novCat: e.target.value })}>
-                        <option value="">{t('— без категории —')}</option>
-                        {categoryOptions(form.novCat || '', catList).map((o) => <option key={o.value} value={o.value}>{t(o.value)}</option>)}
-                      </select>
-                    </div>
-                    <div className="prh-info prh-nov-cat">
-                      <div><span>{t('Цена со скидкой')}</span><b>{money(discCost(form.base, form.disc))}</b></div>
-                    </div>
+              <div className="prh-av-col">
+                {/* У товара из базы упаковка и категория — из карточки, менять их здесь нельзя;
+                    у нового товара — задаются тут же */}
+                <div className="prh-f" data-tour="af.pack">
+                  <label htmlFor={nov ? 'prh-nov-upp' : undefined}>{t('Кол-во в упаковке')}</label>
+                  <div className="prh-ctl">
+                    {nov ? (
+                      <>
+                        <NumberInput
+                          id="prh-nov-upp"
+                          integer
+                          className="prh-num-s"
+                          value={novUppEditable ? form.novUpp : ''}
+                          placeholder={novUppEditable ? '1' : '—'}
+                          disabled={!novUppEditable}
+                          onChange={numField('novUpp')}
+                          onKeyDown={onEnter}
+                          aria-label={t('Штук в упаковке')}
+                        />
+                        <select
+                          id="prh-nov-unit"
+                          value={novUnit}
+                          aria-label={t('Единица измерения')}
+                          // Дробная единица и штука — без «штук в упаковке»: штуки сверх упаковок обнуляем
+                          onChange={(e) => setForm({ novUnit: e.target.value, ...(isVesovoy({ unit: e.target.value }) || e.target.value === 'шт' ? { novUpp: '1', pieces: '' } : {}) })}
+                        >
+                          {EDINICY.map((x) => (
+                            <option key={x.v} value={x.v}>{t(x.v) === t(x.name) ? t(x.v) : `${t(x.v)} — ${t(x.name)}`}</option>
+                          ))}
+                        </select>
+                      </>
+                    ) : (
+                      <label className="prh-unit prh-ro">
+                        <input readOnly tabIndex={-1} value={draft ? (draft.ves ? '—' : String(uppOf(draft))) : ''} placeholder="—" aria-label={t('Кол-во в упаковке')} />
+                        <span>{draft?.ves ? t(draft.unit) : t('шт')}</span>
+                      </label>
+                    )}
                   </div>
-                ) : (
-                  <div className="prh-info">
-                    <div><span>{t('В упаковке')}</span><b>{draft ? packText(draft, t) : '—'}</b></div>
-                    <div><span>{t('Категория')}</span><b>{draft?.category || '—'}</b></div>
-                    <div><span>{t('На складе')}</span><b>{chosen || editing ? stockText(products.find((p) => p.id === draft.productId) || {}) : '—'}</b></div>
-                    <div><span>{t('Цена со скидкой')}</span><b>{draft ? money(discCost(form.base, form.disc)) : '—'}</b></div>
+                </div>
+                <div className="prh-f">
+                  <label htmlFor={nov ? 'prh-nov-cat' : undefined}>{t('Категория')}</label>
+                  <div className="prh-ctl">
+                    {nov ? (
+                      <>
+                        <select id="prh-nov-cat" value={form.novCat || ''} onChange={(e) => setForm({ novCat: e.target.value })} aria-label={t('Категория')}>
+                          <option value="">{t('— без категории —')}</option>
+                          {categoryOptions(form.novCat || '', catList).map((o) => <option key={o.value} value={o.value}>{t(o.value)}</option>)}
+                        </select>
+                        <AddCategoryBtn dialog={dialog} toast={toast} options={categoryNames(catList)} onPicked={(name) => setForm({ novCat: name })} />
+                      </>
+                    ) : (
+                      <input className="prh-ro" readOnly tabIndex={-1} value={draft?.category || ''} placeholder="—" aria-label={t('Категория')} />
+                    )}
                   </div>
-                )}
+                </div>
                 <div className="prh-f" data-tour="af.markup">
-                  <label>{t('Розничная цена')}</label>
-                  <div className="prh-price">
+                  <label className={draft && String(form.price).trim() === '' ? 'req' : ''}>
+                    {t('Розничная цена')}
+                    {mkShown !== '' && <em className="prh-mk-tag">{mkShown}%</em>}
+                  </label>
+                  <div className="prh-ctl prh-price">
                     <NumberInput
-                      className={draft && !nov && num(form.price) !== form.price0 ? 'changed' : ''}
+                      className={'prh-num' + (draft && !nov && num(form.price) !== form.price0 ? ' changed' : '')}
                       value={form.price}
                       onChange={(e) => setForm({ price: e.target.value, mk: null })}
                       onKeyDown={onEnter}
                       disabled={!draft}
+                      aria-label={t('Розничная цена')}
                       title={draft && !nov && num(form.price) !== form.price0 ? `${t('Было')}: ${money(form.price0)}` : undefined}
                     />
                     <label className="prh-unit prh-mk">
@@ -517,33 +542,44 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                       />
                       <span>%</span>
                     </label>
+                    {draft && !nov && num(form.price) !== form.price0 && <span className="prh-was">{t('Было')}: {money(form.price0)}</span>}
                   </div>
-                  {draft && !nov && num(form.price) !== form.price0 && <div className="prh-was">{t('Было')}: {money(form.price0)}</div>}
                 </div>
                 {draft?.div && (
-                  <div className="prh-info">
-                    <div><span>{t('Цена за 1 шт')}</span><b>{money(piecePrice(draft))}</b></div>
+                  <div className="prh-f prh-f-info">
+                    <label>{t('Цена за 1 шт')}</label>
+                    <b className="prh-val">{money(piecePrice(draft))}</b>
                   </div>
                 )}
-                <div className="prh-info">
-                  <div><span>{t('Сумма строки')}</span><b>{draft ? money(lineTotal(draft)) : '—'}</b></div>
+                <div className="prh-f prh-f-info">
+                  <label>{t('Сумма строки')}</label>
+                  <b className="prh-val">{draft ? money(lineTotal(draft)) : '—'}</b>
                 </div>
               </div>
             </div>
 
-            <div className="prh-add-actions">
+            <div className="scan-hint prh-av-hint">
+              <span className="ic">{nov ? <LuPackagePlus size={15} /> : <LuScanLine size={15} />}</span>
+              {editing
+                ? t('Правите строку из таблицы. Enter — сохранить её.')
+                : nov
+                  ? t('Нового товара нет в базе — он заведётся в «Товарах», когда нажмёте «Завести и добавить». Без штрихкода программа даст свой код.')
+                  : t('USB-сканер работает как клавиатура. Незнакомый штрихкод — заведём товар прямо в этой форме')}
+            </div>
+
+            <div className="prh-add-actions prh-av-actions">
               <button type="button" className="btn ghost" onClick={clearForm}>
                 <span className="ic"><LuEraser size={15} /></span> {editing ? t('Отмена') : t('Очистить форму')}
+              </button>
+              <button type="button" className="btn green" data-tour="af.add" onClick={commit} disabled={!draft || savingNew}>
+                <span className="ic">{editing ? <LuCheck size={16} /> : nov ? <LuPackagePlus size={16} /> : <LuPlus size={16} />}</span>{' '}
+                {editing ? t('Сохранить строку') : nov ? (savingNew ? t('Сохранение…') : t('Завести и добавить')) : t('Добавить')}
               </button>
               {editing && (
                 <button type="button" className="btn ghost danger-text" onClick={() => { removeLine(editing.key); focusScan() }}>
                   <span className="ic"><LuTrash2 size={15} /></span> {t('Убрать строку')}
                 </button>
               )}
-              <button type="button" className="btn green" data-tour="af.add" onClick={commit} disabled={!draft || savingNew}>
-                <span className="ic">{editing ? <LuCheck size={16} /> : nov ? <LuPackagePlus size={16} /> : <LuPlus size={16} />}</span>{' '}
-                {editing ? t('Сохранить строку') : nov ? (savingNew ? t('Сохранение…') : t('Завести и добавить')) : t('Добавить')}
-              </button>
             </div>
           </div>
         )}

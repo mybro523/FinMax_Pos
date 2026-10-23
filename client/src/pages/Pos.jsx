@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo, useDeferredValue, lazy, Suspense } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useDeferredValue, lazy, Suspense } from 'react'
 import {
   LuCamera, LuShoppingCart, LuPlus, LuMinus, LuTrash2, LuCheck, LuPrinter, LuScanLine, LuClock,
   LuTriangleAlert, LuX, LuLock, LuChevronRight,
@@ -1731,15 +1731,40 @@ export default function Pos() {
   )
 }
 
-// ── Сумма «Итого»: число крупно, «сомони» мельче ──
-// Так и сумма с тысячами («12 345,50 сомони») встаёт в одну строку узкой панели итога.
-// Не влезла совсем — «сомони» переносится под число, а не рвёт его
+// ── Сумма «Итого»: в одну строку с подписью, число крупно, «сомони» мельче ──
+// Длинная сумма («12 345,50 сомони») рядом с «ИТОГО» в узкую панель не помещается —
+// тогда шрифт сам уменьшается ровно настолько, чтобы влезть. Строка всегда одна, а
+// высота панели не меняется, пока кассир сканирует. Меряем один раз при полном
+// размере: ширина растёт пропорционально шрифту («сомони» задано в em)
 function SummaItogo({ text }) {
+  const ref = useRef(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    const row = el?.parentElement
+    if (!el || !row) return undefined
+    const fit = () => {
+      el.style.setProperty('--ki-fit', '1')
+      const label = row.firstElementChild !== el ? row.firstElementChild : null
+      // 16 — зазор между подписью и суммой (как в стилях), ещё 8 — чтобы они не слипались
+      const avail = row.clientWidth - (label ? label.getBoundingClientRect().width : 0) - 24
+      // Ширина содержимого — по частям (число и «сомони»): сумма прижата к правому краю,
+      // и лишнее вылезает влево, а такое переполнение scrollWidth не учитывает
+      const parts = [...el.children]
+      const gap = parseFloat(getComputedStyle(el).columnGap) || 0
+      const natural = parts.reduce((w, c) => w + c.getBoundingClientRect().width, 0) + gap * Math.max(0, parts.length - 1)
+      const k = natural > 0 && natural > avail ? Math.max(0.5, avail / natural) : 1
+      el.style.setProperty('--ki-fit', String(Math.floor(k * 100) / 100))
+    }
+    fit()
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const ro = new ResizeObserver(fit)
+    ro.observe(row)
+    return () => ro.disconnect()
+  }, [text])
   const i = text.lastIndexOf(' ')
-  if (i <= 0) return <span className="ki-sum"><b>{text}</b></span>
   return (
-    <span className="ki-sum">
-      <b>{text.slice(0, i)}</b> <small>{text.slice(i + 1)}</small>
+    <span className="ki-sum" ref={ref}>
+      {i > 0 ? <><b>{text.slice(0, i)}</b> <small>{text.slice(i + 1)}</small></> : <b>{text}</b>}
     </span>
   )
 }

@@ -6,12 +6,12 @@ import WindowButtons from './WindowButtons'
 import { useT, useLang, setLang, LANGS } from '../lib/i18n'
 import { isDesktop } from '../lib/desktop'
 import emblem from '../assets/brand/emblem-192.webp'
-import logo320 from '../assets/brand/logo-320.webp'
-import logo640 from '../assets/brand/logo-640.webp'
+import logoPos from '../assets/brand/logo-pos-1100.webp'
+import logoPos2x from '../assets/brand/logo-pos-2000.webp'
 
 // ── Экран входа ──
-// Слева — кто мы: логотип на белой карточке, как на сайте FinMax, и несколько
-// строк о том, что умеет система. Справа — форма. На телефоне левая часть
+// Слева — кто мы: логотип FinMax POS на тёмно-синем и несколько строк о том, что
+// умеет система. Справа — форма. На телефоне левая часть
 // сжимается до полосы с именем: там человеку нужен только вход.
 //
 // Язык переключается прямо здесь: кассир, читающий по-таджикски, иначе видел бы
@@ -52,12 +52,12 @@ export default function Login() {
         <div className="auth-brand-body">
           <div className="auth-hero">
             <img
-              src={logo320}
-              srcSet={`${logo320} 320w, ${logo640} 640w`}
-              sizes="132px"
-              width="320"
-              height="332"
-              alt="FinMax"
+              src={logoPos}
+              srcSet={`${logoPos} 1100w, ${logoPos2x} 2000w`}
+              sizes="540px"
+              width="2000"
+              height="472"
+              alt="FinMax POS"
             />
           </div>
           <h2>{t('Касса, склад и смены — в одной системе')}</h2>

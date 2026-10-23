@@ -46,6 +46,10 @@ export default function ProductPick({
   tour,
   nov = false,
   nameRef,
+  // rows — поля стоят строками «подпись : поле» в форме прихода (сама раскладка —
+  // у формы, здесь только классы); labels — свои подписи полей
+  rows = false,
+  labels = {},
 }) {
   const t = useT()
   const [active, setActive] = useState(0)
@@ -138,9 +142,9 @@ export default function ProductPick({
   }
 
   return (
-    <div className={'prh-pick' + (chosen ? ' found' : '') + (nov ? ' nov' : '')} data-tour={tour}>
+    <div className={'prh-pick' + (chosen ? ' found' : '') + (nov ? ' nov' : '') + (rows ? ' rows' : '')} data-tour={tour}>
       <div className="prh-f prh-f-code" data-tour={codeTour}>
-        <label htmlFor={ids.code}>{t('Штрихкод')}</label>
+        <label htmlFor={ids.code}>{labels.code || t('Штрихкод')}</label>
         <input
           id={ids.code}
           ref={codeRef}
@@ -158,7 +162,10 @@ export default function ProductPick({
         />
       </div>
       <div className="prh-f prh-f-name" data-tour={nameTour}>
-        <label htmlFor={ids.name}>{t('Наименование')}</label>
+        <label htmlFor={ids.name} className={nov && !String(name || '').trim() ? 'req' : ''}>
+          {labels.name || t('Наименование')}
+          {rows && <span className="prh-star" aria-hidden="true">*</span>}
+        </label>
         <div className="prh-search">
           <input
             id={ids.name}
@@ -172,7 +179,8 @@ export default function ProductPick({
             onFocus={(e) => { setNameFocus(true); e.target.select() }}
             onBlur={() => setNameFocus(false)}
             // Пусто — название появится само после скана; длинное видно целиком при наведении
-            placeholder={nov ? t('Название нового товара') : t('Или наберите название')}
+            // В форме прихода поле уже — подсказка короче, иначе обрезалась бы
+            placeholder={rows ? t('Название') : nov ? t('Название нового товара') : t('Или наберите название')}
             title={name || undefined}
           />
           {chosen && name === chosen.name && <span className="prh-pick-ok" aria-hidden="true"><LuCircleCheck size={17} /></span>}
