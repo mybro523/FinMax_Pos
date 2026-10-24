@@ -13,7 +13,7 @@ import {
 } from '../auth/permissions'
 import { CreateRoleDto, UpdateRoleDto } from './dto'
 import { PrismaService } from '../prisma/prisma.service'
-import { forgetStamps, stamp } from '../common/stamps'
+import { forgetStamps, same, stamp } from '../common/stamps'
 import { teamMemoForget } from '../sync/team'
 
 // ── Роли магазина ──
@@ -140,8 +140,11 @@ export class RolesService {
     if (dto.permissions !== undefined) data.permissions = cleanPermissions(dto.permissions)
     try {
       const u = await this.admin.role.update({ where: { id }, data, include: { _count: { select: { accounts: true } } } })
-      // Когда правили поля роли: касса без связи могла править её же (sync/team.ts)
-      await stamp(this.prisma as any, 'Role', id, Object.keys(data)).catch(() => {})
+      // Когда правили поля роли: касса без связи могла править её же (sync/team.ts). Отметка —
+      // только полям, которые правда поменялись (окно присылает название и описание вместе)
+      const was: Record<string, any> = { name: r.name, description: r.description, permissions: [...r.permissions].sort() }
+      const now: Record<string, any> = { ...data, ...(Array.isArray(data.permissions) ? { permissions: [...(data.permissions as string[])].sort() } : {}) }
+      await stamp(this.prisma as any, 'Role', id, Object.keys(data).filter((k) => !same(was[k], now[k]))).catch(() => {})
       this.touched(pharmacyId)
       return { id: u.id, name: u.name, description: u.description, system: u.system, permissions: u.permissions, people: u._count.accounts }
     } catch (e) {

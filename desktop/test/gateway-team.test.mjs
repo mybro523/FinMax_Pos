@@ -815,6 +815,57 @@ test('пароль сменили без связи на двух кассах, 
   check(pa.status !== 201, 'касса A без связи: PA (сервер его уже не принимает) кассу не открывает', pa.status)
 })
 
+test('пароль сменили без связи на двух кассах, а сотрудник вошёл через сервер прежним, пока смена этой кассы ждала отправки: смена соседа (более поздняя) не теряется — пароль этой кассы без интернета её не открывает', async (t) => {
+  const S = makeServer()
+  const A = makeTill(S, 'A')
+  const B = makeTill(S, 'B')
+  closeAfter(t, A, B)
+  const C1 = 'Reset-on-A-c1c1'
+  const M = 'Reset-on-B-mmmm'
+
+  for (const k of [A, B]) {
+    check((await k.login('boss', 'Boss-pass-1')).status === 201, `касса ${k.name}: владелец входит с интернетом`)
+    await k.gw.syncNow()
+  }
+  A.gw.logout()
+  check((await A.login('ali', 'Ali-pass-1')).status === 201, 'касса A: ali входит с интернетом')
+  await A.gw.syncNow()
+  A.gw.logout()
+  check((await A.login('boss', 'Boss-pass-1')).status === 201, 'касса A: снова владелец')
+  await A.gw.syncNow()
+  lan(A, B)
+  lan(B, A)
+
+  // Без связи: владелец на A задаёт ali пароль C1 и выходит; минутой позже владелец на B
+  // задаёт ей пароль M — пометка «пароль сменили» доходит до A по сети
+  S.srv.state.online = false
+  check((await A.req('PATCH', '/users/acc-ali', { password: C1 })).status === 200, 'касса A без связи: ali задан пароль C1')
+  A.gw.logout()
+  S.time.now += MIN
+  check((await B.req('PATCH', '/users/acc-ali', { password: M })).status === 200, 'касса B без связи, минутой позже: ali задан пароль M')
+  lan(B, A)
+
+  // Интернет вернулся. Ali входит на A прежним паролем (C1 ещё не ушёл). Обмен A отправляет C1
+  // ключом владельца — сервер отзывает свежий ключ ali, и получение сразу после отправки
+  // отказано: перенос сотрудников в этот раз не идёт
+  S.srv.state.online = true
+  check((await A.login('ali', 'Ali-pass-1')).status === 201, 'касса A с интернетом: ali входит прежним паролем (C1 ещё не отправлен)')
+  await A.gw.syncNow()
+  // B отправляет M (он позже — остаётся он) и сообщает об этом A
+  S.time.now += MIN
+  await B.gw.syncNow()
+  lan(B, A)
+  A.gw.logout()
+  check((await A.login('boss', 'Boss-pass-1')).status === 201, 'касса A: позже входит владелец')
+  await A.gw.syncNow()
+  check((await serverLogin(S, 'ali', M)) === 201 && (await serverLogin(S, 'ali', C1)) === 401, 'сам сервер: действует M, C1 — нет')
+
+  S.srv.state.online = false
+  A.gw.logout()
+  const c1 = await A.login('ali', C1)
+  check(c1.status !== 201, 'касса A без связи: C1 (на сервере его сменила более поздняя смена соседа) кассу не открывает', c1.status)
+})
+
 test('сотрудник работает за кассой, а соседняя касса его удалила: выйдя, без интернета он больше не войдёт', async (t) => {
   const S = makeServer()
   const A = makeTill(S, 'A')

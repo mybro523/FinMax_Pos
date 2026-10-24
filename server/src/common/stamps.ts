@@ -70,8 +70,9 @@ export async function stamp(tx: Tx, tbl: StampTable, rowId: string, fields: stri
   if (!list.length || !rowId) return
   // Момент — всемирным временем, как его хранит и читает Prisma во всех таблицах. Дата,
   // переданная в запрос как есть, легла бы по часовому поясу самой базы — и правка с сайта
-  // казалась бы на несколько часов новее правки кассы
-  const iso = at.toISOString()
+  // казалась бы на несколько часов новее правки кассы. Позже настоящей минуты отметка не
+  // бывает: у кассы со спешащими часами она иначе «перекрыла» бы правки, сделанные после
+  const iso = notAhead(at).toISOString()
   const rows = list.map((f) => Prisma.sql`(${tbl}, ${rowId}, ${f}, (${iso}::timestamptz AT TIME ZONE 'UTC'))`)
   await tx.$executeRaw(Prisma.sql`
     INSERT INTO "FieldStamp" ("tbl", "rowId", "field", "at") VALUES ${Prisma.join(rows)}
@@ -127,11 +128,16 @@ export interface EditOutcome {
   kept: string[]
 }
 
+// Момент правки не позже настоящей минуты: часы кассы могут спешать (сервер принимает
+// время операции до пяти минут вперёд)
+const notAhead = (at: Date) => (at.getTime() > Date.now() ? new Date() : at)
+
 // ── Разобрать правку кассы по полям ──
 // set — что прислала касса, base — что было у неё до правки, current — что в записи
 // сейчас, stamps — когда правили поля записи, at — когда правили на кассе
 export function resolveEdit(set: Record<string, any>, base: Record<string, any>, current: Record<string, any>, stamps: Map<string, Date>, at: Date): EditOutcome {
   const out: EditOutcome = { apply: [], overrode: [], kept: [] }
+  at = notAhead(at)
   for (const field of Object.keys(set)) {
     const now = current[field]
     if (same(now, set[field])) continue
@@ -152,6 +158,12 @@ export function resolveEdit(set: Record<string, any>, base: Record<string, any>,
     }
   }
   return out
+}
+
+// Поля, которые уже такие, как прислала касса (правка совпала с тем, что на сервере). Отметка
+// времени нужна и им: иначе более ранняя правка с другой кассы, пришедшая следом, их перекрыла бы
+export function alreadySame(set: Record<string, any>, current: Record<string, any>, out: EditOutcome): string[] {
+  return Object.keys(set).filter((f) => !out.apply.includes(f) && !out.kept.includes(f) && same(current[f], set[f]))
 }
 
 // Подробности столкновения для «Расхождений»: какое поле, что прислала касса, что было на

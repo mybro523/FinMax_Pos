@@ -3,7 +3,7 @@ import { D } from '../common/money'
 import { setUnits, syncProduct, totalUnits, uppOf, lockProducts } from '../common/stock'
 import { firstCountAfter, lockInventories, markCounted } from '../common/counted'
 import { freeInternalBarcode } from '../common/barcode'
-import { conflictNote, EditOutcome, forgetStamps, lastEditOf, resolveEdit, stamp, StampTable, stampsOf, stampsOfRows } from '../common/stamps'
+import { alreadySame, conflictNote, EditOutcome, forgetStamps, lastEditOf, resolveEdit, stamp, StampTable, stampsOf, stampsOfRows } from '../common/stamps'
 import { setExpenseCash, setSupplierCash } from '../shifts/totals'
 import { lockShift, SHIFT_CLOSED } from '../shifts/till'
 import { hasPerm } from '../auth/permissions'
@@ -316,6 +316,7 @@ async function productUpdate(tx: Tx, p: ReturnType<typeof parseProductUpdate>, c
     if ('price' in data || repack) await backdatePrice(tx, pid, p.at)
     await stamp(tx, 'Product', pid, out.apply, p.at)
   }
+  await stamp(tx, 'Product', pid, alreadySame(p.set, product as any, out), p.at)
   await conflict(tx, ctx, kit, 'Product', { id: pid, name: product.name, productId: pid }, p.at, p.set, product, out)
   if (taken) {
     await kit.flag(tx, ctx, { id: pid, date: p.at }, {
@@ -467,6 +468,7 @@ async function categoryUpdate(tx: Tx, p: ReturnType<typeof parseCategoryUpdate>,
     if (out.apply.includes('name')) await tx.product.updateMany({ where: { category: cat.name }, data: { category: p.set.name } })
     await stamp(tx, 'Category', cat.id, out.apply, p.at)
   }
+  await stamp(tx, 'Category', cat.id, alreadySame(p.set, cat, out), p.at)
   await conflict(tx, ctx, kit, 'Category', { id: cat.id, name: cat.name }, p.at, p.set, cat, out, extra)
   return keptAny(out, !!extra.nameTaken) ? null : cat.id
 }
@@ -509,6 +511,7 @@ async function typeUpdate(tx: Tx, p: ReturnType<typeof parseTypeUpdate>, ctx: Ed
     if (out.apply.includes('name')) await tx.product.updateMany({ where: { type: t.name }, data: { type: p.set.name } })
     await stamp(tx, 'ProductType', t.id, out.apply, p.at)
   }
+  await stamp(tx, 'ProductType', t.id, alreadySame(p.set, t, out), p.at)
   await conflict(tx, ctx, kit, 'ProductType', { id: t.id, name: t.name }, p.at, p.set, t, out, extra)
   return keptAny(out, !!extra.nameTaken) ? null : t.id
 }
@@ -592,6 +595,7 @@ async function supplierUpdate(tx: Tx, p: ReturnType<typeof parseSupplierUpdate>,
     await tx.supplier.update({ where: { id: sid }, data: pick(p.set, out.apply) })
     await stamp(tx, 'Supplier', sid, out.apply, p.at)
   }
+  await stamp(tx, 'Supplier', sid, alreadySame(p.set, s, out), p.at)
   await conflict(tx, ctx, kit, 'Supplier', { id: sid, name: s.name }, p.at, p.set, s, out, extra)
   return keptAny(out, !!extra.nameTaken) ? null : sid
 }
@@ -666,6 +670,7 @@ async function expenseUpdate(tx: Tx, p: ReturnType<typeof parseExpenseUpdate>, c
     await stamp(tx, 'Expense', e.id, out.apply, p.at)
     if (e.fromCash && e.shiftId) await setExpenseCash(tx, e.shiftId)
   }
+  await stamp(tx, 'Expense', e.id, alreadySame(set, e, out), p.at)
   await conflict(tx, ctx, kit, 'Expense', { id: e.id, name: e.category }, p.at, set, e, out)
   return keptAny(out) ? null : e.id
 }
@@ -694,6 +699,7 @@ async function incomeUpdate(tx: Tx, p: ReturnType<typeof parseIncomeUpdate>, ctx
     await tx.income.update({ where: { id: x.id }, data })
     await stamp(tx, 'Income', x.id, out.apply, p.at)
   }
+  await stamp(tx, 'Income', x.id, alreadySame(p.set, x, out), p.at)
   await conflict(tx, ctx, kit, 'Income', { id: x.id, name: x.category }, p.at, p.set, x, out)
   return keptAny(out) ? null : x.id
 }

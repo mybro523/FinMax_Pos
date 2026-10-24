@@ -8,7 +8,7 @@ import { EventsGateway } from '../events/events.gateway'
 import { AccountCache } from '../admin/account-cache.service'
 import { CreateUserDto, UpdateUserDto } from './dto'
 import { RolesService } from '../roles/roles.service'
-import { forgetStamps, stamp } from '../common/stamps'
+import { forgetStamps, same, stamp } from '../common/stamps'
 import { teamMemoForget } from '../sync/team'
 
 // ── Сотрудники магазина ──
@@ -221,6 +221,9 @@ export class UsersService {
     // ФИО, оклад и бонус — в схеме магазина. Ошибку здесь не глотаем: владелец
     // должен узнать, что оклад не сохранился, а не увидеть «изменено»
     const profile = profileData(dto)
+    // Каким был профиль до правки: отметку времени получают только поля, которые правда
+    // поменялись (окно «Сотрудник» присылает их все сразу)
+    const wasProfile = acc.tenantUserId && Object.keys(profile).length ? await this.prisma.user.findUnique({ where: { id: acc.tenantUserId }, select: PROFILE }) : null
     let saved: Profile | null = null
     if (acc.tenantUserId) {
       saved = Object.keys(profile).length
@@ -243,13 +246,14 @@ export class UsersService {
     }
 
     // Когда правили поля: касса без связи могла править того же сотрудника, и остаётся более
-    // поздняя по времени правка (sync/team.ts). Отметка — в схеме магазина
+    // поздняя по времени правка (sync/team.ts). Отметка — в схеме магазина, и только полям,
+    // которые правда поменялись: «Сохранить» без изменений не должно перекрыть правку кассы
     const touchedFields = [
       ...(name && name !== acc.login ? ['name'] : []),
-      ...(dto.active !== undefined ? ['active'] : []),
+      ...(dto.active !== undefined && dto.active !== acc.active ? ['active'] : []),
       ...(roleChanged ? ['roleId'] : []),
       ...(dto.password ? ['password'] : []),
-      ...Object.keys(profile),
+      ...Object.keys(profile).filter((k) => !wasProfile || !same((wasProfile as any)[k], (profile as any)[k])),
     ]
     if (touchedFields.length) await stamp(this.prisma as any, 'Account', id, touchedFields).catch(() => {})
 

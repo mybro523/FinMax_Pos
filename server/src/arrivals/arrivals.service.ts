@@ -9,7 +9,7 @@ import { setSupplierCash } from '../shifts/totals'
 import { TX } from '../common/tx'
 import { periodFilter, PeriodQuery, MAX_ROWS } from '../common/period'
 import { lockSupplier } from '../suppliers/suppliers.service'
-import { forgetStamps, stamp } from '../common/stamps'
+import { forgetStamps, same, stamp } from '../common/stamps'
 import { CreateArrivalDto, UpdateArrivalDto } from './dto'
 
 type Tx = Prisma.TransactionClient
@@ -314,6 +314,9 @@ export async function updateArrivalIn(tx: Tx, id: string, dto: UpdateArrivalDto,
 
   // Новое состояние каждой строки: не прислали — считаем, что убрали
   const wanted = new Map(lines.map((l) => [l.id, l]))
+  // Товары, у которых закупочная цена правда поменялась: отметку времени получают только они
+  // (иначе правка прихода на сайте перекрыла бы цену, поправленную на кассе без связи)
+  const costMoved: string[] = []
 
   for (const pid of ids) {
     const p = byId.get(pid)
@@ -367,10 +370,9 @@ export async function updateArrivalIn(tx: Tx, id: string, dto: UpdateArrivalDto,
     // Обратить средневзвешенную формулу нельзя, а посчитать по партиям можно
     await syncProduct(tx, pid)
     const nowBatches = await tx.batch.findMany({ where: { productId: pid } })
-    await tx.product.update({
-      where: { id: pid },
-      data: { cost: costFromBatches(nowBatches, upp, p?.cost ?? 0) },
-    })
+    const cost = costFromBatches(nowBatches, upp, p?.cost ?? 0)
+    if (!same(p?.cost, cost)) costMoved.push(pid)
+    await tx.product.update({ where: { id: pid }, data: { cost } })
   }
 
   // Сами строки: убранные удаляем, остальные переписываем
@@ -405,7 +407,7 @@ export async function updateArrivalIn(tx: Tx, id: string, dto: UpdateArrivalDto,
   await addDebt(tx, sup.supplierId, sup.debt)
   // Приход правили — и закупочная цена его товаров пересчитана
   await stamp(tx, 'Arrival', id, ['doc'], at)
-  for (const pid of ids) await stamp(tx, 'Product', pid, ['cost'], at)
+  for (const pid of costMoved) await stamp(tx, 'Product', pid, ['cost'], at)
 
   return tx.arrival.update({
     where: { id },
@@ -435,11 +437,10 @@ export async function removeArrivalIn(tx: Tx, id: string, at: Date = new Date())
     await tx.batch.deleteMany({ where: { arrivalId: id, productId: pid } })
     await syncProduct(tx, pid)
     const nowBatches = await tx.batch.findMany({ where: { productId: pid } })
-    await tx.product.update({
-      where: { id: pid },
-      data: { cost: costFromBatches(nowBatches, uppOf(p || {}), p?.cost ?? 0) },
-    })
-    await stamp(tx, 'Product', pid, ['cost'], at)
+    const cost = costFromBatches(nowBatches, uppOf(p || {}), p?.cost ?? 0)
+    await tx.product.update({ where: { id: pid }, data: { cost } })
+    // Отметка — только если цена правда поменялась
+    if (!same(p?.cost, cost)) await stamp(tx, 'Product', pid, ['cost'], at)
   }
 
   // Неоплаченная часть удалённого прихода долгом больше не числится

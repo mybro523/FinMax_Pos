@@ -618,9 +618,10 @@ export function createGateway({
             // Неизвестно — входа без интернета нет, до входа с ним
             const from = pwFrom(db, row.id)
             const counts = (p) => p.seq > from.b || (from.p !== null && p.seq >= from.p)
+            const peerCounts = (m) => m.seq > from.b || (from.q !== null && m.seq >= from.q)
             const events = [
               ...x.pw.filter(counts).map((p) => ({ seq: p.seq, own: p })),
-              ...x.peerPw.filter((m) => m.seq > from.b).map((m) => ({ seq: m.seq, own: null })),
+              ...x.peerPw.filter(peerCounts).map((m) => ({ seq: m.seq, own: null })),
             ].sort((p, r) => p.seq - r.seq)
             // Поправки самой смены уже нет (давно убрана) — судьба по очереди отправки
             if (!x.pw.some((p) => p.opId === row.localPw)) events.push({ seq: Infinity, own: { state: outcome(row.localPw), sealed: null, seq: Infinity } })
@@ -777,9 +778,10 @@ export function createGateway({
 
   // Касса узнала нынешний пароль сотрудника: от сервера (вход через него), сама задала его через
   // сервер (смена своего пароля) или досчитала решённые сервером смены. Всё, что было по паролю
-  // до этой минуты, в нём учтено — дальше в расчёт идут события после неё (b) и свои смены,
-  // которые ещё ждут отправки (с p): сервер их пока не видел. newer — узнанный пароль задан позже
-  // этих ждущих смен: если сервер какую-то из них не проведёт («оставил более поздний»), это он
+  // до этой минуты, в нём учтено — дальше в расчёт идут события после неё (b), свои смены,
+  // которые ещё ждут отправки (с p), и смены пароля соседями, о приёме которых сервером здесь
+  // ещё не известно (с q): сервер их пока мог не видеть. newer — узнанный пароль задан позже
+  // своих ждущих смен: если сервер какую-то из них не проведёт («оставил более поздний»), это он
   function pwLearned(db, id, { newer = false } = {}) {
     try {
       const b = q(db, "SELECT MAX(seq) AS s FROM row_edits WHERE tbl = 'team_accounts' AND rowId = ?").get(id)?.s ?? -1
@@ -789,7 +791,14 @@ export function createGateway({
           `SELECT MIN(e.seq) AS s FROM row_edits e JOIN outbox o ON o.id = e.opId
            WHERE e.tbl = 'team_accounts' AND e.rowId = ? AND o.state = 'pending' AND json_extract(e.data, '$.pw') IS NOT NULL`,
         ).get(id)?.s ?? null
-      setMeta(db, 'pwFrom:' + id, JSON.stringify({ b, p, n: newer }))
+      const peer =
+        q(
+          db,
+          `SELECT MIN(e.seq) AS s FROM row_edits e
+           WHERE e.tbl = 'team_accounts' AND e.rowId = ? AND e.synced = 0 AND json_extract(e.data, '$.pwChanged') = 1
+             AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.id = e.opId)`,
+        ).get(id)?.s ?? null
+      setMeta(db, 'pwFrom:' + id, JSON.stringify({ b, p, q: peer, n: newer }))
     } catch (e) {
       log.warn('отметка о пароле сотрудника не записалась', e)
     }
@@ -797,11 +806,11 @@ export function createGateway({
   function pwFrom(db, id) {
     try {
       const v = JSON.parse(getMeta(db, 'pwFrom:' + id) || 'null')
-      if (v && typeof v === 'object') return { b: Number.isInteger(v.b) ? v.b : -1, p: Number.isInteger(v.p) ? v.p : null, n: v.n === true }
+      if (v && typeof v === 'object') return { b: Number.isInteger(v.b) ? v.b : -1, p: Number.isInteger(v.p) ? v.p : null, q: Number.isInteger(v.q) ? v.q : null, n: v.n === true }
     } catch {
       /* испорченная отметка — как без неё */
     }
-    return { b: -1, p: null, n: false }
+    return { b: -1, p: null, q: null, n: false }
   }
 
   // Своя смена пароля этого сотрудника ещё не ушла на сервер (вход через сервер в это время

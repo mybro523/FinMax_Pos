@@ -35,7 +35,7 @@ const {
   passwordHashOf,
 } = require('../dist/sync/payload')
 const { OP_PERMISSIONS } = require('../dist/auth/permissions')
-const { resolveEdit, same, conflictNote, changedFields } = require('../dist/common/stamps')
+const { resolveEdit, same, conflictNote, changedFields, alreadySame } = require('../dist/common/stamps')
 const { rewriteAliases, aliasOf, EDIT_TYPES } = require('../dist/sync/edits')
 const { randomInternalBarcode, ean13CheckDigit } = require('../dist/common/barcode')
 
@@ -149,6 +149,20 @@ test('у кассы «было» совпало с сервером, но пол
   assert.deepEqual(resolveEdit({ active: true }, { active: false }, current, stamps, at('2026-10-23T09:10:00Z')), { apply: ['active'], overrode: [], kept: [] })
   // Отметки нет — ложится
   assert.deepEqual(resolveEdit({ active: true }, { active: false }, current, new Map(), at('2026-10-23T09:00:00Z')), { apply: ['active'], overrode: [], kept: [] })
+})
+
+test('правка «из будущего» (часы кассы спешат) считается сделанной сейчас: более поздней отметки на сервере она не перебивает', () => {
+  const soon = new Date(Date.now() + 3 * 60000)
+  const stamped = new Date(Date.now() + 60000)
+  // На сервере поле отмечено минутой «вперёд» (так быть не должно, но пусть): правка кассы
+  // «через три минуты» считается сделанной сейчас — и уступает
+  assert.deepEqual(resolveEdit({ price: 170 }, { price: 150 }, { price: 160 }, new Map([['price', stamped]]), soon).kept, ['price'])
+})
+
+test('поля, которые уже такие, как прислала касса, — отдельным списком для отметки времени', () => {
+  const out = resolveEdit({ name: 'Б', phone: '2', note: 'x' }, { name: 'А', phone: '1', note: 'y' }, { name: 'А', phone: '2', note: 'z' }, new Map([['note', at('2026-10-23T10:00:00Z')]]), at('2026-10-23T09:00:00Z'))
+  assert.deepEqual(out, { apply: ['name'], overrode: [], kept: ['note'] })
+  assert.deepEqual(alreadySame({ name: 'Б', phone: '2', note: 'x' }, { name: 'А', phone: '2', note: 'z' }, out), ['phone'])
 })
 
 test('одинаковость полей: деньги числом, пустое — пустым, списки поэлементно', () => {
