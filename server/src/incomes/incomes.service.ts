@@ -5,6 +5,7 @@ import { D } from '../common/money'
 import { TX } from '../common/tx'
 import { periodFilter, PeriodQuery, MAX_ROWS } from '../common/period'
 import { dayKeyTj, storableDate } from '../common/time'
+import { forgetStamps, stamp } from '../common/stamps'
 import { CreateIncomeCategoryDto, CreateIncomeDto, UpdateIncomeDto } from './dto'
 
 // ── Доходы вне продаж ──
@@ -16,6 +17,9 @@ import { CreateIncomeCategoryDto, CreateIncomeDto, UpdateIncomeDto } from './dto
 
 const withUser = { user: { select: { id: true, name: true } } }
 type Tx = Prisma.TransactionClient
+
+// Поля дохода, у которых сервер помнит время правки (common/stamps.ts)
+export const INCOME_FIELDS = ['category', 'amount', 'note', 'date'] as const
 
 // Часы сервера и устройства расходятся не больше чем на минуты
 const FUTURE_SLACK_MS = 5 * 60 * 1000
@@ -95,14 +99,20 @@ export class IncomesService {
       if (dto.amount !== undefined) data.amount = D(dto.amount).toDecimalPlaces(2)
       if (dto.note !== undefined) data.note = dto.note.trim()
       if (dto.date !== undefined) data.date = incomeDate(dto.date)
-      return tx.income.update({ where: { id }, data, include: withUser })
+      const updated = await tx.income.update({ where: { id }, data, include: withUser })
+      // Когда правили: касса без связи сверит по этому свою правку (common/stamps.ts)
+      await stamp(tx, 'Income', id, INCOME_FIELDS.filter((f) => f in data))
+      return updated
     }, TX)
   }
 
   async remove(id: string) {
     const income = await this.prisma.income.findUnique({ where: { id }, select: { id: true } })
     if (!income) throw new NotFoundException('Доход не найден')
-    await this.prisma.income.delete({ where: { id } })
+    await this.prisma.$transaction(async (tx) => {
+      await tx.income.delete({ where: { id } })
+      await forgetStamps(tx, 'Income', id)
+    }, TX)
     return { ok: true }
   }
 

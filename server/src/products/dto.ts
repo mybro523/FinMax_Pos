@@ -47,3 +47,8 @@ export class UpdateProductDto {
   // правки прибит тестом products/dto.spec.ts
   @IsOptional() @IsString() @MaxLength(200_000) @Matches(/^$|^data:image\/(jpeg|png|webp);base64,/) image?: string
 }
+
+// Объединить дубль с основной карточкой (into — номер основной)
+export class MergeProductDto {
+  @IsString() @MaxLength(64) into: string
+}

@@ -20,9 +20,10 @@ const json = (status, body, date) => ({
 const KEYS = [
   'products', 'batches', 'categories', 'customers', 'deferred', 'shifts', 'sales', 'returns', 'arrivals', 'writeoffs', 'payments',
   'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'supplierReturns',
+  'productTypes', 'incomes', 'incomeCategories',
 ]
 // Разделы, которые сервер отдаёт только владельцу
-const FOUNDER_KEYS = new Set(['writeoffs', 'expenses', 'expenseCategories', 'supplierPayments'])
+const FOUNDER_KEYS = new Set(['writeoffs', 'expenses', 'expenseCategories', 'supplierPayments', 'incomes', 'incomeCategories'])
 // Кассиру поставщики отдаются без долгов
 const supplierFor = (s, u) => (u.role === 'founder' ? s : { id: s.id, name: s.name, phone: s.phone, note: s.note, createdAt: s.createdAt })
 
@@ -219,6 +220,185 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
       const own = p.expense.fromCash && s.data.shifts.some((x) => x.id === p.expense.shiftId && x.deviceId === op.deviceId)
       put('expenses', { ...p.expense, shiftId: own ? p.expense.shiftId : null, clientId: null, user: { id: 'tenant-' + op.by, name: op.by }, server: true })
       if (own) recountShift(p.expense.shiftId)
+    } else applyEdit(op, p)
+  }
+
+  // ── Справочники и правки документов, сделанные без связи (версия 1.4.14) ──
+  // Ровно настолько, чтобы следующий обмен вернул их серверной копией
+  const byId = (key, id) => s.data[key].find((x) => x.id === id)
+  const money2 = (v) => Math.round(Number(v || 0) * 100) / 100
+  function rename(key, field, from, to) {
+    for (const x of s.data.products.filter((pr) => pr[field] === from)) put('products', { ...x, [field]: to })
+  }
+  function recountCash(shiftId) {
+    const shift = byId('shifts', shiftId)
+    if (!shift) return
+    const moves = s.data.cashMoves.filter((m) => m.shiftId === shift.id)
+    const sum = (kind) => money2(moves.filter((m) => m.kind === kind).reduce((a, m) => a + Number(m.amount || 0), 0))
+    put('shifts', { ...shift, cashIn: sum('in'), cashOut: sum('out') })
+  }
+  function supplierCash(shiftId, delta) {
+    const shift = shiftId ? byId('shifts', shiftId) : null
+    if (shift) put('shifts', { ...shift, supplierCash: money2(Number(shift.supplierCash || 0) + delta) })
+  }
+  function addDebt(supplierId, delta) {
+    const sup = supplierId ? byId('suppliers', supplierId) : null
+    if (sup) put('suppliers', { ...sup, debt: money2(Number(sup.debt || 0) + delta) })
+  }
+  function applyEdit(op, p) {
+    const who = { id: 'tenant-' + op.by, name: op.by }
+    switch (op.type) {
+      case 'product.create':
+        put('products', { expiredUnits: 0, ...p.product })
+        break
+      case 'product.update': {
+        const was = byId('products', p.id)
+        if (!was) break
+        const next = { ...was, ...p.set }
+        if (p.stock) {
+          const upp = Math.max(1, next.unitsPerPack || 1)
+          next.stock = Math.floor(p.stock.units / upp)
+          next.looseUnits = p.stock.units % upp
+        }
+        if ('expiryDate' in p) next.expiryDate = p.expiryDate
+        put('products', next)
+        break
+      }
+      case 'product.delete':
+        if (byId('products', p.id)) remove('products', p.id)
+        break
+      case 'category.create':
+        if (!s.data.categories.some((c) => c.name === p.category.name)) put('categories', p.category)
+        break
+      case 'category.update': {
+        const was = byId('categories', p.id)
+        if (!was) break
+        put('categories', { ...was, ...p.set })
+        if (p.set.name) rename('products', 'category', was.name, p.set.name)
+        break
+      }
+      case 'category.delete':
+        remove('categories', p.id)
+        break
+      case 'productType.create':
+        put('productTypes', p.type)
+        break
+      case 'productType.update': {
+        const was = byId('productTypes', p.id)
+        if (!was) break
+        put('productTypes', { ...was, ...p.set })
+        if (p.set.name) rename('products', 'type', was.name, p.set.name)
+        break
+      }
+      case 'productType.delete':
+        remove('productTypes', p.id)
+        break
+      case 'payService.create':
+        put('payServices', { ...p.service, ord: 99 })
+        break
+      case 'payService.delete':
+        remove('payServices', p.id)
+        break
+      case 'expenseCategory.create':
+        put('expenseCategories', p.category)
+        break
+      case 'expenseCategory.delete':
+        remove('expenseCategories', p.id)
+        break
+      case 'incomeCategory.create':
+        put('incomeCategories', p.category)
+        break
+      case 'incomeCategory.delete':
+        remove('incomeCategories', p.id)
+        break
+      case 'supplier.create':
+        put('suppliers', { ...p.supplier, debt: p.supplier.openingDebt || 0 })
+        break
+      case 'supplier.update': {
+        const was = byId('suppliers', p.id)
+        if (was) put('suppliers', { ...was, ...p.set })
+        break
+      }
+      case 'supplier.delete':
+        remove('suppliers', p.id)
+        break
+      case 'supplier.pay': {
+        const sup = byId('suppliers', p.payment.supplierId)
+        put('supplierPayments', { ...p.payment, user: who, supplier: sup ? { id: sup.id, name: sup.name } : null, server: true })
+        addDebt(p.payment.supplierId, -Number(p.payment.amount))
+        if (p.payment.fromCash) supplierCash(p.payment.shiftId, Number(p.payment.amount))
+        break
+      }
+      case 'supplierPayment.delete': {
+        const was = byId('supplierPayments', p.id)
+        if (!was) break
+        remove('supplierPayments', was.id)
+        addDebt(was.supplierId, Number(was.amount))
+        if (was.fromCash) supplierCash(was.shiftId, -Number(was.amount))
+        break
+      }
+      case 'supplierReturn.delete': {
+        const was = byId('supplierReturns', p.id)
+        if (!was) break
+        remove('supplierReturns', was.id)
+        for (const it of was.items || []) {
+          const prod = byId('products', it.productId)
+          if (prod) put('products', { ...prod, stock: prod.stock + it.qty })
+        }
+        if (was.refund === 'debt') addDebt(was.supplierId, Number(was.total))
+        break
+      }
+      case 'expense.update': {
+        const was = byId('expenses', p.id)
+        if (!was) break
+        put('expenses', { ...was, ...p.set })
+        if (was.fromCash && was.shiftId) recountShift(was.shiftId)
+        break
+      }
+      case 'expense.delete': {
+        const was = byId('expenses', p.id)
+        if (!was) break
+        remove('expenses', was.id)
+        if (was.fromCash && was.shiftId) recountShift(was.shiftId)
+        break
+      }
+      case 'income.update': {
+        const was = byId('incomes', p.id)
+        if (was) put('incomes', { ...was, ...p.set })
+        break
+      }
+      case 'income.delete':
+        remove('incomes', p.id)
+        break
+      case 'cashMove.delete': {
+        const was = byId('cashMoves', p.id)
+        if (!was) break
+        remove('cashMoves', was.id)
+        recountCash(was.shiftId)
+        break
+      }
+      case 'arrival.update': {
+        const was = byId('arrivals', p.arrival.id)
+        if (!was) break
+        const lines = new Map(p.arrival.items.map((l) => [l.id, l]))
+        const items = (was.items || []).filter((i) => lines.has(i.id) && lines.get(i.id).qty + (lines.get(i.id).pieces || 0) > 0).map((i) => ({ ...i, qty: lines.get(i.id).qty, pieces: lines.get(i.id).pieces || 0, cost: lines.get(i.id).cost }))
+        const total = money2(items.reduce((a, i) => a + i.qty * i.cost, 0))
+        const supplierId = p.arrival.supplierId === undefined ? was.supplierId : p.arrival.supplierId || null
+        const debt = supplierId ? Math.min(total, Number(p.arrival.debt ?? was.debt) || 0) : 0
+        addDebt(was.supplierId, -Number(was.debt || 0))
+        addDebt(supplierId, debt)
+        put('arrivals', { ...was, items, total, supplierId, debt })
+        break
+      }
+      case 'arrival.delete': {
+        const was = byId('arrivals', p.id)
+        if (!was) break
+        remove('arrivals', was.id)
+        addDebt(was.supplierId, -Number(was.debt || 0))
+        break
+      }
+      default:
+        break
     }
   }
 
@@ -226,7 +406,11 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
   function docIdOf(op) {
     const p = op.payload || {}
     const map = { sale: p.sale, return: p.ret, writeoff: p.writeOff, arrival: p.arrival, 'shift.open': p.shift, 'shift.close': p.shift, 'debt.pay': p.payment, 'customer.create': p.customer, 'deferred.add': p.deferred, expense: p.expense, 'cash.move': p.move, 'supplier.return': p.ret }
-    return map[op.type]?.id ?? null
+    if (map[op.type]) return map[op.type].id ?? null
+    // Справочники и правки: номер записи, которой коснулась операция
+    const made = { 'product.create': p.product, 'category.create': p.category, 'productType.create': p.type, 'payService.create': p.service, 'expenseCategory.create': p.category, 'incomeCategory.create': p.category, 'supplier.create': p.supplier, 'supplier.pay': p.payment, 'arrival.update': p.arrival }
+    if (made[op.type]) return made[op.type].id ?? null
+    return typeof p.id === 'string' ? p.id : null
   }
 
   function push(body, u) {
@@ -410,6 +594,8 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
     const history = route.match(/^\/products\/([^/]+)\/history$/)
     if (history && method === 'GET') {
       if (u.role !== 'founder') return json(403, { statusCode: 403, message: 'Недостаточно прав' }, date)
+      // Как у сервера: товара, которого он не знает, нет и истории
+      if (!s.data.products.some((x) => x.id === decodeURIComponent(history[1]))) return json(404, { statusCode: 404, message: 'Товар не найден' }, date)
       return json(200, { productId: decodeURIComponent(history[1]), unitsNow: 0, unitsPerPack: 1, rows: [] }, date)
     }
     if (route === '/pay-services' && method === 'POST') {

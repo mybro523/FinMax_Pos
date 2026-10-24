@@ -93,6 +93,12 @@ export default function ProductHistory({ product, onClose }) {
         ))}
       </div>
       {error && <div className="note err" style={{ marginBottom: 10 }}>{t(error)}</div>}
+      {data?.local && (
+        <div className="note info" style={{ marginBottom: 10 }}>
+          {t('Нет связи с сервером — движения посчитаны по данным этого компьютера.')}
+          {data.partial ? ' ' + t('Продажи хранятся здесь за два месяца, остальное — за полгода; пересчётов с сайта здесь нет.') : ''}
+        </div>
+      )}
       {loading && !data && <div className="note info" style={{ marginBottom: 10 }}>{t('Загружаем историю…')}</div>}
       <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
         <table className="table-cards" data-tour="ph.rows">

@@ -30,9 +30,10 @@
 // документа с суммами. Остатки при этом сходятся на обеих кассах.
 import { getMeta, inTx, q, setMeta } from './db.mjs'
 import { KINDS, putDoc } from './docs.mjs'
-import { docsOf, touchedBy } from './outbox.mjs'
+import { DOC_EDIT_OPS, docsOf, REF_OPS, touchedBy } from './outbox.mjs'
 import { applyMove, rebuildStock } from './stock.mjs'
-import { DOC_KEYS, recountDebts } from './snapshot.mjs'
+import { DOC_KEYS, recountDebts, reorderCategories, reorderProducts } from './snapshot.mjs'
+import { ackEdits, applyPeerEdits, completePeerEdits, docKnown, EDITABLE_DOC_KINDS, editsOf, peerDocWaiting, undoEdits } from './edits.mjs'
 import { hasPerm } from './accounts.mjs'
 
 // Сколько дней чужая операция может ждать сервера. Касса без связи работает не
@@ -45,11 +46,30 @@ const DAY_MS = 86400000
 // Виды документов, которые видит не каждый
 export const WIDE_KINDS = new Set(['writeoff', 'expense', 'income', 'supplierpayment'])
 // Операции, которые соседу без прав не уходят вовсе: в них ничего, кроме денег магазина
-const WIDE_ONLY_TYPES = new Set(['expense', 'income'])
+const WIDE_ONLY_TYPES = new Set([
+  'expense', 'income', 'expense.update', 'expense.delete', 'income.update', 'income.delete',
+  'expenseCategory.create', 'expenseCategory.delete', 'incomeCategory.create', 'incomeCategory.delete',
+  'supplier.pay', 'supplierPayment.delete',
+])
+// Операции, которые кладут поправки справочников и документов (edits.mjs)
+const EDIT_TYPES = new Set([...REF_OPS, ...DOC_EDIT_OPS, 'supplier.pay'])
+// Столбцы поставщика с деньгами магазина: соседу без прав они не уходят
+const MONEY_COLS = ['openingDebtC', 'sDebtC', 'debtArrivals']
+// Поправка → раздел окна, который она меняет
+const TBL_KEY = {
+  products: 'products', categories: 'categories', product_types: 'productTypes', pay_services: 'payServices',
+  expense_categories: 'expenseCategories', income_categories: 'incomeCategories', suppliers: 'suppliers',
+  supplierDebt: 'suppliers', expenseCash: 'shifts', supplierCash: 'shifts',
+}
 // С какими правами касса получает такие данные — те же, что у сервера (pullScope)
 export const WIDE_PERMS = ['suppliers.view', 'writeoffs.view', 'expenses.view', 'incomes.view', 'reports.view', 'dashboard.view']
 
 const KIND_KEY = Object.fromEntries(Object.entries(DOC_KEYS).map(([key, kind]) => [kind, key]))
+// Таблица справочника → её раздел в данных сервера
+const ROW_KEYS = {
+  products: 'products', suppliers: 'suppliers', categories: 'categories', product_types: 'productTypes', pay_services: 'payServices',
+  expense_categories: 'expenseCategories', income_categories: 'incomeCategories',
+}
 
 const parse = (s) => {
   try {
@@ -74,7 +94,8 @@ export function lanWideHere(core, pharmacyCode) {
 // долга, новый клиент, отложенный штрихкод, новая цена продажи
 function effectsOf(db, op) {
   const docs = []
-  for (const [kind, id] of docsOf(op)) {
+  // Правка документа идёт поправкой (ниже), а не документом: у соседа он уже есть
+  for (const [kind, id] of DOC_EDIT_OPS.has(op.type) ? [] : docsOf(op)) {
     if (!id) continue
     const row = q(db, 'SELECT deviceId, body FROM docs WHERE kind = ? AND id = ?').get(kind, id)
     if (row) docs.push({ kind, deviceId: row.deviceId ?? null, body: JSON.parse(row.body) })
@@ -94,6 +115,8 @@ function effectsOf(db, op) {
     out.deferred = { id: p.deferred.id, barcode: String(p.deferred.barcode ?? ''), createdAt: p.deferred.createdAt || op.createdAt }
   }
   if (op.type === 'deferred.remove' && p.id) out.deferredRemove = p.id
+  // Поправки справочников и документов, поправки сумм (долг поставщику, деньги смены)
+  if (EDIT_TYPES.has(op.type)) out.edits = editsOf(db, op.id)
   if (op.type === 'arrival') {
     // Новая цена продажи из прихода — какой она стала в карточке после него
     const prices = []
@@ -110,7 +133,12 @@ function effectsOf(db, op) {
 function logOwn(db, op, deviceId) {
   if (q(db, 'SELECT 1 FROM lan_log WHERE id = ?').get(op.id)) return
   const effects = effectsOf(db, op)
-  const wide = WIDE_ONLY_TYPES.has(op.type) || op.type === 'writeoff' || effects.docs.some((d) => WIDE_KINDS.has(d.kind))
+  const wide =
+    WIDE_ONLY_TYPES.has(op.type) ||
+    op.type === 'writeoff' ||
+    effects.docs.some((d) => WIDE_KINDS.has(d.kind)) ||
+    (effects.edits?.adj || []).length > 0 ||
+    (effects.edits?.rows || []).some((e) => wideRow(e))
   q(
     db,
     `INSERT INTO lan_log (id, kind, origin, opId, type, accountId, createdAt, body, wide, redacted, state)
@@ -139,7 +167,11 @@ export function lanCatchUp(db, { deviceId, now }) {
       `SELECT l.id, o.state, o.error FROM lan_log l JOIN outbox o ON o.id = l.id
        WHERE l.kind = 'op' AND l.state = 'own' AND l.fate IS NULL AND o.state IN ('done', 'rejected', 'dismissed')`,
     ).all()
-    for (const f of fates) lanFate(db, f.id, f.state === 'done' ? 'ok' : 'rejected', f.error, { deviceId, now })
+    // Принята, но сервер ничего не сделал ('noop') — соседи заберут всё заново (fateTo)
+    for (const f of fates) {
+      const status = f.state !== 'done' ? 'rejected' : f.error === 'noop' ? 'noop' : 'ok'
+      lanFate(db, f.id, status, status === 'rejected' ? f.error : null, { deviceId, now })
+    }
   })
   return logged
 }
@@ -177,6 +209,22 @@ const toWire = (r) => ({
   redacted: r.redacted ? 1 : 0,
 })
 
+// Поправка с деньгами магазина: документ, который видит не каждый, или долг поставщика
+function wideRow(e) {
+  if (typeof e?.tbl !== 'string') return false
+  if (e.tbl.startsWith('doc:')) return WIDE_KINDS.has(e.tbl.slice(4))
+  if (e.tbl !== 'suppliers') return false
+  const d = e.data || {}
+  return [d.row, d.set, d.was, d.wasRow].some((x) => x && MONEY_COLS.some((k) => x[k] !== undefined && x[k] !== null))
+}
+// Та же поправка без денег: у поставщика — без долга
+function plainRow(e) {
+  if (e.tbl !== 'suppliers') return e
+  const strip = (x) => (x && typeof x === 'object' ? Object.fromEntries(Object.entries(x).filter(([k]) => !MONEY_COLS.includes(k))) : x)
+  const d = e.data || {}
+  return { ...e, data: { ...d, row: strip(d.row), set: strip(d.set), was: strip(d.was), wasRow: strip(d.wasRow) } }
+}
+
 export function redact(e) {
   if (e.kind !== 'op' || !e.wide) return e
   if (WIDE_ONLY_TYPES.has(e.type)) return null
@@ -185,7 +233,11 @@ export function redact(e) {
   if (!fx) return null
   const docs = (fx.docs || []).filter((d) => !WIDE_KINDS.has(d.kind))
   const rest = { ...fx, docs }
-  if (!docs.length && !(fx.moves || []).length && !(fx.debts || []).length) return null
+  if (fx.edits) {
+    const rows = (fx.edits.rows || []).filter((r) => !(typeof r?.tbl === 'string' && r.tbl.startsWith('doc:') && WIDE_KINDS.has(r.tbl.slice(4)))).map(plainRow)
+    rest.edits = { rows, adj: [] }
+  }
+  if (!docs.length && !(fx.moves || []).length && !(fx.debts || []).length && !(rest.edits?.rows || []).length) return null
   return { ...e, body: JSON.stringify({ effects: rest }), redacted: 1, wide: 0 }
 }
 
@@ -257,9 +309,22 @@ function applyEffects(db, opId, type, fx, changed) {
   for (const d of fx.docs || []) {
     if (d?.kind === 'shift') continue
     const row = q(db, 'SELECT sync FROM docs WHERE kind = ? AND id = ?').get(d?.kind, d?.body?.id)
-    if (row && row.sync === 'synced') return 'confirmed'
+    // В том числе если его здесь уже поправили или удалили: он пришёл с сервера раньше
+    if (row && !['pending', 'peer', 'rejected'].includes(row.sync)) return 'confirmed'
   }
   addDocs(db, opId, fx.docs, changed)
+
+  // Поправки справочников и документов — раньше движений: товар, заведённый соседом,
+  // должен быть на месте, когда ляжет его начальный остаток
+  if (fx.edits && typeof fx.edits === 'object') {
+    const touched = applyPeerEdits(db, opId, fx.edits, Date.now())
+    if (touched.has('products')) reorderProducts(db)
+    if (touched.has('categories')) reorderCategories(db)
+    for (const t of touched) {
+      if (TBL_KEY[t]) changed.add(TBL_KEY[t])
+      else if (t.startsWith('doc:') && KIND_KEY[t.slice(4)]) changed.add(KIND_KEY[t.slice(4)])
+    }
+  }
 
   // Движения остатка — так же, как свои: в журнал с номером операции и сразу на полку.
   // Отказов нет: товар уже продан на соседней кассе (tolerant)
@@ -329,14 +394,23 @@ function confirmOp(db, opId) {
   if (!row) return false
   q(db, 'UPDATE stock_moves SET synced = 1 WHERE opId = ?').run(opId)
   q(db, 'UPDATE debt_moves SET synced = 1 WHERE opId = ?').run(opId)
-  for (const d of q(db, 'SELECT kind, id FROM lan_docs WHERE opId = ?').all(opId)) {
-    q(db, "UPDATE docs SET sync = 'synced' WHERE kind = ? AND id = ? AND sync = 'peer'").run(d.kind, d.id)
-  }
+  const docs = q(db, 'SELECT kind, id FROM lan_docs WHERE opId = ?').all(opId)
   q(db, 'DELETE FROM lan_docs WHERE opId = ?').run(opId)
+  for (const d of docs) {
+    // Документ, который здесь (или на третьей кассе) успели поправить, а правка ещё ждёт:
+    // сервер знает его в том виде, в каком его заводили, и разница правки становится её
+    // поправкой суммы (edits.mjs, docKnown)
+    if (EDITABLE_DOC_KINDS.has(d.kind)) docKnown(db, d.kind, d.id, { fold: false })
+    else q(db, "UPDATE docs SET sync = 'synced' WHERE kind = ? AND id = ? AND sync = 'peer'").run(d.kind, d.id)
+  }
   const fx = parse(row.body)?.effects || {}
   if (fx.customer?.id) q(db, 'UPDATE customers SET local = 0 WHERE id = ? AND local = 2').run(fx.customer.id)
   if (fx.deferred?.id) q(db, "UPDATE deferred SET sync = 'synced' WHERE id = ? AND sync = 'peer'").run(fx.deferred.id)
   if (typeof fx.deferredRemove === 'string') q(db, "DELETE FROM deferred WHERE id = ? AND sync = 'deleted'").run(fx.deferredRemove)
+  // Поправки справочников и сумм — в данных сервера они уже есть. Поправки сумм не
+  // прибавляются к тому, что знает сервер (fold: false): данные, по которым операцию
+  // подтвердили, сняты после её приёма и уже содержат её, — прибавка задвоила бы сумму
+  ackEdits(db, opId, { fold: false })
   q(db, "UPDATE lan_log SET state = 'confirmed' WHERE id = ?").run(opId)
   return true
 }
@@ -346,7 +420,8 @@ function undoOp(db, opId, state) {
   const row = q(db, "SELECT type, body FROM lan_log WHERE id = ? AND kind = 'op' AND state = 'applied'").get(opId)
   if (!row) return null
   for (const d of q(db, 'SELECT kind, id FROM lan_docs WHERE opId = ?').all(opId)) {
-    q(db, "DELETE FROM docs WHERE kind = ? AND id = ? AND sync = 'peer'").run(d.kind, d.id)
+    // И тот, что здесь успели удалить: такого документа у сервера не будет вовсе
+    q(db, "DELETE FROM docs WHERE kind = ? AND id = ? AND sync IN ('peer', 'deleted')").run(d.kind, d.id)
   }
   q(db, 'DELETE FROM lan_docs WHERE opId = ?').run(opId)
   q(db, 'DELETE FROM stock_moves WHERE opId = ? AND synced = 0').run(opId)
@@ -355,6 +430,9 @@ function undoOp(db, opId, state) {
   if (fx.customer?.id) q(db, 'DELETE FROM customers WHERE id = ? AND local = 2').run(fx.customer.id)
   if (fx.deferred?.id) q(db, "DELETE FROM deferred WHERE id = ? AND sync = 'peer'").run(fx.deferred.id)
   if (typeof fx.deferredRemove === 'string') q(db, "UPDATE deferred SET sync = 'synced' WHERE id = ? AND sync = 'deleted'").run(fx.deferredRemove)
+  // Поправки справочников и документов — назад. Строки и документы возвращаются к тому,
+  // что было до неё; что сервер видит на самом деле, касса заберёт целиком
+  if (undoEdits(db, opId)) setMeta(db, 'needFull', '1')
   q(db, 'UPDATE lan_log SET state = ? WHERE id = ?').run(state, opId)
   return row.type
 }
@@ -384,10 +462,22 @@ export function lanReceive(db, entries, { now, gen }) {
         if (!fx || typeof fx !== 'object') continue
         const known = q(db, 'SELECT redacted, state FROM lan_log WHERE id = ?').get(e.id)
         if (known) {
-          // Лежала урезанной, а теперь пришла целиком: докладываем недостающие документы
+          // Лежала урезанной, а теперь пришла целиком: докладываем недостающие документы, а
+          // поправки кладём заново — целиком, с долгами поставщиков и поправками сумм
           if (known.redacted && !e.redacted) {
             q(db, 'UPDATE lan_log SET body = ?, redacted = 0, wide = ? WHERE id = ?').run(e.body, e.wide ? 1 : 0, e.id)
-            if (known.state === 'applied') addDocs(db, e.id, fx.docs, changed)
+            if (known.state === 'applied') {
+              addDocs(db, e.id, fx.docs, changed)
+              if (fx.edits && typeof fx.edits === 'object') {
+                const touched = completePeerEdits(db, e.id, fx.edits, Date.now(), MONEY_COLS)
+                if (touched.has('products')) reorderProducts(db)
+                if (touched.has('categories')) reorderCategories(db)
+                for (const t of touched) {
+                  if (TBL_KEY[t]) changed.add(TBL_KEY[t])
+                  else if (t.startsWith('doc:') && KIND_KEY[t.slice(4)]) changed.add(KIND_KEY[t.slice(4)])
+                }
+              }
+            }
           }
           continue
         }
@@ -435,8 +525,12 @@ function fateTo(db, opId, fate, gen, changed) {
   if (!fate || typeof fate !== 'object') return null
   const op = q(db, "SELECT type FROM lan_log WHERE id = ? AND kind = 'op' AND state = 'applied'").get(opId)
   if (!op) return null
-  if (fate.status === 'ok') {
+  if (fate.status === 'ok' || fate.status === 'noop') {
     q(db, 'UPDATE lan_log SET fate = ?, fateGen = COALESCE(fateGen, ?) WHERE id = ?').run('ok', Number(gen) || 0, opId)
+    // Сервер принял операцию, но ничего не сделал (чужая правка новее, записи уже нет):
+    // её поправка у нас не верна, а данные сервера про эту запись могут больше не прийти —
+    // забираем всё заново
+    if (fate.status === 'noop') setMeta(db, 'needFull', '1')
     return 'ok'
   }
   if (fate.status === 'rejected') {
@@ -474,6 +568,23 @@ export function lanBeforePull(db, data, { startedGen, now }) {
       if (typeof doc?.id !== 'string') continue
       const m = q(db, 'SELECT opId FROM lan_docs WHERE kind = ? AND id = ?').get(kind, doc.id)
       if (m && confirmOp(db, m.opId)) any = true
+    }
+  }
+  // Строка справочника, которую завела соседняя касса, пришла с сервера под тем же номером —
+  // значит, сервер её заведение принял. Так операции, которые на неё ссылаются (продажа
+  // нового товара соседа), не ждут известия от соседа, если тот после отправки выключился
+  for (const [tbl, key] of Object.entries(ROW_KEYS)) {
+    const ups = d[key]?.upsert
+    if (!Array.isArray(ups) || !ups.length) continue
+    for (const r of ups) {
+      if (typeof r?.id !== 'string') continue
+      const made = q(
+        db,
+        `SELECT DISTINCT e.opId FROM row_edits e JOIN lan_log l ON l.id = e.opId
+         WHERE e.tbl = ? AND e.rowId = ? AND e.synced = 0 AND e.action = 'put' AND json_extract(e.data, '$.row') IS NOT NULL
+           AND l.kind = 'op' AND l.state = 'applied'`,
+      ).all(tbl, r.id)
+      for (const m of made) if (confirmOp(db, m.opId)) any = true
     }
   }
   for (const r of q(db, "SELECT id FROM lan_log WHERE kind = 'op' AND state = 'applied' AND fate = 'ok' AND fateGen < ?").all(Number(startedGen) || 0)) {
@@ -520,6 +631,8 @@ export function waitsForPeer(db, op) {
   const p = op?.payload || {}
   const peerSale = (id) => typeof id === 'string' && !!q(db, "SELECT 1 FROM docs WHERE kind = 'sale' AND id = ? AND sync = 'peer'").get(id)
   const peerCustomer = (id) => typeof id === 'string' && !!q(db, 'SELECT 1 FROM customers WHERE id = ? AND local = 2').get(id)
+  // Товар, поставщик или документ, которые завела соседняя касса, а сервер ещё не знает
+  if (refsPeerMade(db, op)) return true
   switch (op?.type) {
     case 'sale':
       return peerCustomer(p.sale?.customerId)
@@ -530,6 +643,43 @@ export function waitsForPeer(db, op) {
     default:
       return false
   }
+}
+
+// ── Заведено соседом и ещё не дошло до сервера ──
+// Строка справочника, которую положила чужая операция «завести» (поправка с row), пока эта
+// операция лежит у нас поправкой; документ — по пометке «от соседа»
+const peerMadeRow = (db, tbl, id) =>
+  typeof id === 'string' &&
+  !!q(
+    db,
+    `SELECT 1 FROM row_edits e JOIN lan_log l ON l.id = e.opId
+     WHERE e.tbl = ? AND e.rowId = ? AND e.synced = 0 AND e.action = 'put' AND json_extract(e.data, '$.row') IS NOT NULL
+       AND l.kind = 'op' AND l.state = 'applied' LIMIT 1`,
+  ).get(tbl, id)
+// Документ — по журналу обмена, а не по пометке: правка здесь пометку меняет, а документ
+// от этого серверу известным не становится
+const peerMadeDoc = (db, kind, id) => typeof kind === 'string' && typeof id === 'string' && peerDocWaiting(db, kind, id)
+
+function refsPeerMade(db, op) {
+  const p = op?.payload || {}
+  const products = new Set()
+  const suppliers = new Set()
+  const walk = (v) => {
+    if (Array.isArray(v)) return v.forEach(walk)
+    if (!v || typeof v !== 'object') return
+    for (const [k, x] of Object.entries(v)) {
+      if (k === 'productId' && typeof x === 'string') products.add(x)
+      else if (k === 'supplierId' && typeof x === 'string' && x) suppliers.add(x)
+      else if (x && typeof x === 'object') walk(x)
+    }
+  }
+  walk(p)
+  if (op.type === 'product.update' || op.type === 'product.delete') products.add(p.id)
+  if (op.type === 'supplier.update' || op.type === 'supplier.delete') suppliers.add(p.id)
+  for (const id of products) if (peerMadeRow(db, 'products', id)) return true
+  for (const id of suppliers) if (peerMadeRow(db, 'suppliers', id)) return true
+  if (DOC_EDIT_OPS.has(op.type) && peerMadeDoc(db, p.ref?.kind, p.ref?.id)) return true
+  return false
 }
 
 // ── Соседние кассы ──

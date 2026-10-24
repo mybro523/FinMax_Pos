@@ -2,7 +2,15 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { TX } from '../common/tx'
+import { changedFields, forgetStamps, stamp } from '../common/stamps'
 import { CreateCategoryDto, UpdateCategoryDto } from './dto'
+
+export const CATEGORY_EXISTS = 'Такая категория уже есть'
+export const CATEGORY_NAME_TAKEN = 'Категория с таким названием уже есть'
+// Товар не должен остаться в категории, которой нет: иначе он пропадёт из фильтров и
+// из пересчёта остатков. Тот же текст показывает касса без связи
+export const categoryInUse = (name: string, used: number) =>
+  `В категории «${name}» ${used} товар(ов) — сначала перенесите их в другую категорию`
 
 // ── Категории товаров ──
 // Списком управляет владелец. У товара категория хранится названием, поэтому
@@ -37,7 +45,7 @@ export class CategoriesService {
       return await this.prisma.category.create({ data: { name, noExpiry: !!dto.noExpiry } })
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-        throw new BadRequestException('Такая категория уже есть')
+        throw new BadRequestException(CATEGORY_EXISTS)
       }
       throw e
     }
@@ -55,10 +63,10 @@ export class CategoriesService {
       // посередине часть товаров осталась бы в несуществующей категории.
       // Товаров в категории могут быть сотни, поэтому время берём с запасом.
       return await this.prisma.$transaction(async (tx) => {
-        const updated = await tx.category.update({
-          where: { id },
-          data: { name, noExpiry: dto.noExpiry === undefined ? cat.noExpiry : !!dto.noExpiry },
-        })
+        const data = { name, noExpiry: dto.noExpiry === undefined ? cat.noExpiry : !!dto.noExpiry }
+        const updated = await tx.category.update({ where: { id }, data })
+        // Когда правили: касса без связи сверит по этому свою правку (common/stamps.ts)
+        await stamp(tx, 'Category', id, changedFields(cat, data, ['name', 'noExpiry']))
         if (name !== cat.name) {
           const moved = await tx.product.updateMany({ where: { category: cat.name }, data: { category: name } })
           if (moved.count) this.log.log(`Категория «${cat.name}» → «${name}»: перенесено товаров ${moved.count}`)
@@ -67,7 +75,7 @@ export class CategoriesService {
       }, TX)
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-        throw new BadRequestException('Категория с таким названием уже есть')
+        throw new BadRequestException(CATEGORY_NAME_TAKEN)
       }
       throw e
     }
@@ -80,12 +88,11 @@ export class CategoriesService {
     // Товар не должен остаться в категории, которой нет: иначе он пропадёт
     // из фильтров и из пересчёта остатков
     const used = await this.prisma.product.count({ where: { category: cat.name } })
-    if (used > 0) {
-      throw new BadRequestException(
-        `В категории «${cat.name}» ${used} товар(ов) — сначала перенесите их в другую категорию`,
-      )
-    }
-    await this.prisma.category.delete({ where: { id } })
+    if (used > 0) throw new BadRequestException(categoryInUse(cat.name, used))
+    await this.prisma.$transaction(async (tx) => {
+      await tx.category.delete({ where: { id } })
+      await forgetStamps(tx, 'Category', id)
+    }, TX)
     return { ok: true }
   }
 

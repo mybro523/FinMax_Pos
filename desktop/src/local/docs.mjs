@@ -29,8 +29,8 @@ export function putDoc(db, kind, body, { sync = 'synced', deviceId = null } = {}
     dateOf(kind, body),
     kind === 'shift' ? null : body.shiftId ?? null,
     kind === 'return' ? body.saleId ?? null : null,
-    // Ключ повтора есть у чека, возврата, расхода, дохода и движения наличных
-    kind === 'sale' || kind === 'return' || kind === 'expense' || kind === 'cashmove' || kind === 'income' ? body.clientId ?? null : null,
+    // Ключ повтора есть у чека, возврата, расхода, дохода, движения наличных и оплаты поставщику
+    kind === 'sale' || kind === 'return' || kind === 'expense' || kind === 'cashmove' || kind === 'income' || kind === 'supplierpayment' ? body.clientId ?? null : null,
     deviceId ?? body.deviceId ?? null,
     kind === 'shift' ? body.closedAt ?? null : null,
     JSON.stringify(body),
@@ -55,24 +55,31 @@ function bodies(rows) {
 // Отвергнутое сервером в журналы и итоги не входит: оно снято с учёта (товар и долг
 // вернулись к тому, что знает сервер) и остаётся на виду у владельца в списке «не
 // принято сервером». Покажи журнал отвергнутый возврат — окно решило бы, что товар
-// уже вернули; покажи отвергнутую смену — что она открыта
+// уже вернули; покажи отвергнутую смену — что она открыта.
+// Удалённое здесь (deleted) — тоже: его уже нет, сервер просто ещё не знает об этом
 export function listDocs(db, kind, { from = null, to = null } = {}) {
   const rows = q(
     db,
     `SELECT body FROM docs
-     WHERE kind = ? AND sync <> 'rejected' AND (? IS NULL OR date >= ?) AND (? IS NULL OR date <= ?)
+     WHERE kind = ? AND sync NOT IN ('rejected', 'deleted') AND (? IS NULL OR date >= ?) AND (? IS NULL OR date <= ?)
      ORDER BY date DESC, id DESC`,
   ).all(kind, from, from, to, to)
   return bodies(rows)
 }
 
 export const docsOfShift = (db, kind, shiftId) =>
-  bodies(q(db, "SELECT body FROM docs WHERE kind = ? AND shiftId = ? AND sync <> 'rejected'").all(kind, shiftId))
+  bodies(q(db, "SELECT body FROM docs WHERE kind = ? AND shiftId = ? AND sync NOT IN ('rejected', 'deleted')").all(kind, shiftId))
+
+// Документ, который есть в журналах: не отвергнут сервером и не удалён здесь
+export function liveDoc(db, kind, id) {
+  const d = getDoc(db, kind, id)
+  return d && d.sync !== 'rejected' && d.sync !== 'deleted' ? d : null
+}
 
 // Возвраты по чеку — чтобы не вернуть больше купленного. Отвергнутый сервером возврат
 // не в счёт: его нет нигде, кроме списка «не принято», и товар по нему не вернулся
 export const returnsOfSale = (db, saleId) =>
-  bodies(q(db, "SELECT body FROM docs WHERE kind = 'return' AND saleId = ? AND sync <> 'rejected'").all(saleId))
+  bodies(q(db, "SELECT body FROM docs WHERE kind = 'return' AND saleId = ? AND sync NOT IN ('rejected', 'deleted')").all(saleId))
 
 // ── Смены ──
 // Открытая смена — у каждой кассы своя. Чужую открытую смену касса не показывает:

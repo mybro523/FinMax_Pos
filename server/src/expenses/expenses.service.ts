@@ -8,6 +8,7 @@ import { dayKeyTj, storableDate } from '../common/time'
 import { setExpenseCash } from '../shifts/totals'
 import { withDeviceNames } from '../shifts/shifts.service'
 import { lockShift, NO_OPEN_SHIFT, openShiftFor, SHIFT_CLOSED } from '../shifts/till'
+import { forgetStamps, stamp } from '../common/stamps'
 import { CreateExpenseCategoryDto, CreateExpenseDto, UpdateExpenseDto } from './dto'
 
 // ── Расходы магазина ──
@@ -25,6 +26,9 @@ import { CreateExpenseCategoryDto, CreateExpenseDto, UpdateExpenseDto } from './
 
 const withUser = { user: { select: { id: true, name: true } } }
 type Tx = Prisma.TransactionClient
+
+// Поля расхода, у которых сервер помнит время правки (common/stamps.ts)
+export const EXPENSE_FIELDS = ['category', 'amount', 'note', 'date', 'employeeId', 'salaryMonth', 'bonusFrom', 'bonusTo'] as const
 
 // Часы сервера и устройства расходятся не больше чем на минуты
 const FUTURE_SLACK_MS = 5 * 60 * 1000
@@ -187,6 +191,8 @@ export class ExpensesService {
       if (dto.employeeId !== undefined && !String(dto.employeeId).trim()) Object.assign(data, { salaryMonth: '', bonusFrom: '', bonusTo: '' })
       const updated = await tx.expense.update({ where: { id }, data, include: withUser })
       if (expense.fromCash && expense.shiftId) await setExpenseCash(tx, expense.shiftId)
+      // Когда правили: касса без связи сверит по этому свою правку (common/stamps.ts)
+      await stamp(tx, 'Expense', id, EXPENSE_FIELDS.filter((f) => f in data || (f === 'employeeId' && 'employeeName' in data)))
       return updated
     }, TX)
   }
@@ -195,6 +201,7 @@ export class ExpensesService {
     await this.prisma.$transaction(async (tx) => {
       const expense = await this.editable(tx, id)
       await tx.expense.delete({ where: { id } })
+      await forgetStamps(tx, 'Expense', id)
       if (expense.fromCash && expense.shiftId) await setExpenseCash(tx, expense.shiftId)
     }, TX)
     return { ok: true }

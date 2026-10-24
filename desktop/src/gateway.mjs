@@ -4,9 +4,12 @@
 // откуда придёт ответ:
 //   • всё, что касса умеет без интернета, — из локальной базы, всегда: и когда
 //     связь есть, и когда её нет. Иначе обрыв посреди продажи менял бы поведение
-//     кассы, а чек зависел бы от того, успел ли дойти запрос;
+//     кассы, а чек зависел бы от того, успел ли дойти запрос. С версии 1.4.14 это и
+//     справочники (товары, поставщики, категории, статьи), и правка документов;
+//   • история товара и карточка поставщика — сначала сервер (у него всё за всё время),
+//     без связи — по журналам кассы;
 //   • вход и «кто я» — через сервер, пока он доступен, и по сохранённому, когда нет;
-//   • остальное (товары, сотрудники, пересчёт, настройки) — только сервер.
+//   • остальное (сотрудники, пересчёт остатков, резервная копия) — только сервер.
 //
 // Модуль не знает про Electron: сеть, диск, шифрование и часы ему передают снаружи.
 // Поэтому он целиком проверяется обычными тестами.
@@ -29,7 +32,7 @@ import {
   hasPerm,
   permissionsOf,
 } from './local/accounts.mjs'
-import { matchLocal, pendingInPeriod } from './local/api.mjs'
+import { matchFallback, matchLocal, pendingInPeriod } from './local/api.mjs'
 import { confirmLicence, licenceOf, touchLicence } from './local/licence.mjs'
 import { ApiError, getMeta, inTx, openDb, q, setMeta } from './local/db.mjs'
 import { getDoc, putDoc } from './local/docs.mjs'
@@ -49,8 +52,6 @@ import {
   touchedBy,
 } from './local/outbox.mjs'
 import { PHARMACY_SCHEMA } from './local/schema.mjs'
-import { NO_OPEN_SHIFT } from './local/ops/expense.mjs'
-import { myOpenShift } from './local/docs.mjs'
 import { applyPull, tenantUserOf } from './local/snapshot.mjs'
 import {
   lanAddManual,
@@ -82,19 +83,8 @@ import { createSync } from './sync.mjs'
 // и показывается на выбранном языке — их сверяет проверка.
 export const MESSAGES = {
   needLogin: 'Требуется вход в систему',
-  onlineOnly: 'Этот раздел работает только с интернетом. Касса, возвраты, приход и списание доступны и без него.',
+  onlineOnly: 'Этот раздел пока работает только с интернетом. Касса, склад, товары, поставщики, расходы и доходы доступны и без него.',
   notSent: 'Эта запись ещё не отправлена на сервер. Изменить или удалить её можно будет после отправки.',
-  // Внести расход можно и без связи, а править и удалять — только через сервер:
-  // общее «раздел работает только с интернетом» здесь было бы неправдой
-  expenseOnline: 'Изменить или удалить расход можно только с интернетом. Внести новый расход можно и без него.',
-  expenseCatsOnline: 'Статьи расходов меняются только с интернетом.',
-  incomeOnline: 'Изменить или удалить доход можно только с интернетом. Внести новый доход можно и без него.',
-  incomeCatsOnline: 'Статьи доходов меняются только с интернетом.',
-  supplierOnline: 'Заводить и менять поставщиков, платить им можно только с интернетом. Приход в долг известному поставщику оформляется и без него.',
-  cashMoveOnline: 'Отменить внесение или изъятие можно только с интернетом. Внести и изъять наличные можно и без него.',
-  supplierReturnOnline: 'Удалить возврат поставщику можно только с интернетом. Оформить новый возврат можно и без него.',
-  payServicesOnline: 'Сервисы перевода меняются только с интернетом.',
-  historyOnline: 'История движения товара открывается только с интернетом.',
   noOfflineLogin: 'Нет связи с сервером. Под этим именем на этом компьютере ещё не входили — первый вход возможен только с интернетом.',
   suspended: 'Работа магазина приостановлен. Обратитесь к поставщику программы.',
   broken: 'Программа не смогла выполнить действие. Повторите; если не поможет — перезапустите программу.',
@@ -107,32 +97,20 @@ export const MESSAGES = {
   rejectedSale: REJECTED_SALE,
 }
 
-// Записи, у которых есть действие «на сервере»: правка и удаление прихода, удаление
-// клиента. Если запись сделана здесь и сервер её ещё не видел, идти к нему незачем
-const SERVER_ONLY_ONE = [
-  { re: /^\/arrivals\/([^/]+)$/, kind: 'arrival' },
-  { re: /^\/customers\/([^/]+)$/, kind: 'customer' },
-  { re: /^\/expenses\/([^/]+)$/, kind: 'expense' },
-  { re: /^\/incomes\/([^/]+)$/, kind: 'income' },
-  { re: /^\/cash-moves\/([^/]+)$/, kind: 'cashmove' },
-  { re: /^\/supplier-returns\/([^/]+)$/, kind: 'supplierreturn' },
-]
+// Записи, у которых осталось действие «только на сервере»: удаление клиента. Если клиент
+// заведён здесь и сервер его ещё не видел, идти к нему незачем
+const SERVER_ONLY_ONE = [{ re: /^\/customers\/([^/]+)$/, kind: 'customer' }]
 
-// Что сказать, когда связи нет, а действие умеет только сервер. Для большинства
-// разделов годится общее объяснение; здесь — те, где оно ввело бы в заблуждение
-const OFFLINE_TEXT = [
-  { re: /^\/expenses\/[^/]+$/, text: 'expenseOnline' },
-  { re: /^\/expense-categories(\/|$)/, text: 'expenseCatsOnline' },
-  { re: /^\/incomes\/[^/]+$/, text: 'incomeOnline' },
-  { re: /^\/income-categories(\/|$)/, text: 'incomeCatsOnline' },
-  { re: /^\/suppliers(\/|$)/, text: 'supplierOnline' },
-  { re: /^\/supplier-payments(\/|$)/, text: 'supplierOnline' },
-  { re: /^\/cash-moves\/[^/]+$/, text: 'cashMoveOnline' },
-  { re: /^\/supplier-returns\/[^/]+$/, text: 'supplierReturnOnline' },
-  { re: /^\/pay-services(\/|$)/, text: 'payServicesOnline' },
-  { re: /^\/products\/[^/]+\/history/, text: 'historyOnline' },
-]
-const offlineText = (route) => MESSAGES[OFFLINE_TEXT.find((x) => x.re.test(route))?.text || 'onlineOnly']
+// Что сказать, когда связи нет, а действие умеет только сервер
+const offlineText = () => MESSAGES.onlineOnly
+
+// Товар (история) или поставщик (карточка), заведённые без связи и ещё не отправленные:
+// строку положила неотправленная поправка «завести» (edits.mjs)
+function madeOffline(db, route, id) {
+  const tbl = route.startsWith('/products/') ? 'products' : route.startsWith('/suppliers/') ? 'suppliers' : null
+  if (!tbl || typeof id !== 'string') return false
+  return !!q(db, "SELECT 1 FROM row_edits WHERE synced = 0 AND tbl = ? AND rowId = ? AND action = 'put' AND json_extract(data, '$.row') IS NOT NULL LIMIT 1").get(tbl, id)
+}
 
 // Разделы, которые лежат в локальной базе и обновляются обменом (см. snapshot.mjs)
 const LOCAL_SECTIONS = new Set([
@@ -140,6 +118,17 @@ const LOCAL_SECTIONS = new Set([
   'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'productTypes',
   'incomes', 'incomeCategories', 'supplierReturns',
 ])
+
+// Запись, названная в отвергнутой операции, — по ней список «не принято» называет её
+const ROW_TABLES = {
+  product: 'products', category: 'categories', productType: 'product_types', payService: 'pay_services',
+  expenseCategory: 'expense_categories', incomeCategory: 'income_categories', supplier: 'suppliers',
+}
+function findForRejected(db, kind, id) {
+  if (typeof id !== 'string') return null
+  if (ROW_TABLES[kind]) return q(db, `SELECT * FROM ${ROW_TABLES[kind]} WHERE id = ?`).get(id) || null
+  return getDoc(db, kind, id)?.body || null
+}
 
 // Имя файла из кода магазина. Код приходит с сервера, но в путь на диске попадает
 // только то, что безвредно в имени файла
@@ -812,6 +801,8 @@ export function createGateway({
     // Период глубже того, что хранится на компьютере, — за ним идём на сервер,
     // а своё неотправленное добавляем сами: сервер о нём ещё не знает
     if (data && data.__deep) return deep(req, acc, ph, data.__deep)
+    // Записи на кассе нет (давний приход) — за ней идём на сервер
+    if (data && data.__remote) return online(req, acc)
     if (req.method !== 'GET') {
       // Записано на диск — теперь это надо отправить. Не дожидаясь ответа сервера:
       // кассир уже может пробивать следующий чек
@@ -831,9 +822,11 @@ export function createGateway({
     if (res.status !== 200 || !Array.isArray(res.data)) return res
     const mine = pendingInPeriod(ph.db, period.kind, period)
     if (!mine.length) return res
-    const have = new Set(res.data.map((d) => d?.id))
+    // Своё — поверх копии сервера: поправленное здесь заменяет её, удалённое здесь — убирает
+    const own = new Map(mine.map((d) => [d.id, d]))
     const dateOf = (d) => d.date || d.createdAt || ''
-    const data = [...res.data, ...mine.filter((d) => !have.has(d.id))].sort((a, b) => (dateOf(a) < dateOf(b) ? 1 : dateOf(a) > dateOf(b) ? -1 : 0))
+    const fromServer = res.data.filter((d) => !own.has(d?.id))
+    const data = [...fromServer, ...mine.filter((d) => !d.__deleted)].sort((a, b) => (dateOf(a) < dateOf(b) ? 1 : dateOf(a) > dateOf(b) ? -1 : 0))
     return { ...res, data }
   }
 
@@ -858,15 +851,6 @@ export function createGateway({
     const token = session.tokenOf(acc.id)
     if (!token) return offline(offlineText(route))
 
-    // Оплата поставщику из кассы: деньги взяты из ящика ЭТОЙ кассы, и смену сервер
-    // должен знать по имени — окно её не называет. Сначала уходит всё, что касса
-    // ещё не отправила (сама смена могла быть открыта без связи), затем оплата
-    if (pharmacy && /^\/suppliers\/[^/]+\/pay$/.test(route) && req.method === 'POST' && req.body?.fromCash === true && !req.body.shiftId) {
-      await pharmacy.sync.run().catch(() => {})
-      const open = myOpenShift(pharmacy.db, deviceId)
-      if (!open) return refuse(400, NO_OPEN_SHIFT)
-      req = { ...req, body: { ...req.body, shiftId: open.body.id } }
-    }
     const res = await remote(req, token)
     // Связи нет или ответил не наш сервер. Настоящую ошибку сервера (500 с объяснением)
     // отдаём как есть — её текст полезнее общего «нужен интернет»
@@ -915,6 +899,16 @@ export function createGateway({
 
       const found = matchLocal(req.method, req.path)
       if (found) return await local(found, req, acc)
+      // Сначала сервер (у него всё за всё время), без связи — касса по своим журналам
+      const fallback = matchFallback(req.method, req.path)
+      if (fallback) {
+        const res = await online(req, acc)
+        if (res.status === 0) return await local(fallback, req, acc)
+        // Сервер такой записи не знает, а у кассы она есть: товар или поставщика завели без
+        // связи (здесь или на соседней кассе), и заведение ещё ждёт отправки — отвечает касса
+        if (res.status === 404 && pharmacy && madeOffline(pharmacy.db, route, fallback.params[0])) return await local(fallback, req, acc)
+        return res
+      }
       return await online(req, acc)
     } catch (e) {
       log.error(`запрос ${req.method} ${route} не выполнен`, e)
@@ -1061,7 +1055,7 @@ export function createGateway({
         by: (op.accountId && accountById(core, op.accountId)?.login) || '',
         // Сумма, название и содержимое целиком: в журналах кассы отвергнутой операции
         // уже нет, и разобрать её владелец может только здесь
-        ...describeOp(op, (kind, id) => getDoc(pharmacy.db, kind, id)?.body || null),
+        ...describeOp(op, (kind, id) => findForRejected(pharmacy.db, kind, id)),
       }))
     },
     dismissRejected(id) {

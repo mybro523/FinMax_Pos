@@ -187,3 +187,53 @@ test('на таджикском подписи переведены', () => {
     setLang('ru')
   }
 })
+
+test('справочники и правки (1.4.14): что завели, что поменяли — словами, на обоих языках', () => {
+  setLang('ru')
+  const day = (d) => 'день:' + d.slice(0, 10)
+  // Новый товар: по штрихкоду, цене и остатку его заводят заново
+  assert.deepEqual(pairs(rejectedDetail({ type: 'product.create', detail: { barcode: '4600001', price: 15, stock: 3 } }, translate, money)), [
+    ['Штрихкод', '4600001'],
+    ['Цена продажи', '15.00 с.'],
+    ['Остаток', '3'],
+  ])
+  // Правка карточки: какие поля поменяли — так, как назвал бы человек, и новый остаток
+  assert.deepEqual(pairs(rejectedDetail({ type: 'product.update', detail: { fields: ['price', 'name'], stock: 7 } }, translate, money)), [
+    ['Что поменяли', 'Цена продажи, Название'],
+    ['Остаток', '7'],
+  ])
+  // Остаток не меняли — строки «Остаток» нет; незнакомое поле — как есть
+  assert.deepEqual(pairs(rejectedDetail({ type: 'supplier.update', detail: { fields: ['phone', 'чтото'], stock: null } }, translate, money)), [['Что поменяли', 'Телефон, чтото']])
+  // Правка и удаление документа: за какой день
+  assert.deepEqual(pairs(rejectedDetail({ type: 'expense.update', detail: { date: '2026-10-20T00:00:00.000Z', fields: ['amount'] } }, translate, money, { day })), [
+    ['Дата', 'день:2026-10-20'],
+    ['Что поменяли', 'Сумма'],
+  ])
+  assert.deepEqual(pairs(rejectedDetail({ type: 'arrival.delete', detail: {} }, translate, money)), [])
+  // Поставщик: телефон и долг на начало; оплата — откуда деньги и примечание
+  assert.deepEqual(pairs(rejectedDetail({ type: 'supplier.create', detail: { phone: '900', openingDebt: 250 } }, translate, money)), [
+    ['Телефон', '900'],
+    ['Долг на начало', '250.00 с.'],
+  ])
+  assert.deepEqual(pairs(rejectedDetail({ type: 'supplier.pay', detail: { fromCash: true, note: 'за май' } }, translate, money)), [
+    ['Оплата', 'из кассы'],
+    ['Примечание', 'за май'],
+  ])
+  setLang('tg')
+  try {
+    const cyrRu = /[ыщ]|ться|ение/i
+    for (const r of [
+      { type: 'product.create', detail: { barcode: '1', price: 1, stock: 1 } },
+      { type: 'product.update', detail: { fields: ['price', 'name', 'category', 'minStock'], stock: 1 } },
+      { type: 'supplier.create', detail: { phone: '9', openingDebt: 5 } },
+      { type: 'supplier.pay', detail: { fromCash: true, note: 'x' } },
+    ]) {
+      for (const f of rejectedDetail(r, translate, money).facts) {
+        assert.equal(cyrRu.test(f.label), false, `${r.type}: подпись «${f.label}» осталась русской`)
+        assert.equal(cyrRu.test(f.value), false, `${r.type}: значение «${f.value}» осталось русским`)
+      }
+    }
+  } finally {
+    setLang('ru')
+  }
+})

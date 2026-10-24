@@ -9,6 +9,7 @@ import { setSupplierCash } from '../shifts/totals'
 import { TX } from '../common/tx'
 import { periodFilter, PeriodQuery, MAX_ROWS } from '../common/period'
 import { lockSupplier } from '../suppliers/suppliers.service'
+import { forgetStamps, stamp } from '../common/stamps'
 import { CreateArrivalDto, UpdateArrivalDto } from './dto'
 
 type Tx = Prisma.TransactionClient
@@ -184,6 +185,9 @@ export class ArrivalsService {
       for (const [pid, price] of newPrice) {
         if (!D(byId.get(pid)!.price).equals(price)) await tx.product.update({ where: { id: pid }, data: { price } })
       }
+      // Приход меняет закупочную цену (и цену продажи, если её назначили): это правка
+      // карточки, и касса без связи должна видеть, что она была (common/stamps.ts)
+      for (const pid of agg.keys()) await stamp(tx, 'Product', pid, newPrice.has(pid) ? ['cost', 'price'] : ['cost'])
 
       let total = D(0)
       for (const it of arrivalItems) {
@@ -255,139 +259,7 @@ export class ArrivalsService {
   // Что нельзя: опустить количество ниже проданного. Этих упаковок физически нет
   // на полке, и «снять» их означало бы увести остаток в минус.
   async update(id: string, dto: UpdateArrivalDto) {
-    return this.prisma.$transaction(async (tx) => {
-      const arrival = await tx.arrival.findUnique({ where: { id }, include: { items: true } })
-      if (!arrival) throw new BadRequestException('Приход не найден')
-
-      const byLineId = new Map(arrival.items.map((i) => [i.id, i]))
-      const lines = dto.items.filter((l) => byLineId.has(l.id))
-      if (!lines.length) throw new BadRequestException('Строки прихода не найдены')
-      if (!lines.some((l) => l.qty > 0 || (l.pieces || 0) > 0)) {
-        throw new BadRequestException('В приходе не осталось ни одной позиции. Чтобы убрать его целиком, удалите приход.')
-      }
-
-      const ids = [...new Set(arrival.items.map((i) => i.productId).filter(Boolean) as string[])]
-      // Тот же замок, что и при создании: одновременная продажа не должна
-      // разъехаться с пересчётом остатка (read-modify-write)
-      await lockProducts(tx, ids)
-      const products = await tx.product.findMany({ where: { id: { in: ids } } })
-      const byId = new Map(products.map((p) => [p.id, p]))
-      const batches = await tx.batch.findMany({ where: { arrivalId: id } })
-
-      // Срок годности партий этого прихода — до того, как мы их снимем.
-      // Пустое поле в правке означает «оставить как было»: стереть срок случайно
-      // нельзя, иначе весь контроль сроков в магазине молча провалился бы
-      const прежнийСрок = new Map<string, Date | null>()
-      for (const b of batches) {
-        const было = прежнийСрок.get(b.productId)
-        if (было === undefined || (b.expiryDate && было && b.expiryDate < было)) {
-          прежнийСрок.set(b.productId, b.expiryDate)
-        }
-      }
-
-      // Новое состояние каждой строки: не прислали — считаем, что убрали
-      const wanted = new Map(lines.map((l) => [l.id, l]))
-
-      for (const pid of ids) {
-        const p = byId.get(pid)
-        const upp = uppOf(p || {})
-        const mine = arrival.items.filter((i) => i.productId === pid)
-
-        const brought = mine.reduce((s, i) => s + this.unitsOf(i, upp), 0)
-        const left = batches.filter((b) => b.productId === pid).reduce((s, b) => s + b.units, 0)
-        const sold = Math.max(0, brought - left)
-
-        const newLines = mine.map((i) => wanted.get(i.id)).filter(Boolean) as typeof lines
-        const wantUnits = newLines.reduce((s, l) => s + this.unitsOf(l, upp), 0)
-
-        if (wantUnits < sold) {
-          const name = p?.name || mine[0]?.name || 'товар'
-          // Весовому — в килограммах: «350 шт» для него значило бы граммы
-          const skolko = p?.unit === 'кг' ? `${sold / 1000} кг` : `${sold} шт (${Math.ceil(sold / upp)} уп)`
-          throw new BadRequestException(
-            `«${name}»: из этого прихода уже продано ${skolko}. ` +
-              'Меньше проданного поставить нельзя — этого товара на полке уже нет.',
-          )
-        }
-
-        // Партии прихода снимаем целиком и раскладываем заново: так одним
-        // действием меняются и количество, и цена, и срок годности
-        await tx.batch.deleteMany({ where: { arrivalId: id, productId: pid } })
-
-        // ── Обязательно ДО раскладки ──
-        // Приход штук умеет чинить товары, заведённые до появления партий: увидев
-        // карточку с остатком и ни одной партии, он считает остаток «начальным»
-        // и заводит партию под него. Здесь это сработало бы во вред: партии мы
-        // только что сняли, а в карточке ещё лежит прежний остаток — и он вернулся
-        // бы отдельной партией, сложившись с новым количеством. Поэтому сначала
-        // приводим карточку к пустым партиям и лишь потом раскладываем заново.
-        await syncProduct(tx, pid)
-
-        // На полку возвращаем всё новое количество за вычетом проданного.
-        // Раскладываем по строкам подряд: если товар стоит одной строкой —
-        // а так почти всегда — это просто «сколько осталось»
-        let toPlace = wantUnits - sold
-        for (const l of newLines) {
-          if (toPlace <= 0) break
-          const take = Math.min(this.unitsOf(l, upp), toPlace)
-          if (take <= 0) continue
-          const срок = l.expiryDate ? expiryFrom(l.expiryDate) : прежнийСрок.get(pid) ?? null
-          await addUnits(tx, pid, take, D(l.cost), срок, id)
-          toPlace -= take
-        }
-
-        // Остаток карточки и её цена — заново, по тому, что реально осталось.
-        // Обратить средневзвешенную формулу нельзя, а посчитать по партиям можно
-        await syncProduct(tx, pid)
-        const nowBatches = await tx.batch.findMany({ where: { productId: pid } })
-        await tx.product.update({
-          where: { id: pid },
-          data: { cost: costFromBatches(nowBatches, upp, p?.cost ?? 0) },
-        })
-      }
-
-      // Сами строки: убранные удаляем, остальные переписываем
-      for (const it of arrival.items) {
-        const l = wanted.get(it.id)
-        if (!l || l.qty * uppOf(byId.get(it.productId || '') || {}) + (l.pieces || 0) <= 0) {
-          await tx.arrivalItem.delete({ where: { id: it.id } })
-          continue
-        }
-        await tx.arrivalItem.update({ where: { id: it.id }, data: { qty: l.qty, pieces: Math.max(0, Math.trunc(l.pieces || 0)), cost: D(l.cost) } })
-      }
-
-      // Сумма — как при оформлении: цена за упаковку × сколько пришло, вместе со
-      // штуками сверх целых упаковок (и граммами весового). Раньше здесь считались
-      // только упаковки, и «2 уп + 5 шт» после правки стоили как 2 уп
-      const total = lines.reduce((s, l) => {
-        const upp = uppOf(byId.get(byLineId.get(l.id)?.productId || '') || {})
-        const units = this.unitsOf(l, upp)
-        return units > 0 ? s.plus(D(l.cost).times(D(units).div(upp))) : s
-      }, D(0)).toDecimalPlaces(2)
-
-      // Долг поставщика переписывается вместе с приходом: прежняя неоплаченная часть
-      // снимается с прежнего поставщика, новая ложится на нового (это может быть тот же)
-      const nextSupplierId = dto.supplierId === undefined ? arrival.supplierId : dto.supplierId || null
-      const nextAsked = dto.debt === undefined ? arrival.debt : dto.debt
-      // Замки на поставщиков — в одном порядке, чтобы две правки не заперли друг друга
-      for (const sid of [arrival.supplierId, nextSupplierId].filter((x, i, a): x is string => !!x && a.indexOf(x) === i).sort()) {
-        if (!(await lockSupplier(tx, sid)) && sid === nextSupplierId) throw new BadRequestException('Поставщик не найден')
-      }
-      const sup = await supplierDebt(tx, nextSupplierId, nextAsked, total)
-      await addDebt(tx, arrival.supplierId, D(arrival.debt).negated())
-      await addDebt(tx, sup.supplierId, sup.debt)
-
-      return tx.arrival.update({
-        where: { id },
-        data: {
-          supplier: sup.name || (dto.supplierId === '' ? dto.supplier?.trim() || '—' : dto.supplier?.trim() || arrival.supplier),
-          supplierId: sup.supplierId,
-          debt: sup.debt,
-          total,
-        },
-        include: { items: true },
-      })
-    }, TX)
+    return this.prisma.$transaction((tx) => updateArrivalIn(tx, id, dto), TX)
   }
 
   // ── Удаление прихода ──
@@ -396,32 +268,186 @@ export class ArrivalsService {
   // уже нет, а чеки хранят свою себестоимость снимком и задним числом не меняются.
   async remove(id: string) {
     return this.prisma.$transaction(async (tx) => {
-      const arrival = await tx.arrival.findUnique({ where: { id }, include: { items: true } })
-      if (!arrival) throw new BadRequestException('Приход не найден')
-
-      const ids = [...new Set(arrival.items.map((i) => i.productId).filter(Boolean) as string[])]
-      await lockProducts(tx, ids)
-      const products = await tx.product.findMany({ where: { id: { in: ids } } })
-      const byId = new Map(products.map((p) => [p.id, p]))
-
-      for (const pid of ids) {
-        const p = byId.get(pid)
-        await tx.batch.deleteMany({ where: { arrivalId: id, productId: pid } })
-        await syncProduct(tx, pid)
-        const nowBatches = await tx.batch.findMany({ where: { productId: pid } })
-        await tx.product.update({
-          where: { id: pid },
-          data: { cost: costFromBatches(nowBatches, uppOf(p || {}), p?.cost ?? 0) },
-        })
-      }
-
-      // Неоплаченная часть удалённого прихода долгом больше не числится
-      if (arrival.supplierId) {
-        await lockSupplier(tx, arrival.supplierId)
-        await addDebt(tx, arrival.supplierId, D(arrival.debt).negated())
-      }
-      await tx.arrival.delete({ where: { id } }) // строки уходят каскадом
+      if (!(await removeArrivalIn(tx, id))) throw new BadRequestException('Приход не найден')
       return { ok: true }
     }, TX)
   }
+}
+
+// Штук в строке прихода: упаковки × штук в упаковке + штуки (граммы) сверх
+const unitsOfLine = (it: { qty: number; pieces?: number | null }, upp: number) => (it.qty || 0) * upp + Math.max(0, Math.trunc(it.pieces || 0))
+
+// ── Правка прихода ──
+// Общая часть для сайта и для правки, сделанной на кассе без связи (sync). Подробности
+// правила — у метода update выше
+// at — когда правили (у кассы без связи — момент на кассе): по нему решается, чья правка
+// новее, если приход правили и там, и тут (common/stamps.ts)
+export async function updateArrivalIn(tx: Tx, id: string, dto: UpdateArrivalDto, at: Date = new Date()) {
+  const arrival = await tx.arrival.findUnique({ where: { id }, include: { items: true } })
+  if (!arrival) throw new BadRequestException('Приход не найден')
+
+  const byLineId = new Map(arrival.items.map((i) => [i.id, i]))
+  const lines = dto.items.filter((l) => byLineId.has(l.id))
+  if (!lines.length) throw new BadRequestException('Строки прихода не найдены')
+  if (!lines.some((l) => l.qty > 0 || (l.pieces || 0) > 0)) {
+    throw new BadRequestException('В приходе не осталось ни одной позиции. Чтобы убрать его целиком, удалите приход.')
+  }
+
+  const ids = [...new Set(arrival.items.map((i) => i.productId).filter(Boolean) as string[])]
+  // Тот же замок, что и при создании: одновременная продажа не должна
+  // разъехаться с пересчётом остатка (read-modify-write)
+  await lockProducts(tx, ids)
+  const products = await tx.product.findMany({ where: { id: { in: ids } } })
+  const byId = new Map(products.map((p) => [p.id, p]))
+  const batches = await tx.batch.findMany({ where: { arrivalId: id } })
+
+  // Срок годности партий этого прихода — до того, как мы их снимем.
+  // Пустое поле в правке означает «оставить как было»: стереть срок случайно
+  // нельзя, иначе весь контроль сроков в магазине молча провалился бы
+  const прежнийСрок = new Map<string, Date | null>()
+  for (const b of batches) {
+    const было = прежнийСрок.get(b.productId)
+    if (было === undefined || (b.expiryDate && было && b.expiryDate < было)) {
+      прежнийСрок.set(b.productId, b.expiryDate)
+    }
+  }
+
+  // Новое состояние каждой строки: не прислали — считаем, что убрали
+  const wanted = new Map(lines.map((l) => [l.id, l]))
+
+  for (const pid of ids) {
+    const p = byId.get(pid)
+    const upp = uppOf(p || {})
+    const mine = arrival.items.filter((i) => i.productId === pid)
+
+    const brought = mine.reduce((s, i) => s + unitsOfLine(i, upp), 0)
+    const left = batches.filter((b) => b.productId === pid).reduce((s, b) => s + b.units, 0)
+    const sold = Math.max(0, brought - left)
+
+    const newLines = mine.map((i) => wanted.get(i.id)).filter(Boolean) as typeof lines
+    const wantUnits = newLines.reduce((s, l) => s + unitsOfLine(l, upp), 0)
+
+    if (wantUnits < sold) {
+      const name = p?.name || mine[0]?.name || 'товар'
+      // Весовому — в килограммах: «350 шт» для него значило бы граммы
+      const skolko = p?.unit === 'кг' ? `${sold / 1000} кг` : `${sold} шт (${Math.ceil(sold / upp)} уп)`
+      throw new BadRequestException(
+        `«${name}»: из этого прихода уже продано ${skolko}. ` +
+          'Меньше проданного поставить нельзя — этого товара на полке уже нет.',
+      )
+    }
+
+    // Партии прихода снимаем целиком и раскладываем заново: так одним
+    // действием меняются и количество, и цена, и срок годности
+    await tx.batch.deleteMany({ where: { arrivalId: id, productId: pid } })
+
+    // ── Обязательно ДО раскладки ──
+    // Приход штук умеет чинить товары, заведённые до появления партий: увидев
+    // карточку с остатком и ни одной партии, он считает остаток «начальным»
+    // и заводит партию под него. Здесь это сработало бы во вред: партии мы
+    // только что сняли, а в карточке ещё лежит прежний остаток — и он вернулся
+    // бы отдельной партией, сложившись с новым количеством. Поэтому сначала
+    // приводим карточку к пустым партиям и лишь потом раскладываем заново.
+    await syncProduct(tx, pid)
+
+    // На полку возвращаем всё новое количество за вычетом проданного.
+    // Раскладываем по строкам подряд: если товар стоит одной строкой —
+    // а так почти всегда — это просто «сколько осталось»
+    let toPlace = wantUnits - sold
+    for (const l of newLines) {
+      if (toPlace <= 0) break
+      const take = Math.min(unitsOfLine(l, upp), toPlace)
+      if (take <= 0) continue
+      const срок = l.expiryDate ? expiryFrom(l.expiryDate) : прежнийСрок.get(pid) ?? null
+      await addUnits(tx, pid, take, D(l.cost), срок, id)
+      toPlace -= take
+    }
+
+    // Остаток карточки и её цена — заново, по тому, что реально осталось.
+    // Обратить средневзвешенную формулу нельзя, а посчитать по партиям можно
+    await syncProduct(tx, pid)
+    const nowBatches = await tx.batch.findMany({ where: { productId: pid } })
+    await tx.product.update({
+      where: { id: pid },
+      data: { cost: costFromBatches(nowBatches, upp, p?.cost ?? 0) },
+    })
+  }
+
+  // Сами строки: убранные удаляем, остальные переписываем
+  for (const it of arrival.items) {
+    const l = wanted.get(it.id)
+    if (!l || l.qty * uppOf(byId.get(it.productId || '') || {}) + (l.pieces || 0) <= 0) {
+      await tx.arrivalItem.delete({ where: { id: it.id } })
+      continue
+    }
+    await tx.arrivalItem.update({ where: { id: it.id }, data: { qty: l.qty, pieces: Math.max(0, Math.trunc(l.pieces || 0)), cost: D(l.cost) } })
+  }
+
+  // Сумма — как при оформлении: цена за упаковку × сколько пришло, вместе со
+  // штуками сверх целых упаковок (и граммами весового). Раньше здесь считались
+  // только упаковки, и «2 уп + 5 шт» после правки стоили как 2 уп
+  const total = lines.reduce((s, l) => {
+    const upp = uppOf(byId.get(byLineId.get(l.id)?.productId || '') || {})
+    const units = unitsOfLine(l, upp)
+    return units > 0 ? s.plus(D(l.cost).times(D(units).div(upp))) : s
+  }, D(0)).toDecimalPlaces(2)
+
+  // Долг поставщика переписывается вместе с приходом: прежняя неоплаченная часть
+  // снимается с прежнего поставщика, новая ложится на нового (это может быть тот же)
+  const nextSupplierId = dto.supplierId === undefined ? arrival.supplierId : dto.supplierId || null
+  const nextAsked = dto.debt === undefined ? arrival.debt : dto.debt
+  // Замки на поставщиков — в одном порядке, чтобы две правки не заперли друг друга
+  for (const sid of [arrival.supplierId, nextSupplierId].filter((x, i, a): x is string => !!x && a.indexOf(x) === i).sort()) {
+    if (!(await lockSupplier(tx, sid)) && sid === nextSupplierId) throw new BadRequestException('Поставщик не найден')
+  }
+  const sup = await supplierDebt(tx, nextSupplierId, nextAsked, total)
+  await addDebt(tx, arrival.supplierId, D(arrival.debt).negated())
+  await addDebt(tx, sup.supplierId, sup.debt)
+  // Приход правили — и закупочная цена его товаров пересчитана
+  await stamp(tx, 'Arrival', id, ['doc'], at)
+  for (const pid of ids) await stamp(tx, 'Product', pid, ['cost'], at)
+
+  return tx.arrival.update({
+    where: { id },
+    data: {
+      supplier: sup.name || (dto.supplierId === '' ? dto.supplier?.trim() || '—' : dto.supplier?.trim() || arrival.supplier),
+      supplierId: sup.supplierId,
+      debt: sup.debt,
+      total,
+    },
+    include: { items: true },
+  })
+}
+
+// ── Удаление прихода ──
+// Общая часть для сайта и для удаления на кассе без связи (sync). Прихода уже нет — false
+export async function removeArrivalIn(tx: Tx, id: string, at: Date = new Date()): Promise<boolean> {
+  const arrival = await tx.arrival.findUnique({ where: { id }, include: { items: true } })
+  if (!arrival) return false
+
+  const ids = [...new Set(arrival.items.map((i) => i.productId).filter(Boolean) as string[])]
+  await lockProducts(tx, ids)
+  const products = await tx.product.findMany({ where: { id: { in: ids } } })
+  const byId = new Map(products.map((p) => [p.id, p]))
+
+  for (const pid of ids) {
+    const p = byId.get(pid)
+    await tx.batch.deleteMany({ where: { arrivalId: id, productId: pid } })
+    await syncProduct(tx, pid)
+    const nowBatches = await tx.batch.findMany({ where: { productId: pid } })
+    await tx.product.update({
+      where: { id: pid },
+      data: { cost: costFromBatches(nowBatches, uppOf(p || {}), p?.cost ?? 0) },
+    })
+    await stamp(tx, 'Product', pid, ['cost'], at)
+  }
+
+  // Неоплаченная часть удалённого прихода долгом больше не числится
+  if (arrival.supplierId) {
+    await lockSupplier(tx, arrival.supplierId)
+    await addDebt(tx, arrival.supplierId, D(arrival.debt).negated())
+  }
+  await tx.arrival.delete({ where: { id } }) // строки уходят каскадом
+  await forgetStamps(tx, 'Arrival', id)
+  return true
 }

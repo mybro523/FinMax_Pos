@@ -14,6 +14,7 @@
 // записи дописываются, меняются и удаляются по одной.
 import { getMeta, inTx, q, setMeta } from './db.mjs'
 import { KINDS, putDoc, WINDOW_DAYS } from './docs.mjs'
+import { replayEdits } from './edits.mjs'
 import { toCents } from './money.mjs'
 import { rebuildStock } from './stock.mjs'
 import { DAY_MS, expiryLimit, isoOrNull } from './time.mjs'
@@ -149,11 +150,24 @@ function applyProducts(db, products, batches, full, now) {
   }
   for (const b of batches.upsert) dropCard.run(b.productId)
 
-  if (reorder) {
-    const all = q(db, 'SELECT id, name FROM products').all().sort((a, b) => byName.compare(a.name, b.name))
-    const setOrd = q(db, 'UPDATE products SET ord = ? WHERE id = ?')
-    all.forEach((p, n) => setOrd.run(n, p.id))
-  }
+  // Свои (и соседские) заведения и правки товаров, которых сервер ещё не принял, — поверх
+  // его данных (edits.mjs). До пересчёта остатков: движения заведённого здесь товара
+  // проигрываются только тогда, когда сам товар уже на месте
+  if (replayEdits(db, ['products'])) reorder = true
+  if (reorder) reorderProducts(db)
+}
+
+// Порядок товаров в списке — по алфавиту, как у сервера
+export function reorderProducts(db) {
+  const all = q(db, 'SELECT id, name FROM products').all().sort((a, b) => byName.compare(a.name, b.name))
+  const setOrd = q(db, 'UPDATE products SET ord = ? WHERE id = ?')
+  all.forEach((p, n) => setOrd.run(n, p.id))
+}
+
+export function reorderCategories(db) {
+  const all = q(db, 'SELECT id, name FROM categories').all().sort((a, b) => byName.compare(a.name, b.name))
+  const setOrd = q(db, 'UPDATE categories SET ord = ? WHERE id = ?')
+  all.forEach((c, n) => setOrd.run(n, c.id))
 }
 
 function applyCategories(db, categories, full) {
@@ -161,13 +175,12 @@ function applyCategories(db, categories, full) {
   const insert = q(db, 'INSERT OR REPLACE INTO categories (id, ord, name, noExpiry, createdAt) VALUES (?, 0, ?, ?, ?)')
   for (const c of categories.upsert) insert.run(c.id, String(c.name ?? ''), c.noExpiry ? 1 : 0, isoOrNull(c.createdAt) || '')
   for (const id of categories.remove) q(db, 'DELETE FROM categories WHERE id = ?').run(id)
-  const all = q(db, 'SELECT id, name FROM categories').all().sort((a, b) => byName.compare(a.name, b.name))
-  const setOrd = q(db, 'UPDATE categories SET ord = ? WHERE id = ?')
-  all.forEach((c, n) => setOrd.run(n, c.id))
+  replayEdits(db, ['categories'])
+  reorderCategories(db)
 }
 
-// Статьи расходов. Меняют их только через сервер, поэтому своих неотправленных
-// здесь не бывает: список сервера и есть весь список
+// Статьи расходов. Список сервера — основа; свои неотправленные заведения и удаления
+// накладываются поверх (edits.mjs)
 function applyExpenseCategories(db, cats, full) {
   if (full) q(db, 'DELETE FROM expense_categories').run()
   const insert = q(db, 'INSERT OR REPLACE INTO expense_categories (id, name, createdAt) VALUES (?, ?, ?)')
@@ -175,9 +188,10 @@ function applyExpenseCategories(db, cats, full) {
     if (c && typeof c.id === 'string') insert.run(c.id, String(c.name ?? ''), isoOrNull(c.createdAt) || '')
   }
   for (const id of cats.remove) q(db, 'DELETE FROM expense_categories WHERE id = ?').run(id)
+  replayEdits(db, ['expense_categories'])
 }
 
-// Статьи доходов — как статьи расходов: список сервера и есть весь список
+// Статьи доходов — как статьи расходов
 function applyIncomeCategories(db, cats, full) {
   if (full) q(db, 'DELETE FROM income_categories').run()
   const insert = q(db, 'INSERT OR REPLACE INTO income_categories (id, name, createdAt) VALUES (?, ?, ?)')
@@ -185,6 +199,7 @@ function applyIncomeCategories(db, cats, full) {
     if (c && typeof c.id === 'string') insert.run(c.id, String(c.name ?? ''), isoOrNull(c.createdAt) || '')
   }
   for (const id of cats.remove) q(db, 'DELETE FROM income_categories WHERE id = ?').run(id)
+  replayEdits(db, ['income_categories'])
 }
 
 // Поставщики. Кассиру сервер отдаёт их без долга — тогда долг, известный с прошлого
@@ -205,6 +220,7 @@ function applySuppliers(db, sup, full) {
     insert.run(s.id, String(s.name ?? ''), String(s.phone ?? ''), String(s.note ?? ''), known ? toCents(s.openingDebt || 0) : null, known ? toCents(s.debt) : null, Number.isInteger(s.debtArrivals) ? s.debtArrivals : null, isoOrNull(s.createdAt) || '')
   }
   for (const id of sup.remove) q(db, 'DELETE FROM suppliers WHERE id = ?').run(id)
+  replayEdits(db, ['suppliers'])
 }
 
 // Сервисы перевода — список сервера целиком, своих неотправленных не бывает
@@ -216,6 +232,7 @@ function applyProductTypes(db, list, full) {
     if (x && typeof x.id === 'string') insert.run(x.id, String(x.name ?? ''), x.analogs ? 1 : 0, isoOrNull(x.createdAt) || '')
   }
   for (const id of list.remove) q(db, 'DELETE FROM product_types WHERE id = ?').run(id)
+  replayEdits(db, ['product_types'])
 }
 
 function applyPayServices(db, list, full) {
@@ -225,6 +242,7 @@ function applyPayServices(db, list, full) {
     if (s && typeof s.id === 'string') insert.run(s.id, String(s.name ?? ''), Number(s.ord) || 0, isoOrNull(s.createdAt) || '')
   }
   for (const id of list.remove) q(db, 'DELETE FROM pay_services WHERE id = ?').run(id)
+  replayEdits(db, ['pay_services'])
 }
 
 // Долг = что сказал сервер + свои неотправленные изменения. В минус не уходит
@@ -270,7 +288,8 @@ function applyDocs(db, kind, docs, full) {
   // значит посчитать товар дважды
   // (Отвергнутый — не в счёт: если сервер прислал документ с таким номером, значит,
   // он у сервера есть, и пометка «отвергнут» устарела.)
-  const mine = new Set(q(db, "SELECT id FROM docs WHERE kind = ? AND sync = 'pending'").all(kind).map((r) => r.id))
+  // Поправленный и удалённый здесь — тоже: правку сервер ещё не видел (edits.mjs)
+  const mine = new Set(q(db, "SELECT id FROM docs WHERE kind = ? AND sync IN ('pending', 'edited', 'deleted')").all(kind).map((r) => r.id))
   // Смена соседней кассы, закрытая у неё без интернета (пришла по местной сети, см.
   // lan.mjs): сервер её закрытия ещё не видел и присылает открытой. Закрытую копию не
   // заменяем — иначе закрытая смена то пропадала бы из истории, то появлялась
@@ -281,7 +300,8 @@ function applyDocs(db, kind, docs, full) {
     if (peerClosed && peerClosed.has(d.id) && !d.closedAt) continue
     putDoc(db, kind, d, { sync: 'synced' })
   }
-  const drop = q(db, "DELETE FROM docs WHERE kind = ? AND id = ? AND sync = 'synced'")
+  // Удалённый здесь, которого нет и у сервера, — ушёл совсем
+  const drop = q(db, "DELETE FROM docs WHERE kind = ? AND id = ? AND sync IN ('synced', 'deleted')")
   for (const id of docs.remove) drop.run(kind, id)
 }
 

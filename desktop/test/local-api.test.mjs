@@ -24,7 +24,7 @@ import {
   throttle,
   userView,
 } from '../src/local/accounts.mjs'
-import { matchLocal, parseQuery, pendingInPeriod, periodOf } from '../src/local/api.mjs'
+import { matchFallback, matchLocal, parseQuery, pendingInPeriod, periodOf } from '../src/local/api.mjs'
 import { ApiError, openDb } from '../src/local/db.mjs'
 import { checkout } from '../src/local/ops/sale.mjs'
 import { CORE_SCHEMA, PHARMACY_SCHEMA } from '../src/local/schema.mjs'
@@ -68,44 +68,55 @@ test('касса отвечает сама ровно на то, что умее
     ['POST', '/customers/abc/pay'],
     ['POST', '/deferred'],
     ['DELETE', '/deferred/abc'],
-  ]
-  for (const [method, path] of local) assert.ok(matchLocal(method, path), `${method} ${path} должен обслуживаться локально`)
-
-  // Всё остальное — дело сервера: заведение и правка товаров, сотрудники, пересчёт,
-  // настройки, правка и удаление прихода, удаление клиента, правка и удаление расхода,
-  // статьи расходов, заведение и оплата поставщиков, отмена внесения и изъятия,
-  // удаление возврата поставщику, сервисы перевода, история движения товара
-  const remote = [
+    // С версии 1.4.14 — и справочники, и правка документов
     ['POST', '/products'],
     ['PATCH', '/products/abc'],
     ['DELETE', '/products/abc'],
+    ['POST', '/categories'],
+    ['PATCH', '/categories/abc'],
+    ['DELETE', '/categories/abc'],
+    ['POST', '/product-types'],
+    ['PATCH', '/product-types/abc'],
+    ['DELETE', '/product-types/abc'],
+    ['POST', '/pay-services'],
+    ['DELETE', '/pay-services/abc'],
+    ['POST', '/expense-categories'],
+    ['DELETE', '/expense-categories/abc'],
+    ['POST', '/income-categories'],
+    ['DELETE', '/income-categories/abc'],
+    ['POST', '/suppliers'],
+    ['PATCH', '/suppliers/abc'],
+    ['DELETE', '/suppliers/abc'],
+    ['POST', '/suppliers/abc/pay'],
+    ['DELETE', '/supplier-payments/abc'],
+    ['DELETE', '/supplier-returns/abc'],
+    ['PATCH', '/expenses/abc'],
+    ['DELETE', '/expenses/abc'],
+    ['PATCH', '/incomes/abc'],
+    ['DELETE', '/incomes/abc'],
+    ['DELETE', '/cash-moves/abc'],
+    ['GET', '/arrivals/abc'],
+    ['PATCH', '/arrivals/abc'],
+    ['DELETE', '/arrivals/abc'],
+  ]
+  for (const [method, path] of local) assert.ok(matchLocal(method, path), `${method} ${path} должен обслуживаться локально`)
+
+  // Сначала сервер, без связи — касса: история товара и карточка поставщика
+  for (const [method, path] of [['GET', '/products/abc/history'], ['GET', '/suppliers/abc']]) {
+    assert.equal(matchLocal(method, path), null, `${method} ${path} — сначала сервер`)
+    assert.ok(matchFallback(method, path), `${method} ${path} без связи отвечает касса`)
+  }
+
+  // Всё остальное — дело сервера: сотрудники и роли, пересчёт, резервная копия,
+  // удаление клиента, панель владельца сервиса
+  const remote = [
     ['GET', '/users'],
     ['POST', '/users'],
     ['GET', '/inventory'],
     ['POST', '/inventory'],
     ['GET', '/backup'],
     ['POST', '/backup/restore'],
-    ['GET', '/arrivals/abc'],
-    ['PATCH', '/arrivals/abc'],
-    ['DELETE', '/arrivals/abc'],
     ['DELETE', '/customers/abc'],
-    ['PATCH', '/expenses/abc'],
-    ['DELETE', '/expenses/abc'],
-    ['POST', '/expense-categories'],
-    ['DELETE', '/expense-categories/abc'],
-    ['POST', '/suppliers'],
-    ['GET', '/suppliers/abc'],
-    ['PATCH', '/suppliers/abc'],
-    ['DELETE', '/suppliers/abc'],
-    ['POST', '/suppliers/abc/pay'],
-    ['DELETE', '/supplier-payments/abc'],
-    ['DELETE', '/cash-moves/abc'],
-    ['DELETE', '/supplier-returns/abc'],
-    ['POST', '/pay-services'],
-    ['DELETE', '/pay-services/abc'],
-    ['GET', '/products/abc/history'],
-    ['POST', '/categories'],
-    ['PATCH', '/categories/abc'],
     ['GET', '/admin/pharmacies'],
     ['GET', '/auth/me'],
     ['POST', '/auth/login'],
@@ -113,7 +124,10 @@ test('касса отвечает сама ровно на то, что умее
     ['GET', '/sales/abc'],
     ['DELETE', '/sales'],
   ]
-  for (const [method, path] of remote) assert.equal(matchLocal(method, path), null, `${method} ${path} не должен обслуживаться локально`)
+  for (const [method, path] of remote) {
+    assert.equal(matchLocal(method, path), null, `${method} ${path} не должен обслуживаться локально`)
+    assert.equal(matchFallback(method, path), null, `${method} ${path} не должен обслуживаться локально`)
+  }
 })
 
 test('из адреса достаются номер записи и параметры', () => {

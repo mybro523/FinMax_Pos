@@ -11,6 +11,7 @@
 // Перевод, вид денег и дат передаются снаружи (t, money, fmt), а надписи стоят в коде
 // целиком — их наличие в таджикском словаре стережёт test/i18n.test.js.
 import { qtyPriceText } from './ticket.js'
+import { fieldLabel } from './discrepancy.js'
 
 function payLabel(payment, t) {
   if (payment === 'card') return t('Карта')
@@ -112,6 +113,38 @@ export function rejectedDetail(r, t, money = String, fmt = {}) {
       break
     case 'shift.open':
       fact(t('касса на старте'), money(d.openingCash || 0))
+      break
+    // ── Справочники и правки документов (версия 1.4.14) ──
+    case 'product.create':
+      fact(t('Штрихкод'), d.barcode)
+      if (has(d.price)) fact(t('Цена продажи'), money(d.price))
+      if (d.stock > 0) fact(t('Остаток'), d.stock)
+      break
+    case 'supplier.create':
+      fact(t('Телефон'), d.phone)
+      if (d.openingDebt > 0) fact(t('Долг на начало'), money(d.openingDebt))
+      break
+    case 'supplier.pay':
+      if (d.fromCash) fact(t('Оплата'), t('из кассы'))
+      fact(t('Примечание'), d.note)
+      break
+    case 'product.update':
+    case 'category.update':
+    case 'productType.update':
+    case 'supplier.update':
+    case 'expense.update':
+    case 'income.update':
+    case 'arrival.update':
+    case 'supplierPayment.delete':
+    case 'supplierReturn.delete':
+    case 'expense.delete':
+    case 'income.delete':
+    case 'cashMove.delete':
+    case 'arrival.delete':
+      if (d.date) fact(t('Дата'), day(d.date))
+      // Что поменяли — по полям, как назвал бы человек
+      if (list(d.fields).length) fact(t('Что поменяли'), list(d.fields).map((f) => fieldLabel(f, t)).join(', '))
+      if (has(d.stock)) fact(t('Остаток'), d.stock)
       break
     case 'shift.close':
       fact(t('Чеков'), d.count ?? 0)

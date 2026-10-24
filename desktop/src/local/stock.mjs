@@ -10,6 +10,7 @@
 // пришлёт свежий остаток, сделанное здесь и ещё не дошедшее до него накладывается
 // поверх: остаток считается по журналу движений, а не перезаписью количества.
 import { bad, inTx, q } from './db.mjs'
+import { docState } from './edits.mjs'
 import { D, fromCentsD, toCents } from './money.mjs'
 import { expiryLimit } from './time.mjs'
 import { uppOf } from './units.mjs'
@@ -172,6 +173,30 @@ export function applyMove(db, move, { tolerant = false, now } = {}) {
   // Товар убрали из справочника, пока движение ждало отправки. Двигать нечего
   if (!product) return { taken: [], short: 0 }
 
+  // ── Движения правок, сделанных без связи (версия 1.4.14) ──
+  // Срок годности из карточки: у единственной партии на полке
+  if (move.kind === 'expiry') return setSingleExpiry(db, product, move.expiryDate ?? null)
+  // Закупочная цена, вписанная в карточку руками
+  if (move.kind === 'cost') {
+    if (Number.isInteger(move.costC)) q(db, 'UPDATE products SET costC = ? WHERE id = ?').run(move.costC, product.id)
+    return { taken: [], short: 0 }
+  }
+  // Удаление прихода: снять всё, что от него осталось на полке, — и закупочную цену заново
+  // по оставшимся партиям (как сервер: arrivals.service, costFromBatches)
+  if (move.kind === 'arrival-undo') return undoArrival(db, product, move.arrivalId)
+  // Правка прихода — как у сервера, по партиям этой кассы на момент, когда движение ложится
+  if (move.kind === 'arrival-edit') return editArrival(db, product, move)
+  // Остаток, вписанный в карточку, больше прежнего: излишек — в партию с самым дальним
+  // сроком, как у сервера (setUnits). Партий нет — новая
+  if (move.kind === 'count' && move.units > 0) {
+    const last = q(db, `SELECT id FROM batches WHERE productId = ? AND units > 0 ${FEFO_LAST}`).get(product.id)
+    if (last) {
+      q(db, 'UPDATE batches SET units = units + ? WHERE id = ?').run(move.units, last.id)
+      writeNearest(db, product.id)
+      return { taken: [], short: 0, batchId: last.id }
+    }
+  }
+
   if (move.units < 0) {
     return consume(db, product, -move.units, { skipExpired: !!move.skipExpired, tolerant, now })
   }
@@ -198,6 +223,94 @@ export function applyMove(db, move, { tolerant = false, now } = {}) {
     createdAt: move.createdAt,
   })
   return { taken: [], short: 0, batchId }
+}
+
+// ── Правка прихода ──
+// Как сервер (updateArrivalIn): всё, что от прихода осталось на полке, снимается, а новое
+// количество раскладывается по строкам прихода за вычетом проданного — первые строки
+// целиком, последним достаётся остаток. Сколько продано, считается здесь и сейчас: «было в
+// приходе» (spec.b) минус то, что от него лежит на полке этой кассы. Поэтому правка,
+// сделанная на соседней кассе, не возвращает на полку то, что здесь из того же прихода
+// уже продали. move.units — сколько штук стало в приходе; spec.l — строки: штуки, цена
+// упаковки, срок
+function editArrival(db, product, move) {
+  let spec = null
+  try {
+    spec = JSON.parse(move.note)
+  } catch {
+    spec = null
+  }
+  if (!move.arrivalId || !spec || !Array.isArray(spec.l)) return { taken: [], short: 0 }
+  // Прихода здесь нет, его заведение сервер отверг или его удалили — править нечего: иначе
+  // «проданным» посчиталось бы всё, что в нём было, и на полку легла бы разница из ничего.
+  // Удалённый приход и так кончается нулём на полке (его остаток снимает удаление), в каком
+  // бы порядке ни легли правка и удаление. Состояние — по очереди, а не только по пометке
+  const doc = q(db, "SELECT sync FROM docs WHERE kind = 'arrival' AND id = ?").get(move.arrivalId)
+  if (!doc || doc.sync === 'rejected' || doc.sync === 'deleted') return { taken: [], short: 0 }
+  const st = docState(db, 'arrival', move.arrivalId)
+  if (st === 'rejected' || st === 'deleted') return { taken: [], short: 0 }
+  const batches = q(db, 'SELECT * FROM batches WHERE productId = ? AND arrivalId = ? AND units > 0').all(product.id, move.arrivalId)
+  const left = batches.reduce((s, b) => s + b.units, 0)
+  const sold = Math.max(0, (Number(spec.b) || 0) - left)
+  const taken = []
+  for (const b of batches) {
+    q(db, 'UPDATE batches SET units = 0 WHERE id = ?').run(b.id)
+    taken.push({ batchId: b.id, units: b.units, costC: b.costC, expiryDate: b.expiryDate })
+  }
+  let toPlace = Math.max(0, Math.trunc(Number(move.units) || 0) - sold)
+  spec.l.forEach((line, n) => {
+    if (toPlace <= 0 || !Array.isArray(line)) return
+    const take = Math.min(Math.max(0, Math.trunc(Number(line[0]) || 0)), toPlace)
+    if (take <= 0) return
+    // Номер партии выводится из номера движения и строки: при проигрывании журнала — тот же
+    addUnits(db, product.id, take, Number.isInteger(line[1]) ? line[1] : product.costC, line[2] ?? null, move.arrivalId, 'приход изменён', {
+      id: `loc-${move.seq}-${n}`,
+      createdAt: move.createdAt,
+    })
+    toPlace -= take
+  })
+  writeNearest(db, product.id)
+  costFromBatches(db, product)
+  return { taken, short: 0 }
+}
+
+// Самая дальняя партия: обратный порядок списания (бессрочные — последними)
+const FEFO_LAST = 'ORDER BY (expiryDate IS NULL) DESC, expiryDate DESC, createdAt DESC, id DESC'
+
+function setSingleExpiry(db, product, expiryDate) {
+  const live = q(db, 'SELECT id FROM batches WHERE productId = ? AND units > 0').all(product.id)
+  if (live.length === 1) {
+    q(db, 'UPDATE batches SET expiryDate = ? WHERE id = ?').run(expiryDate, live[0].id)
+    writeNearest(db, product.id)
+  }
+  return { taken: [], short: 0 }
+}
+
+function undoArrival(db, product, arrivalId) {
+  if (!arrivalId) return { taken: [], short: 0 }
+  const taken = []
+  for (const b of q(db, 'SELECT * FROM batches WHERE productId = ? AND arrivalId = ? AND units > 0').all(product.id, arrivalId)) {
+    q(db, 'UPDATE batches SET units = 0 WHERE id = ?').run(b.id)
+    taken.push({ batchId: b.id, units: b.units, costC: b.costC, expiryDate: b.expiryDate })
+  }
+  writeNearest(db, product.id)
+  costFromBatches(db, product)
+  return { taken, short: 0 }
+}
+
+// ── Закупочная цена по тому, что лежит на полке ──
+// Как у сервера (server/src/common/cost.ts, costFromBatches): в штуках, по ценам партий.
+// Полка пуста — цена остаётся прежней
+export function costFromBatches(db, product) {
+  const upp = uppOf(product)
+  let units = D(0)
+  let value = D(0)
+  for (const b of q(db, 'SELECT units, costC FROM batches WHERE productId = ? AND units > 0').all(product.id)) {
+    units = units.plus(b.units)
+    value = value.plus(fromCentsD(b.costC).dividedBy(upp).times(b.units))
+  }
+  if (units.lte(0)) return
+  q(db, 'UPDATE products SET costC = ? WHERE id = ?').run(toCents(value.dividedBy(units).times(upp)), product.id)
 }
 
 // ── Записать движение и сразу выполнить ──

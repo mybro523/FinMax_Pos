@@ -3,17 +3,19 @@
 // Те же адреса, что у настоящего сервера, но отвечает на них локальная база. Окно
 // не знает разницы: оно просит «/sales», а откуда придёт ответ, решает основная
 // часть программы. Здесь перечислено всё, что касса умеет без интернета:
-// продажа, возврат, смена, долг и его погашение, приход и списание уже заведённого
-// товара, возврат его поставщику, отложенные штрихкоды, новый расход магазина,
-// внесение и изъятие наличных, просмотр товаров, поставщиков и журналов.
+// продажа, возврат, смена, долг и его погашение, приход, списание, возврат поставщику,
+// отложенные штрихкоды, расходы и доходы, внесение и изъятие наличных; с версии 1.4.14 —
+// и справочники: товары, категории и типы, поставщики и оплаты им, сервисы перевода,
+// статьи расходов и доходов, — а также правка и удаление прихода, расхода, дохода,
+// возврата поставщику, внесения и изъятия.
 //
-// Остального здесь нет намеренно — заведение и правка товаров, сотрудники,
-// пересчёт остатков, настройки, правка прихода и расхода, удаление возврата
-// поставщику, оплата поставщику, история движения товара. Такой запрос уходит на сервер.
+// История товара и карточка поставщика — «сначала сервер»: у него все документы за всё
+// время; нет связи — касса считает по своим журналам (FALLBACK ниже). Чего здесь нет
+// вовсе (сотрудники, пересчёт остатков, резервная копия), уходит на сервер.
 import { hasPerm } from './accounts.mjs'
 import { categoriesList, productTypesList, customersList, deferredList, productByBarcode, productsList, productView1 } from './catalog.mjs'
-import { bad, forbidden, q } from './db.mjs'
-import { listDocs, listShifts, myOpenShift, WINDOW_DAYS } from './docs.mjs'
+import { bad, forbidden, notFound, q } from './db.mjs'
+import { listDocs, listShifts, liveDoc, myOpenShift, WINDOW_DAYS } from './docs.mjs'
 import { createArrival } from './ops/arrival.mjs'
 import { createCustomer, payDebt } from './ops/customer.mjs'
 import { addDeferred, removeDeferred } from './ops/deferred.mjs'
@@ -26,6 +28,23 @@ import { createSupplierReturn } from './ops/supplierreturn.mjs'
 import { checkout, NO_SHIFT_SALE } from './ops/sale.mjs'
 import { closeShift, openShift, shiftView } from './ops/shift.mjs'
 import { createWriteOff } from './ops/writeoff.mjs'
+import { createProduct, deleteProduct, updateProduct } from './ops/products.mjs'
+import {
+  createArticle,
+  createCategory,
+  createPayService,
+  createProductType,
+  deleteArticle,
+  deleteCategory,
+  deletePayService,
+  deleteProductType,
+  updateCategory,
+  updateProductType,
+} from './ops/refs.mjs'
+import { createSupplier, deleteSupplier, paySupplier, removeSupplierPayment, updateSupplier } from './ops/supplierops.mjs'
+import { deleteCashMove, deleteExpense, deleteIncome, deleteSupplierReturn, updateExpense, updateIncome } from './ops/docedits.mjs'
+import { arrivalView, deleteArrival, updateArrival } from './ops/arrivaledit.mjs'
+import { productHistory, supplierCard } from './history.mjs'
 import { DAY_MS } from './time.mjs'
 
 const MAX_DAYS = 3650
@@ -63,14 +82,15 @@ const journal = (kind) => (ctx) => {
 
 // Свои неотправленные документы за период — их добавляют к ответу сервера,
 // когда за давним периодом ходили в интернет: сервер о них ещё не знает. Туда же —
-// пришедшие от соседней кассы по местной сети (sync = 'peer'): их сервер тоже ещё не видел
+// пришедшие от соседней кассы по местной сети (sync = 'peer'): их сервер тоже ещё не видел.
+// Поправленные здесь (edited) заменяют копию сервера, удалённые здесь (deleted) — убирают её
 export function pendingInPeriod(db, kind, { from, to }) {
   const rows = q(
     db,
-    `SELECT body FROM docs
-     WHERE kind = ? AND sync IN ('pending', 'peer') AND (? IS NULL OR date >= ?) AND (? IS NULL OR date <= ?)`,
+    `SELECT body, sync FROM docs
+     WHERE kind = ? AND sync IN ('pending', 'peer', 'edited', 'deleted') AND (? IS NULL OR date >= ?) AND (? IS NULL OR date <= ?)`,
   ).all(kind, from, from, to, to)
-  return rows.map((r) => JSON.parse(r.body))
+  return rows.map((r) => (r.sync === 'deleted' ? { ...JSON.parse(r.body), __deleted: true } : JSON.parse(r.body)))
 }
 
 // Право на действие — то же, что на сайте и на сервере. Любое из перечисленных
@@ -88,6 +108,9 @@ const canSell = (ctx) => {
   }
   return checkout(ctx, ctx.body)
 }
+// Правка и удаление документа: на кассе он есть — правим здесь; давний (журналы кассы
+// короче) — запрос уходит на сервер, как раньше
+const here = (kind, fn) => (ctx) => (liveDoc(ctx.db, kind, ctx.params[0]) ? fn(ctx) : { __remote: true })
 const canArrive = (ctx) => {
   if (Number(ctx.body?.debt) > 0 && !hasPerm(ctx.user, 'arrivals.debt')) throw forbidden('Нет права оформлять приход в долг')
   return createArrival(ctx, ctx.body)
@@ -148,7 +171,53 @@ const ROUTES = [
   ['POST', /^\/customers\/([^/]+)\/pay$/, perm(['debts.pay'], (ctx) => payDebt(ctx, ctx.params[0], ctx.body))],
   ['POST', /^\/deferred$/, perm(['pos.defer', 'deferred.manage'], (ctx) => addDeferred(ctx, ctx.body))],
   ['DELETE', /^\/deferred\/([^/]+)$/, perm(['deferred.manage'], (ctx) => removeDeferred(ctx, ctx.params[0]))],
+
+  // ── Справочники и правки документов (версия 1.4.14) — те же права, что на сайте ──
+  ['POST', /^\/products$/, perm(['products.create'], (ctx) => createProduct(ctx, ctx.body))],
+  ['PATCH', /^\/products\/([^/]+)$/, perm(['products.edit'], (ctx) => updateProduct(ctx, ctx.params[0], ctx.body))],
+  ['DELETE', /^\/products\/([^/]+)$/, perm(['products.delete'], (ctx) => deleteProduct(ctx, ctx.params[0]))],
+  ['POST', /^\/categories$/, perm(['settings.categories'], (ctx) => createCategory(ctx, ctx.body))],
+  ['PATCH', /^\/categories\/([^/]+)$/, perm(['settings.categories'], (ctx) => updateCategory(ctx, ctx.params[0], ctx.body))],
+  ['DELETE', /^\/categories\/([^/]+)$/, perm(['settings.categories'], (ctx) => deleteCategory(ctx, ctx.params[0]))],
+  // Типы товаров настраиваются там же, где категории
+  ['POST', /^\/product-types$/, perm(['settings.categories'], (ctx) => createProductType(ctx, ctx.body))],
+  ['PATCH', /^\/product-types\/([^/]+)$/, perm(['settings.categories'], (ctx) => updateProductType(ctx, ctx.params[0], ctx.body))],
+  ['DELETE', /^\/product-types\/([^/]+)$/, perm(['settings.categories'], (ctx) => deleteProductType(ctx, ctx.params[0]))],
+  ['POST', /^\/pay-services$/, perm(['settings.payServices'], (ctx) => createPayService(ctx, ctx.body))],
+  ['DELETE', /^\/pay-services\/([^/]+)$/, perm(['settings.payServices'], (ctx) => deletePayService(ctx, ctx.params[0]))],
+  ['POST', /^\/expense-categories$/, perm(['settings.expenseCategories'], (ctx) => createArticle(ctx, 'expense', ctx.body))],
+  ['DELETE', /^\/expense-categories\/([^/]+)$/, perm(['settings.expenseCategories'], (ctx) => deleteArticle(ctx, 'expense', ctx.params[0]))],
+  ['POST', /^\/income-categories$/, perm(['settings.incomeCategories'], (ctx) => createArticle(ctx, 'income', ctx.body))],
+  ['DELETE', /^\/income-categories\/([^/]+)$/, perm(['settings.incomeCategories'], (ctx) => deleteArticle(ctx, 'income', ctx.params[0]))],
+  ['POST', /^\/suppliers$/, perm(['suppliers.edit'], (ctx) => createSupplier(ctx, ctx.body))],
+  ['PATCH', /^\/suppliers\/([^/]+)$/, perm(['suppliers.edit'], (ctx) => updateSupplier(ctx, ctx.params[0], ctx.body))],
+  ['DELETE', /^\/suppliers\/([^/]+)$/, perm(['suppliers.delete'], (ctx) => deleteSupplier(ctx, ctx.params[0]))],
+  ['POST', /^\/suppliers\/([^/]+)\/pay$/, perm(['suppliers.pay'], (ctx) => paySupplier(ctx, ctx.params[0], ctx.body))],
+  ['DELETE', /^\/supplier-payments\/([^/]+)$/, perm(['suppliers.pay'], here('supplierpayment', (ctx) => removeSupplierPayment(ctx, ctx.params[0])))],
+  ['DELETE', /^\/supplier-returns\/([^/]+)$/, perm(['arrivals.edit'], here('supplierreturn', (ctx) => deleteSupplierReturn(ctx, ctx.params[0])))],
+  ['PATCH', /^\/expenses\/([^/]+)$/, perm(['expenses.edit'], here('expense', (ctx) => updateExpense(ctx, ctx.params[0], ctx.body)))],
+  ['DELETE', /^\/expenses\/([^/]+)$/, perm(['expenses.edit'], here('expense', (ctx) => deleteExpense(ctx, ctx.params[0])))],
+  ['PATCH', /^\/incomes\/([^/]+)$/, perm(['incomes.edit'], here('income', (ctx) => updateIncome(ctx, ctx.params[0], ctx.body)))],
+  ['DELETE', /^\/incomes\/([^/]+)$/, perm(['incomes.edit'], here('income', (ctx) => deleteIncome(ctx, ctx.params[0])))],
+  // Отменить внесение или изъятие — по праву на чужие смены, как на сайте
+  ['DELETE', /^\/cash-moves\/([^/]+)$/, perm(['shift.others'], here('cashmove', (ctx) => deleteCashMove(ctx, ctx.params[0])))],
+  // Приход для окна правки: на кассе есть — отсюда; давний — с сервера
+  ['GET', /^\/arrivals\/([^/]+)$/, perm(['arrivals.view'], (ctx) => arrivalView(ctx.db, ctx.params[0]) || { __remote: true })],
+  ['PATCH', /^\/arrivals\/([^/]+)$/, perm(['arrivals.edit'], here('arrival', (ctx) => updateArrival(ctx, ctx.params[0], ctx.body)))],
+  ['DELETE', /^\/arrivals\/([^/]+)$/, perm(['arrivals.edit'], here('arrival', (ctx) => deleteArrival(ctx, ctx.params[0])))],
 ]
+
+// ── Сначала сервер, без связи — касса ──
+// История товара и карточка поставщика: у сервера все документы за всё время, а у кассы —
+// за последние месяцы. Поэтому на связи отвечает сервер, а без связи — касса, по своим
+// журналам, с пометкой local (окно покажет, что это данные компьютера)
+const FALLBACK = [
+  ['GET', /^\/products\/([^/]+)\/history$/, perm(['products.history'], (ctx) => productHistory(ctx.db, ctx.params[0], ctx.query, ctx.now) || notThere('Товар не найден'))],
+  ['GET', /^\/suppliers\/([^/]+)$/, perm(['suppliers.view'], (ctx) => supplierCard(ctx.db, ctx.params[0]) || notThere('Поставщик не найден'))],
+]
+const notThere = (text) => {
+  throw notFound(text)
+}
 
 const decode = (s) => {
   try {
@@ -167,13 +236,17 @@ export function parseQuery(path) {
   return out
 }
 
-// Найти обработчик. Нет — значит запрос не для локальной базы
-export function matchLocal(method, path) {
+function match(list, method, path) {
   const route = path.split('?')[0]
-  for (const [m, re, handler] of ROUTES) {
+  for (const [m, re, handler] of list) {
     if (m !== method) continue
     const found = route.match(re)
     if (found) return { handler, params: found.slice(1).map(decode), query: parseQuery(path) }
   }
   return null
 }
+
+// Найти обработчик. Нет — значит запрос не для локальной базы
+export const matchLocal = (method, path) => match(ROUTES, method, path)
+// Запрос «сначала сервер»: без связи на него ответит касса
+export const matchFallback = (method, path) => match(FALLBACK, method, path)

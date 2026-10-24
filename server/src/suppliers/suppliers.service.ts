@@ -6,6 +6,7 @@ import { TX } from '../common/tx'
 import { periodFilter, PeriodQuery, MAX_ROWS } from '../common/period'
 import { setSupplierCash } from '../shifts/totals'
 import { lockShift, openShiftFor } from '../shifts/till'
+import { changedFields, forgetStamps, stamp } from '../common/stamps'
 import { CreateSupplierDto, PaySupplierDto, UpdateSupplierDto } from './dto'
 
 // ── Поставщики и долги перед ними ──
@@ -20,8 +21,11 @@ import { CreateSupplierDto, PaySupplierDto, UpdateSupplierDto } from './dto'
 // пока смена открыта.
 
 const withUser = { user: { select: { id: true, name: true } } }
-const SUPPLIER_EXISTS = 'Поставщик с таким названием уже есть'
+export const SUPPLIER_EXISTS = 'Поставщик с таким названием уже есть'
 export const PAYMENT_SHIFT_CLOSED = 'Смена этой оплаты уже закрыта: она вошла в её отчёт и больше не меняется.'
+// Тексты отказа в удалении — те же у кассы без связи
+export const SUPPLIER_HAS_DEBT = 'У поставщика есть долг — сначала закройте его'
+export const SUPPLIER_HAS_PAYMENTS = 'По поставщику есть история оплат — удалить нельзя'
 
 type Tx = Prisma.TransactionClient
 
@@ -95,7 +99,13 @@ export class SuppliersService {
     if (dto.phone !== undefined) data.phone = dto.phone.trim()
     if (dto.note !== undefined) data.note = dto.note.trim()
     try {
-      return await this.prisma.supplier.update({ where: { id }, data })
+      return await this.prisma.$transaction(async (tx) => {
+        const was = await tx.supplier.findUnique({ where: { id } })
+        const updated = await tx.supplier.update({ where: { id }, data })
+        // Когда правили: касса без связи сверит по этому свою правку (common/stamps.ts)
+        if (was) await stamp(tx, 'Supplier', id, changedFields(was, data as any, ['name', 'phone', 'note']))
+        return updated
+      }, TX)
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') throw new BadRequestException(SUPPLIER_EXISTS)
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') throw new NotFoundException('Поставщик не найден')
@@ -108,9 +118,12 @@ export class SuppliersService {
   async remove(id: string) {
     const s = await this.prisma.supplier.findUnique({ where: { id }, include: { _count: { select: { payments: true } } } })
     if (!s) throw new NotFoundException('Поставщик не найден')
-    if (!D(s.debt).isZero()) throw new BadRequestException('У поставщика есть долг — сначала закройте его')
-    if (s._count.payments > 0) throw new BadRequestException('По поставщику есть история оплат — удалить нельзя')
-    await this.prisma.supplier.delete({ where: { id } })
+    if (!D(s.debt).isZero()) throw new BadRequestException(SUPPLIER_HAS_DEBT)
+    if (s._count.payments > 0) throw new BadRequestException(SUPPLIER_HAS_PAYMENTS)
+    await this.prisma.$transaction(async (tx) => {
+      await tx.supplier.delete({ where: { id } })
+      await forgetStamps(tx, 'Supplier', id)
+    }, TX)
     return { ok: true }
   }
 
@@ -175,16 +188,7 @@ export class SuppliersService {
   // закрытая смена уже посчитана с этими деньгами
   async removePayment(id: string) {
     await this.prisma.$transaction(async (tx) => {
-      const payment = await tx.supplierPayment.findUnique({ where: { id } })
-      if (!payment) throw new NotFoundException('Оплата не найдена')
-      if (payment.fromCash && payment.shiftId) {
-        const shift = await lockShift(tx, payment.shiftId)
-        if (shift?.closedAt) throw new BadRequestException(PAYMENT_SHIFT_CLOSED)
-      }
-      const supplier = await lockSupplier(tx, payment.supplierId)
-      await tx.supplierPayment.delete({ where: { id } })
-      if (supplier) await tx.supplier.update({ where: { id: supplier.id }, data: { debt: { increment: payment.amount } } })
-      if (payment.fromCash && payment.shiftId) await setSupplierCash(tx, payment.shiftId)
+      if (!(await removePaymentIn(tx, id))) throw new NotFoundException('Оплата не найдена')
     }, TX)
     return { ok: true }
   }
@@ -197,4 +201,21 @@ export class SuppliersService {
       take: MAX_ROWS,
     })
   }
+}
+
+// ── Отменить оплату поставщику ──
+// Общая часть для сайта и для отмены, сделанной на кассе без связи (sync). Оплаты уже
+// нет — false. Из кассы — только пока смена открыта: закрытая уже посчитана с этими деньгами
+export async function removePaymentIn(tx: Tx, id: string): Promise<boolean> {
+  const payment = await tx.supplierPayment.findUnique({ where: { id } })
+  if (!payment) return false
+  if (payment.fromCash && payment.shiftId) {
+    const shift = await lockShift(tx, payment.shiftId)
+    if (shift?.closedAt) throw new BadRequestException(PAYMENT_SHIFT_CLOSED)
+  }
+  const supplier = await lockSupplier(tx, payment.supplierId)
+  await tx.supplierPayment.delete({ where: { id } })
+  if (supplier) await tx.supplier.update({ where: { id: supplier.id }, data: { debt: { increment: payment.amount } } })
+  if (payment.fromCash && payment.shiftId) await setSupplierCash(tx, payment.shiftId)
+  return true
 }

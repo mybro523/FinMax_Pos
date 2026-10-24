@@ -1,9 +1,10 @@
 // ── Поставщики и сервисы перевода в локальной базе ──
 //
-// Оба списка приходят с сервера (snapshot.mjs) и здесь только читаются: заводит и
-// меняет их сервер, для этого нужна связь (gateway.mjs). Без связи касса может
-// оформить приход в долг поставщику, которого уже знает.
+// Оба списка приходят с сервера (snapshot.mjs); заведённое и поправленное здесь ложится
+// поверх поправкой (edits.mjs, ops/supplierops.mjs). Долг поставщику ведёт сервер, а касса
+// досчитывает к нему своё неотправленное: приходы в долг, возвраты в счёт долга, оплаты.
 import { q } from './db.mjs'
+import { ADJ, adjByRow, adjSum } from './edits.mjs'
 import { D, fromCents, fromCentsD, toCents } from './money.mjs'
 
 const byName = new Intl.Collator('ru', { numeric: true, sensitivity: 'base' })
@@ -19,7 +20,8 @@ export function pendingDebtOf(db, supplierId) {
     if (a.supplierId === supplierId) sum = sum.plus(a.debt || 0)
   }
   for (const x of pendingDebtReturns(db)) if (x.supplierId === supplierId) sum = sum.minus(x.total || 0)
-  return sum
+  // Оплаты, их отмена, правка и удаление приходов и возвратов — поправками суммы
+  return sum.plus(fromCentsD(adjSum(db, ADJ.supplierDebt, supplierId)))
 }
 
 // Свои неотправленные возвраты поставщикам «в счёт долга»
@@ -46,6 +48,8 @@ export function suppliersDebts(db) {
   }
   // Возврат товара «в счёт долга» долг уменьшает; счёт долговых приходов — нет
   for (const x of pendingDebtReturns(db)) pendDebt.set(x.supplierId, (pendDebt.get(x.supplierId) || D(0)).minus(x.total || 0))
+  // Оплаты и правки — поправками суммы
+  for (const [id, c] of adjByRow(db, ADJ.supplierDebt)) pendDebt.set(id, (pendDebt.get(id) || D(0)).plus(fromCentsD(c)))
   let total = D(0)
   let arrivals = 0
   const suppliers = []

@@ -318,8 +318,12 @@ test('внесение и изъятие наличных: смена, вид и
 
 test('список операций закрыт, а списание и расход — только владельцу', () => {
   assert.deepEqual([...OP_TYPES].sort(), [
-    'arrival', 'cash.move', 'customer.create', 'debt.pay', 'deferred.add', 'deferred.remove', 'expense', 'income', 'return', 'sale', 'shift.close', 'shift.open',
-    'supplier.return', 'writeoff',
+    'arrival', 'arrival.delete', 'arrival.update', 'cash.move', 'cashMove.delete', 'category.create', 'category.delete', 'category.update',
+    'customer.create', 'debt.pay', 'deferred.add', 'deferred.remove', 'expense', 'expense.delete', 'expense.update', 'expenseCategory.create',
+    'expenseCategory.delete', 'income', 'income.delete', 'income.update', 'incomeCategory.create', 'incomeCategory.delete', 'payService.create',
+    'payService.delete', 'product.create', 'product.delete', 'product.update', 'productType.create', 'productType.delete', 'productType.update',
+    'return', 'sale', 'shift.close', 'shift.open', 'supplier.create', 'supplier.delete', 'supplier.pay', 'supplier.return', 'supplier.update',
+    'supplierPayment.delete', 'supplierReturn.delete', 'writeoff',
   ])
   // Возврат поставщику — по праву «возврат поставщику», как на сайте, а не только владельцу
   assert.equal(FOUNDER_ONLY.has('supplier.return'), false)

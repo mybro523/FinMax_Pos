@@ -14,7 +14,8 @@
 import { bodyOf, checker, MAX_MONEY } from '../check.mjs'
 import { bad, inTx, newId, q } from '../db.mjs'
 import { docByClientId, enqueue, myOpenShift, putDoc } from '../docs.mjs'
-import { D, fromCents, toCents } from '../money.mjs'
+import { ADJ, adjSum } from '../edits.mjs'
+import { D, fromCents, fromCentsD, toCents } from '../money.mjs'
 import { dayKeyTj } from '../time.mjs'
 
 // Тексты отказов — слово в слово как у сервера: человек читает их с экрана, и
@@ -76,8 +77,10 @@ export function pendingCashExpenses(db, shiftId) {
   return sum
 }
 
-// Сколько всего взято из кассы за смену: что уже знает сервер плюс своё неотправленное
-export const expenseCashOf = (db, shift) => D(shift.expenseCash || 0).plus(pendingCashExpenses(db, shift.id))
+// Сколько всего взято из кассы за смену: что уже знает сервер плюс своё неотправленное,
+// плюс поправки правленых и удалённых здесь расходов, которые сервер уже знал (edits.mjs)
+export const expenseCashOf = (db, shift) =>
+  D(shift.expenseCash || 0).plus(pendingCashExpenses(db, shift.id)).plus(fromCentsD(adjSum(db, ADJ.expenseCash, shift.id)))
 
 export function createExpense(ctx, raw) {
   const { db, now } = ctx

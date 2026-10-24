@@ -333,6 +333,43 @@ export const PHARMACY_SCHEMA = [
   `
   DELETE FROM meta WHERE key IN ('cursor', 'wcursor');
   `,
+  // ── Справочники и правки документов без связи (версия 1.4.14) ──
+  // Касса заводит и правит без интернета товары, поставщиков, категории, типы, статьи и
+  // сервисы перевода, правит и удаляет расходы, доходы, приходы. Сделанное лежит
+  // поправкой поверх данных сервера, пока сервер его не принял (local/edits.mjs):
+  //   row_edits — строки справочников: «завести/поменять поля» (put), «убрать» (del),
+  //     «переименовать во всех товарах» (map), а у документов — новое тело или пометка
+  //     «удалён здесь» вместе с прежним телом (чтобы вернуть, если сервер откажет).
+  //     После каждого обмена с сервером поправки проигрываются заново по порядку;
+  //   adj_moves — поправки сумм, которые сервер ведёт сам: долг поставщику, расходы и
+  //     оплаты поставщикам из ящика смены. Сумма = что сказал сервер + свои поправки.
+  // synced = 1 — сервер принял, проигрывать больше не нужно (его данные уже с этим)
+  `
+  CREATE TABLE row_edits (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    opId TEXT NOT NULL,
+    tbl TEXT NOT NULL,
+    rowId TEXT NOT NULL,
+    action TEXT NOT NULL,
+    data TEXT NOT NULL DEFAULT '{}',
+    createdAt TEXT NOT NULL,
+    synced INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX row_edits_pending ON row_edits(tbl, seq) WHERE synced = 0;
+  CREATE INDEX row_edits_op ON row_edits(opId);
+  CREATE INDEX row_edits_row ON row_edits(tbl, rowId);
+  CREATE TABLE adj_moves (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    opId TEXT NOT NULL,
+    target TEXT NOT NULL,
+    rowId TEXT NOT NULL,
+    deltaC INTEGER NOT NULL,
+    createdAt TEXT NOT NULL,
+    synced INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX adj_moves_pending ON adj_moves(target, rowId) WHERE synced = 0;
+  CREATE INDEX adj_moves_op ON adj_moves(opId);
+  `,
 ]
 
 // ── Общая база программы ──

@@ -40,6 +40,8 @@ import {
 } from './payload'
 import { PushDto, PushOpDto } from './dto'
 import { mark, sinceOf } from './cursor'
+import { applyEdit, EDIT_TYPES, EditKit, loadAliases, rewriteAliases } from './edits'
+import { stamp } from '../common/stamps'
 
 // ── Обмен с кассами, которые работают без интернета ──
 //
@@ -81,6 +83,9 @@ interface Ctx {
   flagged: boolean
   // Разделы, которые операция задела сверх обычного (поправила итог пересчёта)
   extra: Set<string>
+  // Псевдонимы: лишняя карточка товара, объединённая с основной, и поставщик, которого
+  // касса завела без связи, а на сайте он уже был (sync/edits.ts)
+  aliases?: Map<string, string>
 }
 
 // Виды расхождений:
@@ -91,13 +96,19 @@ interface Ctx {
 //                    её уже учёл, остаток не двигался (см. common/counted.ts);
 //   debt           — клиент заплатил (или ему зачли) больше, чем он был должен:
 //                    checkPrice — сумма операции, basePrice — долг на тот момент.
+//   edit           — карточку (товар, поставщика, категорию, расход…) правили и на кассе
+//                    без связи, и на сайте; осталась последняя по времени правка (note);
+//   barcode        — товар, заведённый на кассе без связи, получил внутренний штрихкод:
+//                    его код за это время заняли (note — исходный код и второй товар);
+//   supdebt        — поставщику заплатили больше, чем был долг.
 type Flag = {
-  kind: 'sale' | 'writeoff' | 'price' | 'return' | 'counted' | 'debt' | 'supreturn'
+  kind: 'sale' | 'writeoff' | 'price' | 'return' | 'counted' | 'debt' | 'supreturn' | 'edit' | 'barcode' | 'supdebt'
   productId?: string | null
   name: string
   units: number
   checkPrice?: Prisma.Decimal
   basePrice?: Prisma.Decimal
+  note?: string
 }
 
 // Строка документа, цену которой надо сверить с историей цен
@@ -130,6 +141,38 @@ const TOUCHES: Record<OpType, string[]> = {
   income: ['incomes'],
   // Возврат поставщику: склад, долг поставщика, деньги «в кассу» — в смене
   'supplier.return': ['supplierReturns', 'products', 'suppliers', 'shifts'],
+  // ── Справочники и правки документов без связи ──
+  // Заведённый товар убирает свой штрихкод из «отложенных»
+  'product.create': ['products', 'deferred'],
+  'product.update': ['products'],
+  'product.delete': ['products'],
+  // Переименование категории или типа переносит товары
+  'category.create': ['categories'],
+  'category.update': ['categories', 'products'],
+  'category.delete': ['categories'],
+  'productType.create': ['productTypes'],
+  'productType.update': ['productTypes', 'products'],
+  'productType.delete': ['productTypes'],
+  'payService.create': ['payServices'],
+  'payService.delete': ['payServices'],
+  'expenseCategory.create': ['expenseCategories'],
+  'expenseCategory.delete': ['expenseCategories'],
+  'incomeCategory.create': ['incomeCategories'],
+  'incomeCategory.delete': ['incomeCategories'],
+  'supplier.create': ['suppliers'],
+  'supplier.update': ['suppliers'],
+  'supplier.delete': ['suppliers'],
+  // Оплата из кассы меняет и ожидаемые наличные в смене
+  'supplier.pay': ['suppliers', 'supplierPayments', 'shifts'],
+  'supplierPayment.delete': ['suppliers', 'supplierPayments', 'shifts'],
+  'supplierReturn.delete': ['supplierReturns', 'products', 'suppliers', 'shifts'],
+  'expense.update': ['expenses', 'shifts'],
+  'expense.delete': ['expenses', 'shifts'],
+  'income.update': ['incomes'],
+  'income.delete': ['incomes'],
+  'cashMove.delete': ['cashMoves', 'shifts'],
+  'arrival.update': ['arrivals', 'products', 'suppliers'],
+  'arrival.delete': ['arrivals', 'products', 'suppliers'],
 }
 
 // Сколько журнал изменений хранится. Касса без связи работает не больше недели;
@@ -280,7 +323,11 @@ export class SyncService {
         await tx.syncOp.create({
           data: { id: op.id, type, deviceId, accountId: performer.accountId, submittedBy: user.sub, createdAt, status: 'ok' },
         })
-        const doc = await this.apply(tx, type, op.payload, ctx)
+        // Товар и поставщик, на которые ссылается операция, могли объединить с другими —
+        // тогда номер ведёт к основной записи (sync/edits.ts)
+        ctx.aliases = await loadAliases(tx)
+        const payload = EDIT_TYPES.has(type) ? op.payload : rewriteAliases(op.payload, ctx.aliases)
+        const doc = await this.apply(tx, type, payload, ctx)
         if (doc) await tx.syncOp.update({ where: { id: op.id }, data: { docId: doc } })
         return doc
       }, TX)
@@ -373,7 +420,17 @@ export class SyncService {
         return this.applyIncome(tx, parseIncome(payload), ctx)
       case 'supplier.return':
         return this.applySupplierReturn(tx, parseSupplierReturn(payload), ctx)
+      default:
+        // Справочники и правки документов, сделанные без связи
+        return applyEdit(tx, type, payload, ctx, this.kit)
     }
+  }
+
+  // Что нужно правкам справочников от службы обмена (sync/edits.ts)
+  private readonly kit: EditKit = {
+    flag: (tx, ctx, doc, data) => this.flag(tx, ctx as Ctx, doc, data as Flag),
+    shiftRef: (tx, shiftId, ctx) => this.shiftRef(tx, shiftId, ctx as Ctx),
+    recountClosed: (tx, shiftId) => this.recountClosed(tx, shiftId),
   }
 
   // Смена, к которой привязан документ. Её могло не оказаться (операцию открытия
@@ -495,7 +552,7 @@ export class SyncService {
   // Записать расхождение — то, на что владельцу стоит посмотреть
   private async flag(tx: Tx, ctx: Ctx, doc: { id: string; date: Date }, data: Flag) {
     await tx.discrepancy.create({
-      data: { ...data, productId: data.productId ?? null, docId: doc.id, deviceId: ctx.deviceId, userId: ctx.tenantUserId, date: doc.date },
+      data: { ...data, note: data.note ?? '', productId: data.productId ?? null, docId: doc.id, deviceId: ctx.deviceId, userId: ctx.tenantUserId, date: doc.date },
     })
     ctx.flagged = true
   }
@@ -943,13 +1000,18 @@ export class SyncService {
         addValue: a.value,
       })
       await tx.product.update({ where: { id: productId }, data: { cost: weighted } })
+      // Закупочная цена — поле карточки: касса без связи сверит по времени свою правку
+      await stamp(tx, 'Product', productId, ['cost'], p.date)
     }
 
     // Новая цена продажи, назначенная в приходе наценкой (решает последняя строка товара)
     const newPrice = new Map<string, Prisma.Decimal>()
     for (const it of p.items) if (it.price !== null && it.price !== undefined) newPrice.set(it.productId, D(it.price).toDecimalPlaces(2))
     for (const [productId, price] of newPrice) {
-      if (!D(byId.get(productId)!.price).equals(price)) await tx.product.update({ where: { id: productId }, data: { price } })
+      if (!D(byId.get(productId)!.price).equals(price)) {
+        await tx.product.update({ where: { id: productId }, data: { price } })
+        await stamp(tx, 'Product', productId, ['price'], p.date)
+      }
     }
 
     // Поставщик и неоплаченная часть. Поставщика могли удалить, пока касса была без

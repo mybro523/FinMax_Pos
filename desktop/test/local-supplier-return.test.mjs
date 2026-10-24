@@ -225,8 +225,8 @@ test('возврат «в кассу», оформленный на сайте �
 test('возврат поставщику: адреса, права и описание для списка «не принято»', () => {
   assert.ok(matchLocal('GET', '/supplier-returns?days=180'))
   assert.ok(matchLocal('POST', '/supplier-returns'))
-  // Удалить возврат может только сервер
-  assert.equal(matchLocal('DELETE', '/supplier-returns/abc'), null)
+  // Удалить возврат касса с версии 1.4.14 умеет и сама — по праву «изменить и удалить приход»
+  assert.ok(matchLocal('DELETE', '/supplier-returns/abc'))
 
   const db = apteka()
   const cashier = { accountId: 'acc-2', id: 'user-2', name: 'kassa', role: 'cashier', permissions: ['pos.sell'] }
@@ -241,6 +241,9 @@ test('возврат поставщику: адреса, права и опис�
   const r = call('POST', '/supplier-returns', ret({ refund: 'own' }), storekeeper)()
   assert.equal(r.user.name, 'kassa')
   assert.deepEqual(call('GET', '/supplier-returns', null, storekeeper)().map((x) => x.id), [r.id])
+
+  // Удалить — только с правом на правку прихода
+  refused(call('DELETE', '/supplier-returns/' + r.id, null, storekeeper), 403, 'Недостаточно прав')
 
   const op = opOf(db, 'supplier.return')
   assert.deepEqual(touchedBy(op), ['supplierReturns', 'products', 'suppliers', 'shifts'])

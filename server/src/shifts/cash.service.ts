@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
+import { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { D } from '../common/money'
 import { TX } from '../common/tx'
@@ -64,13 +65,20 @@ export class CashService {
 
   async remove(id: string) {
     await this.prisma.$transaction(async (tx) => {
-      const move = await tx.cashMove.findUnique({ where: { id } })
-      if (!move) throw new NotFoundException('Операция не найдена')
-      const shift = await lockShift(tx, move.shiftId)
-      if (shift?.closedAt) throw new BadRequestException(SHIFT_CLOSED_CASH)
-      await tx.cashMove.delete({ where: { id } })
-      await setCashMoves(tx, move.shiftId)
+      if (!(await removeCashMoveIn(tx, id))) throw new NotFoundException('Операция не найдена')
     }, TX)
     return { ok: true }
   }
+}
+
+// ── Отменить внесение или изъятие ──
+// Общая часть для сайта и для отмены на кассе без связи (sync). Записи уже нет — false
+export async function removeCashMoveIn(tx: Prisma.TransactionClient, id: string): Promise<boolean> {
+  const move = await tx.cashMove.findUnique({ where: { id } })
+  if (!move) return false
+  const shift = await lockShift(tx, move.shiftId)
+  if (shift?.closedAt) throw new BadRequestException(SHIFT_CLOSED_CASH)
+  await tx.cashMove.delete({ where: { id } })
+  await setCashMoves(tx, move.shiftId)
+  return true
 }

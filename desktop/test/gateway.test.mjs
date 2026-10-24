@@ -496,11 +496,13 @@ test('раздел «только с интернетом» без связи о
   tt.after(() => t.gw.close())
   assert.equal((await t.req('GET', '/users')).status, 200)
   t.srv.state.online = false
-  for (const [method, path] of [['GET', '/users'], ['POST', '/products'], ['GET', '/inventory'], ['POST', '/auth/change-password']]) {
+  for (const [method, path] of [['GET', '/users'], ['GET', '/inventory'], ['POST', '/auth/change-password']]) {
     const r = await t.req(method, path, {})
     assert.equal(r.status, 0, `${method} ${path}`)
     assert.equal(r.data.message, MESSAGES.onlineOnly)
   }
+  // Товар заводится и без связи (версия 1.4.14)
+  assert.equal((await t.req('POST', '/products', { name: 'Анальгин', barcode: '4600000000024', price: 30, cost: 20, stock: 4 })).status, 201)
 })
 
 test('запись на сервере сразу видна в локальной базе — товар не пропадает с экрана', async (tt) => {
@@ -517,20 +519,43 @@ test('запись на сервере сразу видна в локально
   assert.equal(sale.status, 201)
 })
 
-test('приход, оформленный без связи, нельзя править «на сервере» — он туда ещё не ушёл', async (tt) => {
+test('приход, оформленный без связи, правится и удаляется прямо на кассе — правка уходит на сервер вслед за ним', async (tt) => {
   const t = await loggedIn()
   tt.after(() => t.gw.close())
+  const stock = async () => (await t.req('GET', '/products')).data.find((p) => p.id === 'nur').stock
+  t.srv.state.online = false
   const arrival = await t.req('POST', '/arrivals', { items: [{ productId: 'nur', qty: 1, cost: 90, expiryDate: '2028-01-01' }] })
-  t.srv.reset()
-  for (const method of ['GET', 'PATCH', 'DELETE']) {
-    const r = await t.req(method, '/arrivals/' + arrival.data.id, { items: [] })
-    assert.equal(r.status, 409, method)
-    assert.equal(r.data.message, MESSAGES.notSent)
-  }
+  assert.equal(await stock(), 6)
+  // Окно правки — из локальной базы: сколько продано и ниже чего опускать нельзя
+  const view = await t.req('GET', '/arrivals/' + arrival.data.id)
+  assert.equal(view.status, 200)
+  assert.deepEqual([view.data.items[0].soldUnits, view.data.items[0].minQty, view.data.items[0].expiryDate], [0, 0, '2028-01-01'])
+  const line = view.data.items[0]
+  const patched = await t.req('PATCH', '/arrivals/' + arrival.data.id, { items: [{ id: line.id, qty: 3, cost: 80 }] })
+  assert.equal(patched.status, 200)
+  assert.deepEqual([patched.data.total, patched.data.items[0].qty], [240, 3])
+  assert.equal(await stock(), 8)
+  // Клиента без связи по-прежнему удаляет только сервер — и неотправленного нельзя
   const pending = await t.req('POST', '/customers', { name: 'Новый' })
   assert.equal((await t.req('DELETE', '/customers/' + pending.data.id)).status, 409)
-  assert.equal(t.srv.state.calls.length, 0)
-  // Запись, которую сервер знает, уходит к нему как обычно
+
+  // Связь вернулась: сервер получил приход и следом правку — по порядку
+  t.srv.state.online = true
+  t.srv.state.received.length = 0
+  await t.gw.syncNow()
+  assert.deepEqual(t.srv.state.received.map((o) => o.type), ['arrival', 'arrival.update', 'customer.create'])
+  const onServer = t.srv.state.data.arrivals.find((a) => a.id === arrival.data.id)
+  assert.deepEqual([onServer.items[0].qty, onServer.items[0].cost], [3, 80])
+  assert.equal(t.gw.status().pending, 0)
+
+  // Удалить — тоже на кассе; без связи сразу снимается с полки, на сервер — после
+  t.srv.state.online = false
+  assert.equal((await t.req('DELETE', '/arrivals/' + arrival.data.id)).status, 200)
+  assert.deepEqual((await t.req('GET', '/arrivals?days=180')).data, [])
+  t.srv.state.online = true
+  await t.gw.syncNow()
+  assert.equal(t.srv.state.data.arrivals.some((a) => a.id === arrival.data.id), false)
+  // Давний приход, которого на кассе нет, правится через сервер
   assert.equal((await t.req('DELETE', '/arrivals/server-1')).status, 200)
 })
 
@@ -1073,61 +1098,42 @@ test('сервер принял расход из кассы, а связь ту
   assert.equal(await cashOut(), 40)
 })
 
-test('править и удалять расход умеет только сервер: неотправленный — нельзя, без связи — честное объяснение, со связью — сразу видно здесь', async (tt) => {
+test('расход правится и удаляется прямо на кассе, и без связи; статьи — тоже; всё уходит на сервер по порядку', async (tt) => {
   const t = await loggedIn()
   tt.after(() => t.gw.close())
   const list = async () => (await t.req('GET', '/expenses?days=180')).data.map((e) => [e.category, e.amount])
 
-  // Внесён без связи и на сервер ещё не ушёл — править там нечего
   t.srv.state.online = false
   const e = await t.req('POST', '/expenses', { category: 'Аренда', amount: 100 })
-  t.srv.reset()
-  for (const method of ['PATCH', 'DELETE']) {
-    const r = await t.req(method, '/expenses/' + e.data.id, { amount: 5 })
-    assert.equal(r.status, 409, method)
-    assert.equal(r.data.message, MESSAGES.notSent)
-  }
-  assert.equal(t.srv.state.calls.length, 0)
-
-  // Ушёл на сервер — правка идёт через него и сразу видна в локальной базе
-  t.srv.state.online = true
-  await t.gw.syncNow()
+  // Неотправленный расход правится на месте: сервер получит его, а следом правку
   const patched = await t.req('PATCH', '/expenses/' + e.data.id, { amount: 120, category: 'Налоги' })
   assert.equal(patched.status, 200)
   assert.deepEqual(await list(), [['Налоги', 120]])
-
-  // Без связи — объяснение про расходы, а не общее «раздел работает только с интернетом»:
-  // вносить-то расход можно и без неё
-  t.srv.state.online = false
-  for (const method of ['PATCH', 'DELETE']) {
-    const r = await t.req(method, '/expenses/' + e.data.id, { amount: 1 })
-    assert.equal(r.status, 0, method)
-    assert.equal(r.data.message, MESSAGES.expenseOnline)
-  }
-  for (const [method, path] of [['POST', '/expense-categories'], ['DELETE', '/expense-categories/expcat-1']]) {
-    const r = await t.req(method, path, { name: 'Охрана' })
-    assert.equal(r.status, 0, `${method} ${path}`)
-    assert.equal(r.data.message, MESSAGES.expenseCatsOnline)
-  }
-  assert.deepEqual(await list(), [['Налоги', 120]], 'без связи ничего не изменилось')
-
-  // Статьи меняет сервер — и касса тут же знает новую: по ней можно внести расход без связи
-  t.srv.state.online = true
+  // Статьи — без связи тоже
   const cat = await t.req('POST', '/expense-categories', { name: 'Охрана' })
   assert.equal(cat.status, 201)
   assert.ok((await t.req('GET', '/expense-categories')).data.some((c) => c.name === 'Охрана'))
-  t.srv.state.online = false
   assert.equal((await t.req('POST', '/expenses', { category: 'Охрана', amount: 30 })).status, 201)
-  t.srv.state.online = true
-  await t.gw.syncNow()
   assert.equal((await t.req('DELETE', '/expense-categories/' + cat.data.id)).status, 200)
-  assert.ok(!(await t.req('GET', '/expense-categories')).data.some((c) => c.name === 'Охрана'))
   // Убранная статья остаётся в прежнем расходе, а новый по ней уже не внести
   assert.deepEqual((await list()).map((x) => x[0]).sort(), ['Налоги', 'Охрана'])
   assert.equal((await t.req('POST', '/expenses', { category: 'Охрана', amount: 30 })).status, 400)
 
-  // Удаление — тоже через сервер, и из локальной базы расход уходит сразу
+  t.srv.state.online = true
+  t.srv.state.received.length = 0
+  await t.gw.syncNow()
+  assert.deepEqual(t.srv.state.received.map((o) => o.type), ['expense', 'expense.update', 'expenseCategory.create', 'expense', 'expenseCategory.delete'])
+  assert.deepEqual(t.srv.state.data.expenses.map((x) => [x.category, x.amount]).sort(), [['Налоги', 120], ['Охрана', 30]])
+  assert.equal(t.srv.state.data.expenseCategories.some((c) => c.name === 'Охрана'), false)
+  assert.deepEqual((await list()).sort(), [['Налоги', 120], ['Охрана', 30]], 'после обмена правка потерялась или задвоилась')
+
+  // Удаление без связи: из журнала сразу, на сервере — после связи
+  t.srv.state.online = false
   assert.equal((await t.req('DELETE', '/expenses/' + e.data.id)).status, 200)
+  assert.deepEqual((await list()).map((x) => x[0]), ['Охрана'])
+  t.srv.state.online = true
+  await t.gw.syncNow()
+  assert.deepEqual(t.srv.state.data.expenses.map((x) => x.category), ['Охрана'])
   assert.deepEqual((await list()).map((x) => x[0]), ['Охрана'])
 })
 
@@ -1265,31 +1271,25 @@ test('возврат поставщику без связи: товар и до�
   assert.deepEqual([closed.data.supplierRefund, closed.data.expectedCash, closed.data.difference], [95, 95, 0])
 })
 
-test('удалить возврат поставщику умеет только сервер: неотправленный — нельзя, без связи — честное объяснение', async (tt) => {
+test('возврат поставщику удаляется прямо на кассе, и без связи: товар и долг возвращаются сразу, на сервере — после связи', async (tt) => {
   const t = await loggedIn()
   tt.after(() => t.gw.close())
-  t.srv.state.online = false
+  const debt = async () => (await t.req('GET', '/suppliers')).data.find((s) => s.id === 'sup-1').debt
+  const stock = async () => (await t.req('GET', '/products')).data.find((p) => p.id === 'nur').stock
   const r = await supplierReturn(t)
-  t.srv.reset()
-  const del = await t.req('DELETE', '/supplier-returns/' + r.data.id)
-  assert.equal(del.status, 409)
-  assert.equal(del.data.message, MESSAGES.notSent)
-  assert.equal(t.srv.state.calls.length, 0)
-
-  // Ушёл на сервер; связь пропала — объяснение про возврат, а не общее «только с интернетом»
-  t.srv.state.online = true
   await t.gw.syncNow()
-  t.srv.state.online = false
-  const off = await t.req('DELETE', '/supplier-returns/' + r.data.id)
-  assert.equal(off.status, 0)
-  assert.equal(off.data.message, MESSAGES.supplierReturnOnline)
+  assert.deepEqual([await debt(), await stock()], [320, 3])
 
-  // Со связью — удаляет сервер, и касса сразу знает: товар и долг вернулись
-  t.srv.state.online = true
+  t.srv.state.online = false
   assert.equal((await t.req('DELETE', '/supplier-returns/' + r.data.id)).status, 200)
   assert.deepEqual((await t.req('GET', '/supplier-returns?days=180')).data, [])
-  assert.equal((await t.req('GET', '/suppliers')).data.find((s) => s.id === 'sup-1').debt, 500)
-  assert.equal((await t.req('GET', '/products')).data.find((p) => p.id === 'nur').stock, 5)
+  assert.deepEqual([await debt(), await stock()], [500, 5])
+
+  t.srv.state.online = true
+  await t.gw.syncNow()
+  assert.deepEqual(t.srv.state.data.supplierReturns, [])
+  assert.equal(t.srv.state.data.suppliers.find((s) => s.id === 'sup-1').debt, 500)
+  assert.deepEqual([await debt(), await stock()], [500, 5], 'после обмена долг или товар задвоились')
 })
 
 // ── Объяснения для человека переведены ──
@@ -1976,7 +1976,7 @@ test('срок работы без связи считается по своем
 
 // ── Поставщики, наличные в смене и переводы (версия 1.0.2) ──
 
-test('внесение и изъятие без связи: в смене кассы сразу, после связи — на сервере в той же смене; отмена — только через сервер', async (tt) => {
+test('внесение и изъятие без связи: в смене кассы сразу, после связи — на сервере в той же смене; отмена — тоже на кассе', async (tt) => {
   const t = await loggedIn({ shift: false })
   tt.after(() => t.gw.close())
   const shift = await t.req('POST', '/shifts/open', { openingCash: 100 })
@@ -1993,11 +1993,6 @@ test('внесение и изъятие без связи: в смене кас
   assert.equal((await t.req('POST', '/shifts/cash', { kind: 'out', amount: 0 })).status, 400)
   assert.deepEqual(await tillNow(), [200, 50])
   assert.equal(t.gw.status().pending, 2)
-  // Отменить неотправленное нельзя: сервер о нём ещё не знает
-  const gone = await t.req('DELETE', '/cash-moves/' + put.data.id)
-  assert.equal(gone.status, 409)
-  assert.equal(gone.data.message, MESSAGES.notSent)
-  assert.deepEqual(await tillNow(), [200, 50])
 
   // Связь вернулась — обе записи на сервере, в смене этой кассы, по одному разу
   t.srv.state.online = true
@@ -2012,19 +2007,18 @@ test('внесение и изъятие без связи: в смене кас
   assert.equal(list.length, 2)
   assert.ok(list.every((m) => m.server), 'в журнале должны быть копии сервера')
 
-  // Отмена — через сервер; без связи — объяснение. Из локальной базы запись уходит сразу
+  // Отмена — и без связи: из смены запись уходит сразу, на сервере — после связи
   t.srv.state.online = false
-  const off = await t.req('DELETE', '/cash-moves/' + put.data.id)
-  assert.equal(off.status, 0)
-  assert.equal(off.data.message, MESSAGES.cashMoveOnline)
-  assert.deepEqual(await tillNow(), [200, 50])
-  t.srv.state.online = true
   assert.equal((await t.req('DELETE', '/cash-moves/' + put.data.id)).status, 200)
   assert.deepEqual(await tillNow(), [0, 50])
   assert.equal((await t.req('GET', '/cash-moves?days=180')).data.length, 1)
+  t.srv.state.online = true
+  await t.gw.syncNow()
+  assert.deepEqual(t.srv.state.data.cashMoves.map((m) => m.kind), ['out'])
+  assert.deepEqual(await tillNow(), [0, 50])
 })
 
-test('продажа переводом без связи: сервис — из локальной базы, чек доходит до сервера с ним; сервисы меняет только сервер', async (tt) => {
+test('продажа переводом без связи: сервис — из локальной базы, чек доходит до сервера с ним; сервисы заводятся и убираются тоже без связи', async (tt) => {
   const t = await loggedIn()
   tt.after(() => t.gw.close())
   t.srv.state.online = false
@@ -2035,23 +2029,22 @@ test('продажа переводом без связи: сервис — из
   const sale = await t.req('POST', '/sales', { payment: 'transfer', payVia: 'DC', items: [{ productId: 'nur', qty: 1 }] })
   assert.equal(sale.status, 201)
   assert.deepEqual([sale.data.payment, sale.data.payVia], ['transfer', 'DC'])
-  for (const [method, path] of [['POST', '/pay-services'], ['DELETE', '/pay-services/paysvc-1']]) {
-    const r = await t.req(method, path, { name: 'Humo' })
-    assert.equal(r.status, 0, `${method} ${path}`)
-    assert.equal(r.data.message, MESSAGES.payServicesOnline)
-  }
+  // Сервис заводится без связи — и по нему сразу можно продать
+  const humo = await t.req('POST', '/pay-services', { name: 'Humo' })
+  assert.equal(humo.status, 201)
+  assert.equal((await t.req('POST', '/pay-services', { name: 'Humo' })).status, 400)
+  assert.equal((await t.req('DELETE', '/pay-services/paysvc-1')).status, 200)
+  assert.deepEqual((await t.req('GET', '/pay-services')).data.map((s) => s.name), ['DC', 'Эсхата', 'Humo'])
+  assert.equal((await t.req('POST', '/sales', { payment: 'transfer', payVia: 'Humo', items: [{ productId: 'nur', qty: 1 }] })).status, 201)
   t.srv.state.online = true
   await t.gw.syncNow()
   const onServer = t.srv.state.data.sales.find((s) => s.id === sale.data.id)
   assert.deepEqual([onServer.payment, onServer.payVia], ['transfer', 'DC'])
-  // Сервис завёл сервер — касса тут же знает его: по нему можно продать и без связи
-  assert.equal((await t.req('POST', '/pay-services', { name: 'Humo' })).status, 201)
-  assert.ok((await t.req('GET', '/pay-services')).data.some((s) => s.name === 'Humo'))
-  t.srv.state.online = false
-  assert.equal((await t.req('POST', '/sales', { payment: 'transfer', payVia: 'Humo', items: [{ productId: 'nur', qty: 1 }] })).status, 201)
+  assert.deepEqual(t.srv.state.data.payServices.map((s) => s.name).sort(), ['DC', 'Humo', 'Эсхата'])
+  assert.deepEqual((await t.req('GET', '/pay-services')).data.map((s) => s.name), ['DC', 'Эсхата', 'Humo'])
 })
 
-test('приход в долг без связи: долг поставщика на кассе растёт сразу, на сервере — после связи; оплата из кассы называет серверу смену кассы', async (tt) => {
+test('приход в долг и оплата поставщику без связи: долг на кассе меняется сразу, на сервере — после связи; оплата из кассы — в смене этой кассы', async (tt) => {
   const t = await loggedIn({ shift: false })
   tt.after(() => t.gw.close())
   const debt = async () => (await t.req('GET', '/suppliers')).data.find((s) => s.id === 'sup-1').debt
@@ -2061,35 +2054,33 @@ test('приход в долг без связи: долг поставщика 
   assert.equal(arrival.status, 201)
   assert.deepEqual([arrival.data.supplier, arrival.data.debt], ['Опт-Маркет', 120])
   assert.equal(await debt(), 620)
-  // Завести поставщика, открыть карточку, заплатить — только с интернетом
-  for (const [method, path, body] of [['POST', '/suppliers', { name: 'Новый' }], ['GET', '/suppliers/sup-1'], ['POST', '/suppliers/sup-1/pay', { amount: 1 }]]) {
-    const r = await t.req(method, path, body)
-    assert.equal(r.status, 0, `${method} ${path}`)
-    assert.equal(r.data.message, MESSAGES.supplierOnline)
-  }
-  t.srv.state.online = true
-  await t.gw.syncNow()
-  assert.equal(t.srv.state.data.suppliers.find((s) => s.id === 'sup-1').debt, 620)
-  assert.equal(await debt(), 620, 'после обмена долг прихода потерялся или задвоился')
-
-  // Оплата из кассы: смену сервер должен знать по имени — касса подставляет свою
-  t.srv.reset()
+  // Карточка поставщика без связи — по журналам кассы
+  const card = await t.req('GET', '/suppliers/sup-1')
+  assert.equal(card.status, 200)
+  assert.equal(card.data.local, true)
+  assert.deepEqual([card.data.debt, card.data.arrivals.length], [620, 1])
+  // Оплата из кассы без открытой смены — отказ теми же словами, что у сервера
   const noShift = await t.req('POST', '/suppliers/sup-1/pay', { amount: 100, fromCash: true })
   assert.equal(noShift.status, 400)
   assert.equal(noShift.data.message, NO_OPEN_SHIFT)
-  assert.equal(t.srv.count('POST', '/suppliers/sup-1/pay'), 0, 'без смены запрос до сервера доходить не должен')
-  // Смена открыта без связи — перед оплатой она сначала уходит на сервер
-  t.srv.state.online = false
+  // Больше долга — нельзя
+  assert.equal((await t.req('POST', '/suppliers/sup-1/pay', { amount: 1000 })).data.message, 'Сумма больше долга поставщика (620.00)')
+  // Смена открыта без связи — из её ящика и платим
   const shift = await t.req('POST', '/shifts/open', { openingCash: 300 })
-  t.srv.state.online = true
   const paid = await t.req('POST', '/suppliers/sup-1/pay', { amount: 100, fromCash: true, note: 'из ящика' })
   assert.equal(paid.status, 201)
-  const call = t.srv.state.calls.find((c) => c.method === 'POST' && c.route === '/suppliers/sup-1/pay')
-  assert.equal(call.body.shiftId, shift.data.id, 'сервер должен получить смену этой кассы')
+  assert.deepEqual([paid.data.amount, paid.data.fromCash, paid.data.shiftId], [100, true, shift.data.id])
   assert.equal(await debt(), 520)
   const here = (await t.req('GET', '/shifts')).data.find((s) => s.id === shift.data.id)
-  assert.equal(here.supplierCash, 100, 'сумма оплат из кассы должна прийти в смену')
+  assert.equal(here.supplierCash, 100, 'оплата из кассы должна сразу уменьшать наличные в смене')
   assert.deepEqual((await t.req('GET', '/supplier-payments')).data.map((p) => [p.amount, p.fromCash, p.shiftId]), [[100, true, shift.data.id]])
+
+  t.srv.state.online = true
+  await t.gw.syncNow()
+  assert.equal(t.srv.state.data.suppliers.find((s) => s.id === 'sup-1').debt, 520)
+  assert.equal(t.srv.state.data.shifts.find((s) => s.id === shift.data.id).supplierCash, 100)
+  assert.equal(await debt(), 520, 'после обмена долг потерялся или задвоился')
+  assert.equal((await t.req('GET', '/shifts')).data.find((s) => s.id === shift.data.id).supplierCash, 100)
   // Закрытие: 300 на начало − 100 поставщику
   const closed = await t.req('POST', '/shifts/close', { countedCash: 200 })
   assert.deepEqual([closed.data.supplierCash, closed.data.expectedCash, closed.data.difference], [100, 200, 0])
@@ -2105,6 +2096,26 @@ test('кассир по умолчанию: приход закрыт — у м�
   assert.equal((await t.req('GET', '/arrivals')).status, 403)
 })
 
+test('история товара, заведённого без связи: пока заведение не дошло до сервера, отвечает касса, а не «не найден»', async (tt) => {
+  const t = await loggedIn()
+  tt.after(() => t.gw.close())
+  t.srv.state.online = false
+  const p = await t.req('POST', '/products', { name: 'Новинка', barcode: '4600000000550', cost: 10, price: 15, stock: 3 })
+  assert.equal(p.status, 201)
+  // Связь есть, но обмена ещё не было: сервер о товаре не знает
+  t.srv.state.online = true
+  const h = await t.req('GET', '/products/' + p.data.id + '/history')
+  assert.equal(h.status, 200, 'касса показала бы «Товар не найден»')
+  assert.equal(h.data.local, true)
+  // Чужого товара, которого нет ни там, ни тут, — по-прежнему нет
+  assert.equal((await t.req('GET', '/products/net-takogo/history')).status, 404)
+  // Товар дошёл — история с сервера
+  await t.gw.syncNow()
+  const h2 = await t.req('GET', '/products/' + p.data.id + '/history')
+  assert.equal(h2.status, 200)
+  assert.ok(!h2.data.local)
+})
+
 test('кассир с правом прихода: поставщики без долгов, оплаты поставщикам и история товара закрыты, как на сервере; приход в долг оформить может', async (tt) => {
   // Владелец выдал кассиру приход и приход в долг, но не поставщиков — долги и оплаты остаются закрытыми
   const t = await loggedIn({ role: 'cashier', permissions: ['pos.sell', 'shift.open', 'arrivals.view', 'arrivals.create', 'arrivals.debt'] })
@@ -2116,9 +2127,9 @@ test('кассир с правом прихода: поставщики без �
   assert.equal((await t.req('POST', '/suppliers/sup-1/pay', { amount: 1 })).status, 403)
   t.srv.state.online = false
   assert.equal((await t.req('POST', '/arrivals', { supplierId: 'sup-1', debt: 30, items: [{ productId: 'nur', qty: 1, cost: 100, expiryDate: '2028-01-31' }] })).status, 201)
+  // История товара без связи — по журналам кассы, но тоже по праву
   const r = await t.req('GET', '/products/nur/history')
-  assert.equal(r.status, 0)
-  assert.equal(r.data.message, MESSAGES.historyOnline)
+  assert.equal(r.status, 403)
   t.srv.state.online = true
   await t.gw.syncNow()
   assert.equal(t.srv.state.data.suppliers.find((s) => s.id === 'sup-1').debt, 530, 'долг прихода кассира не дошёл до сервера')

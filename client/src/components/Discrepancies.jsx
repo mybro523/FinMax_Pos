@@ -4,8 +4,8 @@ import { api } from '../db/api'
 import { money, onChanged } from '../db/store'
 import { fmtShort } from '../lib/time'
 import { useT } from '../lib/i18n'
-import { useToast } from './ui'
-import { discrepancyAdvice, discrepancyDetail, discrepancyTitle } from '../lib/discrepancy'
+import { useDialog, useToast } from './ui'
+import { discrepancyAdvice, discrepancyDetail, discrepancyTitle, noteOf } from '../lib/discrepancy'
 
 // ── Расхождения с касс ──
 // Касса в программе для Windows работает и без интернета. Её чеки сервер принимает
@@ -20,6 +20,7 @@ import { discrepancyAdvice, discrepancyDetail, discrepancyTitle } from '../lib/d
 export default function Discrepancies() {
   const t = useT()
   const toast = useToast()
+  const dialog = useDialog()
   const [list, setList] = useState([])
   const [busy, setBusy] = useState(null)
 
@@ -53,6 +54,32 @@ export default function Discrepancies() {
     }
   }
 
+  // ── Дубль товара: объединить карточки ──
+  // Касса без связи завела товар со штрихкодом, который за это время заняли, — сервер
+  // принял его с внутренним кодом. Лишняя карточка (с внутренним кодом) вливается в
+  // основную: партии, чеки и приходы переходят к ней, лишняя удаляется
+  async function merge(d) {
+    const n = noteOf(d)
+    const ok = await dialog.confirm({
+      title: t('Объединить карточки?'),
+      message: `«${d.name}» ${t('вольётся в')} «${n.other?.name || ''}». ${t('Остаток, чеки и приходы перейдут к ней, а карточка с внутренним кодом будет удалена.')}`,
+      confirmText: t('Объединить'),
+    })
+    if (!ok) return
+    setBusy(d.id)
+    try {
+      await api.post(`/products/${d.productId}/merge`, { into: n.other.id })
+      await api.post(`/discrepancies/${d.id}/resolve`, {}).catch(() => {})
+      setList((cur) => cur.filter((x) => x.id !== d.id))
+      toast(t('Карточки объединены'))
+    } catch (e) {
+      toast(t(e.message), 'err')
+    } finally {
+      setBusy(null)
+    }
+  }
+  const canMerge = (d) => d.kind === 'barcode' && d.productId && !noteOf(d).edit && noteOf(d).other?.id
+
   if (!list.length) return null
 
   return (
@@ -82,9 +109,16 @@ export default function Discrepancies() {
               </div>
               <div className="tag-cat">{discrepancyAdvice(d.kind, t)}</div>
             </div>
-            <button className="btn ghost" disabled={busy === d.id} onClick={() => resolve(d)}>
-              {t('Разобрался')}
-            </button>
+            <div className="rash-acts" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              {canMerge(d) && (
+                <button className="btn" disabled={busy === d.id} onClick={() => merge(d)}>
+                  {t('Объединить')}
+                </button>
+              )}
+              <button className="btn ghost" disabled={busy === d.id} onClick={() => resolve(d)}>
+                {t('Разобрался')}
+              </button>
+            </div>
           </div>
         ))}
       </div>

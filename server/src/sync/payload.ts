@@ -41,6 +41,35 @@ export const OP_TYPES = [
   'cash.move',
   'income',
   'supplier.return',
+  // ── Справочники и правки документов без связи (версия 1.4.14) ──
+  'product.create',
+  'product.update',
+  'product.delete',
+  'category.create',
+  'category.update',
+  'category.delete',
+  'productType.create',
+  'productType.update',
+  'productType.delete',
+  'payService.create',
+  'payService.delete',
+  'expenseCategory.create',
+  'expenseCategory.delete',
+  'incomeCategory.create',
+  'incomeCategory.delete',
+  'supplier.create',
+  'supplier.update',
+  'supplier.delete',
+  'supplier.pay',
+  'supplierPayment.delete',
+  'supplierReturn.delete',
+  'expense.update',
+  'expense.delete',
+  'income.update',
+  'income.delete',
+  'cashMove.delete',
+  'arrival.update',
+  'arrival.delete',
 ] as const
 export type OpType = (typeof OP_TYPES)[number]
 
@@ -406,4 +435,268 @@ export function parseDeferredAdd(p: any, now?: number) {
 export function parseDeferredRemove(p: any) {
   const d = obj(p, 'штрихкод')
   return { id: id(d.id, 'штрихкод'), barcode: text(d.barcode, 200).trim() }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// ── Справочники и правки документов, сделанные без связи ──
+//
+// Касса заводит и правит без интернета товары, поставщиков, категории, типы, статьи и
+// сервисы перевода, правит и удаляет расходы, доходы, приходы. Правка присылается так:
+//   set  — что стало (только поля, которые поменяли);
+//   base — что было в этих полях у кассы до правки;
+//   at   — когда правили на кассе.
+// По base и at сервер решает, чья правка новее, если то же поле правили и на сайте
+// (common/stamps.ts). Остаток товара — отдельно: это пересчёт на момент at.
+// ════════════════════════════════════════════════════════════════════════════════
+
+// Поле правки: прислали — проверяем, нет — его не трогали
+const has = (o: any, k: string) => !!o && Object.prototype.hasOwnProperty.call(o, k) && o[k] !== undefined
+
+// Что было у кассы в поле до правки. Проверять его незачем — с ним только сравнивают;
+// но и тащить в разбор что попало нельзя: текст обрезается, остальное — как есть
+function baseOf(b: any, keys: string[]) {
+  const out: Record<string, any> = {}
+  if (!b || typeof b !== 'object') return out
+  for (const k of keys) {
+    if (!Object.prototype.hasOwnProperty.call(b, k)) continue
+    const v = b[k]
+    if (typeof v === 'string') out[k] = v.slice(0, 200_000)
+    else if (typeof v === 'number' || typeof v === 'boolean' || v === null) out[k] = v
+    else if (Array.isArray(v)) out[k] = v.filter((x) => typeof x === 'string').slice(0, 500).map((x) => String(x).slice(0, 64))
+  }
+  return out
+}
+
+const nonEmpty = (v: any, max: number, what: string) => {
+  const t = text(v, max).trim()
+  if (!t) throw new Reject(`Пусто: ${what}`)
+  return t
+}
+
+const IMAGE = /^$|^data:image\/(jpeg|png|webp);base64,/
+
+// ── Товар ──
+// Поля карточки — как у сайта (products/dto.ts): те же пределы, те же правила
+function productFields(src: any) {
+  const out: Record<string, any> = {}
+  if (has(src, 'name')) out.name = nonEmpty(src.name, 300, 'название товара')
+  if (has(src, 'barcode')) out.barcode = nonEmpty(src.barcode, 200, 'штрихкод')
+  if (has(src, 'category')) out.category = text(src.category, 60).trim()
+  if (has(src, 'type')) out.type = text(src.type, 40).trim()
+  if (has(src, 'cost')) out.cost = money(src.cost, 'закупочная цена')
+  if (has(src, 'price')) out.price = money(src.price, 'цена')
+  if (has(src, 'minStock')) out.minStock = int(src.minStock, 'минимальный остаток')
+  if (has(src, 'unit')) out.unit = text(src.unit, 20).trim() || 'уп'
+  if (has(src, 'unitsPerPack')) out.unitsPerPack = int(src.unitsPerPack, 'штук в упаковке', 1, 100_000)
+  if (has(src, 'dosage')) out.dosage = text(src.dosage, 200)
+  if (has(src, 'analogIds')) {
+    if (!Array.isArray(src.analogIds)) throw new Reject('Аналоги: ожидался список')
+    out.analogIds = src.analogIds.slice(0, 500).map((x: any) => id(x, 'аналог'))
+  }
+  if (has(src, 'image')) {
+    const v = text(src.image, 200_000)
+    if (!IMAGE.test(v)) throw new Reject('Фото: не тот вид')
+    out.image = v
+  }
+  return out
+}
+export const PRODUCT_EDIT_FIELDS = ['name', 'barcode', 'category', 'type', 'cost', 'price', 'minStock', 'unit', 'unitsPerPack', 'dosage', 'analogIds', 'image']
+
+export function parseProductCreate(p: any, now?: number) {
+  const x = obj(obj(p, 'товар').product, 'товар')
+  const f = productFields(x)
+  if (!f.name) throw new Reject('Пусто: название товара')
+  if (!f.barcode) throw new Reject('Пусто: штрихкод')
+  const stock = int(x.stock ?? 0, 'остаток')
+  const looseUnits = int(x.looseUnits ?? 0, 'штук во вскрытой')
+  const upp = f.unitsPerPack ?? 1
+  if (stock * upp + looseUnits > MAX_UNITS) throw new Reject('Недопустимое количество: слишком много')
+  return {
+    id: id(x.id, 'товар'),
+    name: f.name as string,
+    barcode: f.barcode as string,
+    category: (f.category as string) ?? 'Прочее',
+    type: (f.type as string) ?? '',
+    cost: (f.cost as number) ?? 0,
+    price: (f.price as number) ?? 0,
+    minStock: (f.minStock as number) ?? 5,
+    unit: (f.unit as string) ?? 'уп',
+    unitsPerPack: upp,
+    dosage: (f.dosage as string) ?? '',
+    analogIds: (f.analogIds as string[]) ?? [],
+    image: (f.image as string) ?? '',
+    stock,
+    looseUnits,
+    expiryDate: dateOrNull(x.expiryDate, 'срок годности'),
+    createdAt: when(x.createdAt, 'товар', now),
+  }
+}
+
+export function parseProductUpdate(p: any, now?: number) {
+  const root = obj(p, 'правка товара')
+  const set = productFields(root.set || {})
+  // Остаток, который вписали в карточку: штук всего. explicit — вписали число руками;
+  // иначе оно вышло из новой упаковки (штук в упаковке стало больше, упаковок — столько же)
+  const stock =
+    root.stock === null || root.stock === undefined
+      ? null
+      : { units: int(obj(root.stock, 'остаток').units, 'остаток', 0, MAX_UNITS), explicit: root.stock.explicit !== false }
+  // Срок годности из карточки: пусто — без срока; нет поля — не трогали
+  const expiryTouched = Object.prototype.hasOwnProperty.call(root, 'expiryDate')
+  return {
+    id: id(root.id, 'товар'),
+    at: when(root.at, 'правка товара', now),
+    set,
+    base: baseOf(root.base, PRODUCT_EDIT_FIELDS),
+    stock,
+    expiryTouched,
+    expiryDate: expiryTouched ? dateOrNull(root.expiryDate, 'срок годности') : null,
+  }
+}
+
+// Удаление чего-либо: что удаляют и когда (по времени решается, не правили ли запись позже)
+export function parseRemove(p: any, what: string, now?: number) {
+  const root = obj(p, what)
+  return { id: id(root.id, what), at: when(root.at, what, now) }
+}
+
+// ── Категория и тип товара ──
+export function parseCategoryCreate(p: any, now?: number) {
+  const c = obj(obj(p, 'категория').category, 'категория')
+  return { id: id(c.id, 'категория'), name: nonEmpty(c.name, 40, 'название категории'), noExpiry: c.noExpiry === true, createdAt: when(c.createdAt, 'категория', now) }
+}
+
+export function parseCategoryUpdate(p: any, now?: number) {
+  const root = obj(p, 'правка категории')
+  const src = root.set || {}
+  const set: Record<string, any> = {}
+  if (has(src, 'name')) set.name = nonEmpty(src.name, 40, 'название категории')
+  if (has(src, 'noExpiry')) set.noExpiry = src.noExpiry === true
+  return { id: id(root.id, 'категория'), at: when(root.at, 'правка категории', now), set, base: baseOf(root.base, ['name', 'noExpiry']) }
+}
+
+export function parseTypeCreate(p: any, now?: number) {
+  const c = obj(obj(p, 'тип товара').type, 'тип товара')
+  return { id: id(c.id, 'тип товара'), name: nonEmpty(c.name, 40, 'название типа'), analogs: c.analogs === true, createdAt: when(c.createdAt, 'тип товара', now) }
+}
+
+export function parseTypeUpdate(p: any, now?: number) {
+  const root = obj(p, 'правка типа товара')
+  const src = root.set || {}
+  const set: Record<string, any> = {}
+  if (has(src, 'name')) set.name = nonEmpty(src.name, 40, 'название типа')
+  if (has(src, 'analogs')) set.analogs = src.analogs === true
+  return { id: id(root.id, 'тип товара'), at: when(root.at, 'правка типа товара', now), set, base: baseOf(root.base, ['name', 'analogs']) }
+}
+
+// ── Сервис перевода, статьи расходов и доходов: только завести и убрать ──
+// key — где лежит запись в операции, what — как назвать в отказе, max — длина названия
+export function parseNamed(p: any, key: string, what: string, max: number, now?: number) {
+  const c = obj(obj(p, what)[key], what)
+  return { id: id(c.id, what), name: nonEmpty(c.name, max, what), createdAt: when(c.createdAt, what, now) }
+}
+
+// ── Поставщик ──
+export function parseSupplierCreate(p: any, now?: number) {
+  const s = obj(obj(p, 'поставщик').supplier, 'поставщик')
+  return {
+    id: id(s.id, 'поставщик'),
+    name: nonEmpty(s.name, 120, 'название поставщика'),
+    phone: text(s.phone, 60).trim(),
+    note: text(s.note, 500).trim(),
+    openingDebt: money(s.openingDebt ?? 0, 'долг на начало'),
+    createdAt: when(s.createdAt, 'поставщик', now),
+  }
+}
+
+export function parseSupplierUpdate(p: any, now?: number) {
+  const root = obj(p, 'правка поставщика')
+  const src = root.set || {}
+  const set: Record<string, any> = {}
+  if (has(src, 'name')) set.name = nonEmpty(src.name, 120, 'название поставщика')
+  if (has(src, 'phone')) set.phone = text(src.phone, 60).trim()
+  if (has(src, 'note')) set.note = text(src.note, 500).trim()
+  return { id: id(root.id, 'поставщик'), at: when(root.at, 'правка поставщика', now), set, base: baseOf(root.base, ['name', 'phone', 'note']) }
+}
+
+// Оплата поставщику: деньги уже отданы — из ящика своей смены или мимо кассы
+export function parseSupplierPay(p: any, now?: number) {
+  const x = obj(obj(p, 'оплата поставщику').payment, 'оплата поставщику')
+  const amount = money(x.amount, 'сумма оплаты')
+  if (amount <= 0) throw new Reject('Сумма оплаты должна быть больше нуля')
+  return {
+    id: id(x.id, 'оплата поставщику'),
+    supplierId: id(x.supplierId, 'поставщик'),
+    amount,
+    note: text(x.note, 500).trim(),
+    fromCash: x.fromCash === true,
+    shiftId: idOrNull(x.shiftId, 'смена'),
+    date: when(x.date, 'оплата поставщику', now),
+  }
+}
+
+// ── Расход и доход: правка ──
+const SALARY_MONTH_RE = /^(\d{4}-(0[1-9]|1[0-2]))?$/
+const BONUS_DAY_RE = /^(\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]))?$/
+export function parseExpenseUpdate(p: any, now?: number) {
+  const root = obj(p, 'правка расхода')
+  const src = root.set || {}
+  const set: Record<string, any> = {}
+  if (has(src, 'category')) set.category = nonEmpty(src.category, 60, 'статья расхода')
+  if (has(src, 'amount')) {
+    set.amount = money(src.amount, 'сумма расхода')
+    if (set.amount <= 0) throw new Reject('Сумма расхода должна быть больше нуля')
+  }
+  if (has(src, 'note')) set.note = text(src.note, 500).trim()
+  if (has(src, 'date')) set.date = when(src.date, 'дата расхода', now)
+  if (Object.prototype.hasOwnProperty.call(src, 'employeeId')) set.employeeId = idOrNull(src.employeeId, 'сотрудник')
+  if (has(src, 'salaryMonth')) set.salaryMonth = SALARY_MONTH_RE.test(String(src.salaryMonth)) ? String(src.salaryMonth) : ''
+  if (has(src, 'bonusFrom')) set.bonusFrom = BONUS_DAY_RE.test(String(src.bonusFrom)) ? String(src.bonusFrom) : ''
+  if (has(src, 'bonusTo')) set.bonusTo = BONUS_DAY_RE.test(String(src.bonusTo)) ? String(src.bonusTo) : ''
+  return {
+    id: id(root.id, 'расход'),
+    at: when(root.at, 'правка расхода', now),
+    set,
+    base: baseOf(root.base, ['category', 'amount', 'note', 'date', 'employeeId', 'salaryMonth', 'bonusFrom', 'bonusTo']),
+  }
+}
+
+export function parseIncomeUpdate(p: any, now?: number) {
+  const root = obj(p, 'правка дохода')
+  const src = root.set || {}
+  const set: Record<string, any> = {}
+  if (has(src, 'category')) set.category = nonEmpty(src.category, 60, 'статья дохода')
+  if (has(src, 'amount')) {
+    set.amount = money(src.amount, 'сумма дохода')
+    if (set.amount <= 0) throw new Reject('Сумма дохода должна быть больше нуля')
+  }
+  if (has(src, 'note')) set.note = text(src.note, 500).trim()
+  if (has(src, 'date')) set.date = when(src.date, 'дата дохода', now)
+  return { id: id(root.id, 'доход'), at: when(root.at, 'правка дохода', now), set, base: baseOf(root.base, ['category', 'amount', 'note', 'date']) }
+}
+
+// ── Приход: правка ──
+// Как на сайте (arrivals/dto.ts, UpdateArrivalDto): строки целиком, каждая со своим номером
+export function parseArrivalUpdate(p: any, now?: number) {
+  const root = obj(p, 'правка прихода')
+  const x = obj(root.arrival, 'правка прихода')
+  const items = list(x.items, 'строки прихода', (i) => {
+    const exp = dateOrNull(i.expiryDate, 'срок годности')
+    return {
+      id: id(i.id, 'строка прихода'),
+      qty: int(i.qty, 'упаковки', 0),
+      pieces: i.pieces === undefined || i.pieces === null ? 0 : int(i.pieces, 'штуки', 0, 99_999),
+      cost: money(i.cost, 'закупочная цена'),
+      expiryDate: exp ? exp.toISOString() : undefined,
+    }
+  })
+  return {
+    id: id(x.id, 'приход'),
+    at: when(root.at, 'правка прихода', now),
+    supplier: x.supplier === undefined || x.supplier === null ? undefined : text(x.supplier, 200),
+    // Пустая строка — убрать поставщика; не прислано — оставить как было
+    supplierId: x.supplierId === undefined ? undefined : x.supplierId === '' || x.supplierId === null ? '' : id(x.supplierId, 'поставщик'),
+    debt: x.debt === undefined || x.debt === null ? undefined : money(x.debt, 'долг поставщику'),
+    items,
+  }
 }

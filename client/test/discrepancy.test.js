@@ -57,3 +57,58 @@ test('на таджикском все тексты переведены', () =>
     setLang('ru')
   }
 })
+
+// ── Правки без связи (версия 1.4.14): правка в двух местах, дубль штрихкода, переплата ──
+test('правка карточки в двух местах: по каждому полю — что на кассе, что на сайте и чья осталась', () => {
+  setLang('ru')
+  const note = JSON.stringify({ tbl: 'Product', fields: [{ field: 'price', kassa: 170, server: 160, won: 'kassa' }, { field: 'name', kassa: 'Нурофен форте', server: 'Нурофен 200', won: 'server' }] })
+  assert.equal(discrepancyTitle('edit', translate), 'Правку сделали и на кассе без связи, и на сайте')
+  assert.equal(
+    discrepancyDetail({ kind: 'edit', note }, translate, money),
+    'Цена продажи: на кассе 170.00 с., на сайте 160.00 с. — осталась правка кассы; Название: на кассе Нурофен форте, на сайте Нурофен 200 — осталась правка сайта',
+  )
+  assert.equal(discrepancyDetail({ kind: 'edit', note: JSON.stringify({ gone: true }) }, translate, money), 'запись удалили, пока касса была без связи, — правка с кассы не применена')
+  assert.equal(discrepancyDetail({ kind: 'edit', note: JSON.stringify({ deleteKept: true }) }, translate, money), 'удаление с кассы не применено: запись поправили позже')
+  // Подробности испорчены — экран не падает
+  assert.equal(discrepancyDetail({ kind: 'edit', note: '{битые' }, translate, money), 'правку сделали в двух местах')
+})
+
+test('дубль штрихкода и переплата поставщику — своими словами, на обоих языках', () => {
+  setLang('ru')
+  const note = JSON.stringify({ barcode: '4600000000031', internal: '2001234567890', other: { id: 'p1', name: 'Анальгин' } })
+  assert.equal(discrepancyDetail({ kind: 'barcode', note }, translate, money), 'код 4600000000031 уже у товара «Анальгин» — принят с кодом 2001234567890')
+  assert.equal(discrepancyDetail({ kind: 'supdebt', checkPrice: 300, basePrice: 200 }, translate, money), 'оплачено 300.00 с., долг был 200.00 с.')
+  for (const k of ['edit', 'barcode', 'supdebt']) assert.ok(discrepancyAdvice(k, translate).length > 10, k)
+  setLang('tg')
+  try {
+    // «ъ» в таджикском своя (таъминкунанда, таърих) — по ней русский текст не узнать
+    const cyrRu = /[ыэщ]|ться|ение/i
+    for (const k of ['edit', 'barcode', 'supdebt']) {
+      assert.ok(!cyrRu.test(discrepancyTitle(k, translate)), k)
+      assert.ok(!cyrRu.test(discrepancyAdvice(k, translate)), k)
+    }
+  } finally {
+    setLang('ru')
+  }
+})
+
+test('остаток кассы на объединённой карточке и долг на начало у поставщика-двойника — словами', () => {
+  setLang('ru')
+  assert.equal(
+    discrepancyDetail({ kind: 'edit', note: JSON.stringify({ tbl: 'Product', merged: true, stock: 7 }) }, translate, money),
+    'остаток с кассы не применён: эту карточку уже объединили с другой (на кассе насчитали 7 шт)',
+  )
+  assert.equal(
+    discrepancyDetail({ kind: 'edit', note: JSON.stringify({ tbl: 'Supplier', sameName: true, openingDebt: 500 }) }, translate, money),
+    'поставщик с таким названием уже был — долг на начало с кассы к нему не прибавлен: 500.00 с.',
+  )
+  setLang('tg')
+  try {
+    const cyrRu = /[ыэщ]|ться|ение/i
+    for (const note of [{ merged: true, stock: 7 }, { sameName: true, openingDebt: 500 }]) {
+      assert.ok(!cyrRu.test(discrepancyDetail({ kind: 'edit', note: JSON.stringify(note) }, translate, money)), JSON.stringify(note))
+    }
+  } finally {
+    setLang('ru')
+  }
+})

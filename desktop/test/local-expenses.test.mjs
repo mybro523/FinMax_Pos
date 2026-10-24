@@ -308,10 +308,15 @@ test('расходы и статьи — только владельцу: кас
   call('POST', '/expenses', null, { category: 'Транспорт', amount: 7, fromCash: true })
   assert.equal(call('GET', '/shifts')[0].expenseCash, 7)
 
-  // Править и удалять расход, менять статьи касса сама не умеет — это запросы к серверу
-  for (const [method, path] of [['PATCH', '/expenses/abc'], ['DELETE', '/expenses/abc'], ['POST', '/expense-categories'], ['DELETE', '/expense-categories/abc']]) {
-    assert.equal(matchLocal(method, path), null, `${method} ${path} не должен обслуживаться локально`)
+  // Править и удалять расход, менять статьи — с версии 1.4.14 касса умеет и сама, по тем
+  // же правам, что сервер: кассиру — нет
+  for (const [method, path] of [['PATCH', '/expenses/' + e.id], ['DELETE', '/expenses/' + e.id], ['POST', '/expense-categories'], ['DELETE', '/expense-categories/expcat-1']]) {
+    refused(() => call(method, path, cashier, { name: 'Охрана', amount: 12 }), 403, 'Недостаточно прав')
   }
+  assert.equal(call('PATCH', '/expenses/' + e.id, null, { amount: 12 }).amount, 12)
+  assert.equal(call('POST', '/expense-categories', null, { name: 'Охрана' }).name, 'Охрана')
+  assert.deepEqual(call('DELETE', '/expenses/' + e.id), { ok: true })
+  assert.equal(listDocs(db, 'expense').some((x) => x.id === e.id), false)
 })
 
 // ── Обмен с сервером ──

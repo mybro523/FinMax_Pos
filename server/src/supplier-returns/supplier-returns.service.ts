@@ -102,21 +102,33 @@ export class SupplierReturnsService {
   // удаляется (то же правило, что у оплаты поставщику из кассы)
   async remove(id: string) {
     return this.prisma.$transaction(async (tx) => {
-      const ret = await tx.supplierReturn.findUnique({ where: { id }, include: { items: true } })
-      if (!ret) throw new NotFoundException('Возврат не найден')
-      if (ret.refund === 'cash' && ret.shiftId) {
-        const shift = await tx.shift.findUnique({ where: { id: ret.shiftId }, select: { closedAt: true } })
-        if (shift?.closedAt) throw new BadRequestException(CLOSED_SHIFT_REFUND)
-      }
-      await restoreItems(tx, ret.items)
-      if (ret.refund === 'debt' && ret.supplierId && (await lockSupplier(tx, ret.supplierId))) {
-        await tx.supplier.update({ where: { id: ret.supplierId }, data: { debt: { increment: ret.total } } })
-      }
-      await tx.supplierReturn.delete({ where: { id } }) // строки уходят каскадом
-      if (ret.refund === 'cash' && ret.shiftId) await setSupplierRefund(tx, ret.shiftId)
+      if (!(await removeSupplierReturnIn(tx, id))) throw new NotFoundException('Возврат не найден')
       return { ok: true }
     }, TX)
   }
+}
+
+// ── Удалить возврат поставщику ──
+// Общая часть для сайта и для удаления, сделанного на кассе без связи (sync). Возврата
+// уже нет — false
+export async function removeSupplierReturnIn(tx: Tx, id: string): Promise<boolean> {
+  const ret = await tx.supplierReturn.findUnique({ where: { id }, include: { items: true } })
+  if (!ret) return false
+  // Замки — в том же порядке, что у продажи: товары, затем смена, затем поставщик. В
+  // обратном порядке удаление и продажа того же товара в ту же смену заперли бы друг друга
+  await lockProducts(tx, ret.items.map((i) => i.productId))
+  if (ret.refund === 'cash' && ret.shiftId) {
+    // Под замком, как у оплат: закрытие, идущее в ту же секунду, ждёт нас
+    const rows = await tx.$queryRaw<{ closedAt: Date | null }[]>`SELECT "closedAt" FROM "Shift" WHERE "id" = ${ret.shiftId} FOR UPDATE`
+    if (rows[0]?.closedAt) throw new BadRequestException(CLOSED_SHIFT_REFUND)
+  }
+  await restoreItems(tx, ret.items)
+  if (ret.refund === 'debt' && ret.supplierId && (await lockSupplier(tx, ret.supplierId))) {
+    await tx.supplier.update({ where: { id: ret.supplierId }, data: { debt: { increment: ret.total } } })
+  }
+  await tx.supplierReturn.delete({ where: { id } }) // строки уходят каскадом
+  if (ret.refund === 'cash' && ret.shiftId) await setSupplierRefund(tx, ret.shiftId)
+  return true
 }
 
 // Вернуть товар возврата на склад — в те же партии. Товар удалили из справочника —

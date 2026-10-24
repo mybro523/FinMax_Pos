@@ -90,6 +90,63 @@ export function opTitle(type, t) {
       return t('Доход')
     case 'supplier.return':
       return t('Возврат поставщику')
+    // ── Справочники и правки документов (версия 1.4.14) ──
+    case 'product.create':
+      return t('Новый товар')
+    case 'product.update':
+      return t('Правка товара')
+    case 'product.delete':
+      return t('Удаление товара')
+    case 'category.create':
+      return t('Новая категория')
+    case 'category.update':
+      return t('Правка категории')
+    case 'category.delete':
+      return t('Удаление категории')
+    case 'productType.create':
+      return t('Новый тип товара')
+    case 'productType.update':
+      return t('Правка типа товара')
+    case 'productType.delete':
+      return t('Удаление типа товара')
+    case 'payService.create':
+      return t('Новый сервис перевода')
+    case 'payService.delete':
+      return t('Удаление сервиса перевода')
+    case 'expenseCategory.create':
+      return t('Новая статья расходов')
+    case 'expenseCategory.delete':
+      return t('Удаление статьи расходов')
+    case 'incomeCategory.create':
+      return t('Новая статья доходов')
+    case 'incomeCategory.delete':
+      return t('Удаление статьи доходов')
+    case 'supplier.create':
+      return t('Новый поставщик')
+    case 'supplier.update':
+      return t('Правка поставщика')
+    case 'supplier.delete':
+      return t('Удаление поставщика')
+    case 'supplier.pay':
+      return t('Оплата поставщику')
+    case 'supplierPayment.delete':
+      return t('Отмена оплаты поставщику')
+    case 'supplierReturn.delete':
+      return t('Удаление возврата поставщику')
+    case 'expense.update':
+      return t('Правка расхода')
+    case 'expense.delete':
+      return t('Удаление расхода')
+    case 'income.update':
+      return t('Правка дохода')
+    case 'income.delete':
+      return t('Удаление дохода')
+    case 'cashMove.delete':
+      return t('Отмена внесения или изъятия')
+    case 'arrival.update':
+      return t('Правка прихода')
+    case 'arrival.delete':
+      return t('Удаление прихода')
     default:
       return t('Операция')
   }

@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { ProductsService } from './products.service'
 import { CurrentUser, Perm } from '../auth/decorators'
+import { hasPerm } from '../auth/permissions'
 import { PeriodQuery } from '../common/period'
-import { CreateProductDto, UpdateProductDto } from './dto'
+import { CreateProductDto, MergeProductDto, UpdateProductDto } from './dto'
 
 // ── Кто что может с карточкой товара ──
 // Списание одной упаковки было закрыто на владельца, а удалить товар целиком мог
@@ -52,5 +53,14 @@ export class ProductsController {
   @Perm('products.delete')
   remove(@Param('id') id: string) {
     return this.products.remove(id)
+  }
+
+  // Объединить дубль с основной карточкой: лишняя удаляется, её партии и документы
+  // переходят к основной. Это и правка, и удаление — нужны оба права
+  @Post(':id/merge')
+  @Perm('products.edit')
+  merge(@Param('id') id: string, @Body() dto: MergeProductDto, @CurrentUser() u: any) {
+    if (!hasPerm(u, 'products.delete')) throw new ForbiddenException('Недостаточно прав')
+    return this.products.merge(id, dto.into)
   }
 }

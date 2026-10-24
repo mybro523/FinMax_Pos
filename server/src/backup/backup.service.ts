@@ -139,6 +139,10 @@ export class BackupService {
       // остальным — их отметки больше ничего не значат (см. common/counted.ts)
       const copiedAt = new Date(dump.createdAt)
       if (Number.isFinite(copiedAt.getTime())) await forgetCountedAfter(tx, copiedAt)
+      // Время правок карточек, сделанных после копии, — тоже: этих правок больше нет
+      // (common/stamps.ts). Без даты копии забываем все: правка кассы просто окажется новее
+      if (Number.isFinite(copiedAt.getTime())) await tx.fieldStamp.deleteMany({ where: { at: { gt: copiedAt } } })
+      else await tx.fieldStamp.deleteMany({})
 
       const strip = (rows: any[], drop: string[] = []) =>
         (rows || []).map((r) => {
@@ -214,6 +218,10 @@ export class BackupService {
       const ref = (id: any) => (id && userIds.has(id) ? id : null)
 
       if (d.products?.length) await tx.product.createMany({ data: strip(d.products) })
+      // Карточка, которую после этой копии объединили с другой, вернулась вместе с копией —
+      // псевдоним «она теперь та, другая» (sync/edits.ts) больше не верен: операции касс с её
+      // номером должны снова ложиться на неё саму
+      await tx.$executeRaw`DELETE FROM "SyncMeta" WHERE "key" LIKE 'alias:product:%' AND substring("key" from 15) IN (SELECT "id" FROM "Product")`
       if (d.customers?.length) await tx.customer.createMany({ data: strip(d.customers) })
       // Поставщики — до приходов: приход ссылается на поставщика
       if (d.suppliers?.length) await tx.supplier.createMany({ data: strip(d.suppliers) })

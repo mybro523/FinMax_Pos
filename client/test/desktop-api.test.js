@@ -157,7 +157,7 @@ test('часы сверяются с сервером и через мост', a
 // «проверьте интернет» — и на своём языке.
 
 const { setLang } = await import('../src/lib/i18n.js')
-const ONLINE_ONLY = 'Этот раздел работает только с интернетом. Касса, возвраты, приход и списание доступны и без него.'
+const ONLINE_ONLY = 'Этот раздел пока работает только с интернетом. Касса, склад, товары, поставщики, расходы и доходы доступны и без него.'
 const NOT_SENT = 'Эта запись ещё не отправлена на сервер. Изменить или удалить её можно будет после отправки.'
 
 test('«нет связи» с объяснением программы: показываем объяснение, а не общую фразу', async () => {
@@ -170,7 +170,7 @@ test('объяснения программы переводятся на тад
   setLang('tg')
   try {
     answer = () => ({ status: 0, date: null, data: { message: ONLINE_ONLY } })
-    await assert.rejects(() => api.post('/products', {}), (e) => e.status === 0 && /^Ин бахш танҳо бо интернет кор мекунад/.test(e.message))
+    await assert.rejects(() => api.post('/products', {}), (e) => e.status === 0 && /^Ин бахш ҳоло танҳо бо интернет кор мекунад/.test(e.message))
 
     answer = () => ({ status: 409, date: null, data: { message: NOT_SENT } })
     await assert.rejects(() => api.del('/arrivals/a1'), (e) => e.status === 409 && /^Ин сабт ҳанӯз ба сервер фиристода нашудааст/.test(e.message))

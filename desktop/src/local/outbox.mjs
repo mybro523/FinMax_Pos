@@ -7,7 +7,47 @@
 //     дальше остаток, долг и сам документ придут уже от сервера, с этой операцией внутри;
 //   • сервер отверг — сделанное снимается с учёта и остаётся на виду как отвергнутое.
 import { q, setMeta } from './db.mjs'
-import { D, fromCents, toCents } from './money.mjs'
+import { ackEdits, ADJ, adjSum, docKnown, docStillQueued, EDITABLE_DOC_KINDS, undoEdits, unsentPaidCash } from './edits.mjs'
+import { D, fromCents, fromCentsD, toCents } from './money.mjs'
+
+// ── Справочники и правки документов, сделанные без связи (версия 1.4.14) ──
+// Справочники: строка ложится поправкой (edits.mjs)
+export const REF_OPS = new Set([
+  'product.create', 'product.update', 'product.delete',
+  'category.create', 'category.update', 'category.delete',
+  'productType.create', 'productType.update', 'productType.delete',
+  'payService.create', 'payService.delete',
+  'expenseCategory.create', 'expenseCategory.delete',
+  'incomeCategory.create', 'incomeCategory.delete',
+  'supplier.create', 'supplier.update', 'supplier.delete',
+])
+// Правки и удаления документов: документ назван в операции (ref)
+export const DOC_EDIT_OPS = new Set([
+  'supplierPayment.delete', 'supplierReturn.delete', 'expense.update', 'expense.delete', 'income.update', 'income.delete',
+  'cashMove.delete', 'arrival.update', 'arrival.delete',
+])
+// Какую запись завела операция «завести» — по ней видно, не принял ли сервер её как уже
+// существующую (такую же завели на сайте): тогда своя строка не нужна
+function createdIdOf(op) {
+  const p = op.payload || {}
+  switch (op.type) {
+    case 'product.create':
+      return p.product?.id
+    case 'category.create':
+      return p.category?.id
+    case 'productType.create':
+      return p.type?.id
+    case 'payService.create':
+      return p.service?.id
+    case 'expenseCategory.create':
+    case 'incomeCategory.create':
+      return p.category?.id
+    case 'supplier.create':
+      return p.supplier?.id
+    default:
+      return null
+  }
+}
 
 // Что ждёт отправки, по порядку. Порядок — это порядок, в котором всё происходило:
 // возврат не может уйти раньше своего чека.
@@ -75,70 +115,42 @@ export function docsOf(op) {
       return [['cashmove', p.move?.id]]
     case 'supplier.return':
       return [['supplierreturn', p.ret?.id]]
+    case 'supplier.pay':
+      return [['supplierpayment', p.payment?.id]]
     default:
-      return []
+      // Правка или удаление документа: он назван в самой операции
+      return DOC_EDIT_OPS.has(op.type) && p.ref?.kind && p.ref?.id ? [[p.ref.kind, p.ref.id]] : []
   }
 }
 
-// ── Расход из кассы принят сервером ──
-// Сумму расходов из кассы сервер ведёт в самой смене и, приняв расход, уже прибавил
-// его. Касса до сих пор прибавляла его сама — как «своё неотправленное» (ops/expense.mjs).
-// С этой минуты он принят, и прибавка переходит в сумму смены: иначе до следующего
-// ответа сервера (а связь может оборваться сразу после отправки) расход не числился
-// бы нигде и «ожидается в кассе» выросло бы обратно. Свежая копия смены с сервера
-// потом просто заменит эту сумму своей — такой же.
+// ── Документ, заведённый здесь, принят сервером ──
+// Расход из кассы, приход в долг, возврат поставщику «в счёт долга»: суммы, которые
+// сервер ведёт сам (расходы из кассы в смене, долг поставщику), он, приняв документ, уже
+// поменял. Касса до сих пор досчитывала документ к ним сама — как «своё неотправленное»
+// (ops/expense.mjs, suppliers.mjs). С этой минуты прибавка переходит в сумму, известную от
+// сервера: иначе до его следующего ответа (а связь может оборваться сразу после отправки)
+// документ не числился бы нигде. Свежая копия с сервера потом заменит сумму своей — такой же.
+// Если документ успели поправить или удалить, а правка ещё ждёт, — сервер знает его в
+// прежнем виде, и разница правки становится её поправкой суммы (edits.mjs, docKnown).
 //
-// Только открытая смена, о которой сервер уже знает. Закрытая здесь и ждущая отправки
-// уже посчитана вместе с этим расходом; закрытую на сервере он пересчитает сам
-function cashExpenseAccepted(db, op) {
-  const id = op.payload?.expense?.id
-  if (op.type !== 'expense' || !id) return
-  const row = q(db, "SELECT shiftId, body FROM docs WHERE kind = 'expense' AND id = ? AND sync = 'pending'").get(id)
-  if (!row?.shiftId) return
-  const e = JSON.parse(row.body)
-  if (!e.fromCash) return
-  const shift = q(db, "SELECT body FROM docs WHERE kind = 'shift' AND id = ? AND sync = 'synced' AND closedAt IS NULL").get(row.shiftId)
-  if (!shift) return
-  const body = JSON.parse(shift.body)
-  body.expenseCash = fromCents(toCents(D(body.expenseCash || 0).plus(e.amount || 0)))
-  q(db, "UPDATE docs SET body = ? WHERE kind = 'shift' AND id = ?").run(JSON.stringify(body), row.shiftId)
+// Смена — только открытая и известная серверу: закрытая здесь и ждущая отправки уже
+// посчитана со всем своим; закрытую на сервере он пересчитает сам. Долг, которого касса не
+// знает (его получал кассир), не трогаем
+
+// Каким документ получил сервер — тело из самой операции заведения: правки, сделанные
+// после, могли уже поменять и отменить его здесь
+function sentBody(op, kind) {
+  const p = op.payload || {}
+  if (kind === 'expense') return p.expense ?? null
+  if (kind === 'arrival') return p.arrival ?? null
+  if (kind === 'supplierreturn') return p.ret ?? null
+  return null
 }
 
-// ── Приход в долг принят сервером ──
-// Долг поставщика сервер ведёт сам и, приняв приход, уже прибавил его. Касса до сих
-// пор прибавляла долг этого прихода сама — как «своё неотправленное» (suppliers.mjs).
-// С этой минуты прибавка переходит в долг, известный от сервера, — по той же причине,
-// что и у расхода из кассы: иначе до следующего ответа сервера долг «просел» бы.
-// Свежая копия поставщика с сервера потом заменит эту сумму своей — такой же.
-// Долг, которого касса не знает (его получал кассир), не трогаем
-function supplierDebtAccepted(db, op) {
-  const id = op.payload?.arrival?.id
-  if (op.type !== 'arrival' || !id) return
-  const row = q(db, "SELECT body FROM docs WHERE kind = 'arrival' AND id = ? AND sync = 'pending'").get(id)
-  if (!row) return
-  const a = JSON.parse(row.body)
-  if (!a.supplierId || !(Number(a.debt) > 0)) return
-  q(db, 'UPDATE suppliers SET sDebtC = sDebtC + ? WHERE id = ? AND sDebtC IS NOT NULL').run(toCents(a.debt), a.supplierId)
-}
-
-// ── Возврат поставщику «в счёт долга» принят сервером ──
-// То же, что с приходом в долг, только в другую сторону: сервер, приняв возврат, уже
-// уменьшил долг, а касса до сих пор вычитала его сама (suppliers.mjs). С этой минуты
-// вычет переходит в долг, известный от сервера
-function supplierReturnAccepted(db, op) {
-  const id = op.payload?.ret?.id
-  if (op.type !== 'supplier.return' || !id) return
-  const row = q(db, "SELECT body FROM docs WHERE kind = 'supplierreturn' AND id = ? AND sync = 'pending'").get(id)
-  if (!row) return
-  const r = JSON.parse(row.body)
-  if (!r.supplierId || r.refund !== 'debt' || !(Number(r.total) > 0)) return
-  q(db, 'UPDATE suppliers SET sDebtC = sDebtC - ? WHERE id = ? AND sDebtC IS NOT NULL').run(toCents(r.total), r.supplierId)
-}
-
-// Ждёт ли этот документ ещё чего-то в очереди. Смена — единственный документ,
-// который меняют две операции: открытие и закрытие
+// Ждёт ли этот документ ещё чего-то в очереди. Смену меняют две операции: открытие и
+// закрытие; остальные документы — заведение и следом правка или удаление (edits.mjs)
 function stillQueued(db, kind, id, exceptOpId) {
-  if (kind !== 'shift') return false
+  if (kind !== 'shift') return docStillQueued(db, kind, id, exceptOpId)
   return !!q(
     db,
     `SELECT 1 FROM outbox WHERE state = 'pending' AND id <> ? AND type IN ('shift.open', 'shift.close')
@@ -152,18 +164,31 @@ function stillQueued(db, kind, id, exceptOpId) {
 export function ackOp(db, op, fate = null) {
   const noDoc = !!fate && fate.docId === null
   db.transaction(() => {
-    q(db, "UPDATE outbox SET state = 'done', error = NULL WHERE id = ?").run(op.id)
+    // Повторное «принято» (ответ пришёл и на отправку, и на вопрос о судьбе) ничего не меняет:
+    // суммы документа уже перешли к серверу при первом
+    const first = q(db, 'SELECT state FROM outbox WHERE id = ?').get(op.id)?.state !== 'done'
+    // Поправки справочников и правки документов. Сервер принял операцию, но ничего не
+    // сделал (запись уже удалили, чужая правка новее) или принял заведение как уже
+    // существующую запись — тогда своя строка не верна, и касса заберёт всё заново.
+    // Отметка 'noop' в строке очереди уходит и соседним кассам (lan.mjs): их копия правки
+    // тоже не верна
+    const made = createdIdOf(op)
+    const merged = !!made && !!fate?.docId && fate.docId !== made
+    const applied = !(noDoc && (REF_OPS.has(op.type) || DOC_EDIT_OPS.has(op.type))) && !merged
+    q(db, "UPDATE outbox SET state = 'done', error = ? WHERE id = ?").run(applied ? null : 'noop', op.id)
     // Движения остатка и долга больше не «наши неотправленные»: сервер учёл их у себя,
     // и его следующий ответ придёт уже с ними
     q(db, 'UPDATE stock_moves SET synced = 1 WHERE opId = ?').run(op.id)
     q(db, 'UPDATE debt_moves SET synced = 1 WHERE opId = ?').run(op.id)
-    // До того как расход перестанет быть «неотправленным» — см. выше
-    cashExpenseAccepted(db, op)
-    supplierDebtAccepted(db, op)
-    supplierReturnAccepted(db, op)
-    for (const [kind, id] of docsOf(op)) {
-      if (id && !stillQueued(db, kind, id, op.id)) {
-        q(db, "UPDATE docs SET sync = 'synced' WHERE kind = ? AND id = ? AND sync = 'pending'").run(kind, id)
+    ackEdits(db, op.id, { applied })
+    if (!DOC_EDIT_OPS.has(op.type) && first) {
+      for (const [kind, id] of docsOf(op)) {
+        if (!id) continue
+        // Документ, который можно править: суммы и состояние — см. выше
+        if (EDITABLE_DOC_KINDS.has(kind)) docKnown(db, kind, id, { fold: true, created: sentBody(op, kind) })
+        else if (!stillQueued(db, kind, id, op.id)) {
+          q(db, "UPDATE docs SET sync = 'synced' WHERE kind = ? AND id = ? AND sync = 'pending'").run(kind, id)
+        }
       }
     }
     const p = op.payload || {}
@@ -201,7 +226,12 @@ export function rejectOp(db, op, error) {
     q(db, "UPDATE outbox SET state = 'rejected', error = ? WHERE id = ?").run(String(error || '').slice(0, 500), op.id)
     q(db, 'DELETE FROM stock_moves WHERE opId = ? AND synced = 0').run(op.id)
     q(db, 'DELETE FROM debt_moves WHERE opId = ? AND synced = 0').run(op.id)
+    // Поправки справочников и документов — назад, к тому, что было (edits.mjs)
+    undoEdits(db, op.id)
     for (const [kind, id] of docsOf(op)) {
+      // Правка документа не принята — документ уже вернулся к прежнему виду (выше),
+      // а сам он у сервера есть: «отвергнутым» его не помечаем
+      if (DOC_EDIT_OPS.has(op.type)) continue
       if (!id) continue
       // Закрытие смены сервер не принял — значит, для него смена по-прежнему открыта.
       // Открытой она сразу становится и здесь. Пометь мы её отвергнутой, смены на кассе
@@ -257,15 +287,18 @@ function reopenShift(db, id) {
   const row = q(db, "SELECT body FROM docs WHERE kind = 'shift' AND id = ? AND sync = 'pending'").get(id)
   if (!row) return
   const body = { ...JSON.parse(row.body), ...OPEN_TOTALS }
-  // Расходы из кассы — не итог закрытия, а сумма, которая копится всю смену, и она
-  // остаётся. Но при закрытии в неё вошло и то, что сервер ещё не принял; у открытой
-  // смены такое прибавляется отдельно (ops/expense.mjs) — вычитаем, чтобы не посчитать дважды
+  // Расходы из кассы и оплаты поставщикам из ящика — не итог закрытия, а суммы, которые
+  // копятся всю смену, и они остаются. Но при закрытии в них вошло и то, что сервер ещё не
+  // принял: свои неотправленные расходы и приходы, оплаченные из кассы, поправки правок и
+  // оплат. У открытой смены всё это прибавляется отдельно (ops/expense.mjs, ops/shift.mjs) —
+  // вычитаем, чтобы не посчитать дважды
   let unsent = D(0)
   for (const r of q(db, "SELECT body FROM docs WHERE kind = 'expense' AND shiftId = ? AND sync = 'pending'").all(id)) {
     const e = JSON.parse(r.body)
     if (e.fromCash) unsent = unsent.plus(e.amount || 0)
   }
-  body.expenseCash = Math.max(0, fromCents(toCents(D(body.expenseCash || 0).minus(unsent))))
+  body.expenseCash = Math.max(0, fromCents(toCents(D(body.expenseCash || 0).minus(unsent).minus(fromCentsD(adjSum(db, ADJ.expenseCash, id))))))
+  body.supplierCash = Math.max(0, fromCents(toCents(D(body.supplierCash || 0).minus(fromCentsD(unsentPaidCash(db, id))).minus(fromCentsD(adjSum(db, ADJ.supplierCash, id))))))
   q(db, "UPDATE docs SET body = ?, closedAt = NULL, sync = 'synced' WHERE kind = 'shift' AND id = ?").run(JSON.stringify(body), id)
 }
 
@@ -389,9 +422,68 @@ export function describeOp(op, find = () => null) {
       return { sum: null, title: p.deferred?.barcode || '', detail: {} }
     case 'deferred.remove':
       return { sum: null, title: p.barcode || '', detail: {} }
+    // ── Справочники и правки документов (версия 1.4.14) ──
+    case 'product.create': {
+      const x = p.product || {}
+      return { sum: null, title: x.name || '', detail: { barcode: x.barcode || '', price: x.price ?? null, stock: x.stock ?? 0 } }
+    }
+    case 'product.update':
+    case 'category.update':
+    case 'productType.update':
+    case 'supplier.update': {
+      const old = p.base || {}
+      const name = (find(KIND_OF[op.type], p.id) || {}).name || old.name || p.set?.name || ''
+      return { sum: null, title: name, detail: { fields: Object.keys(p.set || {}), set: p.set || {}, base: old, stock: p.stock?.units ?? null } }
+    }
+    case 'product.delete':
+    case 'category.delete':
+    case 'productType.delete':
+    case 'payService.delete':
+    case 'expenseCategory.delete':
+    case 'incomeCategory.delete':
+    case 'supplier.delete':
+      return { sum: null, title: (find(KIND_OF[op.type], p.id) || {}).name || '', detail: {} }
+    case 'category.create':
+    case 'expenseCategory.create':
+    case 'incomeCategory.create':
+      return { sum: null, title: p.category?.name || '', detail: {} }
+    case 'productType.create':
+      return { sum: null, title: p.type?.name || '', detail: {} }
+    case 'payService.create':
+      return { sum: null, title: p.service?.name || '', detail: {} }
+    case 'supplier.create':
+      return { sum: null, title: p.supplier?.name || '', detail: { phone: p.supplier?.phone || '', openingDebt: p.supplier?.openingDebt || 0 } }
+    case 'supplier.pay': {
+      const x = p.payment || {}
+      return { sum: x.amount ?? null, title: (find('supplier', x.supplierId) || {}).name || '', detail: { note: x.note || '', fromCash: x.fromCash === true } }
+    }
+    case 'supplierPayment.delete':
+    case 'supplierReturn.delete':
+    case 'expense.update':
+    case 'expense.delete':
+    case 'income.update':
+    case 'income.delete':
+    case 'cashMove.delete':
+    case 'arrival.update':
+    case 'arrival.delete': {
+      // Сам документ — каким он был: по нему владелец поймёт, о чём речь
+      const d = find(p.ref?.kind, p.ref?.id) || {}
+      const sum = d.amount ?? d.total ?? null
+      const title = d.category || (d.supplier && d.supplier !== '—' ? d.supplier : '') || d.supplier?.name || d.note || ''
+      return { sum, title: typeof title === 'string' ? title : '', detail: { date: d.date || '', fields: Object.keys(p.set || {}), set: p.set || {} } }
+    }
     default:
       return { sum: null, title: '', detail: {} }
   }
+}
+
+// По какому виду искать запись, названную в операции (для названия в списке «не принято»)
+const KIND_OF = {
+  'product.update': 'product', 'product.delete': 'product',
+  'category.update': 'category', 'category.delete': 'category',
+  'productType.update': 'productType', 'productType.delete': 'productType',
+  'payService.delete': 'payService', 'expenseCategory.delete': 'expenseCategory', 'incomeCategory.delete': 'incomeCategory',
+  'supplier.update': 'supplier', 'supplier.delete': 'supplier',
 }
 
 // Какие разделы на экране устарели после того, как с операцией что-то случилось
@@ -414,5 +506,34 @@ const TOUCHES = {
   income: ['incomes'],
   // Возврат поставщику: склад, долг поставщика, деньги «в кассу» — в смене
   'supplier.return': ['supplierReturns', 'products', 'suppliers', 'shifts'],
+  // ── Справочники и правки документов (версия 1.4.14) ──
+  'product.create': ['products', 'deferred'],
+  'product.update': ['products'],
+  'product.delete': ['products'],
+  'category.create': ['categories'],
+  'category.update': ['categories', 'products'],
+  'category.delete': ['categories'],
+  'productType.create': ['productTypes'],
+  'productType.update': ['productTypes', 'products'],
+  'productType.delete': ['productTypes'],
+  'payService.create': ['payServices'],
+  'payService.delete': ['payServices'],
+  'expenseCategory.create': ['expenseCategories'],
+  'expenseCategory.delete': ['expenseCategories'],
+  'incomeCategory.create': ['incomeCategories'],
+  'incomeCategory.delete': ['incomeCategories'],
+  'supplier.create': ['suppliers'],
+  'supplier.update': ['suppliers'],
+  'supplier.delete': ['suppliers'],
+  'supplier.pay': ['suppliers', 'supplierPayments', 'shifts'],
+  'supplierPayment.delete': ['suppliers', 'supplierPayments', 'shifts'],
+  'supplierReturn.delete': ['supplierReturns', 'products', 'suppliers', 'shifts'],
+  'expense.update': ['expenses', 'shifts'],
+  'expense.delete': ['expenses', 'shifts'],
+  'income.update': ['incomes'],
+  'income.delete': ['incomes'],
+  'cashMove.delete': ['cashMoves', 'shifts'],
+  'arrival.update': ['arrivals', 'products', 'suppliers'],
+  'arrival.delete': ['arrivals', 'products', 'suppliers'],
 }
 export const touchedBy = (op) => TOUCHES[op?.type] || []
