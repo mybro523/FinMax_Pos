@@ -34,7 +34,9 @@ export function putDoc(db, kind, body, { sync = 'synced', deviceId = null } = {}
     // Ключ повтора есть у чека, возврата, расхода, дохода, движения наличных и оплаты поставщику
     kind === 'sale' || kind === 'return' || kind === 'expense' || kind === 'cashmove' || kind === 'income' || kind === 'supplierpayment' ? body.clientId ?? null : null,
     deviceId ?? body.deviceId ?? null,
-    kind === 'shift' ? body.closedAt ?? null : null,
+    // У смены — когда закрыта; у применённого листа пересчёта — когда применён (по нему
+    // пересборка остатка находит пересчёты, не разбирая тела всех листов, stock.mjs)
+    kind === 'shift' ? body.closedAt ?? null : kind === 'inventory' && body.status === 'applied' ? body.appliedAt ?? null : null,
     JSON.stringify(body),
     sync,
   )

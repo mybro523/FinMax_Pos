@@ -502,7 +502,15 @@ export class SyncService {
     if (!item || item.inventoryId !== count.inventoryId || item.actualUnits === null) return
     const expected = item.expectedUnits + delta
     await tx.inventoryItem.update({ where: { id: item.id }, data: { expectedUnits: expected } })
-    await this.setShortage(tx, count, product.id, Math.max(0, expected - item.actualUnits))
+    // Другие строки этого товара в листе (две карточки объединили): насчитанное по ним — тот же
+    // товар на той же полке, «по учёту» у них 0 (inventory.service). Недостача — по товару целиком
+    const others = await tx.inventoryItem.findMany({
+      where: { inventoryId: count.inventoryId, productId: product.id, NOT: { id: item.id } },
+      select: { expectedUnits: true, actualUnits: true },
+    })
+    const actual = item.actualUnits + others.reduce((s, o) => s + (o.actualUnits ?? 0), 0)
+    const expectedAll = expected + others.reduce((s, o) => s + o.expectedUnits, 0)
+    await this.setShortage(tx, count, product.id, Math.max(0, expectedAll - actual))
     ctx.extra.add('writeoffs')
   }
 

@@ -31,7 +31,7 @@
 import { getMeta, inTx, q, setMeta } from './db.mjs'
 import { KINDS, putDoc } from './docs.mjs'
 import { DOC_EDIT_OPS, docsOf, REF_OPS, touchedBy } from './outbox.mjs'
-import { applyMove, rebuildStock } from './stock.mjs'
+import { applyMove, countedSince, QTY_KINDS, rebuildStock } from './stock.mjs'
 import { DOC_KEYS, recountDebts, reorderCategories, reorderProducts } from './snapshot.mjs'
 import { ackEdits, applyPeerEdits, completePeerEdits, docKnown, EDITABLE_DOC_KINDS, editsOf, peerDocWaiting, undoEdits } from './edits.mjs'
 import { hasPerm } from './accounts.mjs'
@@ -353,14 +353,22 @@ function applyEffects(db, opId, type, fx, changed) {
     `INSERT INTO stock_moves (opId, productId, kind, units, skipExpired, costC, expiryDate, arrivalId, note, wPacks, wValue, createdAt)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
+  // Движение, сделанное раньше пересчёта товара, который сервер уже провёл: сервер его не
+  // проведёт (пересчёт его учёл) — и здесь оно на полку не ложится, как и при пересборке
+  // остатка (stock.mjs). Строка журнала остаётся — по ней операцию узнают при подтверждении
+  const counted = countedSince(db, (fx.moves || []).filter((m) => m && typeof m.productId === 'string' && typeof m.createdAt === 'string'))
   for (const m of fx.moves || []) {
     if (!m || typeof m.productId !== 'string' || !Number.isInteger(m.units)) continue
     const createdAt = typeof m.createdAt === 'string' ? m.createdAt : new Date().toISOString()
+    const kind = String(m.kind || 'peer')
     const info = insertMove.run(
-      opId, m.productId, String(m.kind || 'peer'), m.units, m.skipExpired ? 1 : 0, m.costC ?? null, m.expiryDate ?? null,
+      opId, m.productId, kind, m.units, m.skipExpired ? 1 : 0, m.costC ?? null, m.expiryDate ?? null,
       m.arrivalId ?? null, String(m.note || ''), m.wPacks ?? null, m.wValue ?? null, createdAt,
     )
-    applyMove(db, { ...m, seq: Number(info.lastInsertRowid), createdAt }, { tolerant: true, now: Date.parse(createdAt) || Date.now() })
+    const c = counted.get(m.productId)
+    if (!(c && QTY_KINDS.has(kind) && createdAt < c)) {
+      applyMove(db, { ...m, seq: Number(info.lastInsertRowid), createdAt }, { tolerant: true, now: Date.parse(createdAt) || Date.now() })
+    }
     changed.add('products')
   }
 

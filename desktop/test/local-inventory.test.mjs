@@ -498,3 +498,39 @@ test('сервер принял своё применение — строки �
   const s = inventoryOne(a, sheet.id)
   assert.deepEqual([s.status, lineOf(s, 'bint').actualUnits], ['applied', 30])
 })
+
+test('лист применили на сайте: остаток и лист пришли одним ответом — движение соседа до пересчёта не вычитается второй раз', () => {
+  const { a, b, swap } = pair()
+  const site = createInventory(at(shop(), 'SITE', NOW), { scope: 'all' })
+  applyPull(a, { full: false, cursor: '1', data: { inventories: up(site) } }, { now: NOW })
+  applyPull(b, { full: false, cursor: '1', data: { inventories: up(site) } }, { now: NOW })
+  const wo = matchLocal('POST', '/writeoffs')
+  wo.handler({ ...at(b, 'B', NOW + 500), params: wo.params, query: wo.query, body: { reason: 'damaged', items: [{ productId: 'nur', units: 1 }] } })
+  swap()
+  assert.equal(stockOf(a, 'nur'), 9)
+  const applied = { ...site, status: 'applied', appliedAt: new Date(NOW + 1000).toISOString(), items: site.items.map((i) => (i.productId === 'nur' ? { ...i, actualUnits: 5 } : i)) }
+  serverPull(a, { products: up(nurAt(5)), inventories: up(applied) })
+  assert.equal(stockOf(a, 'nur'), 5)
+  // Пересчёт соседа по этому листу ещё ждёт отправки — пересчёт сервера всё равно в силе
+  saveCounts(at(b, 'B', NOW + 2000), site.id, { items: [{ id: lineOf(site, 'bint').id, actualUnits: 7 }] })
+  swap()
+  serverPull(a, { products: up(nurAt(5)) })
+  assert.equal(stockOf(a, 'nur'), 5)
+})
+
+test('движение соседа, пришедшее по сети уже после пересчёта, который сервер провёл, на полку не ложится', () => {
+  const a = shop()
+  const b = shop()
+  const site = createInventory(at(shop(), 'SITE', NOW), { scope: 'all' })
+  applyPull(a, { full: false, cursor: '1', data: { inventories: up(site) } }, { now: NOW })
+  applyPull(b, { full: false, cursor: '1', data: { inventories: up(site) } }, { now: NOW })
+  const wo = matchLocal('POST', '/writeoffs')
+  wo.handler({ ...at(b, 'B', NOW + 500), params: wo.params, query: wo.query, body: { reason: 'damaged', items: [{ productId: 'nur', units: 1 }] } })
+  const applied = { ...site, status: 'applied', appliedAt: new Date(NOW + 1000).toISOString(), items: site.items.map((i) => (i.productId === 'nur' ? { ...i, actualUnits: 5 } : i)) }
+  serverPull(a, { products: up(nurAt(5)), inventories: up(applied) })
+  lanCatchUp(b, { deviceId: 'B', now: NOW })
+  lanReceive(a, lanEntriesSince(b, 0, { wide: true }).entries, { now: NOW, gen: lanGen(a) })
+  assert.equal(stockOf(a, 'nur'), 5)
+  serverPull(a, {})
+  assert.equal(stockOf(a, 'nur'), 5)
+})

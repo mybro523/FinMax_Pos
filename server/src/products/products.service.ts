@@ -192,10 +192,15 @@ export class ProductsService {
       // Замки — одним заходом и по порядку номеров (lockProducts): обе карточки и те, у кого
       // лишняя записана в аналогах (их списки ниже правятся)
       const analogRefs = await tx.product.findMany({ where: { analogIds: { has: fromId } }, select: { id: true } })
-      // Листы пересчёта с этими товарами — раньше товаров, как у применения листа
-      // (inventory.service): применение, которое уже идёт, доделается со строками как были,
-      // а не обойдёт строку лишней карточки, и встречные замки друг друга не запрут
-      const sheets = await tx.inventoryItem.findMany({ where: { productId: { in: [fromId, intoId] } }, select: { inventoryId: true }, distinct: ['inventoryId'] })
+      // Незаконченные листы пересчёта с этими товарами — раньше товаров, как у применения листа
+      // (inventory.service): применение, которое уже идёт, доделается со строками как были, а не
+      // обойдёт строку лишней карточки, и встречные замки друг друга не запрут. Применённые листы
+      // поздняя операция кассы берёт после товаров (sync.service, countsAfter) — их не трогаем
+      const sheets = await tx.inventoryItem.findMany({
+        where: { productId: { in: [fromId, intoId] }, inventory: { status: 'draft' } },
+        select: { inventoryId: true },
+        distinct: ['inventoryId'],
+      })
       await lockInventories(tx, sheets.map((s) => s.inventoryId))
       await lockProducts(tx, [fromId, intoId, ...analogRefs.map((r) => r.id)])
       const [from, into] = await Promise.all([tx.product.findUnique({ where: { id: fromId } }), tx.product.findUnique({ where: { id: intoId } })])
@@ -204,20 +209,11 @@ export class ProductsService {
       if (uppOf(from) !== uppOf(into)) {
         throw new BadRequestException(`Штук в упаковке у карточек разное (${uppOf(from)} и ${uppOf(into)}) — сначала поправьте карточку`)
       }
-      // Применённый пересчёт, где есть обе карточки: строки сливаются в одну — иначе поздняя
-      // операция кассы поправляла бы недостачу по строке одной карточки, а списание у него уже
-      // на обе. Ожидаемое и насчитанное складываются; не считали ни одну — строка остаётся
-      // несчитанной. В незаконченном листе строки только переходят к основной карточке: кассы
-      // без связи ещё присылают насчитанное по своим номерам строк, и удалённая строка его
-      // потеряла бы. Сольются они при применении (inventory.service, joinDuplicateLines)
-      const lines = await tx.inventoryItem.findMany({ where: { productId: { in: [fromId, intoId] }, inventory: { status: 'applied' } } })
-      for (const a of lines.filter((d) => d.productId === intoId)) {
-        const b = lines.find((d) => d.productId === fromId && d.inventoryId === a.inventoryId)
-        if (!b) continue
-        const actual = a.actualUnits === null && b.actualUnits === null ? null : (a.actualUnits ?? 0) + (b.actualUnits ?? 0)
-        await tx.inventoryItem.update({ where: { id: a.id }, data: { expectedUnits: a.expectedUnits + b.expectedUnits, actualUnits: actual } })
-        await tx.inventoryItem.delete({ where: { id: b.id } })
-      }
+      // Строки листов пересчёта лишней карточки переходят к основной (ниже, вместе со всем
+      // остальным) и остаются отдельными строками: в незаконченном листе кассы без связи ещё
+      // присылают насчитанное по своим номерам строк; при применении строки одного товара
+      // складываются (inventory.service). В применённом поздняя операция кассы считает
+      // недостачу по товару целиком, по всем его строкам (sync.service, absorb)
       const move = { where: { productId: fromId }, data: { productId: intoId } }
       await tx.batch.updateMany(move)
       await tx.saleItem.updateMany(move)

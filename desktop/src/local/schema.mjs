@@ -376,6 +376,8 @@ export const PHARMACY_SCHEMA = [
   // не придут. Отметки обмена сбрасываются — один раз касса получит всё заново
   `
   DELETE FROM meta WHERE key IN ('cursor', 'wcursor');
+  UPDATE docs SET closedAt = json_extract(body, '$.appliedAt')
+    WHERE kind = 'inventory' AND json_extract(body, '$.status') = 'applied';
   `,
 ]
 

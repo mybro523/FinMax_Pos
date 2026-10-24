@@ -348,11 +348,7 @@ function pruneOld(db, now) {
     if (kind === 'inventory') {
       // Незаконченный лист пересчёта не убираем, какой бы давний он ни был: его ещё будут
       // считать. Применённый — по дню применения (так их отдаёт и сервер), а не заведения
-      q(
-        db,
-        `DELETE FROM docs WHERE kind = 'inventory' AND sync = 'synced' AND json_extract(body, '$.status') = 'applied'
-           AND COALESCE(json_extract(body, '$.appliedAt'), date) < ?`,
-      ).run(cutoff)
+      q(db, "DELETE FROM docs WHERE kind = 'inventory' AND sync = 'synced' AND closedAt IS NOT NULL AND closedAt < ?").run(cutoff)
       continue
     }
     q(db, 'DELETE FROM docs WHERE kind = ? AND sync = ? AND date < ?').run(kind, 'synced', cutoff)
@@ -385,6 +381,18 @@ export function applyPull(db, res, { now }) {
       }
     }
 
+    // Листы пересчёта — раньше остатка: применённый лист, пришедший с этими же данными,
+    // пересборка должна видеть (движения, сделанные до него, сервер уже не проведёт, stock.mjs)
+    let sheetApplied = false
+    if (data.inventories) {
+      const p = part(data.inventories)
+      if (full || touched(p)) {
+        applyDocs(db, 'inventory', p, full)
+        changed.push('inventories')
+        sheetApplied = p.upsert.some((s) => s && s.status === 'applied')
+      }
+    }
+
     // Товары и партии — вместе: остаток товара складывается из его партий
     const products = part(data.products)
     const batches = part(data.batches)
@@ -392,7 +400,10 @@ export function applyPull(db, res, { now }) {
     if (stockTouched) applyProducts(db, products, batches, full && !!data.products, now)
     // Основа новая (или сервер отверг какую-то операцию) — накладываем поверх всё,
     // что сделано здесь и ещё не принято
-    if (stockTouched || getMeta(db, 'needRebuild') === '1') {
+    // Пришёл применённый лист, а неотправленные движения есть — пересобрать, даже если товары
+    // не менялись: часть этих движений теперь учтена пересчётом
+    const pendingQty = sheetApplied && !!q(db, 'SELECT 1 FROM stock_moves WHERE synced = 0 LIMIT 1').get()
+    if (stockTouched || pendingQty || getMeta(db, 'needRebuild') === '1') {
       rebuildStock(db)
       recountDebts(db)
       setMeta(db, 'needRebuild', '0')
@@ -414,7 +425,8 @@ export function applyPull(db, res, { now }) {
       }
     }
     for (const [key, kind] of Object.entries(DOC_KEYS)) {
-      if (!data[key]) continue
+      // Листы пересчёта уже легли (выше, до остатка)
+      if (!data[key] || key === 'inventories') continue
       const p = part(data[key])
       if (!full && !touched(p)) continue
       applyDocs(db, kind, p, full)

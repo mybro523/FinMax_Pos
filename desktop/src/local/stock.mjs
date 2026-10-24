@@ -340,21 +340,20 @@ export function move(db, m, { now }) {
 }
 
 // Какие движения меняют количество на полке (а не срок или цену в карточке)
-const QTY_KINDS = new Set(['sale', 'return', 'arrival', 'writeoff', 'count', 'peer', 'supreturn'])
+export const QTY_KINDS = new Set(['sale', 'return', 'arrival', 'writeoff', 'count', 'peer', 'supreturn'])
 
 // Пересчёты, которые сервер уже провёл (применённые листы из его данных), — по товару самый
-// поздний, но только после самого раннего неотправленного движения: раньше смотреть незачем
-function countedSince(db, moves) {
+// поздний, но только после самого раннего неотправленного движения: раньше смотреть незачем.
+// Основа листа «применён» бывает только из копии сервера или после того, как сервер принял
+// своё применение, — поэтому неотправленные поправки поверх неё (пересчёт соседа, своё
+// удаление) не мешают: пересчёт у сервера уже проведён
+export function countedSince(db, moves) {
   const out = new Map()
   if (!moves.length) return out
   const wanted = new Set(moves.map((m) => m.productId))
   let oldest = moves[0].createdAt
   for (const m of moves) if (m.createdAt < oldest) oldest = m.createdAt
-  const rows = q(
-    db,
-    `SELECT body FROM docs WHERE kind = 'inventory' AND sync = 'synced' AND json_extract(body, '$.status') = 'applied'
-       AND json_extract(body, '$.appliedAt') > ?`,
-  ).all(oldest)
+  const rows = q(db, "SELECT body FROM docs WHERE kind = 'inventory' AND sync <> 'rejected' AND closedAt IS NOT NULL AND closedAt > ?").all(oldest)
   for (const r of rows) {
     let sheet
     try {
