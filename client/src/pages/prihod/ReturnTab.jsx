@@ -13,6 +13,7 @@ import { beepOk, beepError } from '../../lib/sound'
 import { stockUnits, uppOf } from '../../lib/units'
 import { qtyText as unitsText } from '../../lib/otchety'
 import { retLineFromProduct, retLineSum, retSummary, retProblem, toRetItem, qtyText, n2, num } from '../../lib/prihod'
+import { retyped } from '../../lib/pick'
 import { usePrihod, setRet, setRetForm, resetRet, blankRetForm } from './store'
 import ProductPick from './ProductPick'
 
@@ -225,8 +226,10 @@ function NewReturn({ products, suppliers, sup, arrivals }) {
           code={form.code || ''}
           name={form.q}
           chosen={chosen}
-          onCode={(v) => setRetForm({ code: v, q: '', productId: '' })}
-          onName={(v) => setRetForm({ q: v, code: '', productId: '' })}
+          // Товар выбран и поменяли одно поле — форма начинается заново, с набранным; не
+          // выбран — поля друг друга не трогают (как в новом поступлении)
+          onCode={(v) => setRetForm((f) => retyped(f, chosen, 'code', v, blankRetForm()))}
+          onName={(v) => setRetForm((f) => retyped(f, chosen, 'q', v, blankRetForm()))}
           readOnly={!!editing}
           autoFocus={false}
           onPick={choose}

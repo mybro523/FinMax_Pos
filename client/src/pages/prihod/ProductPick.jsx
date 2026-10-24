@@ -4,7 +4,7 @@ import { stockText } from '../../db/store'
 import { useT } from '../../lib/i18n'
 import { normalizeScan } from '../../lib/scan'
 import { beepError } from '../../lib/sound'
-import { autoPickDelay, looksLikeCode, nameSuggest, productByCode } from '../../lib/pick'
+import { autoPickDelay, leftUnknownCode, leftUnknownName, looksLikeCode, nameSuggest, productByCode } from '../../lib/pick'
 
 // ── Товар: «Штрихкод» и «Наименование» ──
 // Одно и то же в новом поступлении и в возврате поставщику (правила — lib/pick.js).
@@ -15,14 +15,16 @@ import { autoPickDelay, looksLikeCode, nameSuggest, productByCode } from '../../
 //     стрелки выбирают, Enter берёт выбранную. Штрихкод выбранного товара встанет
 //     в первое поле сам.
 // Незнакомый штрихкод — onUnknownCode (поступление открывает карточку нового товара),
-// не найденное название — onUnknownName.
+// не найденное название — onUnknownName. Ушли из поля (Tab, мышью) с кодом или названием,
+// которого в базе нет, — onLeaveUnknown (поступление сразу становится «новым товаром»).
 //
 // code и name — что написано в полях; chosen — выбранный товар (или null). Пока в поле
 // названия его название, подсказки не нужны, а Enter значит «дальше, к количеству».
 // codeTour и nameTour — метки тура по программе на этих полях, tour — на обоих сразу.
 //
-// nov — новый товар: кода или названия нет в базе, товар заведётся из формы. Тогда
-// поля друг друга не очищают, в названии — метка «новый», а подсказки под ним —
+// Пока товар не выбран, поля друг друга не очищают (это делает форма, lib/pick.js retyped):
+// новый товар заводят с кодом и названием. nov — новый товар: кода или названия нет в
+// базе, товар заведётся из формы. Тогда в названии — метка «новый», а подсказки под ним —
 // «уже есть в базе»: выбрать их можно стрелками или мышью, но Enter сам их не
 // берёт — он значит «название готово, дальше». nameRef — поле названия
 export default function ProductPick({
@@ -36,6 +38,7 @@ export default function ProductPick({
   onPick,
   onUnknownCode,
   onUnknownName,
+  onLeaveUnknown,
   onEnterChosen,
   codeRef,
   readOnly = false,
@@ -88,6 +91,17 @@ export default function ProductPick({
     if (p) return onPick(p)
     beepError()
     onUnknownCode?.(normalizeScan(val))
+  }
+
+  // Ушли из поля (Tab, мышью), а такого товара в базе нет: это новый товар. Набранное
+  // остаётся в обоих полях; курсор не переставляем — человек уходит сам
+  function leaveCode() {
+    if (readOnly || chosen || nov || !onLeaveUnknown) return
+    if (leftUnknownCode(products, code)) onLeaveUnknown({ code: normalizeScan(String(code).trim()) })
+  }
+  function leaveName() {
+    if (readOnly || chosen || nov || !onLeaveUnknown) return
+    if (leftUnknownName(products, name)) onLeaveUnknown({ q: String(name).trim() })
   }
 
   const codeIsChosen = !!chosen && String(code || '').trim() !== '' && productByCode(products, code)?.id === chosen.id
@@ -158,6 +172,7 @@ export default function ProductPick({
           onKeyDown={onCodeKey}
           // Весь код выделяется: следующий скан заменит его, а не допишется в хвост
           onFocus={(e) => e.target.select()}
+          onBlur={leaveCode}
           placeholder={t('Сканируйте код')}
         />
       </div>
@@ -177,7 +192,10 @@ export default function ProductPick({
             onChange={(e) => onName(e.target.value)}
             onKeyDown={onNameKey}
             onFocus={(e) => { setNameFocus(true); e.target.select() }}
-            onBlur={() => setNameFocus(false)}
+            onBlur={() => {
+              setNameFocus(false)
+              leaveName()
+            }}
             // Пусто — название появится само после скана; длинное видно целиком при наведении
             // В форме прихода поле уже — подсказка короче, иначе обрезалась бы
             placeholder={rows ? t('Название') : nov ? t('Название нового товара') : t('Или наберите название')}

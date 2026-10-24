@@ -53,3 +53,27 @@ export function looksLikeCode(raw) {
   const s = String(raw ?? '').trim()
   return /^\d{6,}$/.test(s.replace(/\s/g, '')) || looksLikeDataMatrix(s)
 }
+
+// ── Набрали в одном из полей — что со вторым ──
+// Товар выбран: второе поле заполнилось само (от этого товара) и к новому набору уже не
+// относится — форма начинается заново, с набранным (blank — пустая форма). Товар не
+// выбран: второе поле человек вписал сам (новый товар: и код, и название) — оно остаётся
+export function retyped(form, chosen, field, value, blank) {
+  return chosen ? { ...blank, [field]: value } : { ...form, [field]: value }
+}
+
+// ── Ушли из поля (Tab, мышью), а такого товара в базе нет — это новый товар ──
+// Код: вписан, и товара с ним нет. Название: вписано, и товара с точно таким названием нет
+// (похожие остаются подсказками — если это он, его выберут)
+export function leftUnknownCode(products, raw) {
+  const s = String(raw ?? '').trim()
+  return !!s && !productByCode(products, s)
+}
+export function leftUnknownName(products, raw) {
+  const s = String(raw ?? '').trim()
+  if (!s) return false
+  // Сканер выстрелил в поле названия — это код существующего товара, а не новое название
+  if (looksLikeCode(s) && productByCode(products, s)) return false
+  const low = s.toLowerCase()
+  return !products.some((p) => String(p.name || '').trim().toLowerCase() === low)
+}

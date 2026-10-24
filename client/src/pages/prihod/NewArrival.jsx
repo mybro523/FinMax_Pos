@@ -18,6 +18,7 @@ import { AddCategoryBtn } from '../../components/CategorySelect'
 import { generateEan13 } from '../../lib/barcode'
 import { useCategories, categoryOptions, categoryNames } from '../../lib/categories'
 import { priceFromMarkup, markupOf } from '../../lib/pricing'
+import { retyped } from '../../lib/pick'
 import {
   lineFromProduct, lineCost, lineTotal, lineRetail, lineUnits, summary, qtyText, packText, lineProblem, toItem,
   piecePrice, discCost, n2, pct, num,
@@ -121,13 +122,21 @@ export default function NewArrival({ products, suppliers, onSaved }) {
   }
 
   // ── Новый товар: кода или названия нет в базе ──
-  // Форма сама становится «новым товаром». Пришёл код — впишут название; пришло
-  // название — отсканируют код упаковки (или оставят пустым: тогда код даст программа)
-  function startNew({ code = '', q = '' }) {
+  // Форма сама становится «новым товаром»; всё, что уже вписано (код, название, количество,
+  // цены), остаётся. Пришёл код — впишут название; пришло название — отсканируют код
+  // упаковки (или оставят пустым: тогда код даст программа); есть и то и другое — дальше
+  // количество. quiet — человек сам уходит из поля (Tab, мышью): курсор не переставляем
+  function startNew({ code, q, quiet = false }) {
+    const next = { ...form, ...(code !== undefined ? { code } : {}), ...(q !== undefined ? { q } : {}) }
     setPrihod((x) => ({
-      form: { ...blankForm(), disc: x.discAll ? x.form.disc : '', nov: true, code, q },
+      form: { ...x.form, productId: '', editKey: '', nov: true, ...(code !== undefined ? { code } : {}), ...(q !== undefined ? { q } : {}) },
     }))
-    setTimeout(() => (q ? scanRef : nameRef).current?.focus(), 0)
+    if (quiet) return
+    const hasName = String(next.q || '').trim() !== ''
+    const hasCode = String(next.code || '').trim() !== ''
+    if (code !== undefined && !hasName) setTimeout(() => nameRef.current?.focus(), 0)
+    else if (q !== undefined && !hasCode) setTimeout(() => scanRef.current?.focus(), 0)
+    else setFocusQty((n) => n + 1)
   }
 
   function clearForm() {
@@ -403,10 +412,11 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                   code={form.code || ''}
                   name={form.q}
                   chosen={chosen}
-                  // Поменяли одно поле — другое относится к прежнему товару и очищается.
-                  // У нового товара оба поля — его собственные и друг друга не трогают
-                  onCode={(v) => (nov ? setForm({ code: v }) : setForm({ code: v, q: '', productId: '' }))}
-                  onName={(v) => (nov ? setForm({ q: v }) : setForm({ q: v, code: '', productId: '' }))}
+                  // Товар выбран и поменяли одно поле — другое относится к прежнему товару:
+                  // форма начинается заново, с набранным. Товар не выбран — оба поля вписаны
+                  // руками (новый товар: код и название) и друг друга не трогают
+                  onCode={(v) => setPrihod((x) => ({ form: retyped(x.form, chosen, 'code', v, { ...blankForm(), disc: x.discAll ? x.form.disc : '' }) }))}
+                  onName={(v) => setPrihod((x) => ({ form: retyped(x.form, chosen, 'q', v, { ...blankForm(), disc: x.discAll ? x.form.disc : '' }) }))}
                   readOnly={!!editing}
                   nov={nov}
                   nameRef={nameRef}
@@ -414,6 +424,8 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                   onEnterChosen={() => setFocusQty((n) => n + 1)}
                   onUnknownCode={(barcode) => (can('products.create') ? startNew({ code: barcode }) : toast(tr('Товар с таким штрихкодом не найден'), 'err'))}
                   onUnknownName={(name) => (can('products.create') ? startNew({ q: name }) : toast(tr('Товар не найден'), 'err'))}
+                  // Ушли из поля с кодом или названием, которого в базе нет, — сразу «новый товар»
+                  onLeaveUnknown={(v) => can('products.create') && startNew({ ...v, quiet: true })}
                 />
                 <div className="prh-f" data-tour="af.qty">
                   <label className={draft && lineUnits(draft) <= 0 ? 'req' : ''}>{t('Количество')}<span className="prh-star" aria-hidden="true">*</span></label>
