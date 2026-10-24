@@ -1,0 +1,75 @@
+/* Экран покупателя — второй экран моноблока. Читается с расстояния: крупно, контрастно,
+   итог — золотом. Размеры — от высоты экрана: у моноблоков сторона покупателя бывает
+   и 1024×600, и 1920×1080 */
+:root {
+  --bg1: #10307f;
+  --bg2: #0a1a45;
+  --bg3: #061233;
+  --fg: #ffffff;
+  --muted: #b9c4e4;
+  --line: rgba(255, 255, 255, 0.12);
+  --gold: #efbd24;
+  --max: #86aaf8;
+  --pos: #4fc483;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+/* Скрытое (скидки нет, сдачи нет) — скрыто, какое бы оформление у строки ни было */
+[hidden] { display: none !important; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: linear-gradient(160deg, var(--bg1) 0%, var(--bg2) 52%, var(--bg3) 100%);
+  color: var(--fg);
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  cursor: none;
+  user-select: none;
+}
+.screen { height: 100%; display: flex; flex-direction: column; padding: 2.4vh 3vw; }
+
+/* Полоса сверху: магазин слева, FinMax POS справа */
+.bar { display: flex; align-items: center; gap: 2vw; font-size: clamp(14px, 2.6vh, 30px); min-height: 4vh; }
+.bar-shop { font-weight: 600; color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-test { font-weight: 700; color: var(--bg3); background: var(--gold); border-radius: 999px; padding: 0.3em 0.9em; white-space: nowrap; }
+.bar-brand { font-weight: 700; white-space: nowrap; }
+.b-fin { color: var(--gold); }
+.b-max { color: var(--max); }
+.b-pos { color: var(--pos); }
+
+.view { display: none; flex: 1; min-height: 0; }
+.screen[data-view='idle'] .view-idle,
+.screen[data-view='thanks'] .view-thanks { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 3vh; }
+.screen[data-view='cart'] .view-cart,
+.screen[data-view='test'] .view-cart { display: flex; flex-direction: column; }
+
+/* Ожидание покупателя */
+.idle-shop { font-size: clamp(28px, 8vh, 110px); font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; text-wrap: balance; max-width: 90vw; }
+.idle-welcome { font-size: clamp(20px, 5vh, 64px); font-weight: 500; color: var(--gold); }
+
+/* Корзина: свежая строка — внизу, список листается к ней сам */
+.items-wrap { flex: 1; min-height: 0; overflow: hidden; margin-top: 2vh; }
+.items { list-style: none; }
+.item { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 3vw; align-items: baseline; padding: 1.6vh 0; border-bottom: 1px solid var(--line); }
+.item:last-child { border-bottom: 0; }
+.item-name { font-size: clamp(16px, 3.6vh, 46px); font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
+.item-sub { grid-column: 1; font-size: clamp(13px, 2.6vh, 32px); color: var(--muted); margin-top: 0.5vh; }
+.item-sum { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-size: clamp(16px, 3.8vh, 48px); font-weight: 700; white-space: nowrap; }
+.item.fresh { animation: fresh 0.9s ease-out; }
+@keyframes fresh { from { background: rgba(239, 189, 36, 0.22); } to { background: transparent; } }
+
+/* Итог */
+.sums { border-top: 2px solid var(--line); padding-top: 2vh; margin-top: 1vh; }
+.sum-row { display: flex; justify-content: space-between; align-items: baseline; gap: 3vw; }
+.sum-disc { font-size: clamp(15px, 3.2vh, 40px); color: var(--muted); margin-bottom: 1vh; }
+.sum-total { font-size: clamp(26px, 7.5vh, 104px); font-weight: 700; }
+.sum-total span { text-transform: uppercase; letter-spacing: 0.04em; }
+.sum-total b { color: var(--gold); white-space: nowrap; }
+
+/* Спасибо за покупку */
+.thanks { font-size: clamp(28px, 8.5vh, 116px); font-weight: 700; letter-spacing: -0.02em; text-wrap: balance; max-width: 92vw; }
+.thanks-row { display: flex; gap: 2.4vw; align-items: baseline; font-size: clamp(20px, 5vh, 66px); color: var(--muted); }
+.thanks-row b { color: var(--fg); white-space: nowrap; }
+.thanks-change b { color: var(--gold); }
+
+@media (prefers-reduced-motion: reduce) {
+  .item.fresh { animation: none; }
+}

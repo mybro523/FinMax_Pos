@@ -106,6 +106,14 @@ contextBridge.exposeInMainWorld('apteka', {
     page: (req) => ipcRenderer.invoke('print:page', req),
     pdf: (req) => ipcRenderer.invoke('print:pdf', req),
   },
+  // Экран покупателя (второй экран моноблока): корзина и итог готовыми строками, настройка
+  // «где показывать» и проба из «Настроек» (desktop/src/customer-window.mjs)
+  customer: {
+    update: (state) => ipcRenderer.invoke('customer:update', state),
+    config: () => ipcRenderer.invoke('customer:config'),
+    setConfig: (cfg) => ipcRenderer.invoke('customer:setConfig', cfg),
+    test: (sample) => ipcRenderer.invoke('customer:test', sample),
+  },
 
   // Выгрузка в Excel: страница собирает файл, основная часть спрашивает, куда его
   // сохранить, и записывает. Скачать файл обычным способом окно в программе не может

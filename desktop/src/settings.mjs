@@ -7,6 +7,7 @@
 // Чем читать и куда писать, передаётся снаружи — модуль проверяется без диска.
 import { isAbsolute } from 'node:path'
 import { sanitizePrint } from './print/transport.mjs'
+import { sanitizeCustomer } from './customer-screen.mjs'
 
 // Папка для копий — только полный путь. Относительный зависел бы от того, откуда
 // запустили программу, и копии оказывались бы каждый раз в новом месте
@@ -19,8 +20,9 @@ const version = (v) => (typeof v === 'string' && /^\d+\.\d+\.\d+$/.test(v) ? v :
 
 export function sanitizeSettings(raw) {
   const v = raw && typeof raw === 'object' ? raw : {}
-  // print — как печатать чеки на этом компьютере (см. print/transport.mjs)
-  return { backupDir: folder(v.backupDir), version: version(v.version), print: sanitizePrint(v.print) }
+  // print — как печатать чеки на этом компьютере (см. print/transport.mjs);
+  // customer — экран покупателя на втором экране (см. customer-screen.mjs)
+  return { backupDir: folder(v.backupDir), version: version(v.version), print: sanitizePrint(v.print), customer: sanitizeCustomer(v.customer) }
 }
 
 export function createSettings({ file, fs }) {

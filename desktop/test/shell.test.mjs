@@ -21,8 +21,12 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = (p) => fs.readFileSync(join(ROOT, p), 'utf8')
 
 test('мост и основная часть называют каналы одинаково', () => {
-  const bridge = [...read('src/preload.cjs').matchAll(/ipcRenderer\.invoke\('([^']+)'/g)].map((m) => m[1]).sort()
-  const main = [...read('src/main.mjs').matchAll(/ipcMain\.handle\('([^']+)'/g)].map((m) => m[1]).sort()
+  // Мост окна кассы и мост экрана покупателя — против того, что слушает основная часть
+  // (сама и модуль окна покупателя)
+  const invokes = (f) => [...read(f).matchAll(/ipcRenderer\.invoke\('([^']+)'/g)].map((m) => m[1])
+  const handles = (f) => [...read(f).matchAll(/ipcMain\.handle\('([^']+)'/g)].map((m) => m[1])
+  const bridge = [...invokes('src/preload.cjs'), ...invokes('src/customer-preload.cjs')].sort()
+  const main = [...handles('src/main.mjs'), ...handles('src/customer-window.mjs')].sort()
   assert.ok(bridge.length >= 4, 'в мосте подозрительно мало функций')
   assert.deepEqual(bridge, main, 'мост зовёт канал, которого основная часть не слушает (или наоборот)')
 })
@@ -48,7 +52,8 @@ test('окно создаётся в песочнице и без Node на ст
 })
 
 test('в мосте нет прямого доступа к системе', () => {
-  const bridge = read('src/preload.cjs')
+  // И у окна кассы, и у экрана покупателя
+  const bridge = read('src/preload.cjs') + '\n' + read('src/customer-preload.cjs')
   for (const bad of ["require('fs')", "require('child_process')", "require('node:", 'ipcRenderer.send(', 'process.env', 'eval(']) {
     assert.equal(bridge.includes(bad), false, `в мост попало «${bad}»`)
   }

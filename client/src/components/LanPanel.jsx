@@ -134,7 +134,7 @@ export default function LanPanel({ manage = false }) {
 
       <div className="note info lan-firewall">
         <LuShieldAlert size={15} style={{ verticalAlign: '-3px' }} />{' '}
-        {t('Если Windows спросит, разрешить ли FinMax POS доступ к сети, нажмите «Разрешить доступ». Достаточно разрешить хотя бы на одном из компьютеров.')}
+        {t('Если Windows спросит, разрешить ли FinMax POS доступ к сети, отметьте обе галочки — «Частные сети» и «Общедоступные сети» — и нажмите «Разрешить доступ». Кассы, соединённые кабелем напрямую, Windows считает общедоступной сетью.')}
       </div>
 
       {lan?.enabled && (

@@ -26,9 +26,9 @@ function disk(initial) {
 const FOLDER = process.platform === 'win32' ? 'D:\\Копии магазина' : '/mnt/kopii'
 
 test('нет файла, мусор в файле, чужие поля — настройки по умолчанию', () => {
-  assert.deepEqual(createSettings({ file: 'settings.json', fs: disk() }).get(), { backupDir: '', version: '', print: PRINT_DEFAULTS })
+  assert.deepEqual(createSettings({ file: 'settings.json', fs: disk() }).get(), { backupDir: '', version: '', print: PRINT_DEFAULTS, customer: { mode: 'auto', display: '' } })
   assert.deepEqual(core(createSettings({ file: 'settings.json', fs: disk('{не json') }).get()), { backupDir: '', version: '' })
-  assert.deepEqual(sanitizeSettings({ backupDir: 42, version: ['1.0.0'], print: 'мусор', lishnee: true }), { backupDir: '', version: '', print: PRINT_DEFAULTS })
+  assert.deepEqual(sanitizeSettings({ backupDir: 42, version: ['1.0.0'], print: 'мусор', customer: 'мусор', lishnee: true }), { backupDir: '', version: '', print: PRINT_DEFAULTS, customer: { mode: 'auto', display: '' } })
   assert.deepEqual(core(sanitizeSettings(null)), { backupDir: '', version: '' })
 })
 

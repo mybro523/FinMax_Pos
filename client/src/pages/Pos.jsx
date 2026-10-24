@@ -28,10 +28,11 @@ import { beepOk, beepError, unlockAudio } from '../lib/sound'
 import { fmtDateTime, chekNomer } from '../lib/time'
 import { normalizeScan } from '../lib/scan'
 import { parseVesEtiketku, productPoVesKodu } from '../lib/vesy'
-import { useT, translate as tr } from '../lib/i18n'
+import { useT, useLang, translate as tr } from '../lib/i18n'
 import { blockUpdate } from '../lib/version'
 import { sellsBelowCost } from '../lib/pricing'
-import { saleTicket } from '../lib/ticket'
+import { saleTicket, qtyPriceText } from '../lib/ticket'
+import { showCustomer, customerLabels, cartScreen } from '../lib/customerScreen'
 import { autoPrint } from '../lib/print'
 import TicketView from '../components/TicketView'
 import PrintDoc from '../components/PrintDoc'
@@ -860,6 +861,41 @@ export default function Pos() {
   const sd = payment === 'cash' ? sdacha(total, received) : { state: 'none', diff: 0, received: null }
   const bills = payment === 'cash' ? kupyury(total) : []
 
+  // ── Экран покупателя (программа для Windows, второй экран моноблока) ──
+  // Покупателю — корзина и итог готовыми строками, как на чеке. После оплаты на пять
+  // секунд — «Спасибо за покупку!» и сдача, потом — «Добро пожаловать». На сайте ничего
+  const lang = useLang()
+  const shopName = auth?.pharmacy?.name || ''
+  const [thanks, setThanks] = useState(null)
+  useEffect(() => {
+    const base = { lang, shop: shopName, labels: customerLabels(t) }
+    if (cart.length) {
+      showCustomer(
+        cartScreen({
+          cart,
+          total,
+          discountTotal,
+          shop: shopName,
+          lang,
+          t,
+          money,
+          sub: (i) => qtyPriceText(i, t, money) + (i.discount > 0 ? ` · ${t('скидка')} −${money(i.discount)}` : ''),
+          sum: (i) => money(lineNet(i)),
+        }),
+      )
+    } else if (thanks) showCustomer({ ...base, mode: 'thanks', total: thanks.total, change: thanks.change })
+    else showCustomer({ ...base, mode: 'idle' })
+  }, [cart, total, discountTotal, thanks, shopName, lang, t])
+  useEffect(() => {
+    if (!thanks) return undefined
+    const id = setTimeout(() => setThanks(null), 5000)
+    return () => clearTimeout(id)
+  }, [thanks])
+  // Ушли из кассы (в другой раздел, вышли) — покупателю снова «Добро пожаловать»
+  const idleScreen = useRef(null)
+  idleScreen.current = { mode: 'idle', lang, shop: shopName, labels: customerLabels(t) }
+  useEffect(() => () => showCustomer(idleScreen.current), [])
+
   // ── Что изменилось в чеке, пока он лежал ──
   const opisat = useCallback(
     (notes) =>
@@ -1039,6 +1075,8 @@ export default function Pos() {
       // «Получено» и «Сдача» — только для бумажного чека. На сервер они не уходят:
       // на деньги смены сдача не влияет, в кассе остаётся ровно сумма чека
       setReceipt({ ...sale, received: sd.state === 'ok' ? sd.received : null, change: sd.state === 'ok' ? sd.diff : 0 })
+      // Покупателю на втором экране — «Спасибо за покупку!» и сдача (если платил наличными)
+      setThanks({ total: money(sale.total), change: sd.state === 'ok' && sd.diff > 0 ? money(sd.diff) : '' })
       // Чек продан — вкладка остаётся и готова к следующему покупателю: всё как у
       // нового чека, и скидка на чек тоже (иначе она досталась бы следующему)
       patch(posleProdazhi)

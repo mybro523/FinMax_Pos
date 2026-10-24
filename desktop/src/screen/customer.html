@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FinMax POS — экран покупателя</title>
+<link rel="stylesheet" href="/_fonts/inter.css">
+<link rel="stylesheet" href="customer.css">
+<script src="customer.js" defer></script>
+</head>
+<body>
+  <!-- Экран покупателя: второй экран моноблока. Что показать, присылает окно кассы -->
+  <main id="screen" class="screen" data-view="idle">
+    <header class="bar">
+      <span class="bar-shop" id="bar-shop"></span>
+      <span class="bar-test" id="bar-test" hidden></span>
+      <span class="bar-brand"><span class="b-fin">Fin</span><span class="b-max">Max</span> <span class="b-pos">POS</span></span>
+    </header>
+
+    <section class="view view-idle" aria-live="polite">
+      <div class="idle-shop" id="idle-shop"></div>
+      <div class="idle-welcome" id="idle-welcome">Добро пожаловать</div>
+    </section>
+
+    <section class="view view-cart">
+      <div class="items-wrap" id="items-wrap">
+        <ol class="items" id="items"></ol>
+      </div>
+      <footer class="sums">
+        <div class="sum-row sum-disc" id="disc-row" hidden>
+          <span id="disc-label">Скидка</span>
+          <b id="disc"></b>
+        </div>
+        <div class="sum-row sum-total">
+          <span id="total-label">Итого</span>
+          <b id="total"></b>
+        </div>
+      </footer>
+    </section>
+
+    <section class="view view-thanks" aria-live="polite">
+      <div class="thanks" id="thanks">Спасибо за покупку!</div>
+      <div class="thanks-row"><span id="thanks-total-label">Итого</span><b id="thanks-total"></b></div>
+      <div class="thanks-row thanks-change" id="change-row" hidden><span id="change-label">Сдача</span><b id="change"></b></div>
+    </section>
+  </main>
+</body>
+</html>

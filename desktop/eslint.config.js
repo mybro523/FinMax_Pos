@@ -33,6 +33,11 @@ export default [
     languageOptions: { sourceType: 'commonjs' },
   },
   {
+    // Страница экрана покупателя (второй экран моноблока) работает в окне, а не в Node
+    files: ['src/screen/**/*.js'],
+    languageOptions: { sourceType: 'script', globals: { ...globals.browser } },
+  },
+  {
     // Сквозные проверки управляют окном программы: внутри page.evaluate код
     // выполняется на странице, поэтому браузерные объекты ему доступны
     files: ['e2e/**/*.mjs', 'playwright.config.mjs'],

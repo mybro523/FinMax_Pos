@@ -15,6 +15,10 @@ export const START_URL = `${ORIGIN}/index.html`
 
 // Шрифты лежат отдельно от сборки интерфейса и отдаются под этим адресом
 const FONTS_PREFIX = '/_fonts/'
+// Страница экрана покупателя (второй экран моноблока) — своя маленькая папка программы:
+// на сайте её нет, в сборку интерфейса она не входит
+const SCREEN_PREFIX = '/_screen/'
+export const SCREEN_URL = `${ORIGIN}${SCREEN_PREFIX}customer.html`
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -69,7 +73,7 @@ export function isAppUrl(url) {
 // Выйти за пределы своих папок нельзя ни через «..», ни через хитрый путь: итоговое
 // имя файла обязано остаться внутри папки, иначе окно могло бы прочитать с диска
 // что угодно — включая файл с ключом входа.
-export function resolveAsset({ root, fonts }, url) {
+export function resolveAsset({ root, fonts, screen }, url) {
   if (!isAppUrl(url)) return null
   let path
   try {
@@ -81,8 +85,9 @@ export function resolveAsset({ root, fonts }, url) {
   if (path === '' || path === '/') path = '/index.html'
 
   const inFonts = path.startsWith(FONTS_PREFIX)
-  const base = resolve(inFonts ? fonts : root)
-  const rel = inFonts ? path.slice(FONTS_PREFIX.length) : path.slice(1)
+  const inScreen = !inFonts && !!screen && path.startsWith(SCREEN_PREFIX)
+  const base = resolve(inFonts ? fonts : inScreen ? screen : root)
+  const rel = inFonts ? path.slice(FONTS_PREFIX.length) : inScreen ? path.slice(SCREEN_PREFIX.length) : path.slice(1)
   const file = normalize(join(base, rel))
   if (!file.startsWith(base + sep)) return null
 
@@ -100,9 +105,9 @@ export function registerScheme(protocol) {
   ])
 }
 
-export function registerAppProtocol({ protocol, readFile, root, fonts }) {
+export function registerAppProtocol({ protocol, readFile, root, fonts, screen }) {
   protocol.handle(SCHEME, async (request) => {
-    const hit = request.method === 'GET' ? resolveAsset({ root, fonts }, request.url) : null
+    const hit = request.method === 'GET' ? resolveAsset({ root, fonts, screen }, request.url) : null
     if (!hit) return new Response('Not found', { status: 404 })
     try {
       const body = await readFile(hit.file)

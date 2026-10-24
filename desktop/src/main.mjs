@@ -8,7 +8,7 @@
 // короткий список функций (preload.cjs). Ни к диску, ни к сети, ни к системе
 // у него доступа нет — даже если в интерфейс попадёт чужой сценарий, дальше окна
 // он не уйдёт.
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerMonitor, protocol, safeStorage, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerMonitor, protocol, safeStorage, screen, session, shell } from 'electron'
 import Database from 'better-sqlite3'
 import updaterPackage from 'electron-updater'
 import { spawn } from 'node:child_process'
@@ -22,6 +22,7 @@ import { io } from 'socket.io-client'
 import { copyTime, createBackups, hostFolderOf, openOrRestore } from './backup.mjs'
 import { readBuildConfig, resolveApiUrl, resolveUpdateFeed, serverOrigin } from './config.mjs'
 import { createGateway } from './gateway.mjs'
+import { createCustomerScreen } from './customer-window.mjs'
 import { safePdfName, safeXlsxName, xlsxBytes } from './files.mjs'
 import { createLan } from './lan.mjs'
 import { createClock } from './local/clock.mjs'
@@ -34,7 +35,7 @@ import { pageRequest, pdfOptions, printOptions } from './print/page.mjs'
 import { LOGO } from './print/logo.mjs'
 import { runPowerShell } from './print/powershell.mjs'
 import { checkHost, sendNetwork, sendWindows } from './print/transport.mjs'
-import { isAppUrl, registerAppProtocol, registerScheme, START_URL } from './protocol.mjs'
+import { isAppUrl, registerAppProtocol, registerScheme, SCREEN_URL, START_URL } from './protocol.mjs'
 import { createRealtime } from './realtime.mjs'
 import { createSessionStore } from './session.mjs'
 import { createSettings } from './settings.mjs'
@@ -61,6 +62,8 @@ const COMPANY_LINKS = {
 }
 const RENDERER = join(ROOT, 'renderer')
 const FONTS = join(ROOT, 'assets', 'fonts')
+// Страница экрана покупателя (второй экран моноблока)
+const SCREEN = join(ROOT, 'src', 'screen')
 const ICON = join(ROOT, 'assets', 'icon.png')
 
 // ── Запуск из исходников ──
@@ -810,7 +813,7 @@ async function start() {
   // идут мимо них, поэтому окну можно закрыть сеть целиком, не мешая самой программе.
   const ses = session.fromPartition('persist:apteka')
 
-  registerAppProtocol({ protocol: ses.protocol, readFile, root: RENDERER, fonts: FONTS })
+  registerAppProtocol({ protocol: ses.protocol, readFile, root: RENDERER, fonts: FONTS, screen: SCREEN })
 
   // Окну в интернет незачем: все запросы делает основная часть. Закрываем сеть
   // и здесь, а не только правилами страницы, — двумя замками, а не одним.
@@ -834,6 +837,38 @@ async function start() {
   }
 
   createWindow(ses, userData)
+
+  // ── Экран покупателя ──
+  // Второй экран моноблока: корзина и итог. Открывается сам, если второй экран есть
+  // (customer-window.mjs); закрывается вместе с окном кассы
+  const customer = createCustomerScreen({
+    BrowserWindow,
+    screen,
+    ipcMain,
+    ses,
+    settings,
+    mainWindow: () => win,
+    trusted,
+    allowed,
+    activeRole: () => gateway.activeRole(),
+    preload: join(ROOT, 'src', 'customer-preload.cjs'),
+    url: SCREEN_URL,
+    isOurs,
+    dev: DEV,
+    log,
+  })
+  win.once('ready-to-show', () => {
+    setTimeout(() => {
+      try {
+        customer.place()
+      } catch (e) {
+        log.warn('экран покупателя не открылся', e)
+      }
+    }, 400)
+  })
+  // Кассу перенесли на другой экран — покупатель уступает ей место
+  win.on('move', () => customer.mainMoved())
+  win.on('closed', () => customer.close())
 }
 
 // Сервер разработки интерфейса: сама страница и её горячая подмена кода
