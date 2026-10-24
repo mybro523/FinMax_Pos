@@ -310,10 +310,15 @@ async function roleUpdate(tx: Tx, p: ReturnType<typeof parseRoleUpdate>, ctx: Ed
   }
   if (out.apply.length) {
     await team.admin.role.update({ where: { id: r.id }, data: pick(set, out.apply) })
-    await stamp(tx, 'Role', r.id, out.apply, p.at)
     // Права поменялись — сторож проверит каждого сотрудника этой роли заново
     team.accounts.dropPharmacy(pharmacyId)
   }
+  // Момент правки — и полям, которые уже такие, как прислала касса (повтор после сбоя, та же
+  // правка с другой кассы): иначе более ранняя правка их бы перекрыла. Более позднюю отметку
+  // GREATEST не понизит
+  const already = Object.keys(set).filter((f) => !out.apply.includes(f) && !out.kept.includes(f) && same((current as any)[f], set[f]))
+  const stamped = [...out.apply, ...already]
+  if (stamped.length) await stamp(tx, 'Role', r.id, stamped, p.at)
   if (out.overrode.length || out.kept.length || Object.keys(extra).length) {
     await kit.flag(tx, ctx, { id: r.id, date: p.at }, { kind: 'edit', name: r.name, units: 0, note: conflictNote('Role', set, current, out, extra) })
   }

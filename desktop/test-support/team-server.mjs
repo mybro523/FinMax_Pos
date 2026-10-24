@@ -29,6 +29,8 @@ export const ROLES = [
 //   srv.rejectTeam = (op) → текст отказа или ничего — отвергнуть операцию с сотрудником или ролью;
 //   srv.noopTeam = (op) → true — принять, но ничего не сделать (сервер оставил своё: удаление
 //     правили позже, логин занят, пароль с сайта новее) — ответ «принято» без документа;
+//   srv.holdTeam = (op) → true — сервер не смог записать операцию сейчас («отправьте ещё раз»):
+//     она остаётся в очереди кассы, а остаток пачки сервер, как и настоящий, не разбирает;
 //   srv.teamOf() — список сотрудников и ролей, каким его сейчас отдал бы сервер;
 //   srv.state.teamLog — все пришедшие операции с сотрудниками и ролями (тип, от кого, что);
 //   srv.state.revoked — отозванные ключи (с ними сервер отвечает 401).
@@ -69,6 +71,8 @@ export function makeServer() {
       if (why) return { id: op.id, status: 'rejected', error: why }
     }
     if (srv.noopTeam && srv.noopTeam(op)) return { id: op.id, status: 'ok', docId: null }
+    // Сбой у самого сервера, а не в операции: касса пришлёт её ещё раз
+    if (srv.holdTeam && srv.holdTeam(op)) return { id: op.id, status: 'retry', error: 'Сервер не смог записать операцию. Она будет отправлена повторно.' }
     switch (op.type) {
       case 'user.create': {
         const u = p.user
@@ -154,6 +158,12 @@ export function makeServer() {
           // уходят и под кассиром). Автора сервер не знает — прав нет
           const performer = op.accountId && op.accountId !== u.id ? byId(op.accountId) || { role: 'cashier' } : u
           const r = applyTeamOp(op, performer)
+          // Незаписанную операцию сервер не запоминает и дальше не идёт — порядок важен:
+          // остаток пачки касса пришлёт ещё раз
+          if (r && r.status === 'retry') {
+            results.push(r)
+            break
+          }
           srv.state.ops.set(op.id, r)
           results.push(r)
           continue

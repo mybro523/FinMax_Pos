@@ -137,6 +137,20 @@ test('поле правили и там, и тут: побеждает та пр
   assert.deepEqual(resolveEdit({ price: 160 }, { price: 150 }, current, new Map(), at('2026-10-23T09:00:00Z')), { apply: [], overrode: [], kept: [] })
 })
 
+test('у кассы «было» совпало с сервером, но поле с тех пор правили позже — более ранняя правка не ложится', () => {
+  // Касса X без связи разблокировала сотрудника в 09:00 (у неё он был заблокирован). Касса Y,
+  // узнав об этом по сети, заблокировала его снова в 09:05 и дошла до сервера первой: на сервере
+  // он заблокирован, отметка поля — 09:05. Правка X приходит последней, её «было» совпадает с
+  // сервером — но она раньше, и блокировка остаётся
+  const current = { active: false }
+  const stamps = new Map([['active', at('2026-10-23T09:05:00Z')]])
+  assert.deepEqual(resolveEdit({ active: true }, { active: false }, current, stamps, at('2026-10-23T09:00:00Z')), { apply: [], overrode: [], kept: ['active'] })
+  // Правка позже отметки (обычный порядок: сначала сервер, потом касса) — ложится, как и раньше
+  assert.deepEqual(resolveEdit({ active: true }, { active: false }, current, stamps, at('2026-10-23T09:10:00Z')), { apply: ['active'], overrode: [], kept: [] })
+  // Отметки нет — ложится
+  assert.deepEqual(resolveEdit({ active: true }, { active: false }, current, new Map(), at('2026-10-23T09:00:00Z')), { apply: ['active'], overrode: [], kept: [] })
+})
+
 test('одинаковость полей: деньги числом, пустое — пустым, списки поэлементно', () => {
   assert.equal(same(new Prisma.Decimal('12.00'), 12), true)
   assert.equal(same('', null), true)

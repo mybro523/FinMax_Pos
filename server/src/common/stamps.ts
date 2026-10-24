@@ -136,7 +136,11 @@ export function resolveEdit(set: Record<string, any>, base: Record<string, any>,
     const now = current[field]
     if (same(now, set[field])) continue
     if (same(now, base[field])) {
-      out.apply.push(field)
+      // Касса правила то же, что видит и сервер. Но если поле с тех пор правили позже (другая
+      // касса успела вернуть значение, с которого начинала эта), более ранняя правка не ложится
+      const last = stamps.get(field)
+      if (last && last.getTime() > at.getTime()) out.kept.push(field)
+      else out.apply.push(field)
       continue
     }
     const last = stamps.get(field)

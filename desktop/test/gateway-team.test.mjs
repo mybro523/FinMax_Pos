@@ -432,6 +432,208 @@ test('две смены пароля без связи, вторую серве�
   check(p1.status === 201, 'без интернета принятый пароль P1 подходит', { status: p1.status, msg: p1.data?.message })
 })
 
+test('свою смену пароля без связи сервер отверг: без интернета снова подходит прежний пароль — и тогда, когда до этого пароль сменили на соседней кассе, а сотрудник вошёл здесь с новым через сервер', async (t) => {
+  const V2 = 'Reset-on-A-222'
+  const refusePw = (op) => (op.type === 'user.update' && op.payload?.set?.passwordHash ? 'Недостаточно прав' : null)
+
+  // Сначала для сравнения — одна касса: смену пароля сервер отверг, и подходит прежний пароль
+  {
+    const S = makeServer()
+    const A = makeTill(S, 'A')
+    closeAfter(t, A)
+    check((await A.login('boss', 'Boss-pass-1')).status === 201, 'одна касса: владелец входит с интернетом')
+    await A.gw.syncNow()
+    A.gw.logout()
+    check((await A.login('ali', 'Ali-pass-1')).status === 201, 'одна касса: ali входит с интернетом (вход без интернета здесь теперь известен)')
+    await A.gw.syncNow()
+    A.gw.logout()
+    check((await A.login('boss', 'Boss-pass-1')).status === 201, 'одна касса: владелец снова входит с интернетом')
+    await A.gw.syncNow()
+    S.srv.state.online = false
+    check((await A.req('PATCH', '/users/acc-ali', { password: V2 })).status === 200, 'одна касса без связи: владелец задал ali новый пароль')
+    S.srv.state.online = true
+    S.srv.rejectTeam = refusePw
+    await A.gw.syncNow()
+    await A.gw.syncNow()
+    S.srv.state.online = false
+    A.gw.logout()
+    const prev = await A.login('ali', 'Ali-pass-1')
+    check(prev.status === 201, 'одна касса без интернета: смену сервер отверг — подходит прежний пароль', { status: prev.status, msg: prev.data?.message })
+  }
+
+  // Теперь до этого пароль ali сменили на соседней кассе B (V1), сервер смену принял, и ali вошла
+  // с V1 здесь, на кассе A, с интернетом. Когда сервер отвергнет свою смену, та давняя, уже
+  // подтверждённая смена соседа не должна снова сделать пароль «неизвестным»: прежний пароль здесь — V1
+  {
+    const S = makeServer()
+    const A = makeTill(S, 'A')
+    const B = makeTill(S, 'B')
+    closeAfter(t, A, B)
+    const V1 = 'Reset-on-B-111'
+    for (const k of [A, B]) {
+      check((await k.login('boss', 'Boss-pass-1')).status === 201, `касса ${k.name}: владелец входит с интернетом`)
+      await k.gw.syncNow()
+    }
+    A.gw.logout()
+    check((await A.login('ali', 'Ali-pass-1')).status === 201, 'касса A: ali входит с интернетом (вход без интернета здесь теперь известен)')
+    await A.gw.syncNow()
+    A.gw.logout()
+    check((await A.login('boss', 'Boss-pass-1')).status === 201, 'касса A: снова владелец')
+    await A.gw.syncNow()
+    lan(A, B)
+    lan(B, A)
+
+    // Касса B без связи задаёт ali пароль V1; по сети A узнаёт только, что пароль сменили
+    S.srv.state.online = false
+    check((await B.req('PATCH', '/users/acc-ali', { password: V1 })).status === 200, 'касса B без связи: ali задан пароль V1')
+    lan(B, A)
+    check(!A.coreRow('ali').hasVerifier, 'касса A: вход без интернета для ali закрыт — пароль сменили на соседней кассе, нового здесь не знают')
+
+    // Связь вернулась: B отправляет смену, известие «сервер принял» по сети доходит до A, и A её подтверждает
+    S.srv.state.online = true
+    await B.gw.syncNow()
+    lan(B, A)
+    await A.gw.syncNow()
+    await A.gw.syncNow()
+
+    // ali входит на A с интернетом паролем V1 — теперь его знает и вход без интернета
+    A.gw.logout()
+    check((await A.login('ali', V1)).status === 201, 'касса A с интернетом: ali входит с V1 (его принял сервер)')
+    await A.gw.syncNow()
+    check(!!A.coreRow('ali').hasVerifier, 'касса A: вход без интернета для ali снова есть — по V1')
+    A.gw.logout()
+    check((await A.login('boss', 'Boss-pass-1')).status === 201, 'касса A: владелец снова входит с интернетом')
+    await A.gw.syncNow()
+
+    // Владелец на A без связи задаёт ali пароль V2 — эту смену сервер отвергнет
+    S.srv.state.online = false
+    check((await A.req('PATCH', '/users/acc-ali', { password: V2 })).status === 200, 'касса A без связи: ali задан пароль V2')
+    S.srv.state.online = true
+    S.srv.rejectTeam = refusePw
+    await A.gw.syncNow()
+    await A.gw.syncNow()
+    const rej = A.gw.rejected().map((o) => o.type)
+    check(rej.includes('user.update'), 'сервер отверг смену пароля V2', rej)
+
+    S.srv.state.online = false
+    A.gw.logout()
+    const v1 = await A.login('ali', V1)
+    check(v1.status === 201, 'касса A без интернета: подходит V1 — нынешний пароль на сервере (V2 отвергнут)', { status: v1.status, msg: v1.data?.message })
+    A.gw.logout()
+    const v2 = await A.login('ali', V2)
+    check(v2.status !== 201, 'касса A без интернета: отвергнутый V2 не подходит', v2.status)
+  }
+})
+
+test('второй владелец сменил сотруднику пароль без связи, а тот тем временем сам сменил свой пароль через сервер; смену владельца сервер отверг — без интернета подходит пароль, заданный самим сотрудником, а прежний (на сервере отозванный) нет', async (t) => {
+  const S = makeServer()
+  S.srv.addUser('boss2', 'Boss2-pass-1', 'founder', 'acc-boss2', { roleId: 'owner', roleName: 'Владелец' })
+  const A = makeTill(S, 'A')
+  closeAfter(t, A)
+  const P1 = 'Reset-by-boss2-1'
+  const W = 'Ali-own-new-W'
+  // Что со сменой P1 в очереди отправки кассы
+  const p1State = () => A.db().prepare("SELECT state FROM outbox WHERE type = 'user.update'").get()?.state
+
+  check((await A.login('boss', 'Boss-pass-1')).status === 201, 'владелец входит с интернетом')
+  await A.gw.syncNow()
+  A.gw.logout()
+  check((await A.login('ali', 'Ali-pass-1')).status === 201, 'ali входит с интернетом (вход без интернета здесь теперь известен)')
+  await A.gw.syncNow()
+  A.gw.logout()
+  check((await A.login('boss2', 'Boss2-pass-1')).status === 201, 'второй владелец boss2 входит с интернетом')
+  await A.gw.syncNow()
+
+  // Интернета нет; boss2 задаёт ali пароль P1
+  S.srv.state.online = false
+  const rs = await A.req('PATCH', '/users/acc-ali', { password: P1 })
+  check(rs.status === 200, 'без связи: boss2 задал ali пароль P1', { status: rs.status, msg: rs.data?.message })
+  A.gw.logout()
+  // Неделя без интернета: ключи обоих владельцев на сервере истекли — P1 отправить пока нечем
+  for (const [token, name] of S.srv.state.tokens) if (name === 'boss2' || name === 'boss') S.srv.state.tokens.delete(token)
+
+  // Интернет вернулся; ali входит прежним паролем и сама меняет его на W — через сервер
+  S.srv.state.online = true
+  check((await A.login('ali', 'Ali-pass-1')).status === 201, 'с интернетом: ali входит прежним паролем')
+  await A.gw.syncNow()
+  check(p1State() === 'pending', 'смена P1 ждёт отправки', p1State())
+  const cp = await A.req('POST', '/auth/change-password', { oldPassword: 'Ali-pass-1', newPassword: W })
+  check(cp.status === 201, 'с интернетом: ali сменила свой пароль на W', cp.status)
+  A.gw.logout()
+
+  // Сайт: boss снял с boss2 права владельца. boss входит на кассе, P1 уходит его ключом, но автор
+  // смены — boss2, и сервер её отвергает
+  S.srv.state.users.get('boss2').role = 'cashier'
+  check((await A.login('boss', 'Boss-pass-1')).status === 201, 'с интернетом: входит владелец boss, очередь уходит')
+  await A.gw.syncNow()
+  await A.gw.syncNow()
+  check(p1State() === 'rejected', 'сервер отверг смену P1', p1State())
+  check((await serverLogin(S, 'ali', W)) === 201 && (await serverLogin(S, 'ali', 'Ali-pass-1')) === 401, 'сам сервер: действует W, прежний пароль — нет')
+
+  S.srv.state.online = false
+  A.gw.logout()
+  const old = await A.login('ali', 'Ali-pass-1')
+  check(old.status !== 201, 'без интернета прежний пароль (на сервере отозванный) не подходит', old.status)
+  A.gw.logout()
+  const cur = await A.login('ali', W)
+  check(cur.status === 201, 'без интернета подходит W — нынешний пароль на сервере', { status: cur.status, msg: cur.data?.message })
+})
+
+test('две смены пароля без связи: первую сервер принял, вторую в тот раз записать не смог; потом пароль задали на сайте, сотрудник вошёл с ним, а вторую смену сервер отверг — без интернета подходит пароль с сайта, а принятая раньше смена — нет', async (t) => {
+  const S = makeServer()
+  const A = makeTill(S, 'A')
+  closeAfter(t, A)
+  const P0 = 'Reset-on-A-000'
+  const P1 = 'Reset-on-A-111'
+  const W = 'Reset-on-site-W'
+  // Смены пароля в очереди отправки кассы — по порядку
+  const queue = () => A.db().prepare("SELECT id, state FROM outbox WHERE type = 'user.update' ORDER BY seq").all()
+  const states = () => queue().map((x) => x.state)
+
+  check((await A.login('boss', 'Boss-pass-1')).status === 201, 'владелец входит с интернетом')
+  await A.gw.syncNow()
+  A.gw.logout()
+  check((await A.login('ali', 'Ali-pass-1')).status === 201, 'ali входит с интернетом (вход без интернета здесь теперь известен)')
+  await A.gw.syncNow()
+  A.gw.logout()
+  check((await A.login('boss', 'Boss-pass-1')).status === 201, 'владелец снова входит с интернетом')
+  await A.gw.syncNow()
+
+  S.srv.state.online = false
+  check((await A.req('PATCH', '/users/acc-ali', { password: P0 })).status === 200, 'без связи: владелец задал ali пароль P0')
+  check((await A.req('PATCH', '/users/acc-ali', { password: P1 })).status === 200, 'без связи: и ещё раз — P1')
+  const p1Id = queue()[1]?.id
+
+  // Интернет вернулся: P0 сервер принимает, а P1 в этот раз записать не может — она остаётся в очереди
+  S.srv.state.online = true
+  S.srv.holdTeam = (op) => op.id === p1Id
+  await A.gw.syncNow()
+  S.srv.holdTeam = null
+  check(states().join() === 'done,pending', 'P0 принята сервером, P1 ждёт повторной отправки', states())
+
+  // Сайт: владелец задаёт ali пароль W, прежние ключи ali сервер отзывает
+  const u = S.srv.state.users.get('ali')
+  u.hash = undefined
+  u.password = W
+  for (const [token, name] of S.srv.state.tokens) if (name === 'ali') S.srv.state.revoked.add(token)
+  A.gw.logout()
+  // ali входит с W, пока P1 ещё в очереди; обмен, начатый входом, уносит P1, и сервер её отвергает
+  S.srv.rejectTeam = (op) => (op.id === p1Id ? 'Недопустимый пароль' : null)
+  check((await A.login('ali', W)).status === 201, 'с интернетом: ali входит с W, пока P1 ждёт отправки')
+  await A.gw.syncNow()
+  await A.gw.syncNow()
+  check(states().join() === 'done,rejected', 'сервер отверг P1', states())
+  check((await serverLogin(S, 'ali', W)) === 201 && (await serverLogin(S, 'ali', P0)) === 401, 'сам сервер: действует W, P0 — нет')
+
+  S.srv.state.online = false
+  A.gw.logout()
+  const p0 = await A.login('ali', P0)
+  check(p0.status !== 201, 'без интернета P0 (на сервере его заменил W) не подходит', p0.status)
+  A.gw.logout()
+  const w = await A.login('ali', W)
+  check(w.status === 201, 'без интернета подходит W — нынешний пароль на сервере, с ним ali входила здесь', { status: w.status, msg: w.data?.message })
+})
+
 test('владелец сменил свой пароль без связи: новый подходит сразу, после отправки на сервер и потом без интернета', async (t) => {
   const S = makeServer()
   const A = makeTill(S, 'A')
@@ -681,6 +883,128 @@ test('правка соседа, не подтверждённая сервер�
   A.gw.logout()
   const b = await A.login('bob', 'Bob-pass-1')
   check(b.status === 201, 'касса A без связи: bob, разблокированный владельцем на этой же кассе, входит', { status: b.status, msg: b.data?.message })
+})
+
+test('разблокировка с соседней кассы, не подтверждённая сервером, не открывает вход тому, кого эта касса сама заблокировала или удалила: пока своя правка ждёт отправки, сотрудник не входит и с интернетом', async (t) => {
+  // Магазин с двумя кассами; на кассе A ali уже входила с интернетом
+  async function shop() {
+    const S = makeServer()
+    const A = makeTill(S, 'A')
+    const B = makeTill(S, 'B')
+    closeAfter(t, A, B)
+    for (const k of [A, B]) {
+      check((await k.login('boss', 'Boss-pass-1')).status === 201, `касса ${k.name}: владелец входит с интернетом`)
+      await k.gw.syncNow()
+    }
+    A.gw.logout()
+    check((await A.login('ali', 'Ali-pass-1')).status === 201, 'касса A: ali входит с интернетом (вход без интернета здесь теперь известен)')
+    await A.gw.syncNow()
+    A.gw.logout()
+    check((await A.login('boss', 'Boss-pass-1')).status === 201, 'касса A: снова владелец')
+    await A.gw.syncNow()
+    lan(A, B)
+    lan(B, A)
+    return { S, A, B }
+  }
+
+  // Первый случай: касса A заблокировала ali, а касса B, увидев это, блокировку сняла
+  {
+    const { S, A, B } = await shop()
+    S.srv.state.online = false
+    check((await A.req('PATCH', '/users/acc-ali', { active: false })).status === 200, 'касса A без связи: владелец заблокировал ali')
+    lan(A, B)
+    const un = await B.req('PATCH', '/users/acc-ali', { active: true })
+    check(un.status === 200 && un.data?.active === true, 'касса B без связи: владелец, увидев блокировку, снял её', un.status)
+    lan(B, A)
+    check(A.coreRow('ali').blocked === 1, 'касса A: вход без интернета для ali закрыт — разблокировку соседа сервер не подтвердил', A.coreRow('ali').blocked)
+    A.gw.logout()
+    check((await A.login('ali', 'Ali-pass-1')).status !== 201, 'касса A без связи: ali не входит')
+
+    // Интернет вернулся, но ни блокировка A, ни разблокировка B на сервер ещё не ушли
+    S.srv.state.online = true
+    const on = await A.login('ali', 'Ali-pass-1')
+    check(on.status !== 201, 'касса A с интернетом: ali не входит — своя блокировка ждёт отправки, а разблокировку соседа сервер не подтвердил', { status: on.status, active: A.session.activeId() })
+    A.gw.logout()
+    S.srv.state.online = false
+    const off = await A.login('ali', 'Ali-pass-1')
+    check(off.status !== 201, 'касса A без связи: ali по-прежнему не входит', off.status)
+  }
+
+  // Второй случай: B заблокировала ali, A её удалила, а B потом блокировку сняла. Удаление
+  // окончательно — последующая правка соседа его не отменяет
+  {
+    const { S, A, B } = await shop()
+    S.srv.state.online = false
+    check((await B.req('PATCH', '/users/acc-ali', { active: false })).status === 200, 'касса B без связи: владелец заблокировал ali')
+    lan(B, A)
+    const del = await A.req('DELETE', '/users/acc-ali')
+    check(del.status === 200, 'касса A без связи: владелец удалил ali', del.status)
+    check((await B.req('PATCH', '/users/acc-ali', { active: true })).status === 200, 'касса B без связи: владелец снял с ali блокировку')
+    lan(B, A)
+    check(A.coreRow('ali')?.blocked === 1, 'касса A: запись входа ali закрыта удалением, которое ждёт отправки', A.coreRow('ali'))
+    A.gw.logout()
+
+    S.srv.state.online = true
+    const on = await A.login('ali', 'Ali-pass-1')
+    check(on.status !== 201, 'касса A с интернетом: удалённая здесь ali не входит, пока удаление ждёт отправки', { status: on.status, active: A.session.activeId() })
+  }
+})
+
+test('сотрудник, которого соседняя касса без связи завела владельцем, не входит здесь без интернета с правами владельца оттого, что владелец этой кассы задал ему пароль: сервер его ещё не видел', async (t) => {
+  const S = makeServer()
+  const A = makeTill(S, 'A')
+  const B = makeTill(S, 'B')
+  closeAfter(t, A, B)
+
+  for (const k of [A, B]) {
+    check((await k.login('boss', 'Boss-pass-1')).status === 201, `касса ${k.name}: владелец входит с интернетом`)
+    await k.gw.syncNow()
+  }
+  lan(A, B)
+  lan(B, A)
+
+  S.srv.state.online = false
+  const mk = await B.req('POST', '/users', { name: 'carl', password: 'Carl-on-B-1', roleId: 'owner' })
+  check(mk.status === 201 && mk.data?.role === 'founder', 'касса B без связи: заведён сотрудник carl — владельцем', { status: mk.status, role: mk.data?.role })
+  lan(B, A)
+  check(!A.coreRow('carl'), 'касса A: заведённого соседом carl во входе без интернета пока нет')
+
+  // Владелец на кассе A задаёт carl пароль — роль он не трогает
+  const pw = await A.req('PATCH', '/users/' + mk.data?.id, { password: 'Carl-on-A-2' })
+  check(pw.status === 200, 'касса A без связи: владелец задал carl пароль (роль не менял)', pw.status)
+  A.gw.logout()
+  const c = await A.login('carl', 'Carl-on-A-2')
+  check(!(c.status === 201 && c.data?.user?.role === 'founder'), 'касса A без связи: carl не входит владельцем — его заведение на соседней кассе сервер ещё не подтвердил', { status: c.status, role: c.data?.user?.role, core: A.coreRow('carl') })
+})
+
+test('испорченная запись роли из обмена по сети (права — не список) не срывает перенос сотрудников во вход без интернета: заблокированный здесь сотрудник не входит', async (t) => {
+  const S = makeServer()
+  S.srv.addUser('bob', 'Bob-pass-1', 'cashier', 'acc-bob', { roleId: 'r-cashier', roleName: 'Кассир' })
+  const A = makeTill(S, 'A')
+  closeAfter(t, A)
+
+  check((await A.login('boss', 'Boss-pass-1')).status === 201, 'владелец входит с интернетом')
+  await A.gw.syncNow()
+  A.gw.logout()
+  check((await A.login('bob', 'Bob-pass-1')).status === 201, 'bob входит с интернетом (вход без интернета здесь теперь известен)')
+  await A.gw.syncNow()
+  A.gw.logout()
+  check((await A.login('boss', 'Boss-pass-1')).status === 201, 'владелец снова входит с интернетом')
+  await A.gw.syncNow()
+
+  // Без связи по сети приходит подделанная запись «от соседней кассы»: права роли кассира — число,
+  // а не список (имена полей касса сверяет, значения — нет)
+  S.srv.state.online = false
+  const body = { effects: { docs: [], moves: [], debts: [], edits: { rows: [{ tbl: 'team_roles', rowId: 'r-cashier', action: 'put', data: { set: { permissions: 5 }, was: {} } }], adj: [] } } }
+  A.gw.lanHub.receive('evil-device', [{ seq: 1, id: 'evil-op-1', kind: 'op', origin: 'evil-device', type: 'role.update', accountId: null, createdAt: new Date(S.time.now).toISOString(), body: JSON.stringify(body), wide: 0, redacted: 0 }])
+
+  // Владелец на этой кассе блокирует bob — вход без интернета для него закрывается сразу
+  const blk = await A.req('PATCH', '/users/acc-bob', { active: false })
+  check(blk.status === 200, 'без связи: владелец заблокировал bob', blk.status)
+  check(A.coreRow('bob')?.blocked === 1, 'вход без интернета для bob закрыт', { bob: A.coreRow('bob'), warns: A.warns })
+  A.gw.logout()
+  const b = await A.login('bob', 'Bob-pass-1')
+  check(b.status !== 201, 'без связи: заблокированный здесь bob не входит', { status: b.status, user: b.data?.user?.name })
 })
 
 test('соседняя касса блокирует, удаляет и назначает роль тем, кого эта касса завела без связи: сервер получает всё, и в верном порядке', async (t) => {
