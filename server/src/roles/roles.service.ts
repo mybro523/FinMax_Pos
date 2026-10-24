@@ -12,6 +12,9 @@ import {
   isPermission,
 } from '../auth/permissions'
 import { CreateRoleDto, UpdateRoleDto } from './dto'
+import { PrismaService } from '../prisma/prisma.service'
+import { forgetStamps, stamp } from '../common/stamps'
+import { teamMemoForget } from '../sync/team'
 
 // ── Роли магазина ──
 // Владелец — не запись в таблице, а особое положение: он может всё, и отнять у него
@@ -44,6 +47,7 @@ export class RolesService {
     private admin: AdminDbService,
     private accounts: AccountCache,
     private events: EventsGateway,
+    private prisma: PrismaService,
   ) {}
 
   // Системная роль кассира, заготовки и роль у кассиров прежней версии
@@ -136,6 +140,8 @@ export class RolesService {
     if (dto.permissions !== undefined) data.permissions = cleanPermissions(dto.permissions)
     try {
       const u = await this.admin.role.update({ where: { id }, data, include: { _count: { select: { accounts: true } } } })
+      // Когда правили поля роли: касса без связи могла править её же (sync/team.ts)
+      await stamp(this.prisma as any, 'Role', id, Object.keys(data)).catch(() => {})
       this.touched(pharmacyId)
       return { id: u.id, name: u.name, description: u.description, system: u.system, permissions: u.permissions, people: u._count.accounts }
     } catch (e) {
@@ -153,6 +159,7 @@ export class RolesService {
       throw new BadRequestException(`На этой роли ${r._count.accounts} сотрудник(ов). Сначала переведите их на другую роль`)
     }
     await this.admin.role.delete({ where: { id } })
+    await forgetStamps(this.prisma as any, 'Role', id).catch(() => {})
     this.touched(pharmacyId)
     return { ok: true }
   }
@@ -160,6 +167,7 @@ export class RolesService {
   // Права поменялись: кэш учётных записей сбрасывается, чтобы следующий же запрос
   // проверялся по новым правам, а открытые окна узнают об этом и перечитают «кто я»
   private touched(pharmacyId: string) {
+    teamMemoForget(pharmacyId)
     this.accounts.dropPharmacy(pharmacyId)
     this.events.changed('roles', 'users')
   }

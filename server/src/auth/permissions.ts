@@ -160,6 +160,9 @@ export function hasPerm(u: Actor | null | undefined, ...keys: string[]): boolean
 }
 
 // Что нужно, чтобы касса прислала операцию, сделанную без связи: то же, что и на сайте
+// Право, которого нет ни в одной роли: операцию пропускает только владелец
+export const OWNER_ONLY = 'owner.only'
+
 export const OP_PERMISSIONS: Record<string, string[]> = {
   sale: ['pos.sell'],
   return: ['returns.create'],
@@ -211,4 +214,12 @@ export const OP_PERMISSIONS: Record<string, string[]> = {
   'inventory.count': ['inventory.count'],
   'inventory.apply': ['inventory.apply'],
   'inventory.delete': ['inventory.count'],
+  // Сотрудники и роли (1.4.16) — только владелец, как на сайте (@Roles('founder')). Такого
+  // права нет ни в одной роли: hasPerm пропускает только владельца
+  'user.create': [OWNER_ONLY],
+  'user.update': [OWNER_ONLY],
+  'user.delete': [OWNER_ONLY],
+  'role.create': [OWNER_ONLY],
+  'role.update': [OWNER_ONLY],
+  'role.delete': [OWNER_ONLY],
 }

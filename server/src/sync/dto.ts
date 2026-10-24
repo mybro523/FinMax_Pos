@@ -48,4 +48,6 @@ export class PullQuery {
   // Номера операций через запятую: касса отправляла их, а ответа не дождалась, и
   // спрашивает, приняты ли они
   @IsOptional() @IsString() @MaxLength(8000) ops?: string
+  // Отпечаток списка сотрудников и ролей, который касса получила в прошлый раз
+  @IsOptional() @IsString() @MaxLength(40) teamv?: string
 }

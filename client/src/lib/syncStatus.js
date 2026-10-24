@@ -156,6 +156,19 @@ export function opTitle(type, t) {
       return t('Применение пересчёта')
     case 'inventory.delete':
       return t('Удаление листа пересчёта')
+    // ── Сотрудники и роли (версия 1.4.16) ──
+    case 'user.create':
+      return t('Новый сотрудник')
+    case 'user.update':
+      return t('Правка сотрудника')
+    case 'user.delete':
+      return t('Удаление сотрудника')
+    case 'role.create':
+      return t('Новая роль')
+    case 'role.update':
+      return t('Правка роли')
+    case 'role.delete':
+      return t('Удаление роли')
     default:
       return t('Операция')
   }

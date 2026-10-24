@@ -41,6 +41,9 @@ import {
 import { PushDto, PushOpDto } from './dto'
 import { mark, sinceOf } from './cursor'
 import { applyEdit, EDIT_TYPES, EditKit, loadAliases, rewriteAliases } from './edits'
+import { applyTeam, TEAM_TYPES, TeamKit, teamFor, teamMemoForget } from './team'
+import { AdminDbService } from '../admin/admin-db.service'
+import { RolesService } from '../roles/roles.service'
 import { stamp, stampsOfRows } from '../common/stamps'
 
 // ── Обмен с кассами, которые работают без интернета ──
@@ -78,7 +81,9 @@ interface Ctx {
   tenantUserId: string | null
   // Кто сделал операцию и его права — для правил, которые зависят от человека
   // (закрыть чужую смену можно только по праву)
-  actor?: { role: string; permissions: string[]; tenantUserId: string | null }
+  actor?: { role: string; permissions: string[]; tenantUserId: string | null; accountId?: string }
+  // Магазин того, кто прислал: сотрудники и роли живут в панели, по магазину
+  pharmacyId?: string | null
   // Операция принята, но что-то в ней не сошлось — владельцу есть на что посмотреть
   flagged: boolean
   // Разделы, которые операция задела сверх обычного (поправила итог пересчёта)
@@ -177,6 +182,12 @@ const TOUCHES: Record<OpType, string[]> = {
   'inventory.count': ['inventories'],
   'inventory.apply': ['inventories', 'products', 'writeoffs'],
   'inventory.delete': ['inventories'],
+  'user.create': ['users', 'staff', 'roles'],
+  'user.update': ['users', 'staff', 'roles'],
+  'user.delete': ['users', 'staff', 'roles'],
+  'role.create': ['roles', 'users'],
+  'role.update': ['roles', 'users'],
+  'role.delete': ['roles', 'users'],
 }
 
 // Сколько журнал изменений хранится. Касса без связи работает не больше недели;
@@ -189,6 +200,8 @@ const SALES_DAYS = 60
 const JOURNAL_DAYS = 180
 // Лист пересчёта — со строками и тем, кто его завёл (как отдаёт раздел «Инвентаризация»)
 const INVENTORY_INCLUDE = { items: true, user: { select: { id: true, name: true } } } as const
+// Сотрудник магазина для зарплаты — те же поля, что у GET /expenses/staff
+const STAFF_SELECT = { id: true, name: true, fullName: true, role: true, active: true, salary: true, bonusPercent: true, salaryDay: true, createdAt: true } as const
 
 // У строк незаконченного листа — когда их посчитали (countedAt). Касса держит поверх листа
 // своё и соседское насчитанное, и «позднее по времени побеждает» ей решать по этому
@@ -283,7 +296,14 @@ export class SyncService {
     private accounts: AccountCache,
     private auth: AuthService,
     private events: EventsGateway,
+    private admin: AdminDbService,
+    private roles: RolesService,
   ) {}
+
+  // Что нужно операциям сотрудников и ролей (sync/team.ts): база панели, сторож, события
+  private get team(): TeamKit {
+    return { admin: this.admin, accounts: this.accounts, events: this.events, roles: this.roles }
+  }
 
   // ── Принять пачку операций ──
   async push(dto: PushDto, user: SyncUser, key?: string): Promise<{ results: OpResult[] }> {
@@ -337,7 +357,7 @@ export class SyncService {
       if (!hasPerm(performer, ...alternatives)) return this.reject(op, deviceId, user, createdAt, 'Недостаточно прав')
     }
 
-    const ctx: Ctx = { deviceId, tenantUserId: performer.tenantUserId, flagged: false, extra: new Set(), actor: performer }
+    const ctx: Ctx = { deviceId, tenantUserId: performer.tenantUserId, flagged: false, extra: new Set(), actor: performer, pharmacyId: user.pharmacyId ?? null }
     try {
       const work = async (tx: Tx) => {
         // Первым делом — номер операции. Если она уже принята (или принимается
@@ -356,6 +376,8 @@ export class SyncService {
       }
       // Лист пересчёта — это тысячи строк: ему, как и на сайте, — запас времени побольше
       const docId = type.startsWith('inventory.') ? await this.prisma.$transaction(work, TX_LONG) : await this.prisma.$transaction(work, TX)
+      // Сотрудник или роль поменялись — список для касс собирается заново
+      if (TEAM_TYPES.has(type) && user.pharmacyId) teamMemoForget(user.pharmacyId)
       ;(TOUCHES[type] || []).forEach((k) => touched.add(k))
       ctx.extra.forEach((k) => touched.add(k))
       if (ctx.flagged) touched.add('discrepancies')
@@ -446,6 +468,8 @@ export class SyncService {
       case 'supplier.return':
         return this.applySupplierReturn(tx, parseSupplierReturn(payload), ctx)
       default:
+        // Сотрудники и роли (1.4.16) — в базе панели
+        if (TEAM_TYPES.has(type)) return applyTeam(tx, type, payload, ctx, this.kit, this.team)
         // Справочники и правки документов, сделанные без связи
         return applyEdit(tx, type, payload, ctx, this.kit)
     }
@@ -1364,7 +1388,7 @@ export class SyncService {
   }
 
   // ── Что изменилось с прошлого раза ──
-  async pull(q: { cursor?: string; wcursor?: string; deviceId: string; appVersion?: string; ops?: string }, user: SyncUser, key?: string) {
+  async pull(q: { cursor?: string; wcursor?: string; deviceId: string; appVersion?: string; ops?: string; teamv?: string }, user: SyncUser, key?: string) {
     const device = await this.touchDevice(q.deviceId, user, q.appVersion, key)
     await this.forgetIfRewound()
     await this.pruneIfDue()
@@ -1416,7 +1440,7 @@ export class SyncService {
         rows.push(
           ...(await tx.$queryRaw<{ tbl: string; rowId: string; op: string }[]>`
             SELECT "tbl", "rowId", "op" FROM "ChangeLog"
-            WHERE "tbl" IN ('WriteOff', 'Expense', 'ExpenseCategory', 'Income', 'IncomeCategory', 'SupplierPayment', 'Supplier') AND "txid" >= ${askedW} AND "txid" < ${since} ORDER BY "seq"`),
+            WHERE "tbl" IN ('WriteOff', 'Expense', 'ExpenseCategory', 'Income', 'IncomeCategory', 'SupplierPayment', 'Supplier', 'User') AND "txid" >= ${askedW} AND "txid" < ${since} ORDER BY "seq"`),
         )
       }
       if (rows.length > MAX_CHANGES) return { full: true, cursor: horizon, fates, data: trimPull(await this.loadAll(tx, scope.wide), scope) }
@@ -1430,6 +1454,21 @@ export class SyncService {
       await this.prisma.syncMeta.upsert({ where: { key: markKey }, update: { value: cursor }, create: { key: markKey, value: cursor } })
     } catch (e: any) {
       this.log.warn(`отметка кассы ${q.deviceId} не записалась: ${e?.message || e}`)
+    }
+
+    // Сотрудники и роли (как GET /users и GET /roles): владелец заводит и правит их на кассе
+    // без связи, а вход без интернета на каждой кассе должен знать, кого заблокировали и
+    // какие у кого права. Поэтому — всем кассам (окладов и паролей здесь нет), но открывает
+    // раздел на кассе только владелец. Целиком, если изменился с прошлого раза (teamv)
+    let team: any = undefined
+    if (user.pharmacyId) {
+      try {
+        const t = await teamFor(this.team, user.pharmacyId)
+        if (q.teamv !== t.v) team = t
+      } catch (e: any) {
+        // Панель не ответила — обмен идёт и без этого раздела, касса спросит снова
+        this.log.warn(`сотрудники для кассы ${q.deviceId} не собраны: ${e?.message || e}`)
+      }
     }
 
     const me = await this.auth.me(user.sub, null)
@@ -1449,7 +1488,7 @@ export class SyncService {
       ops: Object.fromEntries(
         snap.fates.map((f) => [f.id, f.status === 'ok' ? { status: 'ok', docId: f.docId } : { status: 'rejected', error: f.error }]),
       ),
-      data: snap.data,
+      data: team ? { ...snap.data, team } : snap.data,
     }
   }
 
@@ -1501,6 +1540,8 @@ export class SyncService {
       ),
       ...(founder
         ? {
+            // Сотрудники магазина с окладом и бонусом — для зарплаты (как GET /expenses/staff)
+            staff: all(await tx.user.findMany({ select: STAFF_SELECT, orderBy: [{ active: 'desc' }, { name: 'asc' }] })),
             writeoffs: all(await tx.writeOff.findMany({ where: { date: { gte: journalFrom } }, include: withUser, orderBy: { date: 'desc' } })),
             supplierPayments: all(
               await tx.supplierPayment.findMany({
@@ -1577,6 +1618,7 @@ export class SyncService {
       ),
       ...(founder
         ? {
+            staff: await load('User', (part) => tx.user.findMany({ where: inIds(part), select: STAFF_SELECT })),
             writeoffs: await load('WriteOff', (part) => tx.writeOff.findMany({ where: inIds(part), include: withUser })),
             supplierPayments: await load('SupplierPayment', (part) =>
               tx.supplierPayment.findMany({ where: inIds(part), include: { ...userOnly, supplier: { select: { id: true, name: true } } } }),
@@ -1774,7 +1816,7 @@ function requiredPermissions(type: string, payload: any): string[][] {
 // и так у каждой кассы), а на одной кассе работают разные люди — лист, изменённый, пока
 // за кассой кассир, иначе не дошёл бы до неё и тогда, когда войдёт владелец. Раздел
 // «Инвентаризация» на кассе открывается по тем же правам, что на сайте
-type PullScope = { wide: boolean; suppliers: boolean; writeoffs: boolean; expenses: boolean; incomes: boolean }
+type PullScope = { wide: boolean; suppliers: boolean; writeoffs: boolean; expenses: boolean; incomes: boolean; staff: boolean }
 function pullScope(user: any): PullScope {
   // Те же права, что у журналов на сервере: отчёты и панель тоже читают списания и расходы
   const suppliers = hasPerm(user, 'suppliers.view')
@@ -1782,7 +1824,10 @@ function pullScope(user: any): PullScope {
   const expenses = hasPerm(user, 'expenses.view', 'reports.view')
   // Доходы читает и отчёт ОПУ: чистый доход считается вместе с ними
   const incomes = hasPerm(user, 'incomes.view', 'reports.view')
-  return { wide: suppliers || writeoffs || expenses || incomes, suppliers, writeoffs, expenses, incomes }
+  // Сотрудники с окладами — тем, кто видит расходы (и выдаёт зарплату): без права на расходы
+  // широкого раздела нет, и окладов в нём тоже
+  const staff = expenses
+  return { wide: suppliers || writeoffs || expenses || incomes, suppliers, writeoffs, expenses, incomes, staff }
 }
 function trimPull<T extends Record<string, any>>(data: T, scope: PullScope): T {
   if (!scope.wide) return data
@@ -1792,6 +1837,8 @@ function trimPull<T extends Record<string, any>>(data: T, scope: PullScope): T {
     delete out.expenses
     delete out.expenseCategories
   }
+  // Оклады и бонусы сотрудников — тем, кто выдаёт зарплату (как GET /expenses/staff)
+  if (!scope.staff) delete out.staff
   if (!scope.incomes) {
     delete out.incomes
     delete out.incomeCategories

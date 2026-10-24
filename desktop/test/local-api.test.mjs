@@ -98,6 +98,16 @@ test('касса отвечает сама ровно на то, что умее
     ['GET', '/arrivals/abc'],
     ['PATCH', '/arrivals/abc'],
     ['DELETE', '/arrivals/abc'],
+    // С версии 1.4.16 — сотрудники, роли и список для зарплаты
+    ['GET', '/users'],
+    ['POST', '/users'],
+    ['PATCH', '/users/abc'],
+    ['DELETE', '/users/abc'],
+    ['GET', '/roles'],
+    ['POST', '/roles'],
+    ['PATCH', '/roles/abc'],
+    ['DELETE', '/roles/abc'],
+    ['GET', '/expenses/staff'],
   ]
   for (const [method, path] of local) assert.ok(matchLocal(method, path), `${method} ${path} должен обслуживаться локально`)
 
@@ -107,12 +117,11 @@ test('касса отвечает сама ровно на то, что умее
     assert.ok(matchFallback(method, path), `${method} ${path} без связи отвечает касса`)
   }
 
-  // Всё остальное — дело сервера: сотрудники и роли, пересчёт, резервная копия,
-  // удаление клиента, панель владельца сервиса
+  // Всё остальное — дело сервера: расхождения, объединение карточек, резервная копия,
+  // удаление клиента, панель владельца сервиса, свой пароль
   const remote = [
-    ['GET', '/users'],
-    ['POST', '/users'],
     ['GET', '/discrepancies'],
+    ['POST', '/auth/change-password'],
     ['POST', '/products/p1/merge'],
     ['GET', '/backup'],
     ['POST', '/backup/restore'],

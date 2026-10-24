@@ -323,8 +323,8 @@ test('список операций закрыт, а списание и рас�
     'expenseCategory.delete', 'income', 'income.delete', 'income.update', 'incomeCategory.create', 'incomeCategory.delete',
     'inventory.apply', 'inventory.count', 'inventory.create', 'inventory.delete', 'payService.create',
     'payService.delete', 'product.create', 'product.delete', 'product.update', 'productType.create', 'productType.delete', 'productType.update',
-    'return', 'sale', 'shift.close', 'shift.open', 'supplier.create', 'supplier.delete', 'supplier.pay', 'supplier.return', 'supplier.update',
-    'supplierPayment.delete', 'supplierReturn.delete', 'writeoff',
+    'return', 'role.create', 'role.delete', 'role.update', 'sale', 'shift.close', 'shift.open', 'supplier.create', 'supplier.delete', 'supplier.pay',
+    'supplier.return', 'supplier.update', 'supplierPayment.delete', 'supplierReturn.delete', 'user.create', 'user.delete', 'user.update', 'writeoff',
   ])
   // Возврат поставщику — по праву «возврат поставщику», как на сайте, а не только владельцу
   assert.equal(FOUNDER_ONLY.has('supplier.return'), false)

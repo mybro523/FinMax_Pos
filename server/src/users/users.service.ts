@@ -8,6 +8,8 @@ import { EventsGateway } from '../events/events.gateway'
 import { AccountCache } from '../admin/account-cache.service'
 import { CreateUserDto, UpdateUserDto } from './dto'
 import { RolesService } from '../roles/roles.service'
+import { forgetStamps, stamp } from '../common/stamps'
+import { teamMemoForget } from '../sync/team'
 
 // ── Сотрудники магазина ──
 // Запись идёт в две базы сразу, и общей транзакции между ними нет. В панели живёт
@@ -142,6 +144,7 @@ export class UsersService {
 
     // Все открытые списки сотрудников перечитываются — без этого экран жил бы
     // своими догадками и после обрыва связи показывал бы призрачные строки
+    teamMemoForget(pharmacyId)
     this.events.changed('users')
     return view(acc, profile)
   }
@@ -231,11 +234,24 @@ export class UsersService {
         await this.prisma.user.update({ where: { id: acc.tenantUserId }, data: { role: data.role } }).catch(() => {})
       }
       // Открытые окна этого сотрудника перечитают «кто я» и спрячут или покажут разделы
+      teamMemoForget(pharmacyId)
       this.events.changed('roles', 'users')
     } else {
       // Имя, блокировка, пароль — списки сотрудников тоже перечитываются
-      this.events.changed('users')
+      teamMemoForget(pharmacyId)
+    this.events.changed('users')
     }
+
+    // Когда правили поля: касса без связи могла править того же сотрудника, и остаётся более
+    // поздняя по времени правка (sync/team.ts). Отметка — в схеме магазина
+    const touchedFields = [
+      ...(name && name !== acc.login ? ['name'] : []),
+      ...(dto.active !== undefined ? ['active'] : []),
+      ...(roleChanged ? ['roleId'] : []),
+      ...(dto.password ? ['password'] : []),
+      ...Object.keys(profile),
+    ]
+    if (touchedFields.length) await stamp(this.prisma as any, 'Account', id, touchedFields).catch(() => {})
 
     // Доступ отобрали — обрываем и постоянное соединение. Обычные запросы
     // сотрудника уже отклоняются, а связь жила бы своей жизнью до перепроверки
@@ -260,8 +276,10 @@ export class UsersService {
     if (acc.tenantUserId) {
       await this.prisma.user.delete({ where: { id: acc.tenantUserId } }).catch(() => {})
     }
+    await forgetStamps(this.prisma as any, 'Account', id).catch(() => {})
     this.events.dropUser(id, 'сотрудник удалён')
     this.accounts.drop(id)
+    teamMemoForget(pharmacyId)
     this.events.changed('users')
     return { ok: true }
   }

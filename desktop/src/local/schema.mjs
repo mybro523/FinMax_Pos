@@ -379,6 +379,46 @@ export const PHARMACY_SCHEMA = [
   UPDATE docs SET closedAt = json_extract(body, '$.appliedAt')
     WHERE kind = 'inventory' AND json_extract(body, '$.status') = 'applied';
   `,
+  // ── Сотрудники и роли без связи (версия 1.4.16) ──
+  // staff — сотрудники магазина для зарплаты (как GET /expenses/staff): оклад в дирамах,
+  // бонус в сотых долях процента. team_accounts и team_roles — учётные записи и роли
+  // (как GET /users и GET /roles): владелец заводит и правит их без связи. Сделанное здесь
+  // лежит поправками поверх данных сервера (edits.mjs). Сотрудников сервер начал отдавать
+  // кассам с этой версии — отметки обмена сбрасываются, один раз касса получит всё заново
+  `
+  CREATE TABLE staff (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    fullName TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT 'cashier',
+    active INTEGER NOT NULL DEFAULT 1,
+    salaryC INTEGER NOT NULL DEFAULT 0,
+    bonusBp INTEGER NOT NULL DEFAULT 0,
+    salaryDay INTEGER NOT NULL DEFAULT 1,
+    createdAt TEXT NOT NULL DEFAULT ''
+  );
+  CREATE TABLE team_accounts (
+    id TEXT PRIMARY KEY,
+    login TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT 'cashier',
+    roleId TEXT,
+    roleName TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1,
+    userId TEXT,
+    createdAt TEXT NOT NULL DEFAULT '',
+    ord INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE team_roles (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    system TEXT,
+    permissions TEXT NOT NULL DEFAULT '[]',
+    createdAt TEXT NOT NULL DEFAULT '',
+    ord INTEGER NOT NULL DEFAULT 0
+  );
+  DELETE FROM meta WHERE key IN ('cursor', 'wcursor', 'teamv');
+  `,
 ]
 
 // ── Общая база программы ──
@@ -432,5 +472,14 @@ export const CORE_SCHEMA = [
   -- Кассир прежней версии (пустой список) получает права кассира по умолчанию
   ALTER TABLE accounts ADD COLUMN permissions TEXT NOT NULL DEFAULT '';
   ALTER TABLE accounts ADD COLUMN roleName TEXT NOT NULL DEFAULT '';
+  `,
+  // ── Сотрудники без связи (версия 1.4.16) ──
+  // blocked — владелец заблокировал сотрудника (здесь или на соседней кассе): без интернета
+  // под ним не войти. localPw — какой поправкой (номер операции) задан пароль здесь, и
+  // prevVerifier — прежний отпечаток: если сервер смену пароля отвергнет, вернётся прежний
+  `
+  ALTER TABLE accounts ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE accounts ADD COLUMN localPw TEXT;
+  ALTER TABLE accounts ADD COLUMN prevVerifier TEXT;
   `,
 ]

@@ -44,6 +44,10 @@ const COLS = {
   expense_categories: ['name', 'createdAt'],
   income_categories: ['name', 'createdAt'],
   suppliers: ['name', 'phone', 'note', 'openingDebtC', 'sDebtC', 'debtArrivals', 'createdAt'],
+  // Сотрудники и роли (1.4.16)
+  staff: ['name', 'fullName', 'role', 'active', 'salaryC', 'bonusBp', 'salaryDay', 'createdAt'],
+  team_accounts: ['login', 'role', 'roleId', 'roleName', 'active', 'userId', 'createdAt', 'ord'],
+  team_roles: ['name', 'description', 'system', 'permissions', 'createdAt', 'ord'],
 }
 export const EDIT_TABLES = Object.keys(COLS)
 // Виды документов, которые можно править и удалять поправкой

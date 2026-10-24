@@ -180,6 +180,47 @@ function applyCategories(db, categories, full) {
   reorderCategories(db)
 }
 
+// ── Сотрудники магазина (для зарплаты) — список сервера и поверх свои поправки ──
+const cents = (v) => Math.round(Number(v || 0) * 100)
+function applyStaff(db, staff, full) {
+  if (full) q(db, 'DELETE FROM staff').run()
+  const insert = q(
+    db,
+    'INSERT OR REPLACE INTO staff (id, name, fullName, role, active, salaryC, bonusBp, salaryDay, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  )
+  for (const u of staff.upsert) {
+    if (!u || typeof u.id !== 'string') continue
+    insert.run(
+      u.id, String(u.name ?? ''), String(u.fullName ?? ''), String(u.role || 'cashier'), u.active === false ? 0 : 1,
+      cents(u.salary), cents(u.bonusPercent), Math.min(28, Math.max(1, Math.trunc(Number(u.salaryDay) || 1))), isoOrNull(u.createdAt) || '',
+    )
+  }
+  for (const id of staff.remove) q(db, 'DELETE FROM staff WHERE id = ?').run(id)
+  replayEdits(db, ['staff'])
+  setMeta(db, 'staffLoaded', '1')
+}
+
+// ── Учётные записи и роли: сервер отдаёт их целиком (раздел team) ──
+// Список сервера — основа, поверх — поправки, которых он ещё не видел
+function applyTeam(db, team, now) {
+  q(db, 'DELETE FROM team_accounts').run()
+  q(db, 'DELETE FROM team_roles').run()
+  const acc = q(db, 'INSERT INTO team_accounts (id, login, role, roleId, roleName, active, userId, createdAt, ord) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+  ;(Array.isArray(team.accounts) ? team.accounts : []).forEach((a, n) => {
+    if (!a || typeof a.id !== 'string') return
+    acc.run(a.id, String(a.name ?? ''), String(a.role || 'cashier'), a.roleId ?? null, String(a.roleName ?? ''), a.active === false ? 0 : 1, a.userId ?? null, isoOrNull(a.createdAt) || '', n)
+  })
+  const role = q(db, 'INSERT INTO team_roles (id, name, description, system, permissions, createdAt, ord) VALUES (?, ?, ?, ?, ?, ?, ?)')
+  ;(Array.isArray(team.roles) ? team.roles : []).forEach((r, n) => {
+    if (!r || typeof r.id !== 'string') return
+    role.run(r.id, String(r.name ?? ''), String(r.description ?? ''), r.system ?? null, JSON.stringify(Array.isArray(r.permissions) ? r.permissions : []), isoOrNull(r.createdAt) || '', n)
+  })
+  replayEdits(db, ['team_accounts', 'team_roles'])
+  if (typeof team.v === 'string') setMeta(db, 'teamv', team.v)
+  setMeta(db, 'teamLoaded', '1')
+  setMeta(db, 'teamAt', new Date(now).toISOString())
+}
+
 // Статьи расходов. Список сервера — основа; свои неотправленные заведения и удаления
 // накладываются поверх (edits.mjs)
 function applyExpenseCategories(db, cats, full) {
@@ -460,6 +501,19 @@ export function applyPull(db, res, { now }) {
         applyExpenseCategories(db, p, full)
         changed.push('expenseCategories')
       }
+    }
+    // Сотрудники магазина с окладами — тем, кто выдаёт зарплату
+    if (data.staff) {
+      const p = part(data.staff)
+      if (full || touched(p)) {
+        applyStaff(db, p, full)
+        changed.push('staff', 'users')
+      }
+    }
+    // Учётные записи и роли — целиком, когда изменились
+    if (data.team && typeof data.team === 'object' && Array.isArray(data.team.accounts)) {
+      applyTeam(db, data.team, now)
+      changed.push('users', 'roles')
     }
     // Статьи доходов — тем же, кому видны доходы
     if (data.incomeCategories) {

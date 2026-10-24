@@ -21,7 +21,7 @@ import { D } from './money'
 
 type Tx = Prisma.TransactionClient
 
-export type StampTable = 'Product' | 'Supplier' | 'Category' | 'ProductType' | 'Expense' | 'Income' | 'Arrival' | 'InventoryItem'
+export type StampTable = 'Product' | 'Supplier' | 'Category' | 'ProductType' | 'Expense' | 'Income' | 'Arrival' | 'InventoryItem' | 'Account' | 'Role'
 
 // ── Одно поле у многих строк — для листа пересчёта (в нём тысячи строк) ──
 const MANY = 500

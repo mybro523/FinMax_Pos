@@ -62,6 +62,7 @@ const TBL_KEY = {
   products: 'products', categories: 'categories', product_types: 'productTypes', pay_services: 'payServices',
   expense_categories: 'expenseCategories', income_categories: 'incomeCategories', suppliers: 'suppliers',
   supplierDebt: 'suppliers', expenseCash: 'shifts', supplierCash: 'shifts',
+  staff: 'users', team_accounts: 'users', team_roles: 'roles',
 }
 // С какими правами касса получает такие данные — те же, что у сервера (pullScope)
 export const WIDE_PERMS = ['suppliers.view', 'writeoffs.view', 'expenses.view', 'incomes.view', 'reports.view', 'dashboard.view']
@@ -215,6 +216,10 @@ const toWire = (r) => ({
 function wideRow(e) {
   if (typeof e?.tbl !== 'string') return false
   if (e.tbl.startsWith('doc:')) return WIDE_KINDS.has(e.tbl.slice(4))
+  // Оклады и бонусы сотрудников — как расходы: соседу без прав не уходят. Учётные записи и
+  // роли (логин, роль, блокировка, пароль) уходят всем: вход без интернета на каждой кассе
+  // обязан знать, что сотрудника заблокировали или сменили ему пароль
+  if (e.tbl === 'staff') return true
   if (e.tbl !== 'suppliers') return false
   const d = e.data || {}
   return [d.row, d.set, d.was, d.wasRow].some((x) => x && MONEY_COLS.some((k) => x[k] !== undefined && x[k] !== null))
@@ -236,7 +241,10 @@ export function redact(e) {
   const docs = (fx.docs || []).filter((d) => !WIDE_KINDS.has(d.kind))
   const rest = { ...fx, docs }
   if (fx.edits) {
-    const rows = (fx.edits.rows || []).filter((r) => !(typeof r?.tbl === 'string' && r.tbl.startsWith('doc:') && WIDE_KINDS.has(r.tbl.slice(4)))).map(plainRow)
+    // Без денег магазина: документов, которые видит не каждый, и окладов сотрудников
+    const rows = (fx.edits.rows || [])
+      .filter((r) => !(typeof r?.tbl === 'string' && ((r.tbl.startsWith('doc:') && WIDE_KINDS.has(r.tbl.slice(4))) || r.tbl === 'staff')))
+      .map(plainRow)
     rest.edits = { rows, adj: [] }
   }
   if (!docs.length && !(fx.moves || []).length && !(fx.debts || []).length && !(rest.edits?.rows || []).length) return null
@@ -630,6 +638,21 @@ export function lanBeforePull(db, data, { startedGen, now }) {
          AND json_extract(r.value, '$.tbl') = ? AND json_extract(r.value, '$.rowId') = ?`,
     ).all(SHEET_TBL, sheet.id)
     for (const m of applies) if (confirmOp(db, m.id)) any = true
+  }
+  // Сотрудник или роль, которых завела соседняя касса, пришли со списком сервера — значит,
+  // сервер их заведение принял
+  const team = d.team && typeof d.team === 'object' ? d.team : null
+  for (const [tbl, list] of [['team_accounts', team?.accounts], ['team_roles', team?.roles], ['staff', d.staff?.upsert]]) {
+    for (const r of Array.isArray(list) ? list : []) {
+      if (typeof r?.id !== 'string') continue
+      const made = q(
+        db,
+        `SELECT DISTINCT e.opId FROM row_edits e JOIN lan_log l ON l.id = e.opId
+         WHERE e.tbl = ? AND e.rowId = ? AND e.synced = 0 AND e.action = 'put' AND json_extract(e.data, '$.row') IS NOT NULL
+           AND l.kind = 'op' AND l.state = 'applied'`,
+      ).all(tbl, r.id)
+      for (const m of made) if (confirmOp(db, m.opId)) any = true
+    }
   }
   for (const r of q(db, "SELECT id FROM lan_log WHERE kind = 'op' AND state = 'applied' AND fate = 'ok' AND fateGen < ?").all(Number(startedGen) || 0)) {
     if (confirmOp(db, r.id)) any = true

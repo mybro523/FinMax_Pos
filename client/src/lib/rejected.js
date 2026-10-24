@@ -157,6 +157,15 @@ export function rejectedDetail(r, t, money = String, fmt = {}) {
       if (d.date) fact(t('Дата'), when(d.date))
       if (d.counted > 0) fact(t('Пересчитано'), d.counted)
       break
+    // ── Сотрудники и роли (версия 1.4.16) ──
+    case 'user.create':
+      fact(t('ФИО'), d.fullName)
+      if (d.salary > 0) fact(t('Оклад'), money(d.salary))
+      break
+    case 'user.update':
+    case 'role.update':
+      if (list(d.fields).length) fact(t('Что поменяли'), list(d.fields).map((f) => fieldLabel(f, t)).join(', '))
+      break
     case 'shift.close':
       fact(t('Чеков'), d.count ?? 0)
       fact(t('касса на старте'), money(d.openingCash || 0))

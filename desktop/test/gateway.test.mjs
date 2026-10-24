@@ -697,10 +697,10 @@ test('разделы, которых касса у себя не держит, �
   tt.after(() => t.gw.close())
   t.gw.listen(true)
   t.events.length = 0
-  // Сотрудники и расхождения в локальной базе не лежат: ждать обмена незачем.
-  // А про товары окно узнает только после обмена — раньше в базе нового нет
+  // Расхождения в локальной базе не лежат: ждать обмена незачем. А про товары и (с 1.4.16)
+  // сотрудников окно узнает только после обмена — раньше в базе нового нет
   t.gw.serverEvent('changed', ['products', 'users', 'discrepancies'])
-  assert.deepEqual(t.events.filter((e) => e.type !== 'status'), [{ type: 'changed', payload: ['users', 'discrepancies'] }])
+  assert.deepEqual(t.events.filter((e) => e.type !== 'status'), [{ type: 'changed', payload: ['discrepancies'] }])
   t.events.length = 0
   t.gw.serverEvent('changed', ['sales', 'products'])
   t.gw.serverEvent('changed', 'discrepancies')

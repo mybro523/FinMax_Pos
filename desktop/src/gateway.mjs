@@ -25,6 +25,7 @@ import {
   loginSucceeded,
   makeVerifier,
   offlineLogin,
+  passwordProblem,
   saveAccount,
   setSubscription,
   subscriptionOf,
@@ -83,7 +84,7 @@ import { createSync } from './sync.mjs'
 // и показывается на выбранном языке — их сверяет проверка.
 export const MESSAGES = {
   needLogin: 'Требуется вход в систему',
-  onlineOnly: 'Этот раздел пока работает только с интернетом. Касса, склад, инвентаризация, товары, поставщики, расходы и доходы доступны и без него.',
+  onlineOnly: 'Этот раздел работает только с интернетом. Касса, склад, инвентаризация, товары, поставщики, расходы, доходы и сотрудники доступны и без него.',
   notSent: 'Эта запись ещё не отправлена на сервер. Изменить или удалить её можно будет после отправки.',
   noOfflineLogin: 'Нет связи с сервером. Под этим именем на этом компьютере ещё не входили — первый вход возможен только с интернетом.',
   suspended: 'Работа магазина приостановлен. Обратитесь к поставщику программы.',
@@ -116,13 +117,18 @@ function madeOffline(db, route, id) {
 const LOCAL_SECTIONS = new Set([
   'products', 'categories', 'customers', 'deferred', 'shifts', 'sales', 'returns', 'arrivals', 'writeoffs', 'payments',
   'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'productTypes',
-  'incomes', 'incomeCategories', 'supplierReturns',
+  'incomes', 'incomeCategories', 'supplierReturns', 'inventories',
+  // Сотрудники и роли (1.4.16) — тоже из локальной базы: окно узнает о них после обмена
+  'users', 'roles', 'staff',
 ])
+// Адреса, после записи по которым список сотрудников надо перенести во вход без интернета
+const TEAM_ROUTE = /^\/(users|roles)(\/[^/]+)?$/
 
 // Запись, названная в отвергнутой операции, — по ней список «не принято» называет её
 const ROW_TABLES = {
   product: 'products', category: 'categories', productType: 'product_types', payService: 'pay_services',
   expenseCategory: 'expense_categories', incomeCategory: 'income_categories', supplier: 'suppliers',
+  user: 'team_accounts', role: 'team_roles',
 }
 function findForRejected(db, kind, id) {
   if (typeof id !== 'string') return null
@@ -357,6 +363,8 @@ export function createGateway({
           ...(since && wideHere() ? { wcursor: getMeta(db, 'wcursor') } : {}),
           // Операции, на которые не пришёл ответ: приняты ли они?
           ...(asked.length ? { ops: asked.join(',') } : {}),
+          // Отпечаток списка сотрудников и ролей с прошлого раза: неизменившийся не придёт
+          ...(getMeta(db, 'teamv') ? { teamv: getMeta(db, 'teamv') } : {}),
         })
         return remote({ method: 'GET', path: '/sync/pull?' + query, timeoutMs: SYNC_TIMEOUT_MS, headers: asDevice }, token)
       },
@@ -386,6 +394,8 @@ export function createGateway({
         // Обмен кассами по местной сети: общий ключ магазина, сколько у него касс и как
         // называется эта касса — всё это сообщает сервер
         rememberLan(ph, data)
+        // Сотрудники магазина — во вход без интернета (блокировка, роль, новый пароль)
+        teamToCore(ph)
       },
       onState: () => send('status', status()),
     })
@@ -455,6 +465,109 @@ export function createGateway({
     return { accountId: acc.id, id: ph.users.get(acc.login) || 'acc:' + acc.id, name: acc.login, role: acc.role }
   }
 
+  // ── Сотрудники магазина → вход без интернета (версия 1.4.16) ──
+  // Владелец завёл сотрудника, заблокировал его, сменил ему пароль или роль — здесь или на
+  // соседней кассе, без связи. Вход без интернета проверяется по общей базе программы
+  // (core.accounts), и она узнаёт об этом сразу:
+  //   • новый сотрудник с паролем от владельца — может войти и здесь;
+  //   • заблокированный — не может («неверное имя или пароль», как у сервера);
+  //   • новый пароль — действует сразу; прежний ключ сотрудника больше не годится (сервер
+  //     его отзовёт), его операции уйдут ключом владельца. Сервер смену отверг — прежний
+  //     отпечаток возвращается;
+  //   • роль и права — новые; удалённый сотрудник — больше не входит.
+  function teamToCore(ph) {
+    try {
+      inTx(core, () => {
+        const db = ph.db
+        const code = ph.code
+        const team = q(db, 'SELECT * FROM team_accounts').all()
+        const byId = new Map(team.map((a) => [a.id, a]))
+        const roles = new Map(q(db, 'SELECT id, permissions FROM team_roles').all().map((r) => [r.id, r.permissions]))
+        // Пароли, заданные без связи: последняя поправка по каждому сотруднику
+        const pw = new Map()
+        for (const e of q(db, "SELECT opId, rowId, data, synced FROM row_edits WHERE tbl = 'team_accounts' AND json_extract(data, '$.pw') IS NOT NULL ORDER BY seq").all()) {
+          try {
+            pw.set(e.rowId, { opId: e.opId, hash: JSON.parse(e.data).pw, synced: e.synced })
+          } catch {
+            /* испорченная поправка — пропускаем */
+          }
+        }
+        const rows = q(core, 'SELECT * FROM accounts WHERE pharmacyCode = ?').all(code)
+        const tmpl = rows.find((r) => r.id === session.activeId()) || rows[0] || null
+        const teamAt = getMeta(db, 'teamAt') || ''
+        const known = getMeta(db, 'teamLoaded') === '1'
+        for (const row of rows) {
+          const a = byId.get(row.id)
+          if (!a) {
+            // Сотрудника удалили (здесь, на соседней кассе или на сайте) — входа больше нет.
+            // Кто вошёл через сервер позже, чем пришёл список, — остаётся: списка он не застал
+            if (known && (!teamAt || row.seenAt < teamAt) && row.id !== session.activeId()) {
+              q(core, 'DELETE FROM accounts WHERE id = ?').run(row.id)
+              session.drop(row.id)
+            }
+            continue
+          }
+          const set = {}
+          if (row.login !== a.login && a.login) {
+            q(core, 'DELETE FROM accounts WHERE login = ? AND id <> ?').run(a.login, row.id)
+            set.login = a.login
+          }
+          const founder = a.role === 'founder'
+          const perms = founder ? '' : roles.has(a.roleId) ? roles.get(a.roleId) : row.permissions
+          if (row.role !== a.role) set.role = a.role
+          if ((perms ?? '') !== (row.permissions ?? '')) set.permissions = perms ?? ''
+          const roleName = founder ? 'Владелец' : a.roleName || row.roleName
+          if (roleName !== row.roleName) set.roleName = roleName
+          if (a.userId && a.userId !== row.tenantUserId) set.tenantUserId = a.userId
+          const blocked = a.active ? 0 : 1
+          if (blocked !== (row.blocked || 0)) {
+            set.blocked = blocked
+            // Заблокированного сервер больше не пустит — его ключ ни к чему
+            if (blocked && row.id !== session.activeId()) session.drop(row.id)
+          }
+          // Пароль, заданный здесь: принят — прежний отпечаток не нужен; отвергнут — вернуть его
+          const p = pw.get(row.id)
+          if (row.localPw && (!p || p.opId !== row.localPw || p.synced)) {
+            if (p && p.opId === row.localPw && p.synced) Object.assign(set, { localPw: null, prevVerifier: null })
+            else if (!p || !q(db, 'SELECT 1 FROM row_edits WHERE opId = ? LIMIT 1').get(row.localPw)) Object.assign(set, { verifier: row.prevVerifier ?? null, localPw: null, prevVerifier: null })
+          }
+          if (p && !p.synced && p.opId !== row.localPw) {
+            const sealed = seal(p.hash)
+            if (sealed) {
+              Object.assign(set, { verifier: sealed, localPw: p.opId, prevVerifier: row.localPw ? row.prevVerifier : row.verifier })
+              // Прежний ключ сервер отзовёт, как только примет новый пароль. Свой ключ того, кто
+              // сейчас за кассой, оставляем: им и уйдёт смена пароля
+              if (row.id !== session.activeId()) session.drop(row.id)
+            }
+          }
+          const keys = Object.keys(set)
+          if (keys.length) q(core, `UPDATE accounts SET ${keys.map((k) => k + ' = ?').join(', ')} WHERE id = ?`).run(...keys.map((k) => set[k]), row.id)
+        }
+        // Новый сотрудник с паролем от владельца — может войти здесь и без связи
+        if (tmpl) {
+          for (const [id, p] of pw) {
+            if (p.synced || rows.some((r) => r.id === id)) continue
+            const a = byId.get(id)
+            const sealed = a ? seal(p.hash) : null
+            if (!a || !sealed) continue
+            const founder = a.role === 'founder'
+            q(core, 'DELETE FROM accounts WHERE login = ? AND id <> ?').run(a.login, id)
+            q(
+              core,
+              `INSERT INTO accounts (id, login, role, pharmacyCode, pharmacyName, verifier, subStatus, paidUntil, tenantUserId, seenAt, permissions, roleName, blocked, localPw)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).run(
+              id, a.login, a.role, code, tmpl.pharmacyName || '', sealed, tmpl.subStatus || 'active', tmpl.paidUntil ?? null, a.userId ?? null,
+              new Date(clock.now()).toISOString(), founder ? '' : roles.get(a.roleId) ?? '', founder ? 'Владелец' : a.roleName || '', a.active ? 0 : 1, p.opId,
+            )
+          }
+        }
+      })
+    } catch (e) {
+      log.warn('сотрудники магазина не перенеслись во вход без интернета', e)
+    }
+  }
+
   // ── Сервер отказал ──
   // 401 — ключ входа больше не действует. Просто вышел срок ключа — это одно: пароль
   // прежний, и без интернета под ним входить можно. Всё остальное (сменили пароль,
@@ -463,7 +576,9 @@ export function createGateway({
     if (res.status === 401) {
       const working = session.activeId() === acc.id
       session.drop(acc.id)
-      if (res.data?.message !== MESSAGES.needLogin) dropVerifier(core, acc.id)
+      // Пароль, заданный здесь без связи (отпечаток уже новый), не стираем: ключ отозван как
+      // раз потому, что сервер принял этот новый пароль
+      if (res.data?.message !== MESSAGES.needLogin && !accountById(core, acc.id)?.localPw) dropVerifier(core, acc.id)
       // Отозван вход того, кто сейчас за кассой, — обмен ждёт нового входа. Если же
       // отозван ключ другого сотрудника (его операции ждали отправки), работа и обмен
       // продолжаются: его операции уйдут ключом владельца
@@ -608,6 +723,9 @@ export function createGateway({
       const ph = pharmacy
       if (!ph || !Array.isArray(entries) || !entries.length) return
       const r = lanReceive(ph.db, entries, { now: clock.now(), gen: lanGen(ph.db) })
+      // Сотрудника завели, заблокировали или сменили ему пароль на соседней кассе — вход без
+      // интернета здесь тоже по-новому
+      if (r.changed.includes('users') || r.changed.includes('roles')) teamToCore(ph)
       if (r.changed.length) send('changed', r.changed)
       // Сосед сообщил «сервер принял»: обменяться с сервером поскорее — его данные
       // снимут поправку, а ждавшие этого свои операции уйдут
@@ -787,6 +905,17 @@ export function createGateway({
       }
     }
 
+    // Пароль сотрудника — отпечатком, тем же способом, что на сервере: сам пароль в базу
+    // кассы и в очередь на отправку не попадает. Правила пароля — те же слова, что у сервера
+    const route = req.path.split('?')[0]
+    let body = req.body
+    if (req.method !== 'GET' && /^\/users(\/[^/]+)?$/.test(route) && body && typeof body === 'object' && typeof body.password === 'string' && body.password) {
+      const problem = passwordProblem(body.password)
+      if (problem) return refuse(400, problem)
+      const { password, ...rest } = body
+      body = { ...rest, passwordHash: await makeVerifier(password) }
+    }
+
     let data
     try {
       data = found.handler({
@@ -797,7 +926,7 @@ export function createGateway({
         deviceId,
         query: found.query,
         params: found.params,
-        body: req.body,
+        body,
       })
     } catch (e) {
       if (e instanceof ApiError) return refuse(e.status, e.messages || e.message)
@@ -812,6 +941,8 @@ export function createGateway({
     // случай, если сервера нет (лист пересчёта больше, чем можно завести без связи)
     if (data && data.__remote) return online(req, acc, typeof data.__offline === 'string' ? data.__offline : '')
     if (req.method !== 'GET') {
+      // Сотрудники и роли — сразу во вход без интернета этой кассы
+      if (TEAM_ROUTE.test(route)) teamToCore(ph)
       // Записано на диск — теперь это надо отправить. Не дожидаясь ответа сервера:
       // кассир уже может пробивать следующий чек
       ph.sync.kick()

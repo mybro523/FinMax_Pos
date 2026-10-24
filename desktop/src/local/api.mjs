@@ -45,6 +45,7 @@ import { createSupplier, deleteSupplier, paySupplier, removeSupplierPayment, upd
 import { deleteCashMove, deleteExpense, deleteIncome, deleteSupplierReturn, updateExpense, updateIncome } from './ops/docedits.mjs'
 import { arrivalView, deleteArrival, updateArrival } from './ops/arrivaledit.mjs'
 import { applyInventory, createInventory, deleteInventory, inventoriesList, inventoryOne, saveCounts } from './ops/inventory.mjs'
+import { createRole, createUser, deleteRole, deleteUser, rolesList, staffList, updateRole, updateUser, usersList } from './ops/team.mjs'
 import { productHistory, supplierCard } from './history.mjs'
 import { DAY_MS } from './time.mjs'
 
@@ -94,6 +95,11 @@ export function pendingInPeriod(db, kind, { from, to }) {
   return rows.map((r) => (r.sync === 'deleted' ? { ...JSON.parse(r.body), __deleted: true } : JSON.parse(r.body)))
 }
 
+// Только владелец — как @Roles('founder') у сервера: тот же отказ «Недостаточно прав»
+const owner = (handler) => (ctx) => {
+  if (ctx.user?.role !== 'founder') throw forbidden('Недостаточно прав')
+  return handler(ctx)
+}
 // Право на действие — то же, что на сайте и на сервере. Любое из перечисленных
 const perm = (keys, handler) => (ctx) => {
   if (!hasPerm(ctx.user, ...keys)) throw forbidden('Недостаточно прав')
@@ -210,6 +216,17 @@ const ROUTES = [
   // ── Инвентаризация без связи (версия 1.4.15) ──
   // Права — как у сервера (inventory.controller): смотреть, пересчитывать, применять.
   // Лист, которого на кассе нет (давний, применённый раньше срока журналов), — у сервера
+  // ── Сотрудники и роли (версия 1.4.16) — только владелец, как на сайте (@Roles('founder')) ──
+  ['GET', /^\/users$/, owner((ctx) => usersList(ctx.db))],
+  ['POST', /^\/users$/, owner((ctx) => createUser(ctx, ctx.body))],
+  ['PATCH', /^\/users\/([^/]+)$/, owner((ctx) => updateUser(ctx, ctx.params[0], ctx.body))],
+  ['DELETE', /^\/users\/([^/]+)$/, owner((ctx) => deleteUser(ctx, ctx.params[0]))],
+  ['GET', /^\/roles$/, owner((ctx) => rolesList(ctx.db))],
+  ['POST', /^\/roles$/, owner((ctx) => createRole(ctx, ctx.body))],
+  ['PATCH', /^\/roles\/([^/]+)$/, owner((ctx) => updateRole(ctx, ctx.params[0], ctx.body))],
+  ['DELETE', /^\/roles\/([^/]+)$/, owner((ctx) => deleteRole(ctx, ctx.params[0]))],
+  // Кому выдают зарплату — те же права, что у сервера (expenses.controller, staff)
+  ['GET', /^\/expenses\/staff$/, perm(['expenses.create', 'expenses.edit'], (ctx) => staffList(ctx.db))],
   ['GET', /^\/inventory$/, perm(['inventory.view'], (ctx) => inventoriesList(ctx.db))],
   ['GET', /^\/inventory\/([^/]+)$/, perm(['inventory.view'], (ctx) => inventoryOne(ctx.db, ctx.params[0]) || { __remote: true })],
   ['POST', /^\/inventory$/, perm(['inventory.count'], (ctx) => createInventory(ctx, ctx.body))],

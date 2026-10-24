@@ -46,6 +46,22 @@ export async function checkVerifier(password, stored) {
   }
 }
 
+// ── Правила пароля — слово в слово как у сервера (server/src/auth/password.ts) ──
+// Пароль сотрудника, заведённого без связи, проверяет касса: сервер получит только отпечаток
+export const MIN_PASSWORD = 6
+const OBVIOUS = new Set([
+  '000000', '111111', '123123', '123321', '123456', '654321', '666666', '696969',
+  '121212', '112233', '789456', '999999', 'qwerty', 'qwerty123', 'password', 'parol',
+  'parol123', 'abcdef', 'admin1', 'admin123', 'apteka', 'apteka1',
+])
+export function passwordProblem(pw) {
+  const p = String(pw ?? '')
+  if (p.length < MIN_PASSWORD) return `Пароль слишком короткий (минимум ${MIN_PASSWORD} символов)`
+  if (OBVIOUS.has(p.toLowerCase())) return 'Такой пароль подберут с первой попытки — придумайте другой'
+  if (/^(.)\1+$/.test(p)) return 'Пароль из одного повторяющегося символа не защищает — придумайте другой'
+  return null
+}
+
 // ── Номер этого компьютера ──
 // Создаётся один раз. По нему сервер отличает одну кассу от другой: у каждой своя
 // смена и своя очередь неотправленных операций.
@@ -302,7 +318,9 @@ export async function offlineLogin(db, { name, password }, { now, open }) {
     throw new ApiError(503, 'Нет связи с сервером. Первый вход на этом компьютере возможен только с интернетом.')
   }
 
-  if (!(await checkVerifier(String(password ?? ''), verifier))) {
+  // Сотрудника заблокировал владелец (здесь или на соседней кассе) — входа нет. Ответ — как у
+  // сервера: «неверное имя или пароль», и попытка считается
+  if (acc.blocked || !(await checkVerifier(String(password ?? ''), verifier))) {
     throttle.fail(db, nameKey(login), now)
     throttle.fail(db, DEVICE_KEY, now)
     throw new ApiError(401, 'Неверное имя или пароль')

@@ -44,8 +44,18 @@ const FIELD = {
   salaryMonth: 'Месяц зарплаты',
   bonusFrom: 'Бонус с',
   bonusTo: 'Бонус по',
+  // Сотрудник и роль (1.4.16)
+  active: 'Доступ',
+  roleId: 'Роль',
+  password: 'Пароль',
+  fullName: 'ФИО',
+  salary: 'Оклад',
+  bonusPercent: 'Бонус, %',
+  salaryDay: 'День зарплаты',
+  description: 'Описание',
+  permissions: 'Права',
 }
-const MONEY_FIELDS = new Set(['cost', 'price', 'amount'])
+const MONEY_FIELDS = new Set(['cost', 'price', 'amount', 'salary'])
 export const fieldLabel = (f, t) => t(FIELD[f] || f)
 
 // Значение поля для человека: деньги — деньгами, да/нет — словами, пусто — прочерком
@@ -94,6 +104,10 @@ export function discrepancyDetail(d, t, money = String) {
 // касса, что было на сайте и чья правка осталась (позже по времени — та и осталась)
 function editDetail(n, t, money) {
   if (n.gone) return t('запись удалили, пока касса была без связи, — правка с кассы не применена')
+  // Сотрудник, заведённый на кассе без связи: его логин за это время заняли в другом магазине
+  if (n.loginTaken) return `${t('логин')} «${n.loginTaken}» ${t('уже был занят — сотрудник заведён под логином')} «${n.login || ''}»`
+  if (n.tbl === 'Role' && n.sameName) return t('такая роль уже была — сотрудники с кассы назначены на неё, права остались как на сайте')
+  if (n.passwordKept) return t('пароль с кассы не применён: его сменили на сайте позже')
   if (n.merged) return `${t('остаток с кассы не применён: эту карточку уже объединили с другой')} (${t('на кассе насчитали')} ${n.stock ?? 0} ${t('шт')})`
   if (n.sameName) return `${t('поставщик с таким названием уже был — долг на начало с кассы к нему не прибавлен')}: ${money(n.openingDebt ?? 0)}`
   if (n.deleteKept) return t('удаление с кассы не применено: запись поправили позже')
@@ -104,7 +118,7 @@ function editDetail(n, t, money) {
         f.won === 'kassa' ? t('осталась правка кассы') : t('осталась правка сайта')
       }`,
   )
-  if (n.nameTaken) parts.push(`${t('название')} «${n.nameTaken}» ${t('уже занято — осталось прежнее')}`)
+  if (n.nameTaken) parts.push(`${n.tbl === 'Account' ? t('логин') : t('название')} «${n.nameTaken}» ${t('уже занято — осталось прежнее')}`)
   return parts.join('; ') || t('правку сделали в двух местах')
 }
 

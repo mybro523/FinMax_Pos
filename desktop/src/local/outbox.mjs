@@ -20,6 +20,8 @@ export const REF_OPS = new Set([
   'expenseCategory.create', 'expenseCategory.delete',
   'incomeCategory.create', 'incomeCategory.delete',
   'supplier.create', 'supplier.update', 'supplier.delete',
+  // Сотрудники и роли (1.4.16)
+  'user.create', 'user.update', 'user.delete', 'role.create', 'role.update', 'role.delete',
 ])
 // Правки и удаления документов: документ назван в операции (ref)
 export const DOC_EDIT_OPS = new Set([
@@ -46,6 +48,10 @@ function createdIdOf(op) {
       return p.category?.id
     case 'supplier.create':
       return p.supplier?.id
+    case 'user.create':
+      return p.user?.id
+    case 'role.create':
+      return p.role?.id
     default:
       return null
   }
@@ -457,6 +463,26 @@ export function describeOp(op, find = () => null) {
       return { sum: null, title: p.service?.name || '', detail: {} }
     case 'supplier.create':
       return { sum: null, title: p.supplier?.name || '', detail: { phone: p.supplier?.phone || '', openingDebt: p.supplier?.openingDebt || 0 } }
+    // ── Сотрудники и роли (версия 1.4.16) ──
+    case 'user.create': {
+      const u = p.user || {}
+      return { sum: null, title: u.name || '', detail: { fullName: u.fullName || '', salary: u.salary ?? 0 } }
+    }
+    case 'user.update':
+    case 'user.delete': {
+      const u = find('user', p.id) || {}
+      // Пароль в подробности не кладём
+      const set = { ...(p.set || {}) }
+      delete set.passwordHash
+      return { sum: null, title: u.login || p.base?.name || p.set?.name || '', detail: { fields: Object.keys(p.set || {}).map((f) => (f === 'passwordHash' ? 'password' : f)), set } }
+    }
+    case 'role.create':
+      return { sum: null, title: p.role?.name || '', detail: {} }
+    case 'role.update':
+    case 'role.delete': {
+      const r = find('role', p.id) || {}
+      return { sum: null, title: r.name || p.base?.name || p.set?.name || '', detail: { fields: Object.keys(p.set || {}) } }
+    }
     case 'supplier.pay': {
       const x = p.payment || {}
       return { sum: x.amount ?? null, title: (find('supplier', x.supplierId) || {}).name || '', detail: { note: x.note || '', fromCash: x.fromCash === true } }
@@ -557,5 +583,12 @@ const TOUCHES = {
   'inventory.count': ['inventories'],
   'inventory.apply': ['inventories', 'products', 'writeoffs'],
   'inventory.delete': ['inventories'],
+  // Сотрудники и роли
+  'user.create': ['users', 'staff'],
+  'user.update': ['users', 'staff', 'roles'],
+  'user.delete': ['users', 'staff', 'roles'],
+  'role.create': ['roles', 'users'],
+  'role.update': ['roles', 'users'],
+  'role.delete': ['roles', 'users'],
 }
 export const touchedBy = (op) => TOUCHES[op?.type] || []

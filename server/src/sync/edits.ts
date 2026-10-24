@@ -60,7 +60,9 @@ type Tx = Prisma.TransactionClient
 export interface EditCtx {
   deviceId: string
   tenantUserId: string | null
-  actor?: { role: string; permissions: string[]; tenantUserId: string | null }
+  actor?: { role: string; permissions: string[]; tenantUserId: string | null; accountId?: string }
+  // Магазин того, кто прислал (сотрудники и роли живут в панели, по магазину)
+  pharmacyId?: string | null
   flagged: boolean
   extra: Set<string>
   // Псевдонимы: товар, объединённый с другим, и поставщик, заведённый дважды
@@ -98,10 +100,10 @@ export const EDIT_TYPES = new Set([
 
 // ── Псевдонимы ──
 // alias:product:<номер> — лишняя карточка, объединённая с основной (products.service, merge);
-// alias:supplier:<номер>, alias:category:<номер>, alias:productType:<номер> — запись, которую
-// касса завела без связи, а на сайте такая же (по названию) уже была
+// alias:supplier:<номер>, alias:category:<номер>, alias:productType:<номер>, alias:role:<номер> —
+// запись, которую касса завела без связи, а на сайте такая же (по названию) уже была
 export const ALIAS = 'alias:'
-type AliasKind = 'product' | 'supplier' | 'category' | 'productType'
+type AliasKind = 'product' | 'supplier' | 'category' | 'productType' | 'role'
 export async function loadAliases(tx: Tx | { syncMeta: any }): Promise<Map<string, string>> {
   const rows: { key: string; value: string }[] = await (tx as any).syncMeta.findMany({ where: { key: { startsWith: ALIAS } } })
   return new Map(rows.map((r) => [r.key.slice(ALIAS.length), r.value]))
@@ -115,7 +117,7 @@ export function aliasOf(aliases: Map<string, string> | undefined, kind: AliasKin
 // Касса называет запись своим номером, а её уже слили с другой. Удалять с кассы такую
 // запись нечего: лишней больше нет, а ту, с которой её слили, удаление кассы не касается
 const merged = (ctx: EditCtx, kind: AliasKind, id: string) => aliasOf(ctx.aliases, kind, id) !== id
-async function setAlias(tx: Tx, ctx: EditCtx, kind: AliasKind, from: string, to: string) {
+export async function setAlias(tx: Tx, ctx: EditCtx, kind: AliasKind, from: string, to: string) {
   await tx.syncMeta.upsert({ where: { key: ALIAS + kind + ':' + from }, update: { value: to }, create: { key: ALIAS + kind + ':' + from, value: to } })
   ctx.aliases?.set(kind + ':' + from, to)
 }

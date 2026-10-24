@@ -75,6 +75,13 @@ export const OP_TYPES = [
   'inventory.count',
   'inventory.apply',
   'inventory.delete',
+  // ── Сотрудники и роли без связи (версия 1.4.16) ──
+  'user.create',
+  'user.update',
+  'user.delete',
+  'role.create',
+  'role.update',
+  'role.delete',
 ] as const
 export type OpType = (typeof OP_TYPES)[number]
 
@@ -757,3 +764,87 @@ function parseCounts(p: any, what: string, now?: number) {
 }
 export const parseInventoryCount = (p: any, now?: number) => parseCounts(p, 'пересчёт', now)
 export const parseInventoryApply = (p: any, now?: number) => parseCounts(p, 'применение пересчёта', now)
+
+// ════════════════════════ Сотрудники и роли (версия 1.4.16) ════════════════════════
+// Пароль касса не шлёт: только его необратимый отпечаток — тот же, что хранит сервер
+// (auth/password.ts, s3$N$r$p$соль$отпечаток). Правила пароля касса проверила сама теми
+// же словами. Отпечаток проверяется по виду и по стоимости: слабый не пускаем, а такой,
+// что заставил бы сервер считать гигабайты, — тем более
+const HASH_RE = /^s3\$(\d{4,7})\$(\d{1,2})\$(\d{1,2})\$[0-9a-f]{32}\$[0-9a-f]{128}$/
+export function passwordHashOf(v: any): string {
+  const m = typeof v === 'string' ? HASH_RE.exec(v) : null
+  if (!m) throw new Reject('Недопустимый пароль')
+  const [n, r, p] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  if (n < 16384 || r < 8 || p < 1 || 128 * n * r * p > 96 * 1024 * 1024) throw new Reject('Недопустимый пароль')
+  return v
+}
+// Логин — как на сайте: без пробелов по краям, не пустой
+const login = (v: any) => nonEmpty(v, 100, 'имя сотрудника')
+// Роль сотрудника: 'owner' — владелец, иначе номер роли магазина; пусто — системная роль кассира
+const roleRef = (v: any): string | null => (v === 'owner' ? 'owner' : idOrNull(v, 'роль'))
+const salaryDayOf = (v: any) => int(v ?? 1, 'день зарплаты', 1, 28)
+
+export function parseUserCreate(p: any, now?: number) {
+  const u = obj(obj(p, 'сотрудник').user, 'сотрудник')
+  return {
+    id: id(u.id, 'сотрудник'),
+    userId: id(u.userId, 'сотрудник'),
+    name: login(u.name),
+    passwordHash: passwordHashOf(u.passwordHash),
+    roleId: roleRef(u.roleId),
+    fullName: text(u.fullName, 120).trim(),
+    salary: money(u.salary ?? 0, 'оклад'),
+    bonusPercent: percent(u.bonusPercent ?? 0, 'бонус'),
+    salaryDay: salaryDayOf(u.salaryDay),
+    createdAt: when(u.createdAt, 'сотрудник', now),
+  }
+}
+
+export const USER_EDIT_FIELDS = ['name', 'active', 'roleId', 'fullName', 'salary', 'bonusPercent', 'salaryDay'] as const
+export function parseUserUpdate(p: any, now?: number) {
+  const root = obj(p, 'правка сотрудника')
+  const src = root.set || {}
+  const set: Record<string, any> = {}
+  if (has(src, 'name')) set.name = login(src.name)
+  if (has(src, 'active')) set.active = src.active === true
+  if (has(src, 'roleId')) set.roleId = roleRef(src.roleId) ?? reject('Недопустимый номер: роль')
+  if (has(src, 'fullName')) set.fullName = text(src.fullName, 120).trim()
+  if (has(src, 'salary')) set.salary = money(src.salary, 'оклад')
+  if (has(src, 'bonusPercent')) set.bonusPercent = percent(src.bonusPercent, 'бонус')
+  if (has(src, 'salaryDay')) set.salaryDay = salaryDayOf(src.salaryDay)
+  return {
+    id: id(root.id, 'сотрудник'),
+    at: when(root.at, 'правка сотрудника', now),
+    set,
+    base: baseOf(root.base, [...USER_EDIT_FIELDS]),
+    // Новый пароль — отдельно от полей: с прежним сравнивать нечего
+    passwordHash: has(src, 'passwordHash') ? passwordHashOf(src.passwordHash) : null,
+  }
+}
+
+// Права роли — список; незнакомые касса не придумает, но версия программы может быть новее
+const permList = (v: any): string[] => {
+  if (!Array.isArray(v) || v.length > 500) throw new Reject('Права должны быть списком')
+  return [...new Set(v.filter((x: any) => typeof x === 'string' && x.length <= 80))] as string[]
+}
+
+export function parseRoleCreate(p: any, now?: number) {
+  const r = obj(obj(p, 'роль').role, 'роль')
+  return {
+    id: id(r.id, 'роль'),
+    name: nonEmpty(text(r.name, 200).replace(/\s+/g, ' '), 40, 'название роли'),
+    description: text(r.description, 200).trim(),
+    permissions: permList(r.permissions ?? []),
+    createdAt: when(r.createdAt, 'роль', now),
+  }
+}
+
+export function parseRoleUpdate(p: any, now?: number) {
+  const root = obj(p, 'правка роли')
+  const src = root.set || {}
+  const set: Record<string, any> = {}
+  if (has(src, 'name')) set.name = nonEmpty(text(src.name, 200).replace(/\s+/g, ' '), 40, 'название роли')
+  if (has(src, 'description')) set.description = text(src.description, 200).trim()
+  if (has(src, 'permissions')) set.permissions = permList(src.permissions)
+  return { id: roleRef(root.id) ?? reject('Недопустимый номер: роль'), at: when(root.at, 'правка роли', now), set, base: baseOf(root.base, ['name', 'description', 'permissions']) }
+}

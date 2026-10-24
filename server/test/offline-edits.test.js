@@ -28,6 +28,11 @@ const {
   parseInventoryCreate,
   parseInventoryCount,
   parseInventoryApply,
+  parseUserCreate,
+  parseUserUpdate,
+  parseRoleCreate,
+  parseRoleUpdate,
+  passwordHashOf,
 } = require('../dist/sync/payload')
 const { OP_PERMISSIONS } = require('../dist/auth/permissions')
 const { resolveEdit, same, conflictNote, changedFields } = require('../dist/common/stamps')
@@ -208,4 +213,36 @@ test('инвентаризация с кассы (1.4.15): лист, перес�
   assert.deepEqual(OP_PERMISSIONS['inventory.count'], ['inventory.count'])
   assert.deepEqual(OP_PERMISSIONS['inventory.apply'], ['inventory.apply'])
   assert.deepEqual(OP_PERMISSIONS['inventory.delete'], ['inventory.count'])
+})
+
+test('сотрудники и роли с кассы (1.4.16): только отпечаток пароля, поля — в пределах сайта, только владелец', () => {
+  const HASH = 's3$16384$8$4$' + 'a'.repeat(32) + '$' + 'b'.repeat(128)
+  const user = { user: { id: 'acc-k1', userId: 'u-k1', name: '  vali ', passwordHash: HASH, roleId: 'r-1', fullName: ' Валиев ', salary: 2500, bonusPercent: 1.5, salaryDay: 5, createdAt: AT } }
+  const u = parseUserCreate(user, NOW)
+  assert.deepEqual([u.name, u.fullName, u.roleId, u.salary, u.bonusPercent, u.salaryDay], ['vali', 'Валиев', 'r-1', 2500, 1.5, 5])
+  assert.equal(parseUserCreate({ user: { ...user.user, roleId: 'owner' } }, NOW).roleId, 'owner')
+  assert.equal(parseUserCreate({ user: { ...user.user, roleId: undefined, salaryDay: undefined } }, NOW).salaryDay, 1)
+  // Пароль открытым текстом, слабый отпечаток или «дорогой» — отказ
+  rejected(() => parseUserCreate({ user: { ...user.user, passwordHash: 'qwerty123' } }, NOW), /пароль/i)
+  rejected(() => passwordHashOf('s3$1024$8$1$' + 'a'.repeat(32) + '$' + 'b'.repeat(128)), /пароль/i)
+  rejected(() => passwordHashOf('s3$1048576$8$4$' + 'a'.repeat(32) + '$' + 'b'.repeat(128)), /пароль/i)
+  rejected(() => parseUserCreate({ user: { ...user.user, name: ' ' } }, NOW), /имя/i)
+  rejected(() => parseUserCreate({ user: { ...user.user, salaryDay: 31 } }, NOW))
+  rejected(() => parseUserCreate({ user: { ...user.user, bonusPercent: 120 } }, NOW))
+
+  const upd = parseUserUpdate({ id: 'acc-k1', at: AT, set: { active: false, roleId: 'owner', passwordHash: HASH, salary: 3000 }, base: { active: true, roleId: 'r-1', salary: 2500 } }, NOW)
+  assert.deepEqual(upd.set, { active: false, roleId: 'owner', salary: 3000 })
+  assert.equal(upd.passwordHash, HASH)
+  assert.equal(parseUserUpdate({ id: 'acc-k1', at: AT, set: { name: 'x' } }, NOW).passwordHash, null)
+
+  const role = parseRoleCreate({ role: { id: 'r-k1', name: '  Кладовщик   склада ', description: 'Приход', permissions: ['arrivals.create', 'arrivals.create', 42], createdAt: AT } }, NOW)
+  assert.deepEqual([role.name, role.permissions], ['Кладовщик склада', ['arrivals.create']])
+  rejected(() => parseRoleCreate({ role: { id: 'r-k1', name: '', createdAt: AT } }, NOW), /роли/i)
+  rejected(() => parseRoleCreate({ role: { id: 'r-k1', name: 'x', permissions: 'все', createdAt: AT } }, NOW), /списком/i)
+  assert.equal(parseRoleUpdate({ id: 'owner', at: AT, set: { permissions: [] } }, NOW).id, 'owner')
+  assert.deepEqual(parseRoleUpdate({ id: 'r-k1', at: AT, set: { permissions: ['pos.sell'] }, base: { permissions: [] } }, NOW).set, { permissions: ['pos.sell'] })
+
+  for (const t of ['user.create', 'user.update', 'user.delete', 'role.create', 'role.update', 'role.delete']) {
+    assert.deepEqual(OP_PERMISSIONS[t], ['owner.only'], t)
+  }
 })
