@@ -75,14 +75,31 @@ export function sameCounts(wanted, got) {
   return (wanted?.items || []).every((i) => have.has(i.id) && have.get(i.id) === saved(i))
 }
 
-// Итог листа — для шапки и для вопроса «применить?». rows — посчитанные строки:
-// actual — сколько насчитали, diff — расхождение с учётом
+// Итог листа — для шапки и для вопроса «применить?». rows — посчитанные товары:
+// actual — сколько насчитали, diff — расхождение с учётом.
+// Две строки одного товара бывают, когда на сайте объединили две карточки, пока лист
+// считали: это один товар на одной полке. Сервер складывает насчитанное по ним и
+// сравнивает с остатком обеих карточек — итог считается так же
 export function tally(sheet, products) {
   const byId = new Map((products || []).map((p) => [p.id, p]))
+  const items = sheet?.items || []
+  const expectedOf = new Map()
+  for (const item of items) if (item.productId) expectedOf.set(item.productId, (expectedOf.get(item.productId) || 0) + item.expectedUnits)
   const rows = []
-  for (const item of sheet?.items || []) {
+  const ofProduct = new Map()
+  for (const item of items) {
     const actual = saved(item)
-    if (actual !== null) rows.push({ ...item, actual, diff: actual - item.expectedUnits })
+    if (actual === null) continue
+    const same = item.productId ? ofProduct.get(item.productId) : null
+    if (same) {
+      same.actual += actual
+      same.diff = same.actual - same.expected
+      continue
+    }
+    const expected = item.productId ? expectedOf.get(item.productId) : item.expectedUnits
+    const row = { ...item, actual, expected, diff: actual - expected }
+    if (item.productId) ofProduct.set(item.productId, row)
+    rows.push(row)
   }
   const shortage = rows.filter((d) => d.diff < 0)
   const surplus = rows.filter((d) => d.diff > 0)

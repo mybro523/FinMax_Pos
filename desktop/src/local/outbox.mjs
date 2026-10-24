@@ -25,6 +25,8 @@ export const REF_OPS = new Set([
 export const DOC_EDIT_OPS = new Set([
   'supplierPayment.delete', 'supplierReturn.delete', 'expense.update', 'expense.delete', 'income.update', 'income.delete',
   'cashMove.delete', 'arrival.update', 'arrival.delete',
+  // Лист пересчёта (1.4.15): насчитанное, применение и удаление — правки листа
+  'inventory.count', 'inventory.apply', 'inventory.delete',
 ])
 // Какую запись завела операция «завести» — по ней видно, не принял ли сервер её как уже
 // существующую (такую же завели на сайте): тогда своя строка не нужна
@@ -117,6 +119,8 @@ export function docsOf(op) {
       return [['supplierreturn', p.ret?.id]]
     case 'supplier.pay':
       return [['supplierpayment', p.payment?.id]]
+    case 'inventory.create':
+      return [['inventory', p.inventory?.id]]
     default:
       // Правка или удаление документа: он назван в самой операции
       return DOC_EDIT_OPS.has(op.type) && p.ref?.kind && p.ref?.id ? [[p.ref.kind, p.ref.id]] : []
@@ -472,6 +476,19 @@ export function describeOp(op, find = () => null) {
       const title = d.category || (d.supplier && d.supplier !== '—' ? d.supplier : '') || d.supplier?.name || d.note || ''
       return { sum, title: typeof title === 'string' ? title : '', detail: { date: d.date || '', fields: Object.keys(p.set || {}), set: p.set || {} } }
     }
+    // ── Инвентаризация (версия 1.4.15) ──
+    case 'inventory.create': {
+      const x = p.inventory || {}
+      // Название — категория; лист на весь склад и так назван самой операцией
+      return { sum: null, title: x.scope && x.scope !== 'all' ? x.scope : '', detail: { date: x.date || '', lines: Array.isArray(x.items) ? x.items.length : 0 } }
+    }
+    case 'inventory.count':
+    case 'inventory.apply':
+    case 'inventory.delete': {
+      const d = find('inventory', p.id) || {}
+      const counted = (Array.isArray(p.items) ? p.items : []).filter((i) => i && i.actualUnits !== null && i.actualUnits !== undefined).length
+      return { sum: null, title: d.scope && d.scope !== 'all' ? d.scope : '', detail: { date: d.date || '', counted } }
+    }
     default:
       return { sum: null, title: '', detail: {} }
   }
@@ -535,5 +552,10 @@ const TOUCHES = {
   'cashMove.delete': ['cashMoves', 'shifts'],
   'arrival.update': ['arrivals', 'products', 'suppliers'],
   'arrival.delete': ['arrivals', 'products', 'suppliers'],
+  // Инвентаризация: применение двигает склад, недостачу оформит списанием сервер
+  'inventory.create': ['inventories'],
+  'inventory.count': ['inventories'],
+  'inventory.apply': ['inventories', 'products', 'writeoffs'],
+  'inventory.delete': ['inventories'],
 }
 export const touchedBy = (op) => TOUCHES[op?.type] || []

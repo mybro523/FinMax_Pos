@@ -1,9 +1,9 @@
 import { Prisma } from '@prisma/client'
 import { D } from '../common/money'
 import { setUnits, syncProduct, totalUnits, uppOf, lockProducts } from '../common/stock'
-import { firstCountAfter, markCounted } from '../common/counted'
+import { firstCountAfter, lockInventories, markCounted } from '../common/counted'
 import { freeInternalBarcode } from '../common/barcode'
-import { conflictNote, EditOutcome, forgetStamps, lastEditOf, resolveEdit, stamp, StampTable, stampsOf } from '../common/stamps'
+import { conflictNote, EditOutcome, forgetStamps, lastEditOf, resolveEdit, stamp, StampTable, stampsOf, stampsOfRows } from '../common/stamps'
 import { setExpenseCash, setSupplierCash } from '../shifts/totals'
 import { lockShift, SHIFT_CLOSED } from '../shifts/till'
 import { hasPerm } from '../auth/permissions'
@@ -14,6 +14,7 @@ import { lockSupplier, removePaymentIn, SUPPLIER_HAS_DEBT, SUPPLIER_HAS_PAYMENTS
 import { removeSupplierReturnIn } from '../supplier-returns/supplier-returns.service'
 import { removeCashMoveIn } from '../shifts/cash.service'
 import { removeArrivalIn, updateArrivalIn } from '../arrivals/arrivals.service'
+import { applyInventoryIn, createInventoryIn, removeInventoryIn, saveCountsIn } from '../inventory/inventory.service'
 import {
   Reject,
   parseArrivalUpdate,
@@ -21,6 +22,9 @@ import {
   parseCategoryUpdate,
   parseExpenseUpdate,
   parseIncomeUpdate,
+  parseInventoryApply,
+  parseInventoryCount,
+  parseInventoryCreate,
   parseNamed,
   parseProductCreate,
   parseProductUpdate,
@@ -212,6 +216,14 @@ export async function applyEdit(tx: Tx, type: string, payload: any, ctx: EditCtx
       return arrivalUpdate(tx, parseArrivalUpdate(payload), ctx, kit)
     case 'arrival.delete':
       return arrivalDelete(tx, parseRemove(payload, 'приход'), ctx, kit)
+    case 'inventory.create':
+      return inventoryCreate(tx, parseInventoryCreate(payload), ctx)
+    case 'inventory.count':
+      return inventoryCount(tx, parseInventoryCount(payload))
+    case 'inventory.apply':
+      return inventoryApply(tx, parseInventoryApply(payload), ctx, kit)
+    case 'inventory.delete':
+      return inventoryDelete(tx, parseRemove(payload, 'лист пересчёта'), ctx, kit)
     default:
       throw new Reject('Неизвестная операция')
   }
@@ -718,4 +730,52 @@ async function arrivalDelete(tx: Tx, p: { id: string; at: Date }, ctx: EditCtx, 
     return null
   }
   return (await removeArrivalIn(tx, a.id, p.at)) ? a.id : null
+}
+
+// ════════════════════════ Инвентаризация (версия 1.4.15) ════════════════════════
+// Лист, заведённый на кассе, — с её номерами листа и строк. Повтор — тот же лист
+async function inventoryCreate(tx: Tx, p: ReturnType<typeof parseInventoryCreate>, ctx: EditCtx): Promise<string> {
+  if (await tx.inventory.findUnique({ where: { id: p.id }, select: { id: true } })) return p.id
+  await createInventoryIn(tx, { ...p, userId: ctx.tenantUserId })
+  return p.id
+}
+
+// Насчитанное на кассе: строку, которую позже посчитали в другом месте, не перекрывает.
+// Лист применили или удалили, пока касса считала, — отказ теми же словами, что на сайте
+// Не легла хоть одна строка — ответ «принято, но не так» (null): касса заберёт лист заново
+// и покажет более поздний пересчёт, а не оставит у себя своё число
+async function inventoryCount(tx: Tx, p: ReturnType<typeof parseInventoryCount>): Promise<string | null> {
+  const skipped = await saveCountsIn(tx, p.id, p.items, p.at)
+  return skipped ? null : p.id
+}
+
+// Применение на кассе — пересчёт на момент at (inventory.service, applyInventoryIn). Товар,
+// который позже пересчитали ещё раз, остаётся как есть — владелец видит это в «Расхождениях»
+async function inventoryApply(tx: Tx, p: ReturnType<typeof parseInventoryApply>, ctx: EditCtx, kit: EditKit): Promise<string | null> {
+  const report = { skipped: 0 }
+  await applyInventoryIn(tx, p.id, {
+    at: p.at,
+    userId: ctx.tenantUserId,
+    counts: p.items,
+    report,
+    onCounted: (product, line) =>
+      kit.flag(tx, ctx, { id: p.id, date: p.at }, { kind: 'counted', productId: product.id, name: product.name, units: Math.abs(line.actualUnits - line.units) }),
+  })
+  return report.skipped ? null : p.id
+}
+
+// Удаление незаконченного листа: если его считали позже удаления с кассы — лист остаётся
+async function inventoryDelete(tx: Tx, p: { id: string; at: Date }, ctx: EditCtx, kit: EditKit): Promise<string | null> {
+  // Сначала замок листа, потом чтение: пересчёт той же секунды не проскочит между проверкой
+  // «когда считали» и удалением
+  await lockInventories(tx, [p.id])
+  const inv = await tx.inventory.findUnique({ where: { id: p.id }, select: { id: true, scope: true, items: { select: { id: true } } } })
+  if (!inv) return null
+  const stamps = await stampsOfRows(tx, 'InventoryItem', inv.items.map((i) => i.id), 'actual')
+  const last = [...stamps.values()].reduce<Date | null>((m, d) => (!m || d > m ? d : m), null)
+  if (last && last.getTime() > p.at.getTime()) {
+    await kit.flag(tx, ctx, { id: p.id, date: p.at }, { kind: 'edit', name: inv.scope === 'all' ? 'Пересчёт' : inv.scope, units: 0, note: JSON.stringify({ tbl: 'Inventory', deleteKept: true, editedAt: last.toISOString() }) })
+    return null
+  }
+  return (await removeInventoryIn(tx, p.id)) ? p.id : null
 }

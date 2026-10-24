@@ -8,6 +8,7 @@ import { AccountsService } from './admin/accounts.service'
 import { AllExceptionsFilter } from './common/all-exceptions.filter'
 import { DecimalInterceptor } from './common/decimal.interceptor'
 import { assertSecureConfig, ConfigError } from './common/config'
+import { AuthService } from './auth/auth.service'
 
 process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e))
 process.on('uncaughtException', (e) => console.error('[uncaughtException]', e))
@@ -67,6 +68,21 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false })
   const { json } = await import('express')
   app.use('/api/backup/restore', json({ limit: BODY_LIMIT }))
+  // Операции касс без связи: лист пересчёта на весь склад — это тысячи строк с названиями
+  // товаров, а касса шлёт его одной операцией (не делится). Запас — под самый большой лист
+  // Тело такого размера разбирается только для запроса с действующим ключом входа — тем
+  // же, что проверит сторож (auth.guard). Без ключа — тот же отказ, что дал бы сторож, до
+  // разбора тела: иначе любой мог бы заставить сервер разбирать 32 МБ без входа
+  const auth = app.get(AuthService)
+  app.use('/api/sync/push', (req: any, res: any, next: any) => {
+    const header = String(req.headers['authorization'] || '')
+    if (!auth.verify(header.startsWith('Bearer ') ? header.slice(7) : '')) {
+      res.status(401).json({ statusCode: 401, message: 'Требуется вход в систему', error: 'Unauthorized' })
+      return
+    }
+    next()
+  })
+  app.use('/api/sync/push', json({ limit: '32mb' }))
   app.useBodyParser('json', { limit: '8mb' })
   app.useBodyParser('urlencoded', { limit: '1mb', extended: true })
 

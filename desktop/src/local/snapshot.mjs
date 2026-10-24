@@ -14,7 +14,7 @@
 // записи дописываются, меняются и удаляются по одной.
 import { getMeta, inTx, q, setMeta } from './db.mjs'
 import { KINDS, putDoc, WINDOW_DAYS } from './docs.mjs'
-import { replayEdits } from './edits.mjs'
+import { docState, replayEdits } from './edits.mjs'
 import { toCents } from './money.mjs'
 import { rebuildStock } from './stock.mjs'
 import { DAY_MS, expiryLimit, isoOrNull } from './time.mjs'
@@ -24,6 +24,7 @@ import { packsToUnits, uppOf, wholeNonNeg } from './units.mjs'
 export const DOC_KEYS = {
   sales: 'sale', returns: 'return', arrivals: 'arrival', writeoffs: 'writeoff', payments: 'payment', shifts: 'shift', expenses: 'expense',
   cashMoves: 'cashmove', supplierPayments: 'supplierpayment', incomes: 'income', supplierReturns: 'supplierreturn',
+  inventories: 'inventory',
 }
 
 const rows = (v) => (Array.isArray(v) ? v : [])
@@ -282,6 +283,7 @@ function applyDeferred(db, deferred, full) {
 }
 
 function applyDocs(db, kind, docs, full) {
+  if (kind === 'inventory') return applySheets(db, docs, full)
   if (full) q(db, "DELETE FROM docs WHERE kind = ? AND sync = 'synced'").run(kind)
   // Свой документ, который сервер ещё не подтвердил, серверной копией не заменяем:
   // вместе с ним в журнале лежат его движения, и заменить одно без другого —
@@ -305,6 +307,31 @@ function applyDocs(db, kind, docs, full) {
   for (const id of docs.remove) drop.run(kind, id)
 }
 
+// Листы пересчёта (1.4.15): копия сервера ложится основой всегда — насчитанное здесь и на
+// соседних кассах лежит поправками поверх неё (sheet.mjs). Состояние листа — выведенное
+// (edits.mjs, docState): «ждущий», пока своё заведение не принято, «поправлен», пока ждут
+// поправки, «удалён здесь», пока ждёт удаление. Лист, которого у сервера больше нет (удалили
+// на сайте), уходит и отсюда — кроме своего, заведение которого ещё не отправлено, и
+// соседского, которого сервер ещё не знает
+function applySheets(db, docs, full) {
+  const known = new Set()
+  for (const d of docs.upsert) {
+    if (!d || typeof d.id !== 'string' || !Array.isArray(d.items)) continue
+    known.add(d.id)
+    const cur = q(db, "SELECT deviceId FROM docs WHERE kind = 'inventory' AND id = ?").get(d.id)
+    const state = docState(db, 'inventory', d.id)
+    // «Отвергнут» устарело: раз сервер прислал лист, он у него есть
+    putDoc(db, 'inventory', d, { sync: state === 'rejected' ? 'synced' : state, deviceId: cur?.deviceId ?? null })
+  }
+  const gone = q(db, "DELETE FROM docs WHERE kind = 'inventory' AND id = ? AND sync IN ('synced', 'edited', 'deleted')")
+  if (full) {
+    for (const r of q(db, "SELECT id FROM docs WHERE kind = 'inventory' AND sync IN ('synced', 'edited', 'deleted')").all()) {
+      if (!known.has(r.id)) gone.run(r.id)
+    }
+  }
+  for (const id of docs.remove) gone.run(id)
+}
+
 // Сколько дней хранить то, что сервер уже принял: операции в очереди и движения
 // в журнале. Работе они больше не нужны — остаток и долг приходят от сервера уже с
 // ними. Держим полтора месяца на случай разбирательства: «что касса отправляла».
@@ -317,7 +344,18 @@ function pruneOld(db, now) {
   if (now - last < DAY_MS) return
   for (const [kind, days] of Object.entries(WINDOW_DAYS)) {
     // День запаса: чек у самой границы срока не должен мигать туда-сюда
-    q(db, "DELETE FROM docs WHERE kind = ? AND sync = 'synced' AND date < ?").run(kind, new Date(now - (days + 1) * DAY_MS).toISOString())
+    const cutoff = new Date(now - (days + 1) * DAY_MS).toISOString()
+    if (kind === 'inventory') {
+      // Незаконченный лист пересчёта не убираем, какой бы давний он ни был: его ещё будут
+      // считать. Применённый — по дню применения (так их отдаёт и сервер), а не заведения
+      q(
+        db,
+        `DELETE FROM docs WHERE kind = 'inventory' AND sync = 'synced' AND json_extract(body, '$.status') = 'applied'
+           AND COALESCE(json_extract(body, '$.appliedAt'), date) < ?`,
+      ).run(cutoff)
+      continue
+    }
+    q(db, 'DELETE FROM docs WHERE kind = ? AND sync = ? AND date < ?').run(kind, 'synced', cutoff)
   }
   // Принятое сервером. Не принятое (ждёт отправки, отвергнуто) не трогаем никогда:
   // это единственная запись о сделанном
@@ -325,6 +363,9 @@ function pruneOld(db, now) {
   q(db, "DELETE FROM outbox WHERE state = 'done' AND createdAt < ?").run(before)
   q(db, 'DELETE FROM stock_moves WHERE synced = 1 AND createdAt < ?').run(before)
   q(db, 'DELETE FROM debt_moves WHERE synced = 1 AND createdAt < ?').run(before)
+  // Поправки, которые сервер уже принял: они больше не проигрываются и не нужны
+  q(db, 'DELETE FROM row_edits WHERE synced = 1 AND createdAt < ?').run(before)
+  q(db, 'DELETE FROM adj_moves WHERE synced = 1 AND createdAt < ?').run(before)
   setMeta(db, 'docsPrunedAt', String(now))
 }
 

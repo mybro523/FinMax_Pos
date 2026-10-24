@@ -9,7 +9,7 @@ import { D, discountOf } from '../common/money'
 import { weightedPackCost } from '../common/cost'
 import { addUnits, consumeUnitsTolerant, lockProducts, returnExpiry, shortageWorth, uppOf } from '../common/stock'
 import { Count, firstCountAfter, forgetShortageDoc, lockInventories, pruneCounted, rememberShortageDoc, shortageDocOf } from '../common/counted'
-import { TX, TX_SNAPSHOT } from '../common/tx'
+import { TX, TX_LONG, TX_SNAPSHOT } from '../common/tx'
 import { setCashMoves, setExpenseCash, setSupplierCash, setSupplierRefund, shiftTotals } from '../shifts/totals'
 import { batchesOf } from '../supplier-returns/supplier-returns.service'
 import { withDeviceNames } from '../shifts/shifts.service'
@@ -41,7 +41,7 @@ import {
 import { PushDto, PushOpDto } from './dto'
 import { mark, sinceOf } from './cursor'
 import { applyEdit, EDIT_TYPES, EditKit, loadAliases, rewriteAliases } from './edits'
-import { stamp } from '../common/stamps'
+import { stamp, stampsOfRows } from '../common/stamps'
 
 // ── Обмен с кассами, которые работают без интернета ──
 //
@@ -173,6 +173,10 @@ const TOUCHES: Record<OpType, string[]> = {
   'cashMove.delete': ['cashMoves', 'shifts'],
   'arrival.update': ['arrivals', 'products', 'suppliers'],
   'arrival.delete': ['arrivals', 'products', 'suppliers'],
+  'inventory.create': ['inventories'],
+  'inventory.count': ['inventories'],
+  'inventory.apply': ['inventories', 'products', 'writeoffs'],
+  'inventory.delete': ['inventories'],
 }
 
 // Сколько журнал изменений хранится. Касса без связи работает не больше недели;
@@ -183,6 +187,25 @@ const PRUNE_EVERY_MS = 24 * 3600 * 1000
 const MAX_CHANGES = 20000
 const SALES_DAYS = 60
 const JOURNAL_DAYS = 180
+// Лист пересчёта — со строками и тем, кто его завёл (как отдаёт раздел «Инвентаризация»)
+const INVENTORY_INCLUDE = { items: true, user: { select: { id: true, name: true } } } as const
+
+// У строк незаконченного листа — когда их посчитали (countedAt). Касса держит поверх листа
+// своё и соседское насчитанное, и «позднее по времени побеждает» ей решать по этому
+// моменту: пересчёт соседа, сделанный раньше уже принятого, не должен перекрыть его
+async function withCountedAt<T extends { status: string; items: { id: string }[] }>(tx: Tx, sheets: T[]): Promise<T[]> {
+  const ids = sheets.filter((s) => s.status === 'draft').flatMap((s) => s.items.map((i) => i.id))
+  if (!ids.length) return sheets
+  const stamps = await stampsOfRows(tx, 'InventoryItem', ids, 'actual')
+  for (const s of sheets) {
+    if (s.status !== 'draft') continue
+    for (const it of s.items) {
+      const at = stamps.get(it.id)
+      if (at) (it as any).countedAt = at.toISOString()
+    }
+  }
+  return sheets
+}
 const DAY = 86400000
 // Часы кассы сверены с сервером, но не до секунды. Цена, действовавшая в пределах
 // пары минут от момента продажи, считается верной
@@ -316,7 +339,7 @@ export class SyncService {
 
     const ctx: Ctx = { deviceId, tenantUserId: performer.tenantUserId, flagged: false, extra: new Set(), actor: performer }
     try {
-      const docId = await this.prisma.$transaction(async (tx) => {
+      const work = async (tx: Tx) => {
         // Первым делом — номер операции. Если она уже принята (или принимается
         // прямо сейчас соседним запросом), транзакция упадёт на уникальности
         // и ничего не запишет
@@ -330,7 +353,9 @@ export class SyncService {
         const doc = await this.apply(tx, type, payload, ctx)
         if (doc) await tx.syncOp.update({ where: { id: op.id }, data: { docId: doc } })
         return doc
-      }, TX)
+      }
+      // Лист пересчёта — это тысячи строк: ему, как и на сайте, — запас времени побольше
+      const docId = type.startsWith('inventory.') ? await this.prisma.$transaction(work, TX_LONG) : await this.prisma.$transaction(work, TX)
       ;(TOUCHES[type] || []).forEach((k) => touched.add(k))
       ctx.extra.forEach((k) => touched.add(k))
       if (ctx.flagged) touched.add('discrepancies')
@@ -1454,6 +1479,18 @@ export class SyncService {
       cashMoves: all(await tx.cashMove.findMany({ where: { date: { gte: journalFrom } }, include: userOnly, orderBy: { date: 'desc' } })),
       // Возвраты поставщикам — как приходы: всем, журнал в программе читается по праву на приход
       supplierReturns: all(await tx.supplierReturn.findMany({ where: { date: { gte: journalFrom } }, include: { items: true, user: { select: { id: true, name: true } } }, orderBy: { date: 'desc' } })),
+      // Листы пересчёта (1.4.15): незаконченные — все, применённые — за срок журналов.
+      // Всем кассам, как карточки товаров (см. pullScope)
+      inventories: all(
+        await withCountedAt(
+          tx,
+          await tx.inventory.findMany({
+            where: { OR: [{ status: 'draft' }, { appliedAt: { gte: journalFrom } }] },
+            include: INVENTORY_INCLUDE,
+            orderBy: { date: 'desc' },
+          }),
+        ),
+      ),
       ...(founder
         ? {
             writeoffs: all(await tx.writeOff.findMany({ where: { date: { gte: journalFrom } }, include: withUser, orderBy: { date: 'desc' } })),
@@ -1518,6 +1555,18 @@ export class SyncService {
       payServices: await load('PayService', (part) => tx.payService.findMany({ where: inIds(part) })),
       cashMoves: await load('CashMove', (part) => tx.cashMove.findMany({ where: inIds(part), include: userOnly })),
       supplierReturns: await load('SupplierReturn', (part) => tx.supplierReturn.findMany({ where: inIds(part), include: { items: true, user: { select: { id: true, name: true } } } })),
+      // Изменение строки листа записано в журнал номером самого листа (миграция 20261024)
+      // Лист за пределами окна (давний применённый) уходит из ответа как удалённый: касса его
+      // и так убирает по сроку, а качать его заново целиком незачем
+      inventories: await load('Inventory', async (part) =>
+        withCountedAt(
+          tx,
+          await tx.inventory.findMany({
+            where: { ...inIds(part), OR: [{ status: 'draft' }, { appliedAt: { gte: new Date(Date.now() - JOURNAL_DAYS * DAY) } }] },
+            include: INVENTORY_INCLUDE,
+          }),
+        ),
+      ),
       ...(founder
         ? {
             writeoffs: await load('WriteOff', (part) => tx.writeOff.findMany({ where: inIds(part), include: withUser })),
@@ -1712,7 +1761,11 @@ function requiredPermissions(type: string, payload: any): string[][] {
 }
 
 // Какие разделы с деньгами магазина касса получает в обмене: журнал списаний, расходы
-// и долги поставщикам видят только те, у кого на это есть право
+// и долги поставщикам видят только те, у кого на это есть право.
+// Листы пересчёта приходят всем: в них те же закупочные цены, что в карточках товаров (они
+// и так у каждой кассы), а на одной кассе работают разные люди — лист, изменённый, пока
+// за кассой кассир, иначе не дошёл бы до неё и тогда, когда войдёт владелец. Раздел
+// «Инвентаризация» на кассе открывается по тем же правам, что на сайте
 type PullScope = { wide: boolean; suppliers: boolean; writeoffs: boolean; expenses: boolean; incomes: boolean }
 function pullScope(user: any): PullScope {
   // Те же права, что у журналов на сервере: отчёты и панель тоже читают списания и расходы

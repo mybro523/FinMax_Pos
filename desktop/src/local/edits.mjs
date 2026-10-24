@@ -18,6 +18,9 @@
 //     которые касса досчитывает за сервером (долг поставщику, расходы из кассы), берут
 //     из «ждущих» документа целиком — а поправленный сервер уже знает, у него только
 //     другая сумма (её разница — поправкой суммы, ниже);
+//   • лист пересчёта (tbl = 'doc:inventory') — иначе: не тело целиком, а поправки по строкам
+//     (action = 'lines'), которые лежат поверх копии сервера (sheet.mjs). Копия сервера
+//     ложится основой всегда, а поправки, которых он ещё не видел, — поверх неё;
 //   • суммы, которые сервер ведёт сам (adj_moves): долг поставщику, расходы и оплаты
 //     поставщикам из ящика смены. Сумма = что сказал сервер + свои поправки.
 //
@@ -26,6 +29,7 @@
 import { q, setMeta } from './db.mjs'
 import { putDoc } from './docs.mjs'
 import { D, fromCents, toCents } from './money.mjs'
+import { foldSheetEdit, SHEET_TBL } from './sheet.mjs'
 
 // Какие столбцы можно трогать в каждой таблице. Поправка приходит и от соседней кассы
 // по сети — писать в базу что попало нельзя
@@ -43,7 +47,7 @@ const COLS = {
 }
 export const EDIT_TABLES = Object.keys(COLS)
 // Виды документов, которые можно править и удалять поправкой
-const DOC_KINDS = new Set(['expense', 'income', 'cashmove', 'supplierreturn', 'supplierpayment', 'arrival'])
+const DOC_KINDS = new Set(['expense', 'income', 'cashmove', 'supplierreturn', 'supplierpayment', 'arrival', 'inventory'])
 
 // Суммы, которые ведёт сервер, и куда переходит поправка, когда он её принял
 export const ADJ = { supplierDebt: 'supplierDebt', expenseCash: 'expenseCash', supplierCash: 'supplierCash' }
@@ -103,10 +107,18 @@ function applyDocEdit(db, kind, id, action, data) {
   // Заведение сервер отверг — документа у него не будет, и чужая правка его не воскрешает.
   // Состояние — выведенное, а не пометка в строке: удалённый здесь хранит «удалён»
   if (docState(db, kind, id) === 'rejected') return
+  // Насчитанное в листе пересчёта лежит поверх основы (sheet.mjs) — тело не меняется,
+  // меняется только состояние: «поправлен здесь» (или «ждущий», «от соседа», как было)
+  if (action === 'lines') {
+    if (kind === 'inventory') settleDoc(db, kind, id)
+    return
+  }
   if (action === 'put' && data.body && typeof data.body === 'object' && data.body.id === id) {
     // Документ удалили (здесь или на соседней кассе) — правка, пришедшая позже, его не
     // возвращает: сервер, получив удаление, правку уже не применит
-    if (q(db, "SELECT 1 FROM row_edits WHERE tbl = ? AND rowId = ? AND action = 'del' LIMIT 1").get('doc:' + kind, id)) return
+    // Удаление, которое сервер уже принял, — не в счёт: если документ после него здесь, сервер
+    // его оставил (позже его правили), и правки ложатся как обычно
+    if (q(db, "SELECT 1 FROM row_edits WHERE tbl = ? AND rowId = ? AND action = 'del' AND synced = 0 LIMIT 1").get('doc:' + kind, id)) return
     // Заведён здесь и ещё не отправлен — остаётся «ждущим»; заведён соседней кассой и ещё не
     // дошёл до сервера — остаётся «от соседа»; иначе — «поправлен здесь» (docState)
     putDoc(db, kind, data.body, { sync: docState(db, kind, id), deviceId: data.deviceId ?? null })
@@ -206,6 +218,7 @@ const CREATED_BY = {
   supplierreturn: ['supplier.return', '$.ret.id'],
   supplierpayment: ['supplier.pay', '$.payment.id'],
   arrival: ['arrival', '$.arrival.id'],
+  inventory: ['inventory.create', '$.inventory.id'],
 }
 function creationIn(db, kind, id, states) {
   const by = CREATED_BY[kind]
@@ -315,6 +328,9 @@ export function ackEdits(db, opId, { applied = true, fold = true } = {}) {
   for (const e of edits) {
     if (!e.tbl.startsWith('doc:')) continue
     const kind = e.tbl.slice(4)
+    // Своё насчитанное в листе сервер принял — оно в основу листа до его следующего ответа.
+    // Соседское — нет: данные сервера, по которым его подтвердили, уже с ним
+    if (e.tbl === SHEET_TBL && e.action === 'lines' && fold && applied) foldSheetEdit(db, e.rowId, parse(e.data) || {})
     if (e.action === 'del') q(db, "DELETE FROM docs WHERE kind = ? AND id = ? AND sync = 'deleted'").run(kind, e.rowId)
     else if (q(db, "SELECT 1 FROM docs WHERE kind = ? AND id = ? AND sync IN ('pending', 'peer', 'edited', 'synced')").get(kind, e.rowId)) settleDoc(db, kind, e.rowId)
   }
@@ -356,6 +372,11 @@ export function undoEdits(db, opId) {
     const data = parse(e.data) || {}
     if (e.tbl.startsWith('doc:')) {
       const kind = e.tbl.slice(4)
+      // Лист пересчёта: поправка лежала поверх основы — без неё лист сразу такой, как был
+      if (e.tbl === SHEET_TBL) {
+        docs.set(kind + '|' + e.rowId, [kind, e.rowId])
+        continue
+      }
       const later = q(db, 'SELECT 1 FROM row_edits WHERE tbl = ? AND rowId = ? AND synced = 0 AND opId <> ? AND seq > ? LIMIT 1').get(e.tbl, e.rowId, opId, e.seq)
       if (!later) {
         if (data.was && data.was.id === e.rowId) putDoc(db, kind, data.was, { sync: 'synced', deviceId: data.deviceId ?? null })
@@ -408,7 +429,7 @@ const validRow = (e) =>
   !!e &&
   typeof e.tbl === 'string' &&
   typeof e.rowId === 'string' &&
-  ['put', 'del', 'map'].includes(e.action) &&
+  (['put', 'del', 'map'].includes(e.action) || (e.action === 'lines' && e.tbl === SHEET_TBL)) &&
   !!(COLS[e.tbl] || (e.tbl.startsWith('doc:') && DOC_KINDS.has(e.tbl.slice(4))))
 const sumKind = (e) => (e.tbl.startsWith('doc:') && DOC_SUMS[e.tbl.slice(4)] ? e.tbl.slice(4) : null)
 
@@ -420,10 +441,12 @@ export function applyPeerEdits(db, opId, { rows = [], adj = [] } = {}, now) {
     // Правка документа, которого здесь нет (давний, за пределами журналов кассы; заведение
     // соседа, отвергнутое сервером; ещё не дошедшее через третью кассу): документ из неё не
     // заводится. Его поправка суммы — та, что посчитала касса, где правили (ниже)
-    if (e.tbl.startsWith('doc:') && !q(db, 'SELECT 1 FROM docs WHERE kind = ? AND id = ?').get(e.tbl.slice(4), e.rowId)) continue
+    // Насчитанное в листе пересчёта — исключение: оно лежит поправкой поверх листа и ляжет,
+    // когда лист придёт (с сервера или от соседа), — иначе пересчёт соседа терялся бы навсегда
+    if (e.tbl.startsWith('doc:') && e.tbl !== SHEET_TBL && !q(db, 'SELECT 1 FROM docs WHERE kind = ? AND id = ?').get(e.tbl.slice(4), e.rowId)) continue
     // Документ уже удалили (здесь или другой правкой) — правка, пришедшая позже, не кладётся:
     // сервер, получив удаление, её не применит, а лишняя поправка путала бы состояние документа
-    if (e.tbl.startsWith('doc:') && q(db, "SELECT 1 FROM row_edits WHERE tbl = ? AND rowId = ? AND action = 'del' LIMIT 1").get(e.tbl, e.rowId)) continue
+    if (e.tbl.startsWith('doc:') && q(db, "SELECT 1 FROM row_edits WHERE tbl = ? AND rowId = ? AND action = 'del' AND synced = 0 LIMIT 1").get(e.tbl, e.rowId)) continue
     const kind = sumKind(e)
     const cur = kind ? q(db, 'SELECT sync FROM docs WHERE kind = ? AND id = ?').get(kind, e.rowId) : null
     q(db, 'INSERT INTO row_edits (opId, tbl, rowId, action, data, createdAt) VALUES (?, ?, ?, ?, ?, ?)').run(

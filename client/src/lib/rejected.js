@@ -146,6 +146,17 @@ export function rejectedDetail(r, t, money = String, fmt = {}) {
       if (list(d.fields).length) fact(t('Что поменяли'), list(d.fields).map((f) => fieldLabel(f, t)).join(', '))
       if (has(d.stock)) fact(t('Остаток'), d.stock)
       break
+    // ── Инвентаризация (версия 1.4.15) ──
+    case 'inventory.create':
+      if (d.date) fact(t('Дата'), when(d.date))
+      fact(t('Позиций в листе'), d.lines)
+      break
+    case 'inventory.count':
+    case 'inventory.apply':
+    case 'inventory.delete':
+      if (d.date) fact(t('Дата'), when(d.date))
+      if (d.counted > 0) fact(t('Пересчитано'), d.counted)
+      break
     case 'shift.close':
       fact(t('Чеков'), d.count ?? 0)
       fact(t('касса на старте'), money(d.openingCash || 0))

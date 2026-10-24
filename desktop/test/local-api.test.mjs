@@ -112,8 +112,8 @@ test('касса отвечает сама ровно на то, что умее
   const remote = [
     ['GET', '/users'],
     ['POST', '/users'],
-    ['GET', '/inventory'],
-    ['POST', '/inventory'],
+    ['GET', '/discrepancies'],
+    ['POST', '/products/p1/merge'],
     ['GET', '/backup'],
     ['POST', '/backup/restore'],
     ['DELETE', '/customers/abc'],

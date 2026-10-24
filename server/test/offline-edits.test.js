@@ -25,6 +25,9 @@ const {
   parseExpenseUpdate,
   parseIncomeUpdate,
   parseArrivalUpdate,
+  parseInventoryCreate,
+  parseInventoryCount,
+  parseInventoryApply,
 } = require('../dist/sync/payload')
 const { OP_PERMISSIONS } = require('../dist/auth/permissions')
 const { resolveEdit, same, conflictNote, changedFields } = require('../dist/common/stamps')
@@ -170,4 +173,39 @@ test('псевдонимы категорий и типов: правка с н�
   assert.equal(aliasOf(aliases, 'category', 's-kassa'), 's-kassa')
   // Старые операции с номером категории в полях товара не переписываются: товар хранит её названием
   assert.deepEqual(rewriteAliases({ product: { category: 'Таблетки', categoryId: 'cat-kassa' } }, aliases), { product: { category: 'Таблетки', categoryId: 'cat-kassa' } })
+})
+
+test('инвентаризация с кассы (1.4.15): лист, пересчёт и применение — в пределах сайта, права те же', () => {
+  const sheet = {
+    inventory: {
+      id: 'inv-1', scope: 'Таблетки', note: '', date: AT,
+      items: [
+        { id: 'l-1', productId: 'p-1', name: 'Анальгин', expectedUnits: 30, cost: 20 },
+        { id: 'l-2', productId: null, name: 'Удалённый', expectedUnits: 0, cost: 0, actualUnits: 0 },
+      ],
+    },
+  }
+  const inv = parseInventoryCreate(sheet, NOW)
+  assert.deepEqual([inv.id, inv.scope, inv.items.length, inv.items[0].actualUnits, inv.items[1].productId, inv.items[1].actualUnits], ['inv-1', 'Таблетки', 2, null, null, 0])
+  assert.equal(parseInventoryCreate({ inventory: { ...sheet.inventory, scope: '' } }, NOW).scope, 'all')
+  rejected(() => parseInventoryCreate({ inventory: { ...sheet.inventory, items: [] } }, NOW), /позиц/i)
+  rejected(() => parseInventoryCreate({ inventory: { ...sheet.inventory, items: [{ ...sheet.inventory.items[0], expectedUnits: -1 }] } }, NOW))
+  // Название — снимок карточки: карточка с одними пробелами лист не ломает
+  assert.equal(parseInventoryCreate({ inventory: { ...sheet.inventory, items: [{ ...sheet.inventory.items[0], name: ' ' }] } }, NOW).items[0].name, '—')
+
+  const c = parseInventoryCount({ id: 'inv-1', at: AT, items: [{ id: 'l-1', actualUnits: 28 }, { id: 'l-2', actualUnits: null }] }, NOW)
+  assert.deepEqual(c.items, [{ id: 'l-1', actualUnits: 28 }, { id: 'l-2', actualUnits: null }])
+  rejected(() => parseInventoryCount({ id: 'inv-1', items: [] }, NOW), /дата/i)
+  rejected(() => parseInventoryCount({ id: 'inv-1', at: AT, items: [{ id: 'l-1', actualUnits: 1.5 }] }, NOW))
+  // Применить можно и без новых чисел — по сохранённым
+  assert.deepEqual(parseInventoryApply({ id: 'inv-1', at: AT }, NOW).items, [])
+  // Строку посчитала соседняя касса по сети — у неё свой момент
+  const peer = parseInventoryApply({ id: 'inv-1', at: AT, items: [{ id: 'l-1', actualUnits: 5, at: '2026-10-20T08:00:00.000Z' }] }, NOW)
+  assert.equal(peer.items[0].at.toISOString(), '2026-10-20T08:00:00.000Z')
+  assert.equal('at' in c.items[0], false)
+  rejected(() => parseInventoryApply({ id: 'inv-1', at: AT, items: [{ id: 'l-1', actualUnits: 5, at: 'вчера' }] }, NOW), /дата/i)
+  assert.deepEqual(OP_PERMISSIONS['inventory.create'], ['inventory.count'])
+  assert.deepEqual(OP_PERMISSIONS['inventory.count'], ['inventory.count'])
+  assert.deepEqual(OP_PERMISSIONS['inventory.apply'], ['inventory.apply'])
+  assert.deepEqual(OP_PERMISSIONS['inventory.delete'], ['inventory.count'])
 })

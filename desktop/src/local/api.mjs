@@ -44,6 +44,7 @@ import {
 import { createSupplier, deleteSupplier, paySupplier, removeSupplierPayment, updateSupplier } from './ops/supplierops.mjs'
 import { deleteCashMove, deleteExpense, deleteIncome, deleteSupplierReturn, updateExpense, updateIncome } from './ops/docedits.mjs'
 import { arrivalView, deleteArrival, updateArrival } from './ops/arrivaledit.mjs'
+import { applyInventory, createInventory, deleteInventory, inventoriesList, inventoryOne, saveCounts } from './ops/inventory.mjs'
 import { productHistory, supplierCard } from './history.mjs'
 import { DAY_MS } from './time.mjs'
 
@@ -205,6 +206,16 @@ const ROUTES = [
   ['GET', /^\/arrivals\/([^/]+)$/, perm(['arrivals.view'], (ctx) => arrivalView(ctx.db, ctx.params[0]) || { __remote: true })],
   ['PATCH', /^\/arrivals\/([^/]+)$/, perm(['arrivals.edit'], here('arrival', (ctx) => updateArrival(ctx, ctx.params[0], ctx.body)))],
   ['DELETE', /^\/arrivals\/([^/]+)$/, perm(['arrivals.edit'], here('arrival', (ctx) => deleteArrival(ctx, ctx.params[0])))],
+
+  // ── Инвентаризация без связи (версия 1.4.15) ──
+  // Права — как у сервера (inventory.controller): смотреть, пересчитывать, применять.
+  // Лист, которого на кассе нет (давний, применённый раньше срока журналов), — у сервера
+  ['GET', /^\/inventory$/, perm(['inventory.view'], (ctx) => inventoriesList(ctx.db))],
+  ['GET', /^\/inventory\/([^/]+)$/, perm(['inventory.view'], (ctx) => inventoryOne(ctx.db, ctx.params[0]) || { __remote: true })],
+  ['POST', /^\/inventory$/, perm(['inventory.count'], (ctx) => createInventory(ctx, ctx.body))],
+  ['PATCH', /^\/inventory\/([^/]+)$/, perm(['inventory.count'], here('inventory', (ctx) => saveCounts(ctx, ctx.params[0], ctx.body)))],
+  ['POST', /^\/inventory\/([^/]+)\/apply$/, perm(['inventory.apply'], here('inventory', (ctx) => applyInventory(ctx, ctx.params[0], ctx.body)))],
+  ['DELETE', /^\/inventory\/([^/]+)$/, perm(['inventory.count'], here('inventory', (ctx) => deleteInventory(ctx, ctx.params[0])))],
 ]
 
 // ── Сначала сервер, без связи — касса ──

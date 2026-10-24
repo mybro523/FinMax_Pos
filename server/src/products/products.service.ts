@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { expiryFrom, lockProducts, setUnits, syncProduct, totalUnits, uppOf } from '../common/stock'
+import { lockInventories } from '../common/counted'
 import { costFromBatches } from '../common/cost'
 import { TX } from '../common/tx'
 import { CreateProductDto, UpdateProductDto } from './dto'
@@ -191,6 +192,11 @@ export class ProductsService {
       // Замки — одним заходом и по порядку номеров (lockProducts): обе карточки и те, у кого
       // лишняя записана в аналогах (их списки ниже правятся)
       const analogRefs = await tx.product.findMany({ where: { analogIds: { has: fromId } }, select: { id: true } })
+      // Листы пересчёта с этими товарами — раньше товаров, как у применения листа
+      // (inventory.service): применение, которое уже идёт, доделается со строками как были,
+      // а не обойдёт строку лишней карточки, и встречные замки друг друга не запрут
+      const sheets = await tx.inventoryItem.findMany({ where: { productId: { in: [fromId, intoId] } }, select: { inventoryId: true }, distinct: ['inventoryId'] })
+      await lockInventories(tx, sheets.map((s) => s.inventoryId))
       await lockProducts(tx, [fromId, intoId, ...analogRefs.map((r) => r.id)])
       const [from, into] = await Promise.all([tx.product.findUnique({ where: { id: fromId } }), tx.product.findUnique({ where: { id: intoId } })])
       if (!from || !into) throw new NotFoundException('Товар не найден')
@@ -198,11 +204,13 @@ export class ProductsService {
       if (uppOf(from) !== uppOf(into)) {
         throw new BadRequestException(`Штук в упаковке у карточек разное (${uppOf(from)} и ${uppOf(into)}) — сначала поправьте карточку`)
       }
-      // Пересчёт, где есть обе карточки: строки сливаются в одну. У незавершённого — иначе
-      // при применении товар посчитался бы дважды; у применённого — поздняя операция кассы
-      // поправляла бы недостачу по строке одной карточки, а списание у него уже на обе.
-      // Ожидаемое и насчитанное складываются; не считали ни одну — строка остаётся несчитанной
-      const lines = await tx.inventoryItem.findMany({ where: { productId: { in: [fromId, intoId] } } })
+      // Применённый пересчёт, где есть обе карточки: строки сливаются в одну — иначе поздняя
+      // операция кассы поправляла бы недостачу по строке одной карточки, а списание у него уже
+      // на обе. Ожидаемое и насчитанное складываются; не считали ни одну — строка остаётся
+      // несчитанной. В незаконченном листе строки только переходят к основной карточке: кассы
+      // без связи ещё присылают насчитанное по своим номерам строк, и удалённая строка его
+      // потеряла бы. Сольются они при применении (inventory.service, joinDuplicateLines)
+      const lines = await tx.inventoryItem.findMany({ where: { productId: { in: [fromId, intoId] }, inventory: { status: 'applied' } } })
       for (const a of lines.filter((d) => d.productId === intoId)) {
         const b = lines.find((d) => d.productId === fromId && d.inventoryId === a.inventoryId)
         if (!b) continue

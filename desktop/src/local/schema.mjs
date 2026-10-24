@@ -370,6 +370,13 @@ export const PHARMACY_SCHEMA = [
   CREATE INDEX adj_moves_pending ON adj_moves(target, rowId) WHERE synced = 0;
   CREATE INDEX adj_moves_op ON adj_moves(opId);
   `,
+  // ── Инвентаризация без связи (версия 1.4.15) ──
+  // Листы пересчёта лежат в docs (kind = inventory). Сервер начал записывать их изменения
+  // в журнал только с этой версии: листы, заведённые раньше, по отметке «докуда получили»
+  // не придут. Отметки обмена сбрасываются — один раз касса получит всё заново
+  `
+  DELETE FROM meta WHERE key IN ('cursor', 'wcursor');
+  `,
 ]
 
 // ── Общая база программы ──

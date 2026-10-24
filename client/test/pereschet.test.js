@@ -112,6 +112,18 @@ test('итог листа: недостача, излишек и её стоим
   assert.equal(tally(null, products).counted, 0)
 })
 
+test('итог листа: две строки одного товара (карточки объединили) — как один товар, как у сервера', () => {
+  const products = [{ id: 'p-a', unitsPerPack: 1 }]
+  // «Основная» — 5 по учёту, «лишняя» — 3; насчитали 9 в основной, лишнюю не считали
+  const sheet = sheetOf('s1', [line('a', 5, 9), line('a2', 3, null, { productId: 'p-a' })])
+  const sum = tally(sheet, products)
+  assert.equal(sum.counted, 1)
+  assert.deepEqual(sum.surplus.map((d) => [d.id, d.diff]), [['a', 1]])
+  // Насчитали в обеих: 6 + 1 = 7 против 8 — недостача 1
+  const both = tally(sheetOf('s1', [line('a', 5, 6), line('a2', 3, 1, { productId: 'p-a' })]), products)
+  assert.deepEqual(both.shortage.map((d) => [d.id, d.diff]), [['a', -1]])
+})
+
 test('сервер принял сохранение: из «введённого здесь» уходит только то, что с отправки не меняли', () => {
   const sent = { a: '7', b: '3' }
   // Пока запрос шёл, в строке b исправили число и ввели новую строку c

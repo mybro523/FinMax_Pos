@@ -205,4 +205,10 @@ export const OP_PERMISSIONS: Record<string, string[]> = {
   'cashMove.delete': ['shift.others'],
   'arrival.update': ['arrivals.edit'],
   'arrival.delete': ['arrivals.edit'],
+  // Инвентаризация (1.4.15) — как на сайте: завести, считать и удалить лист — право
+  // пересчитывать, применить — отдельное право
+  'inventory.create': ['inventory.count'],
+  'inventory.count': ['inventory.count'],
+  'inventory.apply': ['inventory.apply'],
+  'inventory.delete': ['inventory.count'],
 }

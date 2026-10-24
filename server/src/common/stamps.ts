@@ -21,7 +21,34 @@ import { D } from './money'
 
 type Tx = Prisma.TransactionClient
 
-export type StampTable = 'Product' | 'Supplier' | 'Category' | 'ProductType' | 'Expense' | 'Income' | 'Arrival'
+export type StampTable = 'Product' | 'Supplier' | 'Category' | 'ProductType' | 'Expense' | 'Income' | 'Arrival' | 'InventoryItem'
+
+// ── Одно поле у многих строк — для листа пересчёта (в нём тысячи строк) ──
+const MANY = 500
+// Когда правили это поле у каждой из строк: строка → момент
+export async function stampsOfRows(tx: Tx, tbl: StampTable, rowIds: string[], field: string): Promise<Map<string, Date>> {
+  const out = new Map<string, Date>()
+  for (let n = 0; n < rowIds.length; n += MANY) {
+    const rows = await tx.fieldStamp.findMany({ where: { tbl, field, rowId: { in: rowIds.slice(n, n + MANY) } }, select: { rowId: true, at: true } })
+    for (const r of rows) out.set(r.rowId, r.at)
+  }
+  return out
+}
+// Отметить, что поле правили у этих строк в этот момент (позже уже стоящего — не назад)
+export async function stampMany(tx: Tx, tbl: StampTable, rowIds: string[], field: string, at: Date = new Date()) {
+  const iso = at.toISOString()
+  const list = [...new Set(rowIds.filter(Boolean))]
+  for (let n = 0; n < list.length; n += MANY) {
+    const rows = list.slice(n, n + MANY).map((r) => Prisma.sql`(${tbl}, ${r}, ${field}, (${iso}::timestamptz AT TIME ZONE 'UTC'))`)
+    await tx.$executeRaw(Prisma.sql`
+      INSERT INTO "FieldStamp" ("tbl", "rowId", "field", "at") VALUES ${Prisma.join(rows)}
+      ON CONFLICT ("tbl", "rowId", "field") DO UPDATE SET "at" = GREATEST("FieldStamp"."at", EXCLUDED."at")`)
+  }
+}
+// Строки удалили или они больше не меняются (лист применён) — их штампы не нужны
+export async function forgetStampsOfRows(tx: Tx, tbl: StampTable, rowIds: string[]) {
+  for (let n = 0; n < rowIds.length; n += MANY) await tx.fieldStamp.deleteMany({ where: { tbl, rowId: { in: rowIds.slice(n, n + MANY) } } })
+}
 
 // Когда правили поля записи: поле → момент
 export async function stampsOf(tx: Tx, tbl: StampTable, rowId: string): Promise<Map<string, Date>> {

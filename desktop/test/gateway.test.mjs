@@ -496,13 +496,14 @@ test('раздел «только с интернетом» без связи о
   tt.after(() => t.gw.close())
   assert.equal((await t.req('GET', '/users')).status, 200)
   t.srv.state.online = false
-  for (const [method, path] of [['GET', '/users'], ['GET', '/inventory'], ['POST', '/auth/change-password']]) {
+  for (const [method, path] of [['GET', '/users'], ['GET', '/discrepancies'], ['POST', '/auth/change-password']]) {
     const r = await t.req(method, path, {})
     assert.equal(r.status, 0, `${method} ${path}`)
     assert.equal(r.data.message, MESSAGES.onlineOnly)
   }
-  // Товар заводится и без связи (версия 1.4.14)
+  // Товар заводится и без связи (версия 1.4.14), лист пересчёта — тоже (1.4.15)
   assert.equal((await t.req('POST', '/products', { name: 'Анальгин', barcode: '4600000000024', price: 30, cost: 20, stock: 4 })).status, 201)
+  assert.equal((await t.req('POST', '/inventory', { scope: 'all' })).status, 201)
 })
 
 test('запись на сервере сразу видна в локальной базе — товар не пропадает с экрана', async (tt) => {

@@ -6,13 +6,15 @@
 // ключ повтора. Остальное читается из самого документа.
 import { q } from './db.mjs'
 
-export const KINDS = ['sale', 'return', 'arrival', 'writeoff', 'payment', 'shift', 'expense', 'cashmove', 'supplierpayment', 'income', 'supplierreturn']
+export const KINDS = ['sale', 'return', 'arrival', 'writeoff', 'payment', 'shift', 'expense', 'cashmove', 'supplierpayment', 'income', 'supplierreturn', 'inventory']
 
 // За какой срок касса держит журналы у себя. Столько же по умолчанию отдаёт сервер
 // (server/src/*/…service.ts) и столько же держит в памяти окно (client/src/db/store.js).
 // Смены сервер отдаёт все — у них срока нет.
 export const WINDOW_DAYS = {
   sale: 60, return: 180, arrival: 180, writeoff: 180, payment: 180, expense: 180, cashmove: 180, supplierpayment: 180, income: 180, supplierreturn: 180,
+  // Листы пересчёта: применённые — за тот же срок, незаконченные — пока не применят (snapshot.mjs)
+  inventory: 180,
 }
 
 // Какое поле документа считается его датой

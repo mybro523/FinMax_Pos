@@ -320,7 +320,8 @@ test('список операций закрыт, а списание и рас�
   assert.deepEqual([...OP_TYPES].sort(), [
     'arrival', 'arrival.delete', 'arrival.update', 'cash.move', 'cashMove.delete', 'category.create', 'category.delete', 'category.update',
     'customer.create', 'debt.pay', 'deferred.add', 'deferred.remove', 'expense', 'expense.delete', 'expense.update', 'expenseCategory.create',
-    'expenseCategory.delete', 'income', 'income.delete', 'income.update', 'incomeCategory.create', 'incomeCategory.delete', 'payService.create',
+    'expenseCategory.delete', 'income', 'income.delete', 'income.update', 'incomeCategory.create', 'incomeCategory.delete',
+    'inventory.apply', 'inventory.count', 'inventory.create', 'inventory.delete', 'payService.create',
     'payService.delete', 'product.create', 'product.delete', 'product.update', 'productType.create', 'productType.delete', 'productType.update',
     'return', 'sale', 'shift.close', 'shift.open', 'supplier.create', 'supplier.delete', 'supplier.pay', 'supplier.return', 'supplier.update',
     'supplierPayment.delete', 'supplierReturn.delete', 'writeoff',

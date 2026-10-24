@@ -35,6 +35,7 @@ import { applyMove, rebuildStock } from './stock.mjs'
 import { DOC_KEYS, recountDebts, reorderCategories, reorderProducts } from './snapshot.mjs'
 import { ackEdits, applyPeerEdits, completePeerEdits, docKnown, EDITABLE_DOC_KINDS, editsOf, peerDocWaiting, undoEdits } from './edits.mjs'
 import { hasPerm } from './accounts.mjs'
+import { SHEET_TBL, sheetShut } from './sheet.mjs'
 
 // Сколько дней чужая операция может ждать сервера. Касса без связи работает не
 // больше недели (срок подписки без проверки), две недели — с запасом
@@ -43,7 +44,8 @@ export const LAN_KEEP_DAYS = 14
 const LOG_KEEP_DAYS = 21
 const DAY_MS = 86400000
 
-// Виды документов, которые видит не каждый
+// Виды документов, которые видит не каждый. Листы пересчёта (1.4.15) уходят всем — как и с
+// сервера: закупочные цены в них те же, что в карточках товаров у каждой кассы
 export const WIDE_KINDS = new Set(['writeoff', 'expense', 'income', 'supplierpayment'])
 // Операции, которые соседу без прав не уходят вовсе: в них ничего, кроме денег магазина
 const WIDE_ONLY_TYPES = new Set([
@@ -241,6 +243,11 @@ export function redact(e) {
   return { ...e, body: JSON.stringify({ effects: rest }), redacted: 1, wide: 0 }
 }
 
+// Самая большая запись, которую обмен передаёт (сообщение по сети — до 8 МБ, lan.mjs в
+// корне программы). Больше — только лист пересчёта на огромный склад: такую запись сосед
+// получит от сервера, а застрявшая в сети запись остановила бы весь обмен с ним
+export const LAN_MAX_ENTRY_BYTES = 6_000_000
+
 export function lanEntriesSince(db, since, { wide = false, limit = 200, maxBytes = 1_500_000 } = {}) {
   const rows = q(db, 'SELECT * FROM lan_log WHERE seq > ? ORDER BY seq LIMIT ?').all(Number(since) || 0, limit + 1)
   const entries = []
@@ -250,7 +257,12 @@ export function lanEntriesSince(db, since, { wide = false, limit = 200, maxBytes
   for (const r of rows.slice(0, limit)) {
     const e = wide ? toWire(r) : redact(toWire(r))
     if (e) {
-      const size = e.body.length + 200
+      // В байтах и как строка внутри сообщения (кавычки удваиваются)
+      const size = Buffer.byteLength(JSON.stringify(e.body)) + 300
+      if (size > LAN_MAX_ENTRY_BYTES) {
+        upTo = r.seq
+        continue
+      }
       if (entries.length && bytes + size > maxBytes) {
         more = true
         break
@@ -277,7 +289,7 @@ function validEntry(e) {
     typeof e.origin === 'string' &&
     e.origin.length <= 100 &&
     typeof e.body === 'string' &&
-    e.body.length <= 2_000_000 &&
+    e.body.length <= LAN_MAX_ENTRY_BYTES &&
     typeof e.createdAt === 'string' &&
     e.createdAt.length <= 40
   )
@@ -311,6 +323,14 @@ function applyEffects(db, opId, type, fx, changed) {
     const row = q(db, 'SELECT sync FROM docs WHERE kind = ? AND id = ?').get(d?.kind, d?.body?.id)
     // В том числе если его здесь уже поправили или удалили: он пришёл с сервера раньше
     if (row && !['pending', 'peer', 'rejected'].includes(row.sync)) return 'confirmed'
+  }
+  // Применение листа пересчёта, который здесь уже закрыт: применён по данным сервера (этим
+  // самым применением или другим, раньше) или его применение ждёт отправки. Лист применяется
+  // один раз — второе сервер отвергнет, а первое у него уже есть. Его остатки второй раз не
+  // накладываем
+  if (type === 'inventory.apply') {
+    const sheet = (fx.edits?.rows || []).find((r) => r?.tbl === SHEET_TBL)?.rowId
+    if (typeof sheet === 'string' && sheetShut(db, sheet)) return 'confirmed'
   }
   addDocs(db, opId, fx.docs, changed)
 
@@ -586,6 +606,22 @@ export function lanBeforePull(db, data, { startedGen, now }) {
       ).all(tbl, r.id)
       for (const m of made) if (confirmOp(db, m.opId)) any = true
     }
+  }
+  // Лист пересчёта пришёл с сервера применённым — применение соседа, которое у нас лежит
+  // поправкой, в этих данных уже есть (или сервер его отвергнет: лист применяют один раз).
+  // Его остатки второй раз не накладываем, не дожидаясь известия от соседа
+  // Ищем по журналу обмена, а не по поправкам: поправку листа, которого здесь не было (или
+  // который здесь удалён), касса могла и не положить, а движения остатка этого применения
+  // лежат всё равно
+  for (const sheet of Array.isArray(d.inventories?.upsert) ? d.inventories.upsert : []) {
+    if (typeof sheet?.id !== 'string' || sheet.status !== 'applied') continue
+    const applies = q(
+      db,
+      `SELECT DISTINCT l.id FROM lan_log l, json_each(l.body, '$.effects.edits.rows') r
+       WHERE l.kind = 'op' AND l.state = 'applied' AND l.type = 'inventory.apply'
+         AND json_extract(r.value, '$.tbl') = ? AND json_extract(r.value, '$.rowId') = ?`,
+    ).all(SHEET_TBL, sheet.id)
+    for (const m of applies) if (confirmOp(db, m.id)) any = true
   }
   for (const r of q(db, "SELECT id FROM lan_log WHERE kind = 'op' AND state = 'applied' AND fate = 'ok' AND fateGen < ?").all(Number(startedGen) || 0)) {
     if (confirmOp(db, r.id)) any = true

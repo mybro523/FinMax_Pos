@@ -339,6 +339,40 @@ export function move(db, m, { now }) {
   return applyMove(db, { ...m, seq: Number(info.lastInsertRowid), createdAt }, { tolerant: false, now })
 }
 
+// Какие движения меняют количество на полке (а не срок или цену в карточке)
+const QTY_KINDS = new Set(['sale', 'return', 'arrival', 'writeoff', 'count', 'peer', 'supreturn'])
+
+// Пересчёты, которые сервер уже провёл (применённые листы из его данных), — по товару самый
+// поздний, но только после самого раннего неотправленного движения: раньше смотреть незачем
+function countedSince(db, moves) {
+  const out = new Map()
+  if (!moves.length) return out
+  const wanted = new Set(moves.map((m) => m.productId))
+  let oldest = moves[0].createdAt
+  for (const m of moves) if (m.createdAt < oldest) oldest = m.createdAt
+  const rows = q(
+    db,
+    `SELECT body FROM docs WHERE kind = 'inventory' AND sync = 'synced' AND json_extract(body, '$.status') = 'applied'
+       AND json_extract(body, '$.appliedAt') > ?`,
+  ).all(oldest)
+  for (const r of rows) {
+    let sheet
+    try {
+      sheet = JSON.parse(r.body)
+    } catch {
+      continue
+    }
+    const ms = typeof sheet?.appliedAt === 'string' ? Date.parse(sheet.appliedAt) : NaN
+    if (!Number.isFinite(ms)) continue
+    const at = new Date(ms).toISOString()
+    for (const it of Array.isArray(sheet.items) ? sheet.items : []) {
+      if (!it?.productId || !wanted.has(it.productId) || it.actualUnits === null || it.actualUnits === undefined) continue
+      if (!out.has(it.productId) || out.get(it.productId) < at) out.set(it.productId, at)
+    }
+  }
+  return out
+}
+
 // ── Проиграть журнал заново ──
 // Основа — то, что сказал сервер: его партии, его закупочные цены. Поверх
 // накладывается всё, что сделано на этой кассе и сервером ещё не принято, в том же
@@ -354,7 +388,15 @@ export function rebuildStock(db) {
     q(db, 'UPDATE batches SET units = sUnits').run()
     q(db, 'UPDATE products SET costC = sCostC, expiryDate = sExpiry, oversold = 0').run()
     const moves = q(db, 'SELECT * FROM stock_moves WHERE synced = 0 ORDER BY seq').all()
-    for (const m of moves) applyMove(db, m, { tolerant: true, now: Date.parse(m.createdAt) })
+    const counted = countedSince(db, moves)
+    for (const m of moves) {
+      // Движение остатка, сделанное раньше пересчёта этого товара, который сервер уже провёл
+      // (лист применён — он в его данных): сервер такое движение не проведёт, пересчёт его уже
+      // учёл (server: common/counted.ts). Здесь — тоже
+      const c = counted.get(m.productId)
+      if (c && QTY_KINDS.has(m.kind) && m.createdAt < c) continue
+      applyMove(db, m, { tolerant: true, now: Date.parse(m.createdAt) })
+    }
     return moves.length
   })
 }

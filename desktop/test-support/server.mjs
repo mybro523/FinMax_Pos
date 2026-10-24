@@ -20,9 +20,9 @@ const json = (status, body, date) => ({
 const KEYS = [
   'products', 'batches', 'categories', 'customers', 'deferred', 'shifts', 'sales', 'returns', 'arrivals', 'writeoffs', 'payments',
   'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'supplierReturns',
-  'productTypes', 'incomes', 'incomeCategories',
+  'productTypes', 'incomes', 'incomeCategories', 'inventories',
 ]
-// Разделы, которые сервер отдаёт только владельцу
+// Разделы, которые сервер отдаёт только владельцу. Листы пересчёта (1.4.15) — всем
 const FOUNDER_KEYS = new Set(['writeoffs', 'expenses', 'expenseCategories', 'supplierPayments', 'incomes', 'incomeCategories'])
 // Кассиру поставщики отдаются без долгов
 const supplierFor = (s, u) => (u.role === 'founder' ? s : { id: s.id, name: s.name, phone: s.phone, note: s.note, createdAt: s.createdAt })
@@ -397,6 +397,43 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
         addDebt(was.supplierId, -Number(was.debt || 0))
         break
       }
+      // ── Инвентаризация (1.4.15): как настоящий сервер, без пересчёта на момент ──
+      case 'inventory.create': {
+        const inv = p.inventory
+        put('inventories', {
+          id: inv.id, date: inv.date, userId: who.id, user: who, status: 'draft', scope: inv.scope, note: inv.note || '', appliedAt: null,
+          items: inv.items.map((i) => ({ ...i, inventoryId: inv.id, actualUnits: i.actualUnits ?? null })),
+        })
+        break
+      }
+      case 'inventory.count':
+      case 'inventory.apply': {
+        const was = byId('inventories', p.id)
+        if (!was || was.status === 'applied') break
+        const counts = new Map((p.items || []).map((i) => [i.id, i.actualUnits]))
+        const items = was.items.map((i) => (counts.has(i.id) ? { ...i, actualUnits: counts.get(i.id) } : i))
+        if (op.type === 'inventory.count') {
+          put('inventories', { ...was, items })
+          break
+        }
+        // Две строки одного товара — насчитанное складывается (joinDuplicateLines)
+        const sum = new Map()
+        for (const it of items) {
+          if (it.actualUnits === null || it.actualUnits === undefined || !it.productId) continue
+          sum.set(it.productId, (sum.get(it.productId) || 0) + it.actualUnits)
+        }
+        for (const [productId, units] of sum) {
+          const prod = byId('products', productId)
+          if (!prod) continue
+          const upp = Math.max(1, prod.unitsPerPack || 1)
+          put('products', { ...prod, stock: Math.floor(units / upp), looseUnits: units % upp })
+        }
+        put('inventories', { ...was, items, status: 'applied', appliedAt: op.createdAt })
+        break
+      }
+      case 'inventory.delete':
+        remove('inventories', p.id)
+        break
       default:
         break
     }
@@ -408,7 +445,7 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
     const map = { sale: p.sale, return: p.ret, writeoff: p.writeOff, arrival: p.arrival, 'shift.open': p.shift, 'shift.close': p.shift, 'debt.pay': p.payment, 'customer.create': p.customer, 'deferred.add': p.deferred, expense: p.expense, 'cash.move': p.move, 'supplier.return': p.ret }
     if (map[op.type]) return map[op.type].id ?? null
     // Справочники и правки: номер записи, которой коснулась операция
-    const made = { 'product.create': p.product, 'category.create': p.category, 'productType.create': p.type, 'payService.create': p.service, 'expenseCategory.create': p.category, 'incomeCategory.create': p.category, 'supplier.create': p.supplier, 'supplier.pay': p.payment, 'arrival.update': p.arrival }
+    const made = { 'product.create': p.product, 'category.create': p.category, 'productType.create': p.type, 'payService.create': p.service, 'expenseCategory.create': p.category, 'incomeCategory.create': p.category, 'supplier.create': p.supplier, 'supplier.pay': p.payment, 'arrival.update': p.arrival, 'inventory.create': p.inventory }
     if (made[op.type]) return made[op.type].id ?? null
     return typeof p.id === 'string' ? p.id : null
   }

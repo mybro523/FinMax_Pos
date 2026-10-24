@@ -31,6 +31,8 @@ const IDLE_MS = 5 * 60 * 1000
 const KICK_MS = 1000
 // Сколько операций в одной пачке. Оборвалась связь — повторить придётся не всё
 const BATCH = 50
+// Сколько данных — не больше — уходит одним запросом (см. pushAll)
+const MAX_BATCH_BYTES = 4_000_000
 // Сервер столько раз подряд не смог записать одну и ту же операцию — сама она уже
 // не пройдёт, и человек должен это увидеть: за ней стоит вся очередь
 const STUCK_AFTER = 3
@@ -160,8 +162,15 @@ export function createSync({
         break
       }
       const batch = []
+      let bytes = 0
       for (const op of ops) {
         if (tokenFor(op) !== token || store.waitsForPeer?.(op)) break
+        // Пачка не тяжелее ~4 МБ (в байтах: названия товаров — кириллица): лист пересчёта на
+        // весь склад — это мегабайт-другой. Одна операция уходит всегда, даже тяжёлая (сервер
+        // принимает обмен до 32 МБ)
+        const size = Buffer.byteLength(JSON.stringify(op.payload ?? {}))
+        if (batch.length && bytes + size > MAX_BATCH_BYTES) break
+        bytes += size
         batch.push(op)
       }
 

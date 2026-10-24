@@ -70,6 +70,11 @@ export const OP_TYPES = [
   'cashMove.delete',
   'arrival.update',
   'arrival.delete',
+  // ── Инвентаризация без связи (версия 1.4.15) ──
+  'inventory.create',
+  'inventory.count',
+  'inventory.apply',
+  'inventory.delete',
 ] as const
 export type OpType = (typeof OP_TYPES)[number]
 
@@ -700,3 +705,55 @@ export function parseArrivalUpdate(p: any, now?: number) {
     items,
   }
 }
+
+// ════════════════════════ Инвентаризация (версия 1.4.15) ════════════════════════
+// Лист на весь склад — это тысячи строк; насчитанное — целое число штук (у весового —
+// граммов), пусто — «ещё не считали»
+const INV_MAX_LINES = 20000
+const INV_MAX_UNITS = 2_000_000_000
+const invCount = (v: any, what: string): number | null => (v === null || v === undefined || v === '' ? null : int(v, what, 0, INV_MAX_UNITS))
+
+export function parseInventoryCreate(p: any, now?: number) {
+  const inv = obj(obj(p, 'лист пересчёта').inventory, 'лист пересчёта')
+  return {
+    id: id(inv.id, 'лист пересчёта'),
+    scope: text(inv.scope, 60, 'all').trim() || 'all',
+    note: text(inv.note, 500, ''),
+    date: when(inv.date, 'лист пересчёта', now),
+    items: list(
+      inv.items,
+      'лист пересчёта',
+      (it) => ({
+        id: id(it.id, 'строка листа'),
+        productId: idOrNull(it.productId, 'товар'),
+        // Название — снимок карточки. Карточку с одними пробелами сайт принимает, и лист
+        // кассы из-за неё отвергаться не должен — а с ним и весь пересчёт без связи
+        name: text(it.name, 300, '').trim() || '—',
+        expectedUnits: int(it.expectedUnits, 'по учёту', 0, INV_MAX_UNITS),
+        cost: money(it.cost ?? 0, 'закупочная цена'),
+        actualUnits: invCount(it.actualUnits, 'по факту'),
+      }),
+      INV_MAX_LINES,
+    ),
+  }
+}
+
+// Пересчёт и применение: какие строки и сколько насчитали, когда (момент на кассе). У строки
+// может быть свой момент: её посчитала соседняя касса по сети, а применила эта
+function parseCounts(p: any, what: string, now?: number) {
+  const root = obj(p, what)
+  const raw = root.items === undefined || root.items === null ? [] : root.items
+  if (!Array.isArray(raw) || raw.length > INV_MAX_LINES) throw new Reject(`Нет позиций: ${what}`)
+  const at = when(root.at, what, now)
+  return {
+    id: id(root.id, 'лист пересчёта'),
+    at,
+    items: raw.map((it: any) => {
+      const x = obj(it, what)
+      const own = x.at === undefined || x.at === null ? undefined : when(x.at, what, now)
+      return { id: id(x.id, 'строка листа'), actualUnits: invCount(x.actualUnits, 'по факту'), ...(own ? { at: own } : {}) }
+    }),
+  }
+}
+export const parseInventoryCount = (p: any, now?: number) => parseCounts(p, 'пересчёт', now)
+export const parseInventoryApply = (p: any, now?: number) => parseCounts(p, 'применение пересчёта', now)

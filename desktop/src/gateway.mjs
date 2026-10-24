@@ -83,7 +83,7 @@ import { createSync } from './sync.mjs'
 // и показывается на выбранном языке — их сверяет проверка.
 export const MESSAGES = {
   needLogin: 'Требуется вход в систему',
-  onlineOnly: 'Этот раздел пока работает только с интернетом. Касса, склад, товары, поставщики, расходы и доходы доступны и без него.',
+  onlineOnly: 'Этот раздел пока работает только с интернетом. Касса, склад, инвентаризация, товары, поставщики, расходы и доходы доступны и без него.',
   notSent: 'Эта запись ещё не отправлена на сервер. Изменить или удалить её можно будет после отправки.',
   noOfflineLogin: 'Нет связи с сервером. Под этим именем на этом компьютере ещё не входили — первый вход возможен только с интернетом.',
   suspended: 'Работа магазина приостановлен. Обратитесь к поставщику программы.',
@@ -204,8 +204,15 @@ export function createGateway({
   const SYNC_TIMEOUT_MS = 120000
   // Отправка — небольшая пачка, сервер принимает её за секунду-две. Ждать дольше
   // незачем: если сеть «зависла», кассир должен увидеть «нет интернета» скоро,
-  // а не через две минуты. Пачка при этом не теряется — уйдёт следующей попыткой
+  // а не через две минуты. Пачка при этом не теряется — уйдёт следующей попыткой.
+  // Тяжёлая пачка (лист пересчёта на весь склад — мегабайты) по слабой связи идёт дольше:
+  // ей срок — по размеру, из расчёта ~24 КБ в секунду. Иначе она обрывалась бы на полпути
+  // каждый раз, и за ней стояла бы вся очередь
   const PUSH_TIMEOUT_MS = 45000
+  const pushTimeout = (ops) => {
+    const bytes = ops.reduce((n, o) => n + Buffer.byteLength(JSON.stringify(o.payload ?? {})), 0)
+    return Math.max(PUSH_TIMEOUT_MS, 30000 + Math.ceil(bytes / 24000) * 1000)
+  }
 
   function openPharmacy(code) {
     if (pharmacy?.code === code) return pharmacy
@@ -321,7 +328,7 @@ export function createGateway({
           {
             method: 'POST',
             path: '/sync/push',
-            timeoutMs: PUSH_TIMEOUT_MS,
+            timeoutMs: pushTimeout(ops),
             headers: asDevice,
             body: {
               deviceId,
@@ -801,8 +808,9 @@ export function createGateway({
     // Период глубже того, что хранится на компьютере, — за ним идём на сервер,
     // а своё неотправленное добавляем сами: сервер о нём ещё не знает
     if (data && data.__deep) return deep(req, acc, ph, data.__deep)
-    // Записи на кассе нет (давний приход) — за ней идём на сервер
-    if (data && data.__remote) return online(req, acc)
+    // Записи на кассе нет (давний приход) — за ней идём на сервер. __offline — свой текст на
+    // случай, если сервера нет (лист пересчёта больше, чем можно завести без связи)
+    if (data && data.__remote) return online(req, acc, typeof data.__offline === 'string' ? data.__offline : '')
     if (req.method !== 'GET') {
       // Записано на диск — теперь это надо отправить. Не дожидаясь ответа сервера:
       // кассир уже может пробивать следующий чек
@@ -831,8 +839,9 @@ export function createGateway({
   }
 
   // ── Запрос, на который умеет ответить только сервер ──
-  async function online(req, acc) {
+  async function online(req, acc, offlineMessage = '') {
     const route = req.path.split('?')[0]
+    const offlineSays = () => offlineMessage || offlineText(route)
 
     // Запись сделана здесь и на сервер ещё не ушла — он о ней не знает
     if (pharmacy) {
@@ -849,12 +858,12 @@ export function createGateway({
     }
 
     const token = session.tokenOf(acc.id)
-    if (!token) return offline(offlineText(route))
+    if (!token) return offline(offlineSays())
 
     const res = await remote(req, token)
     // Связи нет или ответил не наш сервер. Настоящую ошибку сервера (500 с объяснением)
     // отдаём как есть — её текст полезнее общего «нужен интернет»
-    if (!res.status || res.foreign) return offline(offlineText(route), !!res.timedOut)
+    if (!res.status || res.foreign) return offline(offlineSays(), !!res.timedOut)
     if (res.status === 401 || res.status === 403) denied(acc, res)
 
     // Запись на сервере прошла — локальная база должна узнать о ней ДО того, как

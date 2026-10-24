@@ -147,6 +147,15 @@ export function opTitle(type, t) {
       return t('Правка прихода')
     case 'arrival.delete':
       return t('Удаление прихода')
+    // ── Инвентаризация (версия 1.4.15) ──
+    case 'inventory.create':
+      return t('Новый лист пересчёта')
+    case 'inventory.count':
+      return t('Пересчёт: черновик')
+    case 'inventory.apply':
+      return t('Применение пересчёта')
+    case 'inventory.delete':
+      return t('Удаление листа пересчёта')
     default:
       return t('Операция')
   }
