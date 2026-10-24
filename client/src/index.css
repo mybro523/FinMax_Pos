@@ -1191,15 +1191,9 @@ input, select { transition: border 0.14s, box-shadow 0.14s, background 0.14s; }
    и зелёный берём светлые — как в тёмной теме */
 .auth-brand .brand-word { font-size: 22px; --brand-max-c: #86aaf8; --brand-pos-c: #4fc483; }
 .auth-brand-body { max-width: 540px; margin: auto; text-align: center; }
-/* Логотип FinMax POS — картинка на тёмно-синем фоне, под цвет панели. Её края
-   растворяются в панели (маска), чтобы не было видно прямоугольника */
-.auth-hero {
-  width: min(100%, 540px); margin: 0 auto 26px;
-  -webkit-mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent), linear-gradient(to bottom, transparent, #000 14%, #000 86%, transparent);
-  -webkit-mask-composite: source-in;
-  mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent), linear-gradient(to bottom, transparent, #000 14%, #000 86%, transparent);
-  mask-composite: intersect;
-}
+/* Логотип FinMax POS — картинка с прозрачным фоном: лежит прямо на синей панели, без
+   тёмного прямоугольника вокруг */
+.auth-hero { width: min(100%, 540px); margin: 0 auto 26px; }
 .auth-hero img { width: 100%; height: auto; display: block; }
 .auth-brand-body h2 { font-size: clamp(25px, 2.5vw, 32px); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 12px; text-wrap: balance; }
 .auth-brand-body p { font-size: 15px; line-height: 1.6; color: #b9c4e4; max-width: 420px; margin: 0 auto; }
