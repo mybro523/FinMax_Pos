@@ -36,7 +36,7 @@ export async function stampsOfRows(tx: Tx, tbl: StampTable, rowIds: string[], fi
 }
 // Отметить, что поле правили у этих строк в этот момент (позже уже стоящего — не назад)
 export async function stampMany(tx: Tx, tbl: StampTable, rowIds: string[], field: string, at: Date = new Date()) {
-  const iso = at.toISOString()
+  const iso = notAhead(at).toISOString()
   const list = [...new Set(rowIds.filter(Boolean))]
   for (let n = 0; n < list.length; n += MANY) {
     const rows = list.slice(n, n + MANY).map((r) => Prisma.sql`(${tbl}, ${r}, ${field}, (${iso}::timestamptz AT TIME ZONE 'UTC'))`)

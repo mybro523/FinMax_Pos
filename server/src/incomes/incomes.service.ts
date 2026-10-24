@@ -5,7 +5,7 @@ import { D } from '../common/money'
 import { TX } from '../common/tx'
 import { periodFilter, PeriodQuery, MAX_ROWS } from '../common/period'
 import { dayKeyTj, storableDate } from '../common/time'
-import { forgetStamps, stamp } from '../common/stamps'
+import { changedFields, forgetStamps, stamp } from '../common/stamps'
 import { CreateIncomeCategoryDto, CreateIncomeDto, UpdateIncomeDto } from './dto'
 
 // ── Доходы вне продаж ──
@@ -100,8 +100,9 @@ export class IncomesService {
       if (dto.note !== undefined) data.note = dto.note.trim()
       if (dto.date !== undefined) data.date = incomeDate(dto.date)
       const updated = await tx.income.update({ where: { id }, data, include: withUser })
-      // Когда правили: касса без связи сверит по этому свою правку (common/stamps.ts)
-      await stamp(tx, 'Income', id, INCOME_FIELDS.filter((f) => f in data))
+      // Когда правили: касса без связи сверит по этому свою правку (common/stamps.ts). Отметка —
+      // только полям, которые правда поменялись
+      await stamp(tx, 'Income', id, changedFields(income, data as any, INCOME_FIELDS))
       return updated
     }, TX)
   }

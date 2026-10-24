@@ -8,7 +8,7 @@ import { dayKeyTj, storableDate } from '../common/time'
 import { setExpenseCash } from '../shifts/totals'
 import { withDeviceNames } from '../shifts/shifts.service'
 import { lockShift, NO_OPEN_SHIFT, openShiftFor, SHIFT_CLOSED } from '../shifts/till'
-import { forgetStamps, stamp } from '../common/stamps'
+import { changedFields, forgetStamps, stamp } from '../common/stamps'
 import { CreateExpenseCategoryDto, CreateExpenseDto, UpdateExpenseDto } from './dto'
 
 // ── Расходы магазина ──
@@ -191,8 +191,9 @@ export class ExpensesService {
       if (dto.employeeId !== undefined && !String(dto.employeeId).trim()) Object.assign(data, { salaryMonth: '', bonusFrom: '', bonusTo: '' })
       const updated = await tx.expense.update({ where: { id }, data, include: withUser })
       if (expense.fromCash && expense.shiftId) await setExpenseCash(tx, expense.shiftId)
-      // Когда правили: касса без связи сверит по этому свою правку (common/stamps.ts)
-      await stamp(tx, 'Expense', id, EXPENSE_FIELDS.filter((f) => f in data || (f === 'employeeId' && 'employeeName' in data)))
+      // Когда правили: касса без связи сверит по этому свою правку (common/stamps.ts). Отметка —
+      // только полям, которые правда поменялись (дни бонуса, например, приходят парой)
+      await stamp(tx, 'Expense', id, changedFields(expense, data as any, EXPENSE_FIELDS))
       return updated
     }, TX)
   }

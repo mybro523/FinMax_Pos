@@ -163,6 +163,9 @@ export class ArrivalsService {
 
       // Пересчитываем СРЕДНЕВЗВЕШЕННУЮ себестоимость — по одному разу на товар.
       // Само количество добавляется партиями ниже (там же обновится остаток карточки).
+      // Отметку времени получает только то, что правда поменялось: приход по прежней цене
+      // закупочную цену не меняет и правку цены, сделанную на кассе без связи, не перекрывает
+      const costMoved = new Set<string>()
       for (const [pid, a] of agg) {
         const p = byId.get(pid)!
         const weighted = weightedPackCost({
@@ -172,7 +175,8 @@ export class ArrivalsService {
           cost: p.cost,
           addPacks: Number(D(a.units).div(uppOf(p))),
           addValue: a.value,
-        })
+        }).toDecimalPlaces(2)
+        if (!same(p.cost, weighted)) costMoved.add(pid)
         await tx.product.update({ where: { id: pid }, data: { cost: weighted } })
       }
 
@@ -182,12 +186,15 @@ export class ArrivalsService {
       for (const it of items) {
         if (it.price !== undefined && it.price !== null) newPrice.set(it.productId, D(it.price).toDecimalPlaces(2))
       }
+      const priceMoved = new Set<string>()
       for (const [pid, price] of newPrice) {
-        if (!D(byId.get(pid)!.price).equals(price)) await tx.product.update({ where: { id: pid }, data: { price } })
+        if (D(byId.get(pid)!.price).equals(price)) continue
+        await tx.product.update({ where: { id: pid }, data: { price } })
+        priceMoved.add(pid)
       }
       // Приход меняет закупочную цену (и цену продажи, если её назначили): это правка
       // карточки, и касса без связи должна видеть, что она была (common/stamps.ts)
-      for (const pid of agg.keys()) await stamp(tx, 'Product', pid, newPrice.has(pid) ? ['cost', 'price'] : ['cost'])
+      for (const pid of agg.keys()) await stamp(tx, 'Product', pid, [...(costMoved.has(pid) ? ['cost'] : []), ...(priceMoved.has(pid) ? ['price'] : [])])
 
       let total = D(0)
       for (const it of arrivalItems) {
@@ -370,7 +377,8 @@ export async function updateArrivalIn(tx: Tx, id: string, dto: UpdateArrivalDto,
     // Обратить средневзвешенную формулу нельзя, а посчитать по партиям можно
     await syncProduct(tx, pid)
     const nowBatches = await tx.batch.findMany({ where: { productId: pid } })
-    const cost = costFromBatches(nowBatches, upp, p?.cost ?? 0)
+    // Как её хранит база — до дирама: иначе «10.3333…» не совпало бы с прежними 10.33
+    const cost = costFromBatches(nowBatches, upp, p?.cost ?? 0).toDecimalPlaces(2)
     if (!same(p?.cost, cost)) costMoved.push(pid)
     await tx.product.update({ where: { id: pid }, data: { cost } })
   }
@@ -437,7 +445,7 @@ export async function removeArrivalIn(tx: Tx, id: string, at: Date = new Date())
     await tx.batch.deleteMany({ where: { arrivalId: id, productId: pid } })
     await syncProduct(tx, pid)
     const nowBatches = await tx.batch.findMany({ where: { productId: pid } })
-    const cost = costFromBatches(nowBatches, uppOf(p || {}), p?.cost ?? 0)
+    const cost = costFromBatches(nowBatches, uppOf(p || {}), p?.cost ?? 0).toDecimalPlaces(2)
     await tx.product.update({ where: { id: pid }, data: { cost } })
     // Отметка — только если цена правда поменялась
     if (!same(p?.cost, cost)) await stamp(tx, 'Product', pid, ['cost'], at)

@@ -44,7 +44,7 @@ import { applyEdit, EDIT_TYPES, EditKit, loadAliases, rewriteAliases } from './e
 import { applyTeam, TEAM_TYPES, TeamKit, teamFor, teamMemoForget } from './team'
 import { AdminDbService } from '../admin/admin-db.service'
 import { RolesService } from '../roles/roles.service'
-import { stamp, stampsOfRows } from '../common/stamps'
+import { same, stamp, stampsOfRows } from '../common/stamps'
 
 // ── Обмен с кассами, которые работают без интернета ──
 //
@@ -1055,10 +1055,11 @@ export class SyncService {
         cost: product.cost,
         addPacks: Number(D(a.units).div(uppOf(product))),
         addValue: a.value,
-      })
+      }).toDecimalPlaces(2)
       await tx.product.update({ where: { id: productId }, data: { cost: weighted } })
-      // Закупочная цена — поле карточки: касса без связи сверит по времени свою правку
-      await stamp(tx, 'Product', productId, ['cost'], p.date)
+      // Закупочная цена — поле карточки: касса без связи сверит по времени свою правку. Отметка
+      // — только если цена правда поменялась (приход по прежней цене её не меняет)
+      if (!same(product.cost, weighted)) await stamp(tx, 'Product', productId, ['cost'], p.date)
     }
 
     // Новая цена продажи, назначенная в приходе наценкой (решает последняя строка товара)
