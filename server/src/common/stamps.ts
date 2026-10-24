@@ -57,8 +57,9 @@ export async function stampsOf(tx: Tx, tbl: StampTable, rowId: string): Promise<
 }
 
 // Самая поздняя правка записи — любого поля
-export async function lastEditOf(tx: Tx, tbl: StampTable, rowId: string): Promise<Date | null> {
-  const r = await tx.fieldStamp.aggregate({ where: { tbl, rowId }, _max: { at: true } })
+// except — поля, правка которых не в счёт (смена своего пароля не значит «оставить запись»)
+export async function lastEditOf(tx: Tx, tbl: StampTable, rowId: string, except: string[] = []): Promise<Date | null> {
+  const r = await tx.fieldStamp.aggregate({ where: { tbl, rowId, ...(except.length ? { field: { notIn: except } } : {}) }, _max: { at: true } })
   return r._max.at ?? null
 }
 

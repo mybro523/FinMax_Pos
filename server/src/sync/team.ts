@@ -23,7 +23,7 @@ import { AccountCache } from '../admin/account-cache.service'
 import { EventsGateway } from '../events/events.gateway'
 import { RolesService } from '../roles/roles.service'
 import { ALL_PERMISSIONS, isPermission, OWNER_ROLE } from '../auth/permissions'
-import { conflictNote, EditOutcome, forgetStamps, lastEditOf, resolveEdit, stamp, stampsOf } from '../common/stamps'
+import { conflictNote, EditOutcome, forgetStamps, lastEditOf, resolveEdit, same, stamp, stampsOf } from '../common/stamps'
 import { aliasOf, EditCtx, EditKit, setAlias } from './edits'
 import { parseRemove, parseRoleCreate, parseRoleUpdate, parseUserCreate, parseUserDelete, parseUserUpdate, Reject } from './payload'
 
@@ -214,7 +214,11 @@ async function userUpdate(tx: Tx, p: ReturnType<typeof parseUserUpdate>, ctx: Ed
     if (prof.role !== finalRole) udata.role = finalRole
     if (Object.keys(udata).length) await tx.user.update({ where: { id: acc.tenantUserId }, data: udata })
   }
-  const stamped = [...out.apply, ...(password ? ['password'] : [])]
+  // Момент правки — и полям, которые уже такие, как прислала касса: после сбоя между двумя
+  // базами повтор видит их «совпавшими», а отметка нужна, чтобы более ранняя правка с другой
+  // кассы их не перекрыла (GREATEST — более позднюю отметку не понизит)
+  const already = Object.keys(p.set).filter((f) => !out.apply.includes(f) && !out.kept.includes(f) && same(current[f], p.set[f]))
+  const stamped = [...out.apply, ...already, ...(password ? ['password'] : [])]
   if (stamped.length) await stamp(tx, 'Account', acc.id, stamped, p.at)
   if (out.overrode.length || out.kept.length || Object.keys(extra).length) {
     await kit.flag(tx, ctx, { id: acc.tenantUserId || acc.id, date: p.at }, { kind: 'edit', name: acc.login, units: 0, note: conflictNote('Account', p.set, current, out, extra) })
@@ -240,8 +244,9 @@ async function userDelete(tx: Tx, p: { id: string; at: Date; userId: string | nu
   }
   if (acc.role === 'founder') throw new Reject(TEAM_TEXT.deleteOwner)
   if (acc.id === ctx.actor?.accountId) throw new Reject(TEAM_TEXT.deleteSelf)
-  // Позже удаления его правили на сайте — он остаётся (как запись справочника, этап 1)
-  const last = await lastEditOf(tx, 'Account', acc.id)
+  // Позже удаления его правили на сайте — он остаётся (как запись справочника, этап 1). Смена
+  // пароля не в счёт: сменить свой пароль может и сам сотрудник — это не решение его оставить
+  const last = await lastEditOf(tx, 'Account', acc.id, ['password'])
   if (last && last.getTime() > p.at.getTime()) {
     await kit.flag(tx, ctx, { id: acc.tenantUserId || acc.id, date: p.at }, { kind: 'edit', name: acc.login, units: 0, note: JSON.stringify({ tbl: 'Account', deleteKept: true, editedAt: last.toISOString() }) })
     return null

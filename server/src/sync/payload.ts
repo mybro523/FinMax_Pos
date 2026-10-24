@@ -782,8 +782,9 @@ export function passwordHashOf(v: any): string {
 // иначе операция повторялась бы вечно и держала за собой всю очередь кассы
 const CONTROL = /[\u0000-\u001f\u007f]/
 const printable = (v: string, what: string) => {
-  if (CONTROL.test(v)) throw new Reject(`Недопустимые символы: ${what}`)
-  return v
+  const t = v.replace(/[\t\r\n]+/g, ' ')
+  if (CONTROL.test(t)) throw new Reject(`Недопустимые символы: ${what}`)
+  return t
 }
 // Логин — как на сайте: без пробелов по краям, не пустой
 const login = (v: any) => printable(nonEmpty(v, 100, 'имя сотрудника'), 'имя сотрудника')

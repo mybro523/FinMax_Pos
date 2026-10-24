@@ -309,6 +309,12 @@ export function createSync({
       if (got.changed.length) onChanged(got.changed)
       // Нужна полная загрузка — не ждём пять минут: сразу ещё один заход
       if (got.more) again = true
+      // Очередь ждала соседнюю кассу, а полученное подтвердило её операции (сервер их принял):
+      // своё ушло бы только следующим заходом — отправляем сразу
+      if (sent.waiting && got.ok) {
+        const next = store.pendingOps(1)[0]
+        if (next && !store.waitsForPeer?.(next)) again = true
+      }
       result = { ok: sent.ok && got.ok, changed: got.changed }
       return result
     } finally {

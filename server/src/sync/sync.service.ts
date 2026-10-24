@@ -1498,7 +1498,7 @@ export class SyncService {
       ops: Object.fromEntries(
         snap.fates.map((f) => [f.id, f.status === 'ok' ? { status: 'ok', docId: f.docId } : { status: 'rejected', error: f.error }]),
       ),
-      data: team ? { ...snap.data, team } : snap.data,
+      data: withMarks(team ? { ...snap.data, team } : snap.data, snap.full, askedW, askedS),
     }
   }
 
@@ -1838,6 +1838,19 @@ function pullScope(user: any): PullScope {
   const staff = hasPerm(user, 'expenses.create', 'expenses.edit')
   return { wide: suppliers || writeoffs || expenses || incomes || staff, suppliers, writeoffs, expenses, incomes, staff }
 }
+// Разделы со своей отметкой у кассы: журнал списаний (wcursor) и сотрудники с окладами
+// (scursor). В ответе «изменения с прошлого раза» — только если касса назвала свою отметку:
+// иначе (права выдали только что, а касса спросила по прежним) она сдвинула бы отметку, не
+// получив раздел целиком, и так и не узнала бы о прежних записях. Без раздела отметка не
+// сдвинется, и следующий обмен — уже по новым правам — будет полным
+function withMarks<T extends Record<string, any>>(data: T, full: boolean, askedW: bigint | null, askedS: bigint | null): T {
+  if (full) return data
+  const out: any = { ...data }
+  if (askedW === null) delete out.writeoffs
+  if (askedS === null) delete out.staff
+  return out
+}
+
 function trimPull<T extends Record<string, any>>(data: T, scope: PullScope): T {
   if (!scope.wide) return data
   const out: any = { ...data }

@@ -715,6 +715,15 @@ export function waitsForPeer(db, op) {
   // Сделал сотрудник, которого завела соседняя касса, а сервер ещё не знает: без его учётной
   // записи сервер записал бы операцию на «кассира без имени» (и отказал бы сверх его прав)
   if (typeof op?.accountId === 'string' && peerMadeRow(db, 'team_accounts', op.accountId)) return true
+  // Правка или удаление сотрудника или роли, которых завела соседняя касса, назначение такой
+  // роли, зарплата такому сотруднику: сервер их ещё не знает — блокировку или удаление он счёл
+  // бы «уже сделанным», роль подменил бы кассиром, а зарплату записал бы без сотрудника
+  if ((op?.type === 'user.update' || op?.type === 'user.delete') && peerMadeRow(db, 'team_accounts', p.id)) return true
+  if ((op?.type === 'role.update' || op?.type === 'role.delete') && peerMadeRow(db, 'team_roles', p.id)) return true
+  if (op?.type === 'user.create' && peerMadeRow(db, 'team_roles', p.user?.roleId)) return true
+  if (op?.type === 'user.update' && peerMadeRow(db, 'team_roles', p.set?.roleId)) return true
+  if (op?.type === 'expense' && peerMadeRow(db, 'staff', p.expense?.employeeId)) return true
+  if (op?.type === 'expense.update' && peerMadeRow(db, 'staff', p.set?.employeeId)) return true
   switch (op?.type) {
     case 'sale':
       return peerCustomer(p.sale?.customerId)
