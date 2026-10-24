@@ -212,7 +212,7 @@ function RestoreView({ st, onBack }) {
           ))}
         </div>
       ) : (
-        <div className="note info">{t('Копий пока нет. Снимите копию или выберите папку с копией.')}</div>
+        <div className="note info">{t('Копий пока нет — программа сама снимает копию раз в сутки. Или выберите папку с копией.')}</div>
       )}
       <div className="modal-actions" style={{ justifyContent: 'flex-start' }}>
         <button className="btn ghost" disabled={!!busy || done} onClick={pickFolder} data-testid="restore-pick">
@@ -474,45 +474,18 @@ function StatusModal({ st, onClose }) {
               {t('В последнюю копию не попали базы')}: {backup.skipped.join(', ')}. {t('Файл такой базы повреждён или занят. Её прежняя копия сохранена.')}
             </div>
           )}
+          {/* Две кнопки — и всё: сохранить копию в файл (например, на флешку) и загрузить её.
+              Копию раз в сутки программа снимает сама */}
           {isFounder && (
-            <Row label={t('Вторая папка для копий')} tone={backup.extraOk === false ? 'bad' : undefined}>
-              {backup.extraDir || t('не выбрана')}
-              {backup.extraOk === false ? ` — ${t('недоступна')}` : ''}
-            </Row>
-          )}
-          {isFounder && !backup.extraDir && (
-            <div className="tag-cat">{t('Копия на том же диске спасает от испорченного файла, но не от сломанного диска. Выберите папку на другом диске или флешке.')}</div>
-          )}
-          <div className="modal-actions" style={{ justifyContent: 'flex-start', flexWrap: 'wrap' }}>
-            <button className="btn ghost" disabled={!!busy} onClick={run('backup', () => bridge.backup.now(), (next) => next && !next.backup?.error && toast(t('Копия снята')))}>
-              {busy === 'backup' ? t('Снимаем копию…') : t('Снять копию сейчас')}
-            </button>
-            {isFounder && (
-              <button className="btn ghost" disabled={!!busy} onClick={run('folder', () => bridge.backup.chooseFolder())}>
-                {t('Выбрать вторую папку')}
-              </button>
-            )}
-            {isFounder && backup.extraDir && (
-              <button className="btn ghost" disabled={!!busy} onClick={run('clear', () => bridge.backup.clearFolder())}>
-                {t('Убрать вторую папку')}
-              </button>
-            )}
-            {isFounder && (
-              <button className="btn ghost" disabled={!!busy} onClick={() => bridge.backup.open().catch(() => {})}>
-                {t('Открыть папку с копиями')}
-              </button>
-            )}
-            {isFounder && (
+            <div className="modal-actions" style={{ justifyContent: 'flex-start', flexWrap: 'wrap' }}>
               <button className="btn ghost" disabled={!!busy} onClick={saveTo} data-testid="backup-save-to">
                 {busy === 'saveTo' ? t('Сохраняем…') : t('Сохранить копию в…')}
               </button>
-            )}
-            {isFounder && (
               <button className="btn ghost" disabled={!!busy} onClick={() => setView('restore')} data-testid="restore-open">
                 {t('Загрузить копию')}
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* ── Обновление ── */}

@@ -107,10 +107,13 @@ test('окно состояния: чек сохранён на этом ком�
   await expect(rowOf('Версия программы')).toContainText(/\d+\.\d+\.\d+/)
 })
 
-test('копия базы снимается по кнопке — и в ней тот самый неотправленный чек', async () => {
+test('копия базы снимается — и в ней тот самый неотправленный чек', async () => {
   await expect(rowOf('Последняя копия')).toContainText('ещё не снималась')
-  await modal().getByRole('button', { name: 'Снять копию сейчас' }).click()
-  await expect(page.locator('.toast')).toContainText('Копия снята', { timeout: 30_000 })
+  // Кнопки «Снять копию сейчас» больше нет (1.4.18): копию программа снимает сама раз в
+  // сутки. Здесь — тем же вызовом, что и ежедневная копия; окно состояния открываем заново
+  await page.evaluate(() => window.apteka.backup.now())
+  await closeStatus()
+  await openStatus()
   await expect(rowOf('Последняя копия')).not.toContainText('ещё не снималась')
   await closeStatus()
 

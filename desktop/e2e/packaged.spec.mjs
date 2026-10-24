@@ -191,8 +191,8 @@ test('значок состояния и копия базы работают и
   await badge.click()
   const modal = page.getByTestId('status-modal')
   await expect(modal).toBeVisible()
-  await modal.getByRole('button', { name: 'Снять копию сейчас' }).click()
-  await expect(page.locator('.toast')).toContainText('Копия снята', { timeout: 30_000 })
+  // Кнопки «Снять копию сейчас» больше нет (1.4.18) — копию снимаем тем же вызовом, что и ежедневная
+  await page.evaluate(() => window.apteka.backup.now())
   const root = join(userData, 'backups')
   const folders = readdirSync(root).filter((n) => !n.startsWith('.'))
   expect(folders.length).toBe(1)
