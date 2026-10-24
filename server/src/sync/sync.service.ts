@@ -1388,7 +1388,7 @@ export class SyncService {
   }
 
   // ── Что изменилось с прошлого раза ──
-  async pull(q: { cursor?: string; wcursor?: string; deviceId: string; appVersion?: string; ops?: string; teamv?: string }, user: SyncUser, key?: string) {
+  async pull(q: { cursor?: string; wcursor?: string; scursor?: string; deviceId: string; appVersion?: string; ops?: string; teamv?: string }, user: SyncUser, key?: string) {
     const device = await this.touchDevice(q.deviceId, user, q.appVersion, key)
     await this.forgetIfRewound()
     await this.pruneIfDue()
@@ -1400,6 +1400,7 @@ export class SyncService {
     // этих разделов нет, а общая отметка двигалась. Владелец добирает их со своей отметки.
     // Поставщиков кассир получает, но без долгов — их владелец тоже добирает заново
     const askedW = scope.wide ? mark(q.wcursor) : null
+    const askedS = scope.staff ? mark(q.scursor) : null
     const markKey = MARK + q.deviceId
     // Операции, которые касса отправляла, а ответа не дождалась: она спрашивает,
     // приняты ли они. Ответ берётся из того же снимка, что и данные, — поэтому касса
@@ -1421,6 +1422,7 @@ export class SyncService {
       const since = sinceOf({
         asked,
         askedW,
+        askedS,
         pruned: BigInt(meta.get('prunedTxid') || '0'),
         horizon,
         // Отметка, которую сервер выдал этой кассе в прошлый раз
@@ -1440,7 +1442,15 @@ export class SyncService {
         rows.push(
           ...(await tx.$queryRaw<{ tbl: string; rowId: string; op: string }[]>`
             SELECT "tbl", "rowId", "op" FROM "ChangeLog"
-            WHERE "tbl" IN ('WriteOff', 'Expense', 'ExpenseCategory', 'Income', 'IncomeCategory', 'SupplierPayment', 'Supplier', 'User') AND "txid" >= ${askedW} AND "txid" < ${since} ORDER BY "seq"`),
+            WHERE "tbl" IN ('WriteOff', 'Expense', 'ExpenseCategory', 'Income', 'IncomeCategory', 'SupplierPayment', 'Supplier') AND "txid" >= ${askedW} AND "txid" < ${since} ORDER BY "seq"`),
+        )
+      }
+      // Сотрудники с окладами — со своей отметки: их получает не каждый, кому видны другие
+      // широкие разделы, и общая отметка широких разделов для них не годится
+      if (askedS !== null && askedS < since) {
+        rows.push(
+          ...(await tx.$queryRaw<{ tbl: string; rowId: string; op: string }[]>`
+            SELECT "tbl", "rowId", "op" FROM "ChangeLog" WHERE "tbl" = 'User' AND "txid" >= ${askedS} AND "txid" < ${since} ORDER BY "seq"`),
         )
       }
       if (rows.length > MAX_CHANGES) return { full: true, cursor: horizon, fates, data: trimPull(await this.loadAll(tx, scope.wide), scope) }
@@ -1824,10 +1834,9 @@ function pullScope(user: any): PullScope {
   const expenses = hasPerm(user, 'expenses.view', 'reports.view')
   // Доходы читает и отчёт ОПУ: чистый доход считается вместе с ними
   const incomes = hasPerm(user, 'incomes.view', 'reports.view')
-  // Сотрудники с окладами — тем, кто видит расходы (и выдаёт зарплату): без права на расходы
-  // широкого раздела нет, и окладов в нём тоже
-  const staff = expenses
-  return { wide: suppliers || writeoffs || expenses || incomes, suppliers, writeoffs, expenses, incomes, staff }
+  // Сотрудники с окладами — тем, кто выдаёт зарплату: те же права, что у GET /expenses/staff
+  const staff = hasPerm(user, 'expenses.create', 'expenses.edit')
+  return { wide: suppliers || writeoffs || expenses || incomes || staff, suppliers, writeoffs, expenses, incomes, staff }
 }
 function trimPull<T extends Record<string, any>>(data: T, scope: PullScope): T {
   if (!scope.wide) return data

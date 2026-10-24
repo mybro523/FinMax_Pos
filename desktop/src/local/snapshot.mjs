@@ -205,12 +205,13 @@ function applyStaff(db, staff, full) {
 function applyTeam(db, team, now) {
   q(db, 'DELETE FROM team_accounts').run()
   q(db, 'DELETE FROM team_roles').run()
-  const acc = q(db, 'INSERT INTO team_accounts (id, login, role, roleId, roleName, active, userId, createdAt, ord) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+  // INSERT OR IGNORE: повтор номера в списке (такого быть не должно) не должен ломать весь приём
+  const acc = q(db, 'INSERT OR IGNORE INTO team_accounts (id, login, role, roleId, roleName, active, userId, createdAt, ord) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
   ;(Array.isArray(team.accounts) ? team.accounts : []).forEach((a, n) => {
     if (!a || typeof a.id !== 'string') return
     acc.run(a.id, String(a.name ?? ''), String(a.role || 'cashier'), a.roleId ?? null, String(a.roleName ?? ''), a.active === false ? 0 : 1, a.userId ?? null, isoOrNull(a.createdAt) || '', n)
   })
-  const role = q(db, 'INSERT INTO team_roles (id, name, description, system, permissions, createdAt, ord) VALUES (?, ?, ?, ?, ?, ?, ?)')
+  const role = q(db, 'INSERT OR IGNORE INTO team_roles (id, name, description, system, permissions, createdAt, ord) VALUES (?, ?, ?, ?, ?, ?, ?)')
   ;(Array.isArray(team.roles) ? team.roles : []).forEach((r, n) => {
     if (!r || typeof r.id !== 'string') return
     role.run(r.id, String(r.name ?? ''), String(r.description ?? ''), r.system ?? null, JSON.stringify(Array.isArray(r.permissions) ? r.permissions : []), isoOrNull(r.createdAt) || '', n)
@@ -530,11 +531,14 @@ export function applyPull(db, res, { now }) {
       // Пока за кассой кассир, общая отметка идёт вперёд, а эти разделы стоят на месте —
       // докуда они верны, помним отдельно. С этой отметки владелец и доберёт пропущенное
       if (data.writeoffs) setMeta(db, 'wcursor', res.cursor)
+      // Сотрудники с окладами — своя отметка: их получает только тот, кто выдаёт зарплату
+      if (data.staff) setMeta(db, 'scursor', res.cursor)
     }
     if (full) {
       // Полный ответ без списаний (за кассой кассир): лежавшие здесь списания
       // устарели целиком — владельцу при входе понадобится свой полный ответ
       if (!data.writeoffs) setMeta(db, 'wcursor', '')
+      if (!data.staff) setMeta(db, 'scursor', '')
       if (data.products && data.sales) setMeta(db, 'loaded', '1')
     }
     setMeta(db, 'syncedAt', new Date(now).toISOString())

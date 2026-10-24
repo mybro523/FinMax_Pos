@@ -118,8 +118,20 @@ function effectsOf(db, op) {
     out.deferred = { id: p.deferred.id, barcode: String(p.deferred.barcode ?? ''), createdAt: p.deferred.createdAt || op.createdAt }
   }
   if (op.type === 'deferred.remove' && p.id) out.deferredRemove = p.id
-  // Поправки справочников и документов, поправки сумм (долг поставщику, деньги смены)
-  if (EDIT_TYPES.has(op.type)) out.edits = editsOf(db, op.id)
+  // Поправки справочников и документов, поправки сумм (долг поставщику, деньги смены).
+  // Отпечаток пароля сотрудника соседям не уходит (он и зашифрован средствами Windows этого
+  // компьютера) — только пометка «пароль сменили»: прежний там перестанет подходить
+  if (EDIT_TYPES.has(op.type)) {
+    const edits = editsOf(db, op.id)
+    out.edits = {
+      ...edits,
+      rows: edits.rows.map((r) => {
+        if (r.tbl !== 'team_accounts' || !r.data || r.data.pw === undefined) return r
+        const { pw: _pw, ...rest } = r.data
+        return { ...r, data: { ...rest, pwChanged: true } }
+      }),
+    }
+  }
   if (op.type === 'arrival') {
     // Новая цена продажи из прихода — какой она стала в карточке после него
     const prices = []
@@ -700,6 +712,9 @@ export function waitsForPeer(db, op) {
   const peerCustomer = (id) => typeof id === 'string' && !!q(db, 'SELECT 1 FROM customers WHERE id = ? AND local = 2').get(id)
   // Товар, поставщик или документ, которые завела соседняя касса, а сервер ещё не знает
   if (refsPeerMade(db, op)) return true
+  // Сделал сотрудник, которого завела соседняя касса, а сервер ещё не знает: без его учётной
+  // записи сервер записал бы операцию на «кассира без имени» (и отказал бы сверх его прав)
+  if (typeof op?.accountId === 'string' && peerMadeRow(db, 'team_accounts', op.accountId)) return true
   switch (op?.type) {
     case 'sale':
       return peerCustomer(p.sale?.customerId)

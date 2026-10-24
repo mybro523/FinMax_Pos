@@ -20,10 +20,11 @@ const json = (status, body, date) => ({
 const KEYS = [
   'products', 'batches', 'categories', 'customers', 'deferred', 'shifts', 'sales', 'returns', 'arrivals', 'writeoffs', 'payments',
   'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'supplierReturns',
-  'productTypes', 'incomes', 'incomeCategories', 'inventories',
+  'productTypes', 'incomes', 'incomeCategories', 'inventories', 'staff',
 ]
-// Разделы, которые сервер отдаёт только владельцу. Листы пересчёта (1.4.15) — всем
-const FOUNDER_KEYS = new Set(['writeoffs', 'expenses', 'expenseCategories', 'supplierPayments', 'incomes', 'incomeCategories'])
+// Разделы, которые сервер отдаёт только владельцу. Листы пересчёта (1.4.15) — всем.
+// Сотрудники с окладами (1.4.16) — тому, кто выдаёт зарплату (здесь — владельцу)
+const FOUNDER_KEYS = new Set(['writeoffs', 'expenses', 'expenseCategories', 'supplierPayments', 'incomes', 'incomeCategories', 'staff'])
 // Кассиру поставщики отдаются без долгов
 const supplierFor = (s, u) => (u.role === 'founder' ? s : { id: s.id, name: s.name, phone: s.phone, note: s.note, createdAt: s.createdAt })
 
@@ -131,7 +132,9 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
         continue
       }
       // У разделов владельца своя отметка: кассиру их не отдают, и владелец добирает пропущенное
-      const w = FOUNDER_KEYS.has(key) && /^\d+$/.test(query.wcursor || '') ? Number(query.wcursor) : since
+      // У сотрудников с окладами — своя (scursor)
+      const own = key === 'staff' ? query.scursor : FOUNDER_KEYS.has(key) ? query.wcursor : null
+      const w = /^\d+$/.test(own || '') ? Number(own) : since
       const from = Math.min(since, w)
       const ids = new Set(s.log.filter((e) => e.key === key && e.v > from).map((e) => e.id))
       const have = new Map(s.data[key].map((r) => [r.id, r]))

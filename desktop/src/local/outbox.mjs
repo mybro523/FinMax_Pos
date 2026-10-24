@@ -474,7 +474,9 @@ export function describeOp(op, find = () => null) {
       // Пароль в подробности не кладём
       const set = { ...(p.set || {}) }
       delete set.passwordHash
-      return { sum: null, title: u.login || p.base?.name || p.set?.name || '', detail: { fields: Object.keys(p.set || {}).map((f) => (f === 'passwordHash' ? 'password' : f)), set } }
+      delete set.passwordSealed
+      const isPw = (f) => f === 'passwordHash' || f === 'passwordSealed'
+      return { sum: null, title: u.login || p.base?.name || p.set?.name || '', detail: { fields: Object.keys(p.set || {}).map((f) => (isPw(f) ? 'password' : f)), set } }
     }
     case 'role.create':
       return { sum: null, title: p.role?.name || '', detail: {} }

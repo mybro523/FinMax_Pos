@@ -60,29 +60,31 @@ test('список сотрудников и ролей — как у серве
 
 test('новый сотрудник без связи: в списке сразу, на сервер — отпечаток пароля, не пароль', () => {
   const db = shop()
-  const u = createUser(ctx(db), { name: 'vali', passwordHash: HASH, roleId: 'r-senior', fullName: 'Валиев Вали', salary: 2500, bonusPercent: 1.5, salaryDay: 5 })
+  const u = createUser(ctx(db), { name: 'vali', passwordSealed: HASH, roleId: 'r-senior', fullName: 'Валиев Вали', salary: 2500, bonusPercent: 1.5, salaryDay: 5 })
   assert.deepEqual([u.name, u.roleId, u.roleName, u.active, u.fullName, u.salary, u.bonusPercent, u.salaryDay], ['vali', 'r-senior', 'Старший кассир', true, 'Валиев Вали', 2500, 1.5, 5])
   const op = opOf(db, 'user.create')
+  // В очереди — только зашифрованный отпечаток (шлюз расшифрует его при отправке)
   assert.deepEqual(
-    [op.payload.user.id, op.payload.user.userId, op.payload.user.name, op.payload.user.passwordHash, op.payload.user.roleId, op.payload.user.salary, op.payload.user.bonusPercent],
+    [op.payload.user.id, op.payload.user.userId, op.payload.user.name, op.payload.user.passwordSealed, op.payload.user.roleId, op.payload.user.salary, op.payload.user.bonusPercent],
     [u.id, u.userId, 'vali', HASH, 'r-senior', 2500, 1.5],
   )
+  assert.equal(op.payload.user.passwordHash, undefined)
   assert.equal(JSON.stringify(op.payload).includes('password"'), false)
   assert.equal(staffList(db).some((s) => s.id === u.userId && s.salary === 2500), true)
   assert.equal(roleOf(db, 'r-senior').people, 1)
-  refused(() => createUser(ctx(db), { name: 'ali', passwordHash: HASH }), 400, TEAM_TEXT.loginTaken('ali'))
-  refused(() => createUser(ctx(db), { name: ' ', passwordHash: HASH }), 400, TEAM_TEXT.noName)
-  refused(() => createUser(ctx(db), { name: 'x1', passwordHash: HASH, roleId: 'net-takoy' }), 400, TEAM_TEXT.roleNotFound)
+  refused(() => createUser(ctx(db), { name: 'ali', passwordSealed: HASH }), 400, TEAM_TEXT.loginTaken('ali'))
+  refused(() => createUser(ctx(db), { name: ' ', passwordSealed: HASH }), 400, TEAM_TEXT.noName)
+  refused(() => createUser(ctx(db), { name: 'x1', passwordSealed: HASH, roleId: 'net-takoy' }), 400, TEAM_TEXT.roleNotFound)
   // Владельцем — тоже
-  assert.equal(createUser(ctx(db), { name: 'boss2', passwordHash: HASH, roleId: 'owner' }).role, 'founder')
+  assert.equal(createUser(ctx(db), { name: 'boss2', passwordSealed: HASH, roleId: 'owner' }).role, 'founder')
 })
 
 test('правка сотрудника: имя, роль, блокировка, пароль и оклад — поправкой; на сервер — что поменяли и что было', () => {
   const db = shop()
-  const u = updateUser(ctx(db), 'acc-2', { name: 'ali2', roleId: 'r-senior', active: false, passwordHash: HASH2, salary: 3500 })
+  const u = updateUser(ctx(db), 'acc-2', { name: 'ali2', roleId: 'r-senior', active: false, passwordSealed: HASH2, salary: 3500 })
   assert.deepEqual([u.name, u.roleId, u.active, u.salary], ['ali2', 'r-senior', false, 3500])
   const op = opOf(db, 'user.update')
-  assert.deepEqual(op.payload.set, { name: 'ali2', active: false, roleId: 'r-senior', salary: 3500, passwordHash: HASH2 })
+  assert.deepEqual(op.payload.set, { name: 'ali2', active: false, roleId: 'r-senior', salary: 3500, passwordSealed: HASH2 })
   assert.deepEqual(op.payload.base, { name: 'ali', active: true, roleId: 'r-cashier', salary: 3000 })
   // Пароль в списке «не принято сервером» не показывается
   assert.equal(JSON.stringify(describeOp(op, () => ({ login: 'ali2' })).detail).includes(HASH2), false)
@@ -98,7 +100,7 @@ test('владелец не может остаться без прав — те
   refused(() => updateUser(ctx(db), 'acc-1', { roleId: 'r-cashier' }), 400, TEAM_TEXT.ownRole)
   refused(() => deleteUser(ctx(db), 'acc-1'), 400, TEAM_TEXT.deleteOwner)
   // Второй владелец: заблокировать его можно, единственного — нет
-  createUser(ctx(db), { name: 'boss2', passwordHash: HASH, roleId: 'owner' })
+  createUser(ctx(db), { name: 'boss2', passwordSealed: HASH, roleId: 'owner' })
   const boss2 = usersList(db).find((u) => u.name === 'boss2')
   const other = ctx(db, { user: { accountId: boss2.id, id: 'u-b2', name: 'boss2', role: 'founder' } })
   updateUser(ctx(db), boss2.id, { active: false })
@@ -143,7 +145,7 @@ test('роли: завести, переименовать, поменять п�
 
 test('свежий список сервера ложится основой, неотправленное — поверх; принятое — уже в списке сервера', () => {
   const db = shop()
-  const u = createUser(ctx(db), { name: 'vali', passwordHash: HASH })
+  const u = createUser(ctx(db), { name: 'vali', passwordSealed: HASH })
   updateUser(ctx(db), 'acc-2', { active: false })
   // Сервер ещё не получил ни того, ни другого
   applyPull(db, { full: false, cursor: '2', data: { team: { ...TEAM, v: 'v2' } } }, { now: NOW })
@@ -159,7 +161,7 @@ test('свежий список сервера ложится основой, н
 
 test('сервер отверг заведение — сотрудника нет и здесь', () => {
   const db = shop()
-  const u = createUser(ctx(db), { name: 'vali', passwordHash: HASH })
+  const u = createUser(ctx(db), { name: 'vali', passwordSealed: HASH })
   rejectOp(db, opOf(db, 'user.create'), 'Недостаточно прав')
   assert.equal(userOf(db, u.id), undefined)
   assert.equal(staffList(db).some((s) => s.id === u.userId), false)
@@ -182,13 +184,24 @@ test('по сети: учётные записи и роли — каждой с
   const a = shop()
   const wide = shop()
   const narrow = shop()
-  const u = createUser(ctx(a, { deviceId: 'A' }), { name: 'vali', passwordHash: HASH, salary: 2500 })
+  const u = createUser(ctx(a, { deviceId: 'A' }), { name: 'vali', passwordSealed: HASH, salary: 2500 })
   lanCatchUp(a, { deviceId: 'A', now: NOW })
   for (const [to, isWide] of [[wide, true], [narrow, false]]) lanReceive(to, lanEntriesSince(a, 0, { wide: isWide }).entries, { now: NOW, gen: lanGen(to) })
   assert.equal(userOf(wide, u.id).name, 'vali')
   assert.equal(userOf(narrow, u.id).name, 'vali', 'сотрудник известен и кассиру — для входа без интернета')
   assert.equal(staffList(wide).find((s) => s.id === u.userId).salary, 2500)
   assert.equal(staffList(narrow).some((s) => s.id === u.userId), false, 'оклад кассиру не уходит')
-  // Отпечаток пароля — в поправке соседа: по нему сосед пустит сотрудника без интернета
-  assert.equal(JSON.parse(row(narrow, "SELECT data FROM row_edits WHERE tbl = 'team_accounts' AND rowId = ?", u.id).data).pw, HASH)
+  // Отпечаток пароля соседям не уходит — только пометка «пароль задан»
+  const peerEdit = JSON.parse(row(narrow, "SELECT data FROM row_edits WHERE tbl = 'team_accounts' AND rowId = ?", u.id).data)
+  assert.deepEqual([peerEdit.pw, peerEdit.pwChanged], [undefined, true])
+  assert.equal(JSON.stringify(lanEntriesSince(a, 0, { wide: true }).entries).includes(HASH), false)
+})
+
+test('без списка сотрудников магазина (оклады) раздел «Сотрудники» — к серверу, а не с пустыми окладами', () => {
+  const db = pharmacy()
+  applyPull(db, { full: false, cursor: '1', data: { team: TEAM } }, { now: NOW })
+  assert.deepEqual(usersList(db), { __remote: true })
+  assert.deepEqual(updateUser(ctx(db), 'acc-2', { salary: 0 }), { __remote: true })
+  // Роли — работают: окладов в них нет
+  assert.equal(rolesList(db).length, 3)
 })

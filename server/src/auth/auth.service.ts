@@ -7,6 +7,8 @@ import { hashPassword, verifyPassword, passwordProblem, isOutdatedHash } from '.
 import { offlineDaysOf, subscriptionOf, subscriptionMessage } from '../admin/subscription'
 import { mayChangeOwnPassword, NO_PASSWORD_CHANGE, permissionsOf } from './permissions'
 import { AccountCache } from '../admin/account-cache.service'
+import { PrismaService } from '../prisma/prisma.service'
+import { stamp } from '../common/stamps'
 
 // Неделя, а не месяц: украденный токен должен умирать быстро. Кассе без
 // интернета недели хватает с запасом, а на сайте вход и так живёт только
@@ -65,7 +67,7 @@ export class AuthService {
   // и строже: своих паролей человек не забывает по пять раз подряд.
   private readonly byChange = new LoginThrottle({ limit: 5, windowMs: 15 * 60_000, blockMs: 15 * 60_000 })
 
-  constructor(private admin: AdminDbService, private accounts: AccountCache) {}
+  constructor(private admin: AdminDbService, private accounts: AccountCache, private prisma: PrismaService) {}
 
   // ── Пароли ──
   // Правила и хранение живут в password.ts, здесь только привычные имена:
@@ -261,6 +263,9 @@ export class AuthService {
     // Смена пароля отзывает прежние токены — сторож обязан узнать об этом сейчас,
     // а не через несколько секунд: иначе старый токен ещё немного поработал бы
     this.accounts.drop(accountId)
+    // Когда сменили пароль: смена, сделанная владельцем на кассе без связи раньше, его не
+    // перекроет — остаётся более поздняя (sync/team.ts). Отметка — в схеме магазина
+    if (acc.pharmacyId) await stamp(this.prisma as any, 'Account', accountId, ['password'], changedAt).catch(() => {})
     const token = this.sign(
       {
         sub: acc.id,

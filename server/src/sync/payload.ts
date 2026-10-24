@@ -778,8 +778,15 @@ export function passwordHashOf(v: any): string {
   if (n < 16384 || r < 8 || p < 1 || 128 * n * r * p > 96 * 1024 * 1024) throw new Reject('Недопустимый пароль')
   return v
 }
+// Управляющие символы (нулевой байт и т. п.) база панели не примет никогда — отказ сразу,
+// иначе операция повторялась бы вечно и держала за собой всю очередь кассы
+const CONTROL = /[\u0000-\u001f\u007f]/
+const printable = (v: string, what: string) => {
+  if (CONTROL.test(v)) throw new Reject(`Недопустимые символы: ${what}`)
+  return v
+}
 // Логин — как на сайте: без пробелов по краям, не пустой
-const login = (v: any) => nonEmpty(v, 100, 'имя сотрудника')
+const login = (v: any) => printable(nonEmpty(v, 100, 'имя сотрудника'), 'имя сотрудника')
 // Роль сотрудника: 'owner' — владелец, иначе номер роли магазина; пусто — системная роль кассира
 const roleRef = (v: any): string | null => (v === 'owner' ? 'owner' : idOrNull(v, 'роль'))
 const salaryDayOf = (v: any) => int(v ?? 1, 'день зарплаты', 1, 28)
@@ -792,7 +799,7 @@ export function parseUserCreate(p: any, now?: number) {
     name: login(u.name),
     passwordHash: passwordHashOf(u.passwordHash),
     roleId: roleRef(u.roleId),
-    fullName: text(u.fullName, 120).trim(),
+    fullName: printable(text(u.fullName, 120).trim(), 'ФИО'),
     salary: money(u.salary ?? 0, 'оклад'),
     bonusPercent: percent(u.bonusPercent ?? 0, 'бонус'),
     salaryDay: salaryDayOf(u.salaryDay),
@@ -808,7 +815,7 @@ export function parseUserUpdate(p: any, now?: number) {
   if (has(src, 'name')) set.name = login(src.name)
   if (has(src, 'active')) set.active = src.active === true
   if (has(src, 'roleId')) set.roleId = roleRef(src.roleId) ?? reject('Недопустимый номер: роль')
-  if (has(src, 'fullName')) set.fullName = text(src.fullName, 120).trim()
+  if (has(src, 'fullName')) set.fullName = printable(text(src.fullName, 120).trim(), 'ФИО')
   if (has(src, 'salary')) set.salary = money(src.salary, 'оклад')
   if (has(src, 'bonusPercent')) set.bonusPercent = percent(src.bonusPercent, 'бонус')
   if (has(src, 'salaryDay')) set.salaryDay = salaryDayOf(src.salaryDay)
@@ -825,15 +832,29 @@ export function parseUserUpdate(p: any, now?: number) {
 // Права роли — список; незнакомые касса не придумает, но версия программы может быть новее
 const permList = (v: any): string[] => {
   if (!Array.isArray(v) || v.length > 500) throw new Reject('Права должны быть списком')
-  return [...new Set(v.filter((x: any) => typeof x === 'string' && x.length <= 80))] as string[]
+  return [...new Set(v.filter((x: any) => typeof x === 'string' && x.length <= 80 && !CONTROL.test(x)))] as string[]
 }
+// Удаление сотрудника: касса называет и его запись в магазине (на случай, если учётную
+// запись удалили раньше, а запись магазина — нет: сбой между двумя базами)
+export function parseUserDelete(p: any, now?: number) {
+  const root = obj(p, 'сотрудник')
+  return { ...parseRemove(p, 'сотрудник', now), userId: idOrNull(root.userId, 'сотрудник') }
+}
+
+// Номер «owner» — у роли владельца (её нет в базе): завести роль с ним нельзя
+const roleIdOf = (v: any) => {
+  const rid = id(v, 'роль')
+  if (rid === 'owner') throw new Reject('Права владельца изменить нельзя')
+  return rid
+}
+const roleName = (v: any) => printable(nonEmpty(text(v, 200).replace(/\s+/g, ' '), 40, 'название роли'), 'название роли')
 
 export function parseRoleCreate(p: any, now?: number) {
   const r = obj(obj(p, 'роль').role, 'роль')
   return {
-    id: id(r.id, 'роль'),
-    name: nonEmpty(text(r.name, 200).replace(/\s+/g, ' '), 40, 'название роли'),
-    description: text(r.description, 200).trim(),
+    id: roleIdOf(r.id),
+    name: roleName(r.name),
+    description: printable(text(r.description, 200).trim(), 'описание роли'),
     permissions: permList(r.permissions ?? []),
     createdAt: when(r.createdAt, 'роль', now),
   }
@@ -843,8 +864,8 @@ export function parseRoleUpdate(p: any, now?: number) {
   const root = obj(p, 'правка роли')
   const src = root.set || {}
   const set: Record<string, any> = {}
-  if (has(src, 'name')) set.name = nonEmpty(text(src.name, 200).replace(/\s+/g, ' '), 40, 'название роли')
-  if (has(src, 'description')) set.description = text(src.description, 200).trim()
+  if (has(src, 'name')) set.name = roleName(src.name)
+  if (has(src, 'description')) set.description = printable(text(src.description, 200).trim(), 'описание роли')
   if (has(src, 'permissions')) set.permissions = permList(src.permissions)
   return { id: roleRef(root.id) ?? reject('Недопустимый номер: роль'), at: when(root.at, 'правка роли', now), set, base: baseOf(root.base, ['name', 'description', 'permissions']) }
 }

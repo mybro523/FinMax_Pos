@@ -50,4 +50,6 @@ export class PullQuery {
   @IsOptional() @IsString() @MaxLength(8000) ops?: string
   // Отпечаток списка сотрудников и ролей, который касса получила в прошлый раз
   @IsOptional() @IsString() @MaxLength(40) teamv?: string
+  // Отметка сотрудников с окладами: их касса получает только при том, кто выдаёт зарплату
+  @IsOptional() @IsString() @MaxLength(20) scursor?: string
 }

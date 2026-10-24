@@ -25,7 +25,7 @@ import { RolesService } from '../roles/roles.service'
 import { ALL_PERMISSIONS, isPermission, OWNER_ROLE } from '../auth/permissions'
 import { conflictNote, EditOutcome, forgetStamps, lastEditOf, resolveEdit, stamp, stampsOf } from '../common/stamps'
 import { aliasOf, EditCtx, EditKit, setAlias } from './edits'
-import { parseRemove, parseRoleCreate, parseRoleUpdate, parseUserCreate, parseUserUpdate, Reject } from './payload'
+import { parseRemove, parseRoleCreate, parseRoleUpdate, parseUserCreate, parseUserDelete, parseUserUpdate, Reject } from './payload'
 
 type Tx = Prisma.TransactionClient
 
@@ -64,7 +64,7 @@ export async function applyTeam(tx: Tx, type: string, payload: any, ctx: EditCtx
     case 'user.update':
       return userUpdate(tx, parseUserUpdate(payload), ctx, kit, team, pharmacyId)
     case 'user.delete':
-      return userDelete(tx, parseRemove(payload, 'сотрудник'), ctx, kit, team, pharmacyId)
+      return userDelete(tx, parseUserDelete(payload), ctx, kit, team, pharmacyId)
     case 'role.create':
       return roleCreate(tx, parseRoleCreate(payload), ctx, kit, team, pharmacyId)
     case 'role.update':
@@ -202,10 +202,16 @@ async function userUpdate(tx: Tx, p: ReturnType<typeof parseUserUpdate>, ctx: Ed
   if (Object.keys(data).length) await team.admin.account.update({ where: { id: acc.id }, data })
 
   if (acc.tenantUserId && prof) {
+    // Имя, блокировка и роль в магазине — как у учётной записи после правки, всегда: если
+    // прошлая попытка записала панель, а магазин — нет (сбой между базами), повтор доведёт
+    // дело до конца, хотя для панели правка уже «сделана»
     const udata: Record<string, any> = profileOf(pick(p.set, out.apply.filter((f) => ['fullName', 'salary', 'bonusPercent', 'salaryDay'].includes(f))))
-    if (data.login) udata.name = data.login
-    if (data.active !== undefined) udata.active = data.active
-    if (data.role) udata.role = data.role
+    const finalLogin = data.login ?? acc.login
+    const finalActive = data.active ?? acc.active
+    const finalRole = data.role ?? acc.role
+    if (prof.name !== finalLogin) udata.name = finalLogin
+    if (prof.active !== finalActive) udata.active = finalActive
+    if (prof.role !== finalRole) udata.role = finalRole
     if (Object.keys(udata).length) await tx.user.update({ where: { id: acc.tenantUserId }, data: udata })
   }
   const stamped = [...out.apply, ...(password ? ['password'] : [])]
@@ -221,10 +227,17 @@ async function userUpdate(tx: Tx, p: ReturnType<typeof parseUserUpdate>, ctx: Ed
 }
 
 // ── Удаление сотрудника ──
-async function userDelete(tx: Tx, p: { id: string; at: Date }, ctx: EditCtx, kit: EditKit, team: TeamKit, pharmacyId: string): Promise<string | null> {
+async function userDelete(tx: Tx, p: { id: string; at: Date; userId: string | null }, ctx: EditCtx, kit: EditKit, team: TeamKit, pharmacyId: string): Promise<string | null> {
   const acc = await team.admin.account.findFirst({ where: { id: p.id, pharmacyId } })
-  // Уже удалили (на сайте или повтор) — удалять нечего, итог тот же
-  if (!acc) return p.id
+  if (!acc) {
+    // Учётной записи уже нет (удалили на сайте или это повтор). Запись магазина могла
+    // остаться, если прошлая попытка не дошла до неё (сбой между базами), — убираем, когда на
+    // неё больше не ссылается ни одна учётная запись этого магазина
+    if (p.userId && !(await team.admin.account.findFirst({ where: { pharmacyId, tenantUserId: p.userId }, select: { id: true } }))) {
+      await tx.user.deleteMany({ where: { id: p.userId } })
+    }
+    return p.id
+  }
   if (acc.role === 'founder') throw new Reject(TEAM_TEXT.deleteOwner)
   if (acc.id === ctx.actor?.accountId) throw new Reject(TEAM_TEXT.deleteSelf)
   // Позже удаления его правили на сайте — он остаётся (как запись справочника, этап 1)

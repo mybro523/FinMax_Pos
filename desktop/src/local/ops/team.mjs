@@ -5,9 +5,11 @@
 // же проверками и текстами, что на сайте. Сделанное ложится поправкой поверх данных сервера
 // (edits.mjs: team_accounts, team_roles, staff) и уходит на сервер, когда появится связь.
 //
-// Пароль сюда приходит уже отпечатком (passwordHash): его считает шлюз (gateway.mjs) — тем
-// же способом, что сервер. Отпечаток лежит в поправке (pw): по нему вход без интернета
-// заработает и здесь, и на соседней кассе (gateway.mjs, teamToCore).
+// Пароль сюда приходит уже отпечатком, зашифрованным средствами Windows (passwordSealed):
+// его считает и прячет шлюз (gateway.mjs) — тем же способом, что сервер. В базе кассы и в
+// очереди на отправку отпечаток лежит только зашифрованным; на сервер шлюз отдаёт его
+// расшифрованным, соседним кассам он не уходит вовсе (lan.mjs). По нему вход без интернета
+// заработает на этой кассе (gateway.mjs, teamToCore); на соседней — после входа с интернетом.
 //
 // Список сотрудников и ролей — тот, что сервер отдал владельцу (раздел team). Его ещё не
 // было на этой кассе — запрос уходит на сервер, как раньше ({ __remote }).
@@ -84,7 +86,9 @@ function roleView(db, r) {
 
 // ── Списки ──
 export function usersList(db) {
-  if (!loaded(db)) return { __remote: true }
+  // Нужны оба списка: без сотрудников магазина окно показало бы оклад и ФИО пустыми, а
+  // сохранение карточки затёрло бы их на сервере
+  if (!loaded(db) || !staffLoaded(db)) return { __remote: true }
   // Как у сервера: владельцы первыми, дальше — в порядке заведения
   return q(db, "SELECT * FROM team_accounts ORDER BY CASE WHEN role = 'founder' THEN 0 ELSE 1 END, ord, createdAt").all().map((a) => userView(db, a))
 }
@@ -155,7 +159,7 @@ function roleFor(db, roleId) {
 // ── Новый сотрудник ──
 export function createUser(ctx, raw) {
   const { db, now } = ctx
-  if (!loaded(db)) return { __remote: true }
+  if (!loaded(db) || !staffLoaded(db)) return { __remote: true }
   const dto = bodyOf(raw)
   const c = checker()
   const name = (c.str(dto.name, 'name', { optional: true }) || '').trim()
@@ -163,7 +167,7 @@ export function createUser(ctx, raw) {
   const profile = profileFrom(dto, c)
   c.done()
   if (!name) throw bad(TEAM_TEXT.noName)
-  if (typeof dto.passwordHash !== 'string' || !dto.passwordHash) throw bad(TEAM_TEXT.noPassword)
+  if (typeof dto.passwordSealed !== 'string' || !dto.passwordSealed) throw bad(TEAM_TEXT.noPassword)
   return inTx(db, () => {
     if (loginTakenHere(db, name)) throw bad(TEAM_TEXT.loginTaken(name))
     const r = roleFor(db, dto.role === 'founder' ? OWNER.id : roleId || null)
@@ -174,7 +178,7 @@ export function createUser(ctx, raw) {
     const ord = q(db, 'SELECT COALESCE(MAX(ord), 0) + 1 AS n FROM team_accounts').get().n
     recordEdit(db, {
       opId, tbl: 'team_accounts', rowId: id, action: 'put',
-      data: { row: { login: name, role: r.role, roleId: r.roleId, roleName: r.roleName, active: 1, userId, createdAt, ord }, pw: dto.passwordHash },
+      data: { row: { login: name, role: r.role, roleId: r.roleId, roleName: r.roleName, active: 1, userId, createdAt, ord }, pw: dto.passwordSealed },
       now,
     })
     recordEdit(db, {
@@ -188,7 +192,7 @@ export function createUser(ctx, raw) {
       accountId: ctx.user.accountId,
       payload: {
         user: {
-          id, userId, name, passwordHash: dto.passwordHash, roleId: r.role === 'founder' ? OWNER.id : r.roleId,
+          id, userId, name, passwordSealed: dto.passwordSealed, roleId: r.role === 'founder' ? OWNER.id : r.roleId,
           fullName: profile.fullName ?? '', salary: (profile.salaryC ?? 0) / 100, bonusPercent: (profile.bonusBp ?? 0) / 100, salaryDay: profile.salaryDay ?? 1, createdAt,
         },
       },
@@ -201,7 +205,7 @@ export function createUser(ctx, raw) {
 // ── Правка сотрудника ──
 export function updateUser(ctx, id, raw) {
   const { db, now } = ctx
-  if (!loaded(db)) return { __remote: true }
+  if (!loaded(db) || !staffLoaded(db)) return { __remote: true }
   const dto = bodyOf(raw)
   const c = checker()
   const nameRaw = c.str(dto.name, 'name', { optional: true })
@@ -267,14 +271,17 @@ export function updateUser(ctx, id, raw) {
     const changedProfile = {}
     const wasProfile = {}
     for (const [k, v] of Object.entries(profile)) {
-      if (prof && prof[k] === v) continue
+      // Сотрудника магазина здесь нет — сравнить не с чем: такие поля не отправляем, иначе
+      // сервер записал бы их поверх своих без «как было»
+      if (!prof) break
+      if (prof[k] === v) continue
       changedProfile[k] = v
       if (prof) wasProfile[k] = prof[k]
       staff(k, v)
     }
     Object.assign(set, profileOut(changedProfile))
     if (prof) Object.assign(base, profileOut(wasProfile))
-    const password = typeof dto.passwordHash === 'string' && dto.passwordHash ? dto.passwordHash : null
+    const password = typeof dto.passwordSealed === 'string' && dto.passwordSealed ? dto.passwordSealed : null
     if (!Object.keys(set).length && !password) return userView(db, acc)
     const opId = newId()
     if (Object.keys(accSet).length || password) {
@@ -285,7 +292,7 @@ export function updateUser(ctx, id, raw) {
       id: opId,
       type: 'user.update',
       accountId: ctx.user.accountId,
-      payload: { id, at: iso(now), set: { ...set, ...(password ? { passwordHash: password } : {}) }, base },
+      payload: { id, at: iso(now), set: { ...set, ...(password ? { passwordSealed: password } : {}) }, base },
       now,
     })
     return userView(db, q(db, 'SELECT * FROM team_accounts WHERE id = ?').get(id))
@@ -295,7 +302,7 @@ export function updateUser(ctx, id, raw) {
 // ── Удаление сотрудника ──
 export function deleteUser(ctx, id) {
   const { db, now } = ctx
-  if (!loaded(db)) return { __remote: true }
+  if (!loaded(db) || !staffLoaded(db)) return { __remote: true }
   return inTx(db, () => {
     const acc = q(db, 'SELECT * FROM team_accounts WHERE id = ?').get(id)
     if (!acc) throw notFound(TEAM_TEXT.notFound)
@@ -309,7 +316,8 @@ export function deleteUser(ctx, id) {
       const { id: _s, ...wasStaff } = prof
       recordEdit(db, { opId, tbl: 'staff', rowId: prof.id, action: 'del', data: { wasRow: wasStaff }, now })
     }
-    enqueue(db, { id: opId, type: 'user.delete', accountId: ctx.user.accountId, payload: { id, at: iso(now) }, now })
+    // Запись магазина — тоже: сервер уберёт её и тогда, когда учётную запись удалили раньше
+    enqueue(db, { id: opId, type: 'user.delete', accountId: ctx.user.accountId, payload: { id, at: iso(now), userId: acc.userId ?? null }, now })
     return { ok: true }
   })
 }

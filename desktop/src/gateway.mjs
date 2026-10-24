@@ -84,6 +84,7 @@ import { createSync } from './sync.mjs'
 // и показывается на выбранном языке — их сверяет проверка.
 export const MESSAGES = {
   needLogin: 'Требуется вход в систему',
+  noSealing: 'Пароль на этом компьютере сохранить не удалось — задайте его, когда будет интернет.',
   onlineOnly: 'Этот раздел работает только с интернетом. Касса, склад, инвентаризация, товары, поставщики, расходы, доходы и сотрудники доступны и без него.',
   notSent: 'Эта запись ещё не отправлена на сервер. Изменить или удалить её можно будет после отправки.',
   noOfflineLogin: 'Нет связи с сервером. Под этим именем на этом компьютере ещё не входили — первый вход возможен только с интернетом.',
@@ -236,7 +237,25 @@ export function createGateway({
     // Чьим ключом ушла пачка — чтобы знать, чей вход отозван, если сервер откажет
     const sentAs = new Map()
 
-    // Каким ключом отправить операцию. Обычно — ключом того, кто её сделал. Если его
+    // Что уходит на сервер: отпечаток пароля сотрудника лежит в очереди зашифрованным — серверу
+  // он нужен как есть. Не расшифровался (базу перенесли с другого компьютера) — уходит без
+  // него, и сервер откажет: владелец увидит это в «Не принято сервером»
+  function outgoing(o) {
+    const p = o.payload || {}
+    if (o.type === 'user.create' && p.user?.passwordSealed) {
+      const { passwordSealed, ...u } = p.user
+      const hash = open(passwordSealed)
+      return { ...p, user: hash ? { ...u, passwordHash: hash } : u }
+    }
+    if (o.type === 'user.update' && p.set?.passwordSealed) {
+      const { passwordSealed, ...set } = p.set
+      const hash = open(passwordSealed)
+      return { ...p, set: hash ? { ...set, passwordHash: hash } : set }
+    }
+    return p
+  }
+
+  // Каким ключом отправить операцию. Обычно — ключом того, кто её сделал. Если его
     // ключа уже нет (сменили пароль, вышел срок), годится ключ владельца магазина,
     // входившего на этом компьютере: сервер принимает от владельца операции любого
     // сотрудника. Иначе операция ждёт — её автора или владельца.
@@ -263,8 +282,12 @@ export function createGateway({
     // Широкие разделы (списания, расходы, долги поставщикам) получает не только
     // владелец, а всякий, кому они открыты правами
     const wideHere = () => hasPerm(activeAccount(), 'suppliers.view', 'writeoffs.view', 'expenses.view', 'incomes.view', 'reports.view', 'dashboard.view')
+    // Сотрудников с окладами получает тот, кто выдаёт зарплату, — со своей отметкой (как
+    // у сервера: GET /expenses/staff)
+    const staffHere = () => hasPerm(activeAccount(), 'expenses.create', 'expenses.edit')
     function cursor() {
       if (wideHere() && !getMeta(db, 'wcursor')) return ''
+      if (staffHere() && !getMeta(db, 'scursor')) return ''
       return getMeta(db, 'cursor') || ''
     }
 
@@ -339,7 +362,7 @@ export function createGateway({
             body: {
               deviceId,
               appVersion,
-              ops: ops.map((o) => ({ id: o.id, type: o.type, accountId: o.accountId || undefined, createdAt: o.createdAt, payload: o.payload })),
+              ops: ops.map((o) => ({ id: o.id, type: o.type, accountId: o.accountId || undefined, createdAt: o.createdAt, payload: outgoing(o) })),
             },
           },
           token,
@@ -361,10 +384,14 @@ export function createGateway({
           ...(since ? { cursor: since } : {}),
           // Списания, изменившиеся, пока за кассой работал кассир
           ...(since && wideHere() ? { wcursor: getMeta(db, 'wcursor') } : {}),
+          // Сотрудники с окладами, изменившиеся, пока за кассой был тот, кому они не видны
+          ...(since && staffHere() ? { scursor: getMeta(db, 'scursor') } : {}),
           // Операции, на которые не пришёл ответ: приняты ли они?
           ...(asked.length ? { ops: asked.join(',') } : {}),
-          // Отпечаток списка сотрудников и ролей с прошлого раза: неизменившийся не придёт
-          ...(getMeta(db, 'teamv') ? { teamv: getMeta(db, 'teamv') } : {}),
+          // Отпечаток списка сотрудников и ролей с прошлого раза: неизменившийся не придёт. Когда
+          // касса просит всё заново (сервер принял правку, но сделал не так), — без него: список
+          // придёт целиком и ляжет основой
+          ...(getMeta(db, 'teamv') && getMeta(db, 'needFull') !== '1' ? { teamv: getMeta(db, 'teamv') } : {}),
         })
         return remote({ method: 'GET', path: '/sync/pull?' + query, timeoutMs: SYNC_TIMEOUT_MS, headers: asDevice }, token)
       },
@@ -480,85 +507,182 @@ export function createGateway({
       inTx(core, () => {
         const db = ph.db
         const code = ph.code
+        const active = session.activeId()
         const team = q(db, 'SELECT * FROM team_accounts').all()
         const byId = new Map(team.map((a) => [a.id, a]))
         const roles = new Map(q(db, 'SELECT id, permissions FROM team_roles').all().map((r) => [r.id, r.permissions]))
-        // Пароли, заданные без связи: последняя поправка по каждому сотруднику
-        const pw = new Map()
-        for (const e of q(db, "SELECT opId, rowId, data, synced FROM row_edits WHERE tbl = 'team_accounts' AND json_extract(data, '$.pw') IS NOT NULL ORDER BY seq").all()) {
+        // Роли, права которых поменяла соседняя касса, а сервер ещё не подтвердил: такие права
+        // сюда не переносятся (кроме урезания) — расширить права может только своя правка или сервер
+        const peerRoles = new Set(
+          q(
+            db,
+            `SELECT DISTINCT e.rowId FROM row_edits e JOIN lan_log l ON l.id = e.opId
+             WHERE e.tbl = 'team_roles' AND e.synced = 0 AND l.kind = 'op' AND l.state = 'applied'`,
+          )
+            .all()
+            .map((r) => r.rowId),
+        )
+        // Что известно о каждом сотруднике по поправкам: свои смены пароля (отпечаток —
+        // зашифрованный), неотправленные правки соседа, удаление
+        const outcome = (opId) => {
+          const o = q(db, 'SELECT state, error FROM outbox WHERE id = ?').get(opId)
+          if (!o) return 'unknown'
+          if (o.state === 'pending') return 'pending'
+          if (o.state === 'done') return o.error === 'noop' ? 'noop' : 'applied'
+          return 'rejected'
+        }
+        const per = new Map()
+        const info = (id) => {
+          if (!per.has(id)) per.set(id, { pw: [], peer: false, peerPw: false, del: false, delPending: false })
+          return per.get(id)
+        }
+        for (const e of q(db, "SELECT opId, rowId, action, data, synced FROM row_edits WHERE tbl = 'team_accounts' ORDER BY seq").all()) {
+          let d = {}
           try {
-            pw.set(e.rowId, { opId: e.opId, hash: JSON.parse(e.data).pw, synced: e.synced })
+            d = JSON.parse(e.data) || {}
           } catch {
-            /* испорченная поправка — пропускаем */
+            continue
+          }
+          const x = info(e.rowId)
+          const mine = !!q(db, 'SELECT 1 FROM outbox WHERE id = ?').get(e.opId)
+          // Удаление: ещё не подтверждено — вход закрыт, но обратимо (сервер может удаление не
+          // провести — сотрудника тогда правили позже); подтверждено и проведено — запись уходит
+          if (e.action === 'del') {
+            if (!e.synced) x.delPending = true
+            else if (!mine || outcome(e.opId) === 'applied') x.del = true
+          }
+          if (mine && typeof d.pw === 'string' && d.pw) x.pw.push({ opId: e.opId, sealed: d.pw, state: outcome(e.opId) })
+          if (!mine && !e.synced) {
+            x.peer = true
+            if (d.pwChanged) x.peerPw = true
           }
         }
         const rows = q(core, 'SELECT * FROM accounts WHERE pharmacyCode = ?').all(code)
-        const tmpl = rows.find((r) => r.id === session.activeId()) || rows[0] || null
+        const tmpl = rows.find((r) => r.id === active) || rows[0] || null
         const teamAt = getMeta(db, 'teamAt') || ''
         const known = getMeta(db, 'teamLoaded') === '1'
+        const sameSet = (a, b) => {
+          const x = new Set(JSON.parse(a || '[]'))
+          const y = new Set(JSON.parse(b || '[]'))
+          return [...x].every((k) => y.has(k))
+        }
+        const renames = []
         for (const row of rows) {
           const a = byId.get(row.id)
+          const x = per.get(row.id) || { pw: [], peer: false, peerPw: false, del: false, delPending: false }
           if (!a) {
-            // Сотрудника удалили (здесь, на соседней кассе или на сайте) — входа больше нет.
-            // Кто вошёл через сервер позже, чем пришёл список, — остаётся: списка он не застал
-            if (known && (!teamAt || row.seenAt < teamAt) && row.id !== session.activeId()) {
-              q(core, 'DELETE FROM accounts WHERE id = ?').run(row.id)
-              session.drop(row.id)
+            // Сотрудника нет в списке. Удаление ещё ждёт ответа сервера — вход закрыт, но
+            // обратимо: сервер может его не провести, и сотрудник вернётся в список
+            if (x.delPending && !x.del) {
+              if (!row.blocked) q(core, 'UPDATE accounts SET blocked = 1 WHERE id = ?').run(row.id)
+              if (row.id !== active) session.drop(row.id)
+              continue
+            }
+            // Входа без интернета больше нет, если удаление провели, если его заведение здесь не
+            // принял сервер, или он пропал из списка сервера (кто вошёл через сервер позже, чем
+            // пришёл список, — остаётся)
+            const failedCreation = !!row.localPw && ['rejected', 'unknown', 'noop'].includes(outcome(row.localPw))
+            if (x.del || failedCreation || (known && (!teamAt || row.seenAt < teamAt))) {
+              // За кассой он сам — после выхода не войдёт, а запись уберётся следующим разом
+              if (row.id === active) q(core, 'UPDATE accounts SET blocked = 1 WHERE id = ?').run(row.id)
+              else {
+                q(core, 'DELETE FROM accounts WHERE id = ?').run(row.id)
+                session.drop(row.id)
+              }
             }
             continue
           }
           const set = {}
-          if (row.login !== a.login && a.login) {
-            q(core, 'DELETE FROM accounts WHERE login = ? AND id <> ?').run(a.login, row.id)
-            set.login = a.login
-          }
+          if (a.login && row.login !== a.login) renames.push({ id: row.id, login: a.login })
+          // Роль и права. Неотправленная правка соседа может их только урезать: стать
+          // владельцем или получить новые права здесь можно по своей правке или по данным сервера
           const founder = a.role === 'founder'
           const perms = founder ? '' : roles.has(a.roleId) ? roles.get(a.roleId) : row.permissions
-          if (row.role !== a.role) set.role = a.role
-          if ((perms ?? '') !== (row.permissions ?? '')) set.permissions = perms ?? ''
-          const roleName = founder ? 'Владелец' : a.roleName || row.roleName
-          if (roleName !== row.roleName) set.roleName = roleName
+          const fromPeer = x.peer || (!founder && peerRoles.has(a.roleId))
+          const narrower = row.role === 'founder' ? !founder : !founder && sameSet(perms, row.permissions)
+          if (!fromPeer || narrower) {
+            if (row.role !== a.role) set.role = a.role
+            if ((perms ?? '') !== (row.permissions ?? '')) set.permissions = perms ?? ''
+            const roleName = founder ? 'Владелец' : a.roleName || row.roleName
+            if (roleName !== row.roleName) set.roleName = roleName
+          }
           if (a.userId && a.userId !== row.tenantUserId) set.tenantUserId = a.userId
+          // Блокировка действует сразу, от кого бы ни пришла; снять её соседская правка не может
           const blocked = a.active ? 0 : 1
-          if (blocked !== (row.blocked || 0)) {
-            set.blocked = blocked
-            // Заблокированного сервер больше не пустит — его ключ ни к чему
-            if (blocked && row.id !== session.activeId()) session.drop(row.id)
+          if (blocked && !row.blocked) {
+            set.blocked = 1
+            if (row.id !== active) session.drop(row.id)
+          } else if (!blocked && row.blocked && !x.peer) set.blocked = 0
+
+          // ── Пароль ──
+          if (x.peerPw && !(row.localPw && x.pw.some((p) => p.opId === row.localPw && p.state === 'pending'))) {
+            // Пароль сменили на соседней кассе: какой он, здесь неизвестно (отпечаток по сети не
+            // ходит). Прежний больше не подходит — до входа с интернетом входа без него нет
+            if (row.verifier) set.verifier = null
+            if (row.id !== active) session.drop(row.id)
           }
-          // Пароль, заданный здесь: принят — прежний отпечаток не нужен; отвергнут — вернуть его
-          const p = pw.get(row.id)
-          if (row.localPw && (!p || p.opId !== row.localPw || p.synced)) {
-            if (p && p.opId === row.localPw && p.synced) Object.assign(set, { localPw: null, prevVerifier: null })
-            else if (!p || !q(db, 'SELECT 1 FROM row_edits WHERE opId = ? LIMIT 1').get(row.localPw)) Object.assign(set, { verifier: row.prevVerifier ?? null, localPw: null, prevVerifier: null })
-          }
-          if (p && !p.synced && p.opId !== row.localPw) {
-            const sealed = seal(p.hash)
-            if (sealed) {
-              Object.assign(set, { verifier: sealed, localPw: p.opId, prevVerifier: row.localPw ? row.prevVerifier : row.verifier })
-              // Прежний ключ сервер отзовёт, как только примет новый пароль. Свой ключ того, кто
+          const last = x.pw[x.pw.length - 1] || null
+          if (last && last.state === 'pending') {
+            if (row.localPw !== last.opId) {
+              Object.assign(set, { verifier: last.sealed, localPw: last.opId, prevVerifier: row.localPw ? row.prevVerifier : row.verifier })
+              // Прежний ключ сотрудника сервер отзовёт, как только примет пароль. Ключ того, кто
               // сейчас за кассой, оставляем: им и уйдёт смена пароля
-              if (row.id !== session.activeId()) session.drop(row.id)
+              if (row.id !== active) session.drop(row.id)
+            }
+          } else if (row.localPw) {
+            const mineLast = x.pw.find((p) => p.opId === row.localPw)
+            if (mineLast && mineLast.state === 'applied') {
+              // Сервер принял — отпечаток этой смены и есть пароль (вход через сервер старым
+              // паролем, пока смена шла, его подменить не должен)
+              Object.assign(set, { verifier: mineLast.sealed, localPw: null, prevVerifier: null })
+            } else if (mineLast && mineLast.state === 'noop') {
+              // Сервер оставил более поздний пароль с сайта — какой он, здесь неизвестно
+              Object.assign(set, { verifier: null, localPw: null, prevVerifier: null })
+            } else if (!mineLast || mineLast.state === 'rejected' || mineLast.state === 'unknown') {
+              // Отказ: пароль — последний принятый из своих смен, иначе прежний. Судьба
+              // неизвестна — входа без интернета нет, до входа с ним
+              const st = outcome(row.localPw)
+              const accepted = [...x.pw].reverse().find((p) => p.state === 'applied')
+              if (accepted) Object.assign(set, { verifier: accepted.sealed, localPw: null, prevVerifier: null })
+              else if (st === 'rejected') Object.assign(set, { verifier: row.prevVerifier ?? null, localPw: null, prevVerifier: null })
+              else Object.assign(set, { verifier: null, localPw: null, prevVerifier: null })
             }
           }
           const keys = Object.keys(set)
           if (keys.length) q(core, `UPDATE accounts SET ${keys.map((k) => k + ' = ?').join(', ')} WHERE id = ?`).run(...keys.map((k) => set[k]), row.id)
         }
-        // Новый сотрудник с паролем от владельца — может войти здесь и без связи
+        // Переименования — в два прохода: логины могли поменяться местами, а логин в общей
+        // базе уникален. Чужая запись с тем же логином уходит, только если её нет в списке
+        if (renames.length) {
+          for (const r of renames) q(core, 'UPDATE accounts SET login = ? WHERE id = ?').run('\u0001' + r.id, r.id)
+          for (const r of renames) {
+            for (const other of q(core, 'SELECT id FROM accounts WHERE login = ? AND id <> ?').all(r.login, r.id)) {
+              if (!byId.has(other.id)) q(core, 'DELETE FROM accounts WHERE id = ?').run(other.id)
+            }
+            q(core, 'UPDATE accounts SET login = ? WHERE id = ?').run(r.login, r.id)
+          }
+        }
+        // Новый сотрудник, которого завели ЗДЕСЬ, с паролем от владельца, — может войти и без
+        // связи. Заведённого на соседней кассе здесь пустят после входа с интернетом
         if (tmpl) {
-          for (const [id, p] of pw) {
-            if (p.synced || rows.some((r) => r.id === id)) continue
+          for (const [id, x] of per) {
             const a = byId.get(id)
-            const sealed = a ? seal(p.hash) : null
-            if (!a || !sealed) continue
+            if (!a || rows.some((r) => r.id === id) || !x.pw.length) continue
+            const p = x.pw[x.pw.length - 1]
+            if (p.state !== 'pending' && p.state !== 'applied') continue
             const founder = a.role === 'founder'
-            q(core, 'DELETE FROM accounts WHERE login = ? AND id <> ?').run(a.login, id)
+            for (const other of q(core, 'SELECT id FROM accounts WHERE login = ? AND id <> ?').all(a.login, id)) {
+              if (!byId.has(other.id)) q(core, 'DELETE FROM accounts WHERE id = ?').run(other.id)
+            }
+            if (q(core, 'SELECT 1 FROM accounts WHERE login = ?').get(a.login)) continue
             q(
               core,
               `INSERT INTO accounts (id, login, role, pharmacyCode, pharmacyName, verifier, subStatus, paidUntil, tenantUserId, seenAt, permissions, roleName, blocked, localPw)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             ).run(
-              id, a.login, a.role, code, tmpl.pharmacyName || '', sealed, tmpl.subStatus || 'active', tmpl.paidUntil ?? null, a.userId ?? null,
-              new Date(clock.now()).toISOString(), founder ? '' : roles.get(a.roleId) ?? '', founder ? 'Владелец' : a.roleName || '', a.active ? 0 : 1, p.opId,
+              id, a.login, a.role, code, tmpl.pharmacyName || '', p.sealed, tmpl.subStatus || 'active', tmpl.paidUntil ?? null, a.userId ?? null,
+              new Date(clock.now()).toISOString(), founder ? '' : roles.get(a.roleId) ?? '', founder ? 'Владелец' : a.roleName || '', a.active ? 0 : 1,
+              p.state === 'pending' ? p.opId : null,
             )
           }
         }
@@ -566,6 +690,13 @@ export function createGateway({
     } catch (e) {
       log.warn('сотрудники магазина не перенеслись во вход без интернета', e)
     }
+  }
+
+  // Своя смена пароля этого сотрудника ещё не ушла на сервер (вход через сервер в это время
+  // идёт по прежнему паролю — отпечаток нового он подменять не должен)
+  function pwPending(acc) {
+    if (!acc?.localPw || !pharmacy || pharmacy.code !== acc.pharmacyCode) return false
+    return !!q(pharmacy.db, "SELECT 1 FROM outbox WHERE id = ? AND state = 'pending'").get(acc.localPw)
   }
 
   // ── Сервер отказал ──
@@ -777,7 +908,13 @@ export function createGateway({
         return { ...res, data: { ...res.data, token: DESKTOP_TOKEN } }
       }
       const verifier = seal(await makeVerifier(password))
-      const acc = remember(user, { verifier })
+      // Своя смена пароля этого сотрудника ещё в очереди: сервер пока знает прежний пароль, им и
+      // вошли. Отпечаток нового не трогаем, а введённый запоминаем как прежний — он вернётся,
+      // если сервер смену отвергнет
+      const before = accountById(core, user.id)
+      const pending = pwPending(before)
+      const acc = remember(user, pending ? {} : { verifier })
+      if (pending) q(core, 'UPDATE accounts SET prevVerifier = ? WHERE id = ?').run(verifier, user.id)
       loginSucceeded(core, name)
       session.setToken(user.id, res.data.token)
       session.activate(user.id)
@@ -793,7 +930,9 @@ export function createGateway({
     if (res.status === 401) {
       const acc = accountByLogin(core, name.trim())
       const verifier = acc?.verifier ? open(acc.verifier) : null
-      if (verifier && (await checkVerifier(password, verifier))) {
+      // Пароль сменили здесь без связи, а смена ещё не ушла: сервер новый пароль пока не знает —
+      // это не повод закрывать вход по нему
+      if (verifier && !pwPending(acc) && (await checkVerifier(password, verifier))) {
         dropVerifier(core, acc.id)
         denied(acc, { status: 403, data: res.data })
       }
@@ -913,7 +1052,11 @@ export function createGateway({
       const problem = passwordProblem(body.password)
       if (problem) return refuse(400, problem)
       const { password, ...rest } = body
-      body = { ...rest, passwordHash: await makeVerifier(password) }
+      // Отпечаток пароля — сразу зашифрованным средствами Windows: в базе кассы и в очереди
+      // на отправку открытого отпечатка нет (на сервер он уходит расшифрованным, push)
+      const sealed = seal(await makeVerifier(password))
+      if (!sealed) return refuse(400, MESSAGES.noSealing)
+      body = { ...rest, passwordSealed: sealed }
     }
 
     let data

@@ -13,6 +13,8 @@ export interface CursorFacts {
   asked: bigint | null
   // Её же отметка разделов владельца — списаний и расходов (только у владельца)
   askedW: bigint | null
+  // Её отметка сотрудников с окладами (только у того, кто выдаёт зарплату)
+  askedS?: bigint | null
   // До какой транзакции журнал изменений уже подчищен
   pruned: bigint
   // Все транзакции с номером меньше этого завершены и видны
@@ -22,7 +24,7 @@ export interface CursorFacts {
 }
 
 // Номер транзакции, с которой досылать изменения, или null — отдать всё заново
-export function sinceOf({ asked, askedW, pruned, horizon, given }: CursorFacts): bigint | null {
+export function sinceOf({ asked, askedW, askedS = null, pruned, horizon, given }: CursorFacts): bigint | null {
   // Первый обмен
   if (asked === null) return null
   // Журнал за это время подчищен — досылать нечем
@@ -38,5 +40,6 @@ export function sinceOf({ asked, askedW, pruned, horizon, given }: CursorFacts):
   if (given === null || asked > given) return null
   // Отметка разделов владельца старше подчищенного журнала — добрать их нечем
   if (askedW !== null && askedW < pruned) return null
+  if (askedS !== null && askedS < pruned) return null
   return asked
 }
