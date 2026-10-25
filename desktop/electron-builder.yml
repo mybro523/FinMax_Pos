@@ -60,6 +60,9 @@ nsis:
   deleteAppDataOnUninstall: false
   installerLanguages: [ru_RU]
   language: "1049"
+  # В Windows 7, 8 и 32-разрядной Windows эта программа не запустится: установщик скажет,
+  # что нужен установщик «…-Windows-7-8.exe» (он собирается из desktop/legacy)
+  include: win10-only.nsh
 
 # ── Замки на самом исполняемом файле ──
 # Без них готовую программу можно запустить «как голый Node» или с отладчиком и

@@ -51,11 +51,14 @@ export function PechatHost() {
   return <PrintPreview key={req.at} req={req} onClose={closePechat} />
 }
 
-// pdf.js — только здесь и только по требованию: сайту он не нужен вовсе
+// pdf.js — только здесь и только по требованию: сайту он не нужен вовсе.
+// Сборка legacy: программа для Windows 7 и 8 работает на старом движке (Chrome 108),
+// а обычная сборка pdf.js требует Chrome 119 и новее. legacy работает и на новом движке —
+// поэтому путь один для обеих программ
 let pdfjsLoad = null
 function loadPdfjs() {
   if (!pdfjsLoad) {
-    pdfjsLoad = Promise.all([import('pdfjs-dist'), import('pdfjs-dist/build/pdf.worker.min.mjs?url')]).then(([lib, worker]) => {
+    pdfjsLoad = Promise.all([import('pdfjs-dist/legacy/build/pdf.mjs'), import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url')]).then(([lib, worker]) => {
       lib.GlobalWorkerOptions.workerSrc = worker.default
       return lib
     })

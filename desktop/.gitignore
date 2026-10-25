@@ -16,3 +16,6 @@ build-config.json
 # Артефакты проверок: снимки экрана и записи неудачных прогонов
 test-results
 playwright-report
+
+# Установщик для Windows 7 и 8 (scripts/build.mjs --legacy)
+release-legacy

@@ -11,7 +11,7 @@
 // Запуск: npm test (в папке desktop)
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createReleases, expectedAssets, tagOf } from '../scripts/github-release.mjs'
+import { checkFeedFile, createReleases, expectedAssets, legacyAssets, modernAssets, tagOf } from '../scripts/github-release.mjs'
 
 const TOKEN = 'github_pat_SEKRET-kotoryj-nelzya-pokazyvat'
 
@@ -20,6 +20,18 @@ function github({ releases = [], status = null } = {}) {
   const g = { releases: releases.map((r) => ({ assets: [], prerelease: false, ...r })), calls: [], nextId: 100 }
   g.fetch = async (url, init = {}) => {
     const method = init.method || 'GET'
+    // Загрузка файла в выпуск — на отдельный адрес GitHub
+    const up = url.match(/^https:\/\/uploads\.github\.com\/repos\/vladelec\/ustanovshchiki\/releases\/(\d+)\/assets\?name=(.+)$/)
+    if (up) {
+      g.calls.push({ method, path: 'upload:' + decodeURIComponent(up[2]), type: init.headers?.['Content-Type'] })
+      const rel = g.releases.find((r) => r.id === Number(up[1]))
+      const name = decodeURIComponent(up[2])
+      if (!rel) return { status: 404, text: async () => '{"message":"Not Found"}' }
+      if (rel.assets.some((a) => a.name === name)) return { status: 422, text: async () => '{"message":"already_exists"}' }
+      const a = { id: g.nextId++, name, size: init.body.length, state: 'uploaded' }
+      rel.assets.push(a)
+      return { status: 201, text: async () => JSON.stringify(a) }
+    }
     const path = url.replace('https://api.github.com/repos/vladelec/ustanovshchiki', '')
     g.calls.push({ method, path, body: init.body ? JSON.parse(init.body) : null, auth: init.headers?.Authorization })
     const reply = (code, data) => ({ status: code, text: async () => JSON.stringify(data) })
@@ -29,9 +41,15 @@ function github({ releases = [], status = null } = {}) {
       const body = JSON.parse(init.body)
       // Как настоящий GitHub: открытых выпусков с одной меткой не бывает
       if (!body.draft && g.releases.some((r) => r.tag_name === body.tag_name && !r.draft)) return reply(422, { message: 'Validation Failed' })
-      const made = { id: g.nextId++, assets: [], html_url: `https://github.com/vladelec/ustanovshchiki/releases/tag/${body.tag_name}`, ...body }
+      const id = g.nextId++
+      const made = { id, assets: [], html_url: `https://github.com/vladelec/ustanovshchiki/releases/tag/${body.tag_name}`, upload_url: `https://uploads.github.com/repos/vladelec/ustanovshchiki/releases/${id}/assets{?name,label}`, ...body }
       g.releases.push(made)
       return reply(201, made)
+    }
+    const del = path.match(/^\/releases\/assets\/(\d+)$/)
+    if (method === 'DELETE' && del) {
+      for (const r of g.releases) r.assets = r.assets.filter((a) => a.id !== Number(del[1]))
+      return { status: 204, text: async () => '' }
     }
     const m = path.match(/^\/releases\/(\d+)$/)
     if (method === 'PATCH' && m) {
@@ -150,6 +168,51 @@ test('связь моргнула на последнем шаге — выкл�
   assert.equal(refused.calls.length, 1)
 })
 
-test('в выпуске ждём ровно те три файла, по которым программа обновляется', () => {
-  assert.deepEqual(expectedAssets('1.0.0'), ['FinMax-POS-Setup-1.0.0.exe', 'FinMax-POS-Setup-1.0.0.exe.blockmap', 'latest.yml'])
+test('в выпуске ждём обе программы: обычную (latest.yml) и для Windows 7 и 8 (legacy.yml)', () => {
+  assert.deepEqual(modernAssets('1.0.0'), ['FinMax-POS-Setup-1.0.0.exe', 'FinMax-POS-Setup-1.0.0.exe.blockmap', 'latest.yml'])
+  assert.deepEqual(legacyAssets('1.0.0'), ['FinMax-POS-Setup-1.0.0-Windows-7-8.exe', 'FinMax-POS-Setup-1.0.0-Windows-7-8.exe.blockmap', 'legacy.yml'])
+  assert.deepEqual(expectedAssets('1.0.0'), [...modernAssets('1.0.0'), ...legacyAssets('1.0.0')])
+})
+
+test('установщик для Windows 7 и 8 кладётся в черновик; без него выпуск не открывается', async () => {
+  const g = github()
+  const r = make(g)
+  await r.prepare('1.5.0')
+  const rel = g.releases[0]
+  // Упаковщик положил только обычную программу — открывать нельзя
+  rel.assets.push(...modernAssets('1.5.0').map((n) => ({ id: g.nextId++, ...asset(n) })))
+  await assert.rejects(() => r.publish('1.5.0'), /не хватает файлов — FinMax-POS-Setup-1\.5\.0-Windows-7-8\.exe, FinMax-POS-Setup-1\.5\.0-Windows-7-8\.exe\.blockmap, legacy\.yml/)
+  assert.equal(rel.draft, true, 'магазины такой выпуск не видят')
+  // Кладём файлы для Windows 7 и 8
+  for (const n of legacyAssets('1.5.0')) await r.upload('1.5.0', n, Buffer.alloc(n.endsWith('.yml') ? 300 : 5000), n.endsWith('.yml') ? 'text/yaml' : 'application/octet-stream')
+  assert.deepEqual(g.calls.filter((c) => c.path.startsWith('upload:')).map((c) => [c.path, c.type]), [
+    ['upload:FinMax-POS-Setup-1.5.0-Windows-7-8.exe', 'application/octet-stream'],
+    ['upload:FinMax-POS-Setup-1.5.0-Windows-7-8.exe.blockmap', 'application/octet-stream'],
+    ['upload:legacy.yml', 'text/yaml'],
+  ])
+  // Повтор выкладки: такой же файл уже лежит — второй раз не кладётся
+  await r.upload('1.5.0', 'legacy.yml', Buffer.alloc(300), 'text/yaml')
+  assert.equal(g.calls.filter((c) => c.path === 'upload:legacy.yml').length, 1)
+  // Недокачанный (другого размера) — убирается и кладётся заново
+  rel.assets.find((a) => a.name === 'legacy.yml').size = 10
+  await r.upload('1.5.0', 'legacy.yml', Buffer.alloc(300), 'text/yaml')
+  assert.equal(g.calls.filter((c) => c.method === 'DELETE').length, 1)
+  assert.equal(rel.assets.find((a) => a.name === 'legacy.yml').size, 300)
+  // Всё на месте — выпуск открывается
+  const done = await r.publish('1.5.0')
+  assert.equal(done.draft, false)
+  // В открытый выпуск подкладывать нельзя
+  await assert.rejects(() => r.upload('1.5.0', 'legacy.yml', Buffer.alloc(1)), /уже открыт/)
+})
+
+test('описания версий сверяются: та версия и тот установщик — иначе выпуск не выкладывается', () => {
+  const latest = 'version: 1.5.0\nfiles:\n  - url: FinMax-POS-Setup-1.5.0.exe\npath: FinMax-POS-Setup-1.5.0.exe\nsha512: x\n'
+  const legacy = 'version: 1.5.0\nfiles:\n  - url: FinMax-POS-Setup-1.5.0-Windows-7-8.exe\npath: FinMax-POS-Setup-1.5.0-Windows-7-8.exe\n'
+  assert.equal(checkFeedFile(latest, { version: '1.5.0', installer: 'FinMax-POS-Setup-1.5.0.exe' }), '')
+  assert.equal(checkFeedFile(legacy, { version: '1.5.0', installer: 'FinMax-POS-Setup-1.5.0-Windows-7-8.exe' }), '')
+  // Перепутали: под именем latest.yml — описание программы для Windows 7 и 8
+  assert.match(checkFeedFile(legacy, { version: '1.5.0', installer: 'FinMax-POS-Setup-1.5.0.exe' }), /установщик «FinMax-POS-Setup-1\.5\.0-Windows-7-8\.exe»/)
+  // Старое описание от прошлой сборки
+  assert.match(checkFeedFile(latest.replace('version: 1.5.0', 'version: 1.4.19'), { version: '1.5.0', installer: 'FinMax-POS-Setup-1.5.0.exe' }), /версия 1\.4\.19/)
+  assert.match(checkFeedFile('', { version: '1.5.0', installer: 'x' }), /не указана/)
 })

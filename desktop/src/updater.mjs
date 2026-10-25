@@ -29,11 +29,19 @@ const CHECK_EVERY_MS = 4 * 60 * 60 * 1000
 // Пусто или не того вида — обновления выключены.
 const NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/
 
+// ── Канал обновлений ──
+// Программа для Windows 7 и 8 собрана на старом движке (Electron 22) и обновляется только
+// своим установщиком: описание её версии лежит в том же выпуске, но в legacy.yml, а не в
+// latest.yml. Обычный установщик на Windows 7 не запустился бы — и программа, скачав его,
+// перестала бы открываться. Других каналов нет: всё прочее — обычный (latest.yml)
+export const LEGACY_CHANNEL = 'legacy'
+const channelOf = (raw) => (raw?.channel === LEGACY_CHANNEL ? { channel: LEGACY_CHANNEL } : {})
+
 export function normalizeFeed(raw) {
   if (!raw || typeof raw !== 'object') return null
   if (raw.provider === 'github') {
     if (!NAME.test(String(raw.owner || '')) || !NAME.test(String(raw.repo || ''))) return null
-    return { provider: 'github', owner: raw.owner, repo: raw.repo }
+    return { provider: 'github', owner: raw.owner, repo: raw.repo, ...channelOf(raw) }
   }
   if (raw.provider === 'generic') {
     let u
@@ -47,7 +55,7 @@ export function normalizeFeed(raw) {
     // доступ ко всему. Исключение — этот же компьютер, так обновление проверяют
     if (u.protocol !== 'https:' && !(u.protocol === 'http:' && local)) return null
     if (u.username || u.password) return null
-    return { provider: 'generic', url: u.toString().replace(/\/+$/, '') }
+    return { provider: 'generic', url: u.toString().replace(/\/+$/, ''), ...channelOf(raw) }
   }
   return null
 }
@@ -94,6 +102,8 @@ export function feedYaml(feed) {
     feed.provider === 'github'
       ? ['provider: github', `owner: ${feed.owner}`, `repo: ${feed.repo}`]
       : ['provider: generic', `url: ${JSON.stringify(feed.url)}`]
+  // Канал Windows 7/8: библиотека берёт legacy.yml и к latest.yml не обращается вовсе
+  if (feed.channel === LEGACY_CHANNEL) lines.push(`channel: ${LEGACY_CHANNEL}`)
   return [...lines, `updaterCacheDirName: ${UPDATER_CACHE_DIR}`, ''].join('\n')
 }
 

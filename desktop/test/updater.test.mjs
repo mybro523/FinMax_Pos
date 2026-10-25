@@ -220,3 +220,17 @@ test('прежняя папка обновлений убирается; нет 
   assert.ok(said.some((m) => /EBUSY/.test(m)))
   fs.rmSync(base, { recursive: true, force: true })
 })
+
+test('канал Windows 7/8: только «legacy», в описании источника — строка channel; обычная сборка без неё', () => {
+  const legacy = normalizeFeed({ ...FEED, channel: 'legacy' })
+  assert.deepEqual(legacy, { ...FEED, channel: 'legacy' })
+  // Других каналов нет: всё, что не «legacy», — обычный канал
+  assert.deepEqual(normalizeFeed({ ...FEED, channel: 'beta' }), FEED)
+  assert.deepEqual(normalizeFeed({ ...FEED, channel: '../latest' }), FEED)
+  assert.deepEqual(normalizeFeed({ provider: 'generic', url: 'http://127.0.0.1:8123/', channel: 'legacy' }), { provider: 'generic', url: 'http://127.0.0.1:8123', channel: 'legacy' })
+  const yamlLegacy = feedYaml(legacy)
+  assert.match(yamlLegacy, /^channel: legacy$/m)
+  assert.match(yamlLegacy, /^provider: github$/m)
+  assert.match(yamlLegacy, new RegExp(`^updaterCacheDirName: ${UPDATER_CACHE_DIR}$`, 'm'))
+  assert.doesNotMatch(feedYaml(FEED), /channel/, 'обычная сборка читает latest.yml, как раньше')
+})

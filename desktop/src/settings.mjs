@@ -8,6 +8,7 @@
 import { isAbsolute } from 'node:path'
 import { sanitizePrint } from './print/transport.mjs'
 import { sanitizeCustomer } from './customer-screen.mjs'
+import { sanitizeLite } from './lite.mjs'
 
 // Папка для копий — только полный путь. Относительный зависел бы от того, откуда
 // запустили программу, и копии оказывались бы каждый раз в новом месте
@@ -21,8 +22,18 @@ const version = (v) => (typeof v === 'string' && /^\d+\.\d+\.\d+$/.test(v) ? v :
 export function sanitizeSettings(raw) {
   const v = raw && typeof raw === 'object' ? raw : {}
   // print — как печатать чеки на этом компьютере (см. print/transport.mjs);
-  // customer — экран покупателя на втором экране (см. customer-screen.mjs)
-  return { backupDir: folder(v.backupDir), version: version(v.version), print: sanitizePrint(v.print), customer: sanitizeCustomer(v.customer) }
+  // customer — экран покупателя на втором экране (см. customer-screen.mjs);
+  // lite — облегчённый вид для слабого компьютера: auto / on / off (см. lite.mjs);
+  // gpuSoft — в прошлый раз видеокарта не ускоряла отрисовку (сразу после запуска Electron
+  // этого ещё не знает — до ответа вид берётся по прошлому разу)
+  return {
+    backupDir: folder(v.backupDir),
+    version: version(v.version),
+    print: sanitizePrint(v.print),
+    customer: sanitizeCustomer(v.customer),
+    lite: sanitizeLite(v.lite),
+    gpuSoft: v.gpuSoft === true,
+  }
 }
 
 export function createSettings({ file, fs }) {

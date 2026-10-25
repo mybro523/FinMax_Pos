@@ -1,0 +1,65 @@
+# ── Упаковка программы для Windows 7 и 8 ──
+# Запускается сценарием scripts/build.mjs --legacy. Та же программа, что и обычная, но на
+# старом движке: Electron 22 — последняя его версия, которая работает в Windows 7, 8 и 8.1.
+# Основная часть собирается из тех же исходников (desktop/src) в один файл src/main.cjs —
+# Electron 22 не умеет запускать модули .mjs. Всё остальное сценарий кладёт сюда же.
+
+# Те же имя и папка установки, что у обычной программы: данные магазина там же
+appId: tj.finmax.pos
+productName: FinMax POS
+copyright: FinMax
+electronVersion: 22.3.27
+
+directories:
+  output: ../release-legacy
+  buildResources: assets
+
+files:
+  - src/**/*
+  - renderer/**/*
+  - assets/fonts/**/*
+  - assets/icon.png
+  - build-config.json
+  - package.json
+  # Исходники SQLite и файлы для сборки компилятором программе не нужны
+  - "!node_modules/better-sqlite3/{deps,src}/**"
+  - "!node_modules/better-sqlite3/binding.gyp"
+
+asar: true
+# Файл базы данных — настоящая библиотека Windows: изнутри архива её не загрузить
+asarUnpack:
+  - node_modules/better-sqlite3/build/Release/*.node
+# Файл базы данных готовый, под Electron 22 для 32- и 64-разрядной Windows: упаковщик
+# скачивает его сам для каждой разрядности. Компилятор C++ не нужен
+npmRebuild: true
+buildDependenciesFromSource: false
+
+win:
+  target:
+    - target: nsis
+      # Один установщик для 32- и 64-разрядной Windows: сам ставит нужную
+      arch: [x64, ia32]
+  icon: assets/icon.ico
+  executableName: FinMaxPOS
+
+nsis:
+  oneClick: true
+  perMachine: false
+  artifactName: FinMax-POS-Setup-${version}-Windows-7-8.${ext}
+  shortcutName: FinMax POS
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+  installerLanguages: [ru_RU]
+  language: "1049"
+
+# ── Замки на исполняемом файле ──
+# Те, что есть у Electron 22. Проверка архива на подмену в Windows появилась только в
+# Electron 30 — у старого движка её нет
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableCookieEncryption: true
+  onlyLoadAppFromAsar: true

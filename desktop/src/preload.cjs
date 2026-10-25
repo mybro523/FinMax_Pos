@@ -115,6 +115,22 @@ contextBridge.exposeInMainWorld('apteka', {
     test: (sample) => ipcRenderer.invoke('customer:test', sample),
   },
 
+  // Облегчённый вид для слабого компьютера: без теней, анимаций и плавных переходов.
+  // atStart — включён ли он при запуске (основная часть пишет это в командную строку
+  // окна, поэтому вид действует с первого кадра); get / set — узнать и поменять
+  lite: {
+    atStart: process.argv.includes('--finmax-lite'),
+    get: () => ipcRenderer.invoke('lite:get'),
+    set: (mode) => ipcRenderer.invoke('lite:set', mode),
+    // Вид поменялся сам (основная часть узнала, что видеокарта не ускоряет отрисовку).
+    // Возвращает функцию отписки
+    onChange: (fn) => {
+      const handler = (_event, state) => fn(state)
+      ipcRenderer.on('lite:state', handler)
+      return () => ipcRenderer.removeListener('lite:state', handler)
+    },
+  },
+
   // Выгрузка в Excel: страница собирает файл, основная часть спрашивает, куда его
   // сохранить, и записывает. Скачать файл обычным способом окно в программе не может
   file: {

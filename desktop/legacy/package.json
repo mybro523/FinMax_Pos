@@ -1,0 +1,18 @@
+{
+  "name": "finmax-pos-desktop",
+  "productName": "FinMax POS",
+  "version": "1.5.0",
+  "description": "FinMax POS — касса и склад торговли. Программа для Windows 7 и 8 (старый движок Electron 22)",
+  "private": true,
+  "author": "FinMax",
+  "main": "src/main.cjs",
+  "dependencies": {
+    "better-sqlite3": "9.6.0",
+    "decimal.js": "10.4.3",
+    "electron-updater": "6.8.9",
+    "socket.io-client": "4.8.3"
+  },
+  "devDependencies": {
+    "electron": "22.3.27"
+  }
+}

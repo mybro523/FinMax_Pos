@@ -105,21 +105,42 @@ export function registerScheme(protocol) {
   ])
 }
 
-export function registerAppProtocol({ protocol, readFile, root, fonts, screen }) {
-  protocol.handle(SCHEME, async (request) => {
-    const hit = request.method === 'GET' ? resolveAsset({ root, fonts, screen }, request.url) : null
-    if (!hit) return new Response('Not found', { status: 404 })
-    try {
-      const body = await readFile(hit.file)
-      const headers = { 'Content-Type': hit.type, 'X-Content-Type-Options': 'nosniff' }
-      if (hit.html) {
-        headers['Content-Security-Policy'] = CSP
-        // Страницу всегда берём свежую: после обновления программы имена её файлов другие
-        headers['Cache-Control'] = 'no-cache'
-      }
-      return new Response(body, { status: 200, headers })
-    } catch {
-      return new Response('Not found', { status: 404 })
+const NOT_FOUND = { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: 'Not found' }
+
+// Что ответить окну на запрос файла: { status, headers, body }
+export async function serveAsset({ readFile, root, fonts, screen }, request) {
+  const hit = request.method === 'GET' ? resolveAsset({ root, fonts, screen }, request.url) : null
+  if (!hit) return NOT_FOUND
+  try {
+    const body = await readFile(hit.file)
+    const headers = { 'Content-Type': hit.type, 'X-Content-Type-Options': 'nosniff' }
+    if (hit.html) {
+      headers['Content-Security-Policy'] = CSP
+      // Страницу всегда берём свежую: после обновления программы имена её файлов другие
+      headers['Cache-Control'] = 'no-cache'
     }
+    return { status: 200, headers, body }
+  } catch {
+    return NOT_FOUND
+  }
+}
+
+// Возвращает, как подключено: 'handle' (Electron 25 и новее) или 'buffer' (Electron 22 —
+// на нём программа работает в Windows 7 и 8: protocol.handle там ещё нет)
+export function registerAppProtocol({ protocol, readFile, root, fonts, screen }) {
+  const where = { readFile, root, fonts, screen }
+  if (typeof protocol.handle === 'function') {
+    protocol.handle(SCHEME, async (request) => {
+      const r = await serveAsset(where, request)
+      return new Response(r.body, { status: r.status, headers: r.headers })
+    })
+    return 'handle'
+  }
+  protocol.registerBufferProtocol(SCHEME, (request, callback) => {
+    serveAsset(where, request).then(
+      (r) => callback({ statusCode: r.status, headers: r.headers, data: Buffer.from(r.body) }),
+      () => callback({ statusCode: NOT_FOUND.status, headers: NOT_FOUND.headers, data: Buffer.from(NOT_FOUND.body) }),
+    )
   })
+  return 'buffer'
 }

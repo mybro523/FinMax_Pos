@@ -24,9 +24,24 @@ const RETRY_PAUSES_MS = [2000, 5000, 10000]
 
 export const tagOf = (version) => 'v' + version
 
-// Без чего программа в аптеке не обновится: установщик, его «карта» для докачки
-// изменившихся кусков и описание версии, по которому программа узнаёт о ней
-export const expectedAssets = (version) => [`FinMax-POS-Setup-${version}.exe`, `FinMax-POS-Setup-${version}.exe.blockmap`, 'latest.yml']
+// Без чего программы в магазинах не обновятся. Обычная (Windows 10 и 11) — установщик, его
+// «карта» для докачки изменившихся кусков и описание версии latest.yml. Программа для
+// Windows 7 и 8 — свои установщик, карта и legacy.yml: с 1.5.0 каждый выпуск несёт обе.
+// Без legacy.yml программы на Windows 7 молча перестали бы обновляться
+export const modernAssets = (version) => [`FinMax-POS-Setup-${version}.exe`, `FinMax-POS-Setup-${version}.exe.blockmap`, 'latest.yml']
+export const legacyAssets = (version) => [`FinMax-POS-Setup-${version}-Windows-7-8.exe`, `FinMax-POS-Setup-${version}-Windows-7-8.exe.blockmap`, 'legacy.yml']
+export const expectedAssets = (version) => [...modernAssets(version), ...legacyAssets(version)]
+
+// Описание версии (latest.yml / legacy.yml): та ли в нём версия и тот ли установщик.
+// Перепутать их — значит отправить программам на Windows 10 старый движок или программам
+// на Windows 7 — новый, который там не запустится. Пусто — всё верно
+export function checkFeedFile(text, { version, installer }) {
+  const v = /^version:\s*(.+)$/m.exec(String(text || ''))?.[1]?.trim()
+  const p = /^path:\s*(.+)$/m.exec(String(text || ''))?.[1]?.trim()
+  if (v !== version) return `в нём версия ${v || '— (не указана)'}, а выкладывается ${version}`
+  if (p !== installer) return `в нём установщик «${p || '— (не указан)'}», а должен быть «${installer}»`
+  return ''
+}
 
 export function createReleases({ owner, repo, token, fetchImpl = fetch, pause = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
   const where = `${owner}/${repo}`
@@ -116,5 +131,41 @@ export function createReleases({ owner, repo, token, fetchImpl = fetch, pause = 
     return done.data
   }
 
-  return { find, prepare, publish }
+  // Положить файл в черновик. Установщик для Windows 7 и 8 собирается отдельно, и в выпуск
+  // его кладёт сценарий выкладки, а не упаковщик. Такой же файл уже лежит — не трогаем;
+  // недокачанный (оборвалось посередине) — убираем и кладём заново. Не повторяем сами:
+  // оборванная загрузка оставляет недокачанный файл, повтор разберётся с ним при новом запуске
+  async function upload(version, name, bytes, type = 'application/octet-stream') {
+    const rel = await find(version)
+    if (!rel) throw new Error(`Выпуск версии ${version} не найден в ${where} — класть файл ${name} некуда.`)
+    if (!rel.draft) throw new Error(`Выпуск ${version} уже открыт — подкладывать в него файлы нельзя.`)
+    const same = (rel.assets || []).find((a) => a.name === name)
+    if (same && same.state === 'uploaded' && same.size === bytes.length) return same
+    if (same) {
+      const gone = await call('DELETE', `/releases/assets/${same.id}`)
+      if (gone.status !== 204) throw refuse(gone, `убрать недокачанный файл ${name}`)
+    }
+    const url = String(rel.upload_url || '').split('{')[0] + '?name=' + encodeURIComponent(name)
+    let res
+    try {
+      res = await fetchImpl(url, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', 'User-Agent': 'apteka-desktop-build', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': type },
+        body: bytes,
+      })
+    } catch (e) {
+      throw new Error(`GitHub не отвечает (${e?.message || e}). Проверьте интернет и повторите выкладку.`)
+    }
+    const text = await res.text()
+    let data = null
+    try {
+      data = text ? JSON.parse(text) : null
+    } catch {
+      data = null
+    }
+    if (res.status !== 201) throw refuse({ status: res.status, data }, `положить файл ${name}`)
+    return data
+  }
+
+  return { find, prepare, publish, upload }
 }

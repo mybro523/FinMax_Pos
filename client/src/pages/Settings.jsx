@@ -19,6 +19,7 @@ import CustomerScreenPanel from '../components/CustomerScreenPanel'
 import ChekPanel from '../components/ChekPanel'
 import VesyPanel from '../components/VesyPanel'
 import LanPanel from '../components/LanPanel'
+import LitePanel from '../components/LitePanel'
 import { isDesktop } from '../lib/desktop'
 
 // ── Подписка ──
@@ -317,6 +318,8 @@ export default function Settings() {
               {isDesktop && <LanPanel manage />}
               {/* Этикетки весов разбирает касса на этом устройстве — настройка здесь же */}
               <VesyPanel />
+              {/* Облегчённый вид для слабого компьютера — только в программе */}
+              {isDesktop && <LitePanel />}
             </>
           )}
 

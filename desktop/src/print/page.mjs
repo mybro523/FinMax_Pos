@@ -46,3 +46,30 @@ export function printOptions({ printer, landscape, roll, copies }) {
     ...(roll ? {} : { pageSize: 'A4' }),
   }
 }
+
+// ── Принтеры, которые сохраняют файл, а не печатают ──
+// «Microsoft Print to PDF», «XPS Document Writer», «OneNote», «Факс» — вместо бумаги они
+// спрашивают имя файла. На старом движке (программа для Windows 7 и 8, Electron 22)
+// печать на них без окна печати зависает или роняет окно программы — а в Windows 7
+// такой принтер часто стоит по умолчанию. Поэтому там программа на них не печатает и
+// предлагает «Сохранить в PDF».
+// list — ответ getPrintersAsync(), name — выбранный принтер (пусто — принтер по умолчанию).
+// 'file' — принтер сохраняет файл; 'none' — в Windows нет ни одного принтера; null — печатать.
+// Узнаём по драйверу и имени: любые «PDF-принтеры» (Microsoft Print to PDF, Adobe PDF, PDF24,
+// doPDF…), XPS, OneNote, Office Document Image Writer, драйвер общего факса Microsoft и сам
+// «Факс». Настоящий аппарат с FAX в названии модели (Brother FAX-2840) — принтер, его не трогаем
+const FILE_PRINTER = /pdf|xps document writer|onenote|document image writer|shared fax driver/i
+const FAX_NAME = /^(fax|факс)$/i
+
+export function printerKind(list, name) {
+  // Список принтеров не прочитался — решать не по чему: печатает движок, как обычно
+  if (!Array.isArray(list)) return null
+  const all = list.filter((p) => p && typeof p.name === 'string')
+  if (!all.length) return name ? null : 'none'
+  // Принтер по умолчанию не назначен, а принтеров несколько — пусть решает движок
+  const p = name ? all.find((x) => x.name === name) : all.find((x) => x.isDefault) || (all.length === 1 ? all[0] : null)
+  if (!p) return null
+  if (FAX_NAME.test(p.name.trim())) return 'file'
+  const text = [p.name, p.displayName, p.options?.['printer-make-and-model'], p.options?.system_driverinfo].filter((x) => typeof x === 'string').join(' ')
+  return FILE_PRINTER.test(text) ? 'file' : null
+}

@@ -52,6 +52,38 @@ export default function Home() {
     showCustomer({ mode: 'idle', lang, shop, labels: customerLabels(t) })
   }, [lang, shop, t])
 
+  // ── Код главных разделов — заранее, пока человек смотрит на главный экран ──
+  // Первое открытие кассы, товаров или панели иначе ждёт загрузки своего кода — на
+  // слабом компьютере (часто это Windows 7) это заметная пауза. Грузим по одному, когда
+  // окно свободно, и только разделы, которые этому сотруднику открыты. Только в программе:
+  // код у неё на диске, а сайт с телефона тратил бы на это трафик
+  const role = user?.role
+  useEffect(() => {
+    if (!isDesktop) return undefined
+    const open = (to) => {
+      const n = NAV.find((x) => x.to === to)
+      return !!n && allowedNav(user, n)
+    }
+    const jobs = []
+    if (open('/pos')) jobs.push(() => import('./Pos'))
+    if (open('/products')) jobs.push(() => import('./Products'))
+    if (open('/dashboard')) jobs.push(() => import('./Dashboard'), () => import('../components/DashboardCharts'))
+    let stopped = false
+    let at = 0
+    const idle = (fn) => (typeof window.requestIdleCallback === 'function' ? window.requestIdleCallback(fn, { timeout: 4000 }) : setTimeout(fn, 400))
+    const next = () => {
+      if (stopped || at >= jobs.length) return
+      jobs[at++]().catch(() => {}).finally(() => idle(next))
+    }
+    const start = setTimeout(() => idle(next), 1500)
+    return () => {
+      stopped = true
+      clearTimeout(start)
+    }
+    // Права меняются вместе с ролью — по ней и перезапускаем
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role])
+
   return (
     <Layout
       hub

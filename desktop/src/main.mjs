@@ -13,6 +13,8 @@ import Database from 'better-sqlite3'
 import updaterPackage from 'electron-updater'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
+import nodeHttp from 'node:http'
+import nodeHttps from 'node:https'
 import { readFile } from 'node:fs/promises'
 import nodeNet from 'node:net'
 import os from 'node:os'
@@ -30,8 +32,10 @@ import { getMeta, openDb, setMeta } from './local/db.mjs'
 import { lastFloor, lastSeen } from './local/licence.mjs'
 import { CORE_SCHEMA, PHARMACY_SCHEMA } from './local/schema.mjs'
 import { createLog } from './log.mjs'
+import { createFetch } from './fetch-compat.mjs'
+import { LITE_ARG, liteState, sanitizeLite } from './lite.mjs'
 import { layoutTicket, renderTicket } from './print/escpos.mjs'
-import { pageRequest, pdfOptions, printOptions } from './print/page.mjs'
+import { pageRequest, pdfOptions, printerKind, printOptions } from './print/page.mjs'
 import { LOGO } from './print/logo.mjs'
 import { runPowerShell } from './print/powershell.mjs'
 import { checkHost, sendNetwork, sendWindows } from './print/transport.mjs'
@@ -71,6 +75,8 @@ const ICON = join(ROOT, 'assets', 'icon.png')
 // Всё, что ниже, действует только при запуске из исходников — для разработки
 // и проверок. У магазина этих лазеек нет.
 const DEV = !app.isPackaged
+// Сборка для Windows 7 и 8: старый движок Electron 22 (новые его версии Windows 7 не поддерживают)
+const LEGACY = Number(String(process.versions.electron || '').split('.')[0]) < 23
 // Адрес сервера разработки интерфейса (electron:dev). Пусто — открываем сборку
 const DEV_URL = DEV ? process.env.APTEKA_DEV_URL || '' : ''
 // Отдельная папка данных: проверки не должны трогать настоящий вход и настоящую базу
@@ -145,6 +151,40 @@ async function start() {
   const apiUrl = resolveApiUrl({ packaged: app.isPackaged, env: process.env, built })
   if (!apiUrl) log.error('адрес сервера не задан — запросы к серверу работать не будут')
   const settings = createSettings({ file: join(userData, 'settings.json'), fs })
+
+  // ── Облегчённый вид (lite.mjs) ──
+  // Слабый ли этот компьютер: память, ядра, ускоряет ли видеокарта отрисовку.
+  // Про видеокарту Electron узнаёт не сразу: до первого окна он отвечает «ускорения нет»
+  // на любом компьютере. Поэтому при запуске берём то, что узнали о ней в прошлый раз
+  // (settings.gpuSoft), а настоящий ответ — через несколько секунд после загрузки окна
+  // (recheckLite); если вид от этого меняется, окно перекрашивается на ходу
+  let gpuKnown = false
+  const gpuNow = () => {
+    try {
+      return app.getGPUFeatureStatus()
+    } catch {
+      return null
+    }
+  }
+  const machine = () => ({
+    totalmem: os.totalmem(),
+    cpus: os.cpus().length,
+    gpu: gpuKnown ? gpuNow() : settings.get().gpuSoft ? { gpu_compositing: 'disabled_software' } : null,
+  })
+  const liteNow = () => liteState(settings.get().lite, machine())
+  // Какой вид сейчас у окна — чтобы не слать лишнего
+  let liteShown = null
+  const recheckLite = () => {
+    gpuKnown = true
+    const g = gpuNow()
+    const soft = !!g && !String(g.gpu_compositing || '').startsWith('enabled')
+    if (soft !== settings.get().gpuSoft) settings.set({ gpuSoft: soft })
+    const st = liteNow()
+    if (win && !win.isDestroyed() && st.active !== liteShown) {
+      liteShown = st.active
+      win.webContents.send('lite:state', st)
+    }
+  }
 
   // ── Ключи входа ──
   const store = createSessionStore({
@@ -248,7 +288,8 @@ async function start() {
   // запрос Node просто не дошёл бы до сервера.
   const gateway = createGateway({
     apiUrl,
-    fetchImpl: (url, init) => net.fetch(url, init),
+    // На старом движке (Windows 7 и 8) net.fetch нет — тот же запрос через net.request
+    fetchImpl: createFetch({ net, https: nodeHttps, http: nodeHttp, log }),
     session: store,
     core,
     // Отпечаток пароля для входа без интернета шифруется средствами Windows, как
@@ -362,6 +403,8 @@ async function start() {
       // Соседние кассы в местной сети: кто на связи
       lan: gateway.lanStatus(),
       version: app.getVersion(),
+      // win7 — сборка для Windows 7 и 8: в окне состояния видно, какая программа стоит
+      edition: LEGACY ? 'win7' : '',
       update: updater.state(),
       // Часам компьютера сейчас верить нельзя — время в чеках может быть неверным, и
       // человеку надо об этом сказать. А если время идёт по ним, не сверенное с
@@ -460,7 +503,8 @@ async function start() {
     if (trusted(event)) gateway.listen(false)
     return true
   })
-  ipcMain.handle('app:info', (event) => (trusted(event) ? { version: app.getVersion(), packaged: app.isPackaged } : null))
+  // edition: win7 — сборка для Windows 7 и 8 (старый движок), пусто — обычная
+  ipcMain.handle('app:info', (event) => (trusted(event) ? { version: app.getVersion(), packaged: app.isPackaged, edition: LEGACY ? 'win7' : '' } : null))
   // «Закрыть программу» с главного экрана: у кассы не всегда есть мышь с крестиком
   ipcMain.handle('app:quit', (event) => {
     if (!trusted(event)) return false
@@ -502,6 +546,16 @@ async function start() {
   // ── Состояние программы: связь, очередь, копия, обновление ──
   // Папка копий и печать — по правам из роли, а не по должности
   const allowed = (key) => gateway.activeCan(key)
+  // Облегчённый вид: узнать может любой вошедший, поменять — тот, кому доступны «Кассы и устройства»
+  ipcMain.handle('lite:get', (event) => (trusted(event) && gateway.activeRole() ? liteNow() : null))
+  ipcMain.handle('lite:set', (event, mode) => {
+    if (!trusted(event) || !allowed('settings.devices')) return null
+    settings.set({ lite: sanitizeLite(mode) })
+    const st = liteNow()
+    // Окно перекрашивается само по ответу — запоминаем, какой вид у него теперь
+    liteShown = st.active
+    return st
+  })
   ipcMain.handle('sync:status', (event) => (trusted(event) ? fullStatus() : null))
   // «Обменяться сейчас» — и окно само зовёт это, когда система сообщает, что сеть вернулась
   ipcMain.handle('sync:now', async (event) => {
@@ -746,6 +800,14 @@ async function start() {
   ipcMain.handle('print:page', async (event, req) => {
     if (!trusted(event) || !gateway.activeRole()) return { ok: false, error: 'Требуется вход в систему' }
     const ask = pageRequest(req)
+    // Старый движок (Windows 7 и 8): на принтере, который сохраняет файл («Microsoft Print
+    // to PDF», «XPS Document Writer»), печать без окна печати зависает или роняет окно.
+    // Такой принтер в Windows 7 часто стоит по умолчанию — говорим словами, что делать
+    if (LEGACY) {
+      const kind = printerKind(await win.webContents.getPrintersAsync().catch(() => null), ask.printer)
+      if (kind === 'file') return { ok: false, error: 'Этот принтер не печатает на бумаге, а сохраняет файл. Чтобы сохранить файлом, нажмите «Сохранить в PDF».' }
+      if (kind === 'none') return { ok: false, error: 'В Windows не установлен ни один принтер.' }
+    }
     return await new Promise((resolve) => {
       win.webContents.print(printOptions(ask), (done, reason) => {
         if (!done) log.warn(`не напечатано (лист${ask.printer ? ', ' + ask.printer : ''}): ${reason || ''}`)
@@ -836,7 +898,21 @@ async function start() {
     throw new Error('Интерфейс программы не собран. Выполните «npm run electron:build» в папке desktop.')
   }
 
-  createWindow(ses, userData)
+  liteShown = liteNow().active
+  createWindow(ses, userData, { lite: liteShown })
+  // Настоящий ответ о видеокарте — когда окно загрузилось и Electron её опросил. И после
+  // каждой перезагрузки окна (после сбоя) — заново: из командной строки окно прочитает
+  // вид на момент запуска, а он мог с тех пор измениться
+  win.webContents.on('did-finish-load', () => {
+    setTimeout(() => {
+      liteShown = null
+      recheckLite()
+    }, gpuKnown ? 300 : 3000)
+  })
+  // Видеокарта отказала посреди работы — Electron перешёл на отрисовку без неё
+  app.on('child-process-gone', (_e, d) => {
+    if (d?.type === 'GPU') setTimeout(recheckLite, 1000)
+  })
 
   // ── Экран покупателя ──
   // Второй экран моноблока: корзина и итог. Открывается сам, если второй экран есть
@@ -910,7 +986,7 @@ function isDevServer(url) {
   }
 }
 
-function createWindow(ses, userData) {
+function createWindow(ses, userData, { lite = false } = {}) {
   const state = createWindowState({ file: join(userData, 'window.json'), fs })
   const saved = state.load()
 
@@ -934,6 +1010,8 @@ function createWindow(ses, userData) {
       spellcheck: false,
       // Инструменты разработчика — только при запуске из исходников
       devTools: DEV,
+      // Облегчённый вид — с первого кадра (окно читает его из своей командной строки)
+      additionalArguments: lite ? [LITE_ARG] : [],
     },
   })
 

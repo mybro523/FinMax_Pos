@@ -7,7 +7,9 @@ import globals from 'globals'
 // живёт в Node, поэтому и глобальные объекты здесь его, а не браузера.
 
 export default [
-  { ignores: ['node_modules/**', 'renderer/**', 'release/**', 'test-results/**'] },
+  // legacy/ — сборка для Windows 7 и 8: всё, кроме её настроек, кладёт туда сценарий
+  // сборки (основная часть одним файлом, интерфейс) — проверяются исходники, а не копии
+  { ignores: ['node_modules/**', 'renderer/**', 'release/**', 'release-legacy/**', 'legacy/**', 'test-results/**'] },
   js.configs.recommended,
   {
     files: ['**/*.{js,mjs,cjs}'],

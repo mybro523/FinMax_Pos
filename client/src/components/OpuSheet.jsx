@@ -16,9 +16,11 @@ import { fmtDate, fmtDateTime } from '../lib/time'
 const OLD = new Date('2000-01-01T00:00:00Z').getTime()
 
 // Сумма без «сомони» в каждой клетке (валюта — в шапке): целые — без копеек
+const NF_INT = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+const NF_FRAC = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 function amount(v) {
   const n = Math.round((Number(v) || 0) * 100) / 100
-  const text = Math.abs(n).toLocaleString('ru-RU', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 })
+  const text = (n % 1 ? NF_FRAC : NF_INT).format(Math.abs(n))
   return n < 0 ? '−' + text : text
 }
 

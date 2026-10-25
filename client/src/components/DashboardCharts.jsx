@@ -5,6 +5,7 @@ import { LuTrendingUp, LuBoxes } from 'react-icons/lu'
 import { money } from '../db/store'
 import { translate as tr } from '../lib/i18n'
 import { axisNumber } from '../lib/number'
+import { useLite } from '../lib/lite'
 
 // Графики вынесены в отдельный файл: библиотека диаграмм весит ~370 КБ и грузится
 // уже после того, как показаны карточки и таблицы — панель открывается мгновенно.
@@ -16,6 +17,8 @@ const TOOLTIP = {
 }
 
 export default function DashboardCharts({ chart, topProducts, onDay, onProduct }) {
+  // Облегчённый вид (слабый компьютер) — без анимации графиков
+  const animate = !useLite()
   return (
     <>
       <div className="panel" data-tour="dash.chart">
@@ -39,7 +42,7 @@ export default function DashboardCharts({ chart, topProducts, onDay, onProduct }
             <YAxis tick={{ fontSize: 12, fill: 'var(--muted)' }} axisLine={false} tickLine={false} width={64} tickFormatter={(v) => axisNumber(v, tr)} />
             <Tooltip formatter={(v) => money(v)} contentStyle={TOOLTIP} />
             <Area
-              type="monotone" dataKey="sum" stroke="#00359f" strokeWidth={2.5} fill="url(#g)"
+              type="monotone" dataKey="sum" stroke="#00359f" strokeWidth={2.5} fill="url(#g)" isAnimationActive={animate}
               activeDot={{ r: 5, fill: '#efbd24', stroke: '#fff', strokeWidth: 2 }}
             />
           </AreaChart>
@@ -60,7 +63,7 @@ export default function DashboardCharts({ chart, topProducts, onDay, onProduct }
               tickFormatter={(n) => (n.length > 18 ? n.slice(0, 18) + '…' : n)}
             />
             <Tooltip formatter={(v) => money(v)} contentStyle={TOOLTIP} cursor={{ fill: 'var(--hover)' }} />
-            <Bar dataKey="sum" radius={[0, 5, 5, 0]} barSize={17} cursor="pointer" onClick={(d) => d && onProduct(d.name)}>
+            <Bar dataKey="sum" radius={[0, 5, 5, 0]} barSize={17} cursor="pointer" isAnimationActive={animate} onClick={(d) => d && onProduct(d.name)}>
               {topProducts.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
             </Bar>
           </BarChart>

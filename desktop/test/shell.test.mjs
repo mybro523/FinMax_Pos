@@ -31,11 +31,14 @@ test('мост и основная часть называют каналы од
   assert.deepEqual(bridge, main, 'мост зовёт канал, которого основная часть не слушает (или наоборот)')
 })
 
-test('события сервера: мост слушает тот же канал, в который их шлёт основная часть', () => {
-  const listen = read('src/preload.cjs').match(/ipcRenderer\.on\('([^']+)'/)?.[1]
-  const send = read('src/main.mjs').match(/webContents\.send\('([^']+)'/)?.[1]
-  assert.ok(listen && send)
-  assert.equal(listen, send)
+test('события для окна: мост слушает те же каналы, в которые их шлёт основная часть', () => {
+  // События сервера (realtime:event) и смена облегчённого вида (lite:state) — каждое
+  // слушается под тем же именем, под каким шлётся, и лишних каналов нет ни с одной стороны
+  const listen = [...read('src/preload.cjs').matchAll(/ipcRenderer\.on\('([^']+)'/g)].map((m) => m[1]).sort()
+  const send = [...new Set([...read('src/main.mjs').matchAll(/webContents\.send\('([^']+)'/g)].map((m) => m[1]))].sort()
+  assert.ok(listen.length && send.length)
+  assert.deepEqual(listen, send)
+  assert.ok(listen.includes('realtime:event'))
 })
 
 test('окно создаётся в песочнице и без Node на странице', () => {

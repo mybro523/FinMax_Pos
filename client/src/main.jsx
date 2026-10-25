@@ -1,3 +1,4 @@
+import './lib/polyfills' // заплатки для старого движка (программа для Windows 7 и 8) — первыми
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, HashRouter } from 'react-router-dom'
@@ -5,6 +6,7 @@ import App from './App.jsx'
 import { unlockAudio } from './lib/sound'
 import { startVersionWatch } from './lib/version'
 import './lib/theme' // применяет сохранённую тему (светлая/тёмная) при старте
+import './lib/lite' // облегчённый вид на слабом компьютере (программа для Windows) — с первого кадра
 import './index.css'
 
 // Разблокируем звук сканера при первом жесте пользователя

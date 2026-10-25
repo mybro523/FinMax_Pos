@@ -1709,7 +1709,8 @@ tbody tr.clickable { cursor: pointer; }
 .tur-spot {
   position: fixed; border-radius: 12px;
   border: 2px solid var(--accent);
-  box-shadow: 0 0 0 9999px rgba(6, 10, 14, 0.58), 0 0 0 5px color-mix(in srgb, var(--accent) 22%, transparent);
+  /* Кольцо мягким акцентом; смешанный цвет — ниже, в @supports (см. «color-mix» в конце) */
+  box-shadow: 0 0 0 9999px rgba(6, 10, 14, 0.58), 0 0 0 5px var(--accent-soft);
   transition: top 0.22s ease, left 0.22s ease, width 0.22s ease, height 0.22s ease;
 }
 .tur-card {
@@ -1731,7 +1732,7 @@ tbody tr.clickable { cursor: pointer; }
 .tur-body p { font-size: 14.5px; line-height: 1.6; margin: 0 0 10px; }
 .tur-list { margin: 0 0 10px; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.55; }
 .tur-list-warn li::marker { color: var(--warn); }
-.tur-tip { margin: 4px 0 10px; padding: 10px 12px; border-radius: 10px; font-size: 13.5px; line-height: 1.5; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+.tur-tip { margin: 4px 0 10px; padding: 10px 12px; border-radius: 10px; font-size: 13.5px; line-height: 1.5; background: var(--accent-soft); border: 1px solid var(--border); }
 .tur-missing { background: var(--soft); border-color: var(--border); color: var(--muted); }
 .tur-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--border); }
 .tur-foot-right { display: flex; gap: 8px; }
@@ -1841,7 +1842,7 @@ tbody tr.clickable { cursor: pointer; }
   transition: background 0.12s, border-color 0.12s;
 }
 .role-item:hover { background: var(--hover); }
-.role-item.active { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.role-item.active { background: var(--accent-soft); border-color: var(--accent); }
 .role-item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .role-item-main b { font-size: 14px; }
 .role-lock { display: inline-flex; color: var(--muted-2); flex-shrink: 0; }
@@ -2081,10 +2082,10 @@ label .tag-cat { font-weight: 400; }
 
 /* ═════════ Таблицы закупок и отчётов ═════════ */
 .zak-table td { vertical-align: top; }
-.zak-pay td { background: color-mix(in srgb, var(--green-soft) 55%, transparent); }
+.zak-pay td { background: var(--green-soft); }
 .zak-pay-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--green); flex-wrap: wrap; }
 /* Возврат товара поставщику — строка со знаком минус */
-.zak-ret td { background: color-mix(in srgb, var(--danger-soft) 45%, transparent); }
+.zak-ret td { background: var(--danger-soft); }
 tfoot .zak-total td { font-weight: 700; border-top: 2px solid var(--border-strong); background: var(--soft); font-variant-numeric: tabular-nums; }
 @media (max-width: 760px) {
   tfoot .zak-total td { display: block; text-align: right; }
@@ -2360,7 +2361,7 @@ html.has-foot .prh-side { max-height: calc(100vh - 56px - var(--app-foot-h)); }
 .prh-pick-ok { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: var(--green); display: inline-flex; pointer-events: none; }
 /* Новый товар (его нет в базе — заведётся из формы): поле названия обведено золотом,
    внутри метка «новый»; справа в форме — единица, штук в упаковке и категория */
-.prh-pick.nov .prh-f-name input { border-color: var(--gold); box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 24%, transparent); }
+.prh-pick.nov .prh-f-name input { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(239, 189, 36, 0.24); }
 .prh-pick.nov .prh-search input { padding-right: 84px; }
 .prh-pick-new {
   position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none;
@@ -2552,3 +2553,39 @@ html.has-foot .prh-side { max-height: calc(100vh - 56px - var(--app-foot-h)); }
 @media print {
   .prh { display: none !important; }
 }
+
+/* ── Смешанные цвета (color-mix) — только где они есть ──
+   В Chrome 108 (программа для Windows 7 и 8) color-mix нет. Запасное объявление рядом здесь
+   не спасает: строка с var() принимается при разборе, перебивает запасную и только потом
+   оказывается неверной — и цвет пропадает совсем. Поэтому обычные цвета стоят в своих
+   правилах выше, а смешанные — здесь, под проверкой @supports: старый движок блок пропускает */
+@supports (color: color-mix(in srgb, red, red)) {
+  .tur-spot { box-shadow: 0 0 0 9999px rgba(6, 10, 14, 0.58), 0 0 0 5px color-mix(in srgb, var(--accent) 22%, transparent); }
+  .tur-tip { border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+  .role-item.active { border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+  .zak-pay td { background: color-mix(in srgb, var(--green-soft) 55%, transparent); }
+  .zak-ret td { background: color-mix(in srgb, var(--danger-soft) 45%, transparent); }
+  .prh-pick.nov .prh-f-name input { box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 24%, transparent); }
+}
+
+/* ── Облегчённый вид: слабый компьютер (программа для Windows, lib/lite.js) ──
+   Без анимаций, плавных переходов и больших теней: на старой видеокарте и без её ускорения
+   тормозят именно они. Анимации снимаются совсем (а не на ноль секунд) — иначе браузер всё
+   равно заводит их на каждую строку таблицы. Ничего в программе не ждёт их конца, и все
+   элементы видимы и без анимации появления. Крутятся только значки загрузки (.spin, .pp-spin):
+   застывший значок на медленном компьютере выглядел бы как зависание. Кольца фокуса и рамки
+   остаются — они дешёвые */
+html.lite *:not(.spin):not(.pp-spin), html.lite *::before, html.lite *::after {
+  animation-name: none !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}
+html.lite .modal, html.lite .toast, html.lite .auth-card, html.lite .login-card, html.lite .ticket,
+html.lite .pp-page, html.lite .pp-tape, html.lite .tur-card, html.lite .about-emblem, html.lite .wo-suggest,
+html.lite .btn:hover, html.lite .btn.gold:hover, html.lite .page-acts .btn:hover, html.lite .topbar-actions .btn:hover {
+  box-shadow: none !important;
+}
+/* Тень под картинками плиток меню — фильтр на каждой плитке, самое дорогое на главном экране */
+html.lite .hub-tile .hub-pic { filter: none !important; }
+html.lite .hub-tile .hub-name { text-shadow: none !important; }

@@ -101,9 +101,12 @@ function PrintTable({ title, cols, rows, itogi, className }) {
   )
 }
 
-// Минус ноль («изъято −0») печатается просто нулём
+// Минус ноль («изъято −0») печатается просто нулём. Форматтеры — один раз на всю программу:
+// печатная таблица бывает в тысячи клеток
+const NF_INT = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+const NF_FRAC = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const moneyText = (v) => {
   if (typeof v !== 'number') return String(v ?? '')
   const n = v === 0 ? 0 : v
-  return n.toLocaleString('ru-RU', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 })
+  return (n % 1 ? NF_FRAC : NF_INT).format(n)
 }

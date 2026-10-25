@@ -49,41 +49,72 @@ export function lastNDayKeys(n) {
 // ── Отображение (всегда в таджикском поясе) ──
 const opt = (o) => ({ timeZone: TJ_TZ, ...o })
 
+// ── Форматтеры дат: каждый создаётся один раз ──
+// Date.toLocaleString(…, параметры) на каждый вызов заново собирает форматтер — дорого:
+// в списках чеков и продаж это тысячи вызовов, а на старом компьютере (программа для
+// Windows 7) — заметные доли секунды. Здесь те же форматтеры, но каждый — один раз.
+// Поля по умолчанию — те же, что подставил бы сам toLocaleString (дата и время) или
+// toLocaleDateString (дата), если их не назвали
+const DATE_FIELDS = { year: 'numeric', month: 'numeric', day: 'numeric' }
+const TIME_FIELDS = { hour: 'numeric', minute: 'numeric', second: 'numeric' }
+const hasDate = (o) => ['weekday', 'year', 'month', 'day'].some((k) => o[k] !== undefined)
+const hasTime = (o) => ['dayPeriod', 'hour', 'minute', 'second', 'fractionalSecondDigits'].some((k) => o[k] !== undefined)
+const formatters = new Map()
+function formatter(kind, o) {
+  const key = kind + JSON.stringify(o)
+  let f = formatters.get(key)
+  if (!f) {
+    let full = o
+    if (kind === 'any' && !hasDate(o) && !hasTime(o)) full = { ...DATE_FIELDS, ...TIME_FIELDS, ...o }
+    if (kind === 'date' && !hasDate(o)) full = { ...DATE_FIELDS, ...o }
+    f = new Intl.DateTimeFormat('ru-RU', full)
+    formatters.set(key, f)
+  }
+  return f
+}
+// Как toLocaleString / toLocaleDateString: и неверная дата — «Invalid Date», а не ошибка
+function show(kind, d, o) {
+  const date = new Date(d)
+  if (Number.isNaN(date.getTime())) return 'Invalid Date'
+  return formatter(kind, opt(o)).format(date)
+}
+
 // Полные дата и время
 // Номер чека — из даты и времени продажи по таджикским часам: ММДД-ЧЧММСС.
 // Он всегда уникален в пределах кассы, не требует ни интернета, ни счётчика,
 // и один и тот же при повторной печати — потому что время продажи не меняется
+const CHEK_DTF = new Intl.DateTimeFormat('ru-RU', {
+  timeZone: TJ_TZ, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+})
 export function chekNomer(d) {
-  const p = new Intl.DateTimeFormat('ru-RU', {
-    timeZone: TJ_TZ, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-  }).formatToParts(new Date(d))
+  const p = CHEK_DTF.formatToParts(new Date(d))
   const at = (type) => p.find((x) => x.type === type)?.value || '00'
   return `${at('month')}${at('day')}-${at('hour')}${at('minute')}${at('second')}`
 }
 
 export function fmtDateTime(d) {
   if (!d) return '—'
-  return new Date(d).toLocaleString('ru-RU', opt({}))
+  return show('any', d, {})
 }
 // Короткие дата+время: дд.мм чч:мм
 export function fmtShort(d) {
   if (!d) return '—'
-  return new Date(d).toLocaleString('ru-RU', opt({ day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))
+  return show('any', d, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 // Только время чч:мм
 export function fmtTime(d) {
   if (!d) return '—'
-  return new Date(d).toLocaleString('ru-RU', opt({ hour: '2-digit', minute: '2-digit' }))
+  return show('any', d, { hour: '2-digit', minute: '2-digit' })
 }
 // Только дата дд.мм
 export function fmtDayMonth(d) {
   if (!d) return '—'
-  return new Date(d).toLocaleDateString('ru-RU', opt({ day: '2-digit', month: '2-digit' }))
+  return show('date', d, { day: '2-digit', month: '2-digit' })
 }
 // Дата дд.мм.гггг
 export function fmtDate(d) {
   if (!d) return '—'
-  return new Date(d).toLocaleDateString('ru-RU', opt({}))
+  return show('date', d, {})
 }
 
 // ── Момент подписки ──
@@ -93,9 +124,9 @@ export function fmtDate(d) {
 // именно про час.
 export function tjMoment(d) {
   if (!d) return '—'
-  return new Date(d).toLocaleString('ru-RU', opt({
+  return show('any', d, {
     day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  })).replace(', ', ' в ')
+  }).replace(', ', ' в ')
 }
 
 // Дата и час порознь — для полей ввода, которые понимают только «гггг-мм-дд» и «чч:мм»

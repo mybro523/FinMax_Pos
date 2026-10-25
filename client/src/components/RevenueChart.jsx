@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts'
 import { money } from '../db/store'
 import { translate as tr } from '../lib/i18n'
+import { useLite } from '../lib/lite'
 
 // Доход сервиса по месяцам. Вынесено отдельным файлом: библиотека диаграмм весит
 // около 370 КБ и грузится уже после того, как показаны числа и список магазинов —
@@ -40,6 +41,7 @@ function useNarrow() {
 
 export default function RevenueChart({ data }) {
   const narrow = useNarrow()
+  const animate = !useLite()
   const rows = (data || []).map((r) => ({ ...r, label: label(r.month) }))
   // Последний столбик — текущий месяц, он ещё не закончился. Красим иначе,
   // иначе «спад в этом месяце» пугал бы каждое первое число.
@@ -74,7 +76,7 @@ export default function RevenueChart({ data }) {
               cursor={{ fill: 'var(--soft)' }}
               formatter={(v) => [money(v), tr('Доход')]}
             />
-            <Bar dataKey="amount" radius={[6, 6, 0, 0]}>
+            <Bar dataKey="amount" radius={[6, 6, 0, 0]} isAnimationActive={animate}>
               {rows.map((r, i) => (
                 <Cell key={r.month} fill={i === last ? '#8aa5e3' : '#00359f'} />
               ))}

@@ -491,7 +491,8 @@ function StatusModal({ st, onClose }) {
         {/* ── Обновление ── */}
         <div className="sync-section">
           <h4>{t('Обновление программы')}</h4>
-          <Row label={t('Версия программы')}>{st?.version || '—'}</Row>
+          {/* Сборка для Windows 7 и 8 (старый движок) — видно сразу, какая программа стоит */}
+          <Row label={t('Версия программы')}>{st?.version || '—'}{st?.version && st?.edition === 'win7' ? ` · ${t('для Windows 7 и 8')}` : ''}</Row>
           <div className={update.state === 'ready' ? 'note info' : 'tag-cat'} style={{ margin: '6px 0' }}>{updateText(update, t)}</div>
           <div className="modal-actions" style={{ justifyContent: 'flex-start', flexWrap: 'wrap' }}>
             {update.state === 'ready' && (

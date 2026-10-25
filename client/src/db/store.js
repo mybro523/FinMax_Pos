@@ -504,9 +504,12 @@ export const uid = () => Date.now().toString(36) + Math.random().toString(36).sl
 
 // Денежный формат: целые — без копеек, дробные — до 2 знаков (дирамы).
 // Согласовано с серверным Decimal(12,2), чтобы не было ложных «расхождений» в кассе.
+// Форматтер один на всю программу: собирать его заново на каждую сумму дорого — в кассе,
+// списке товаров и отчётах это тысячи вызовов, а на старом компьютере — доли секунды
+const MONEY_NF = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })
 export const money = (n) => {
   const v = Math.round((Number(n) || 0) * 100) / 100
-  return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(v) + ' сомони'
+  return MONEY_NF.format(v) + ' сомони'
 }
 
 // ── Штучная продажа: упаковки + вскрытая упаковка ──
