@@ -9,8 +9,6 @@
   --muted: #b9c4e4;
   --line: rgba(255, 255, 255, 0.12);
   --gold: #efbd24;
-  --max: #86aaf8;
-  --pos: #4fc483;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 /* Скрытое (скидки нет, сдачи нет) — скрыто, какое бы оформление у строки ни было */
@@ -26,14 +24,17 @@ body {
 }
 .screen { height: 100%; display: flex; flex-direction: column; padding: 2.4vh 3vw; }
 
-/* Полоса сверху: магазин слева, FinMax POS справа */
-.bar { display: flex; align-items: center; gap: 2vw; font-size: clamp(14px, 2.6vh, 30px); min-height: 4vh; }
-.bar-shop { font-weight: 600; color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bar-test { font-weight: 700; color: var(--bg3); background: var(--gold); border-radius: 999px; padding: 0.3em 0.9em; white-space: nowrap; }
-.bar-brand { font-weight: 700; white-space: nowrap; }
-.b-fin { color: var(--gold); }
-.b-max { color: var(--max); }
-.b-pos { color: var(--pos); }
+/* Полоса сверху: название магазина крупно по центру — покупатель издалека видит, где он.
+   Длинное название — не больше двух строк: customer.js уменьшает шрифт, пока оно не войдёт
+   целиком (многоточие браузера при выравнивании по центру уезжает за край). max-height —
+   страховка. Высота строки — не меньше высоты букв шрифта (у Inter 1,21): иначе страховка
+   срезала бы хвосты «р», «у» и «й» */
+.bar { display: flex; flex-direction: column; align-items: center; gap: 1.2vh; text-align: center; padding-bottom: 1.6vh; border-bottom: 2px solid var(--line); }
+.bar-shop {
+  max-width: 100%; font-size: clamp(26px, 6.5vh, 76px); font-weight: 700; line-height: 1.22; letter-spacing: -0.01em;
+  overflow-wrap: anywhere; text-wrap: balance; max-height: 2.44em; overflow: hidden;
+}
+.bar-test { font-size: clamp(14px, 2.6vh, 30px); font-weight: 700; color: var(--bg3); background: var(--gold); border-radius: 999px; padding: 0.3em 0.9em; white-space: nowrap; }
 
 .view { display: none; flex: 1; min-height: 0; }
 .screen[data-view='idle'] .view-idle,
@@ -41,8 +42,13 @@ body {
 .screen[data-view='cart'] .view-cart,
 .screen[data-view='test'] .view-cart { display: flex; flex-direction: column; }
 
-/* Ожидание покупателя */
-.idle-shop { font-size: clamp(28px, 8vh, 110px); font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; text-wrap: balance; max-width: 90vw; }
+/* Ожидание покупателя: название магазина — главное на экране. Длинное слово переносится
+   (на экране 4:3 в строку входит около 20 букв), длинное название — мельче, не больше трёх
+   строк (как у полосы — customer.js) */
+.idle-shop {
+  max-width: 90vw; font-size: clamp(32px, 10vh, 130px); font-weight: 700; letter-spacing: -0.02em; line-height: 1.22;
+  overflow-wrap: anywhere; text-wrap: balance; max-height: 3.66em; overflow: hidden;
+}
 .idle-welcome { font-size: clamp(20px, 5vh, 64px); font-weight: 500; color: var(--gold); }
 
 /* Корзина: свежая строка — внизу, список листается к ней сам */

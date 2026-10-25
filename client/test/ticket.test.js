@@ -49,7 +49,9 @@ test('чек продажи: шапка, позиции, скидка, итог,
     { label: 'Получено', value: '500 с.' },
     { label: 'Сдача', value: '155 с.' },
   ])
-  assert.deepEqual(ticket.tail, ['Кассир: Нилуфар', 'Спасибо за покупку!', 'FinMax POS'])
+  // Последняя строка — название магазина, жирным (signAt); имени программы на чеке нет
+  assert.deepEqual(ticket.tail, ['Кассир: Нилуфар', 'Спасибо за покупку!', 'Магазин №1'])
+  assert.equal(ticket.signAt, 2)
 })
 
 test('чек без скидки, картой и в долг: лишних строк нет, клиент назван', () => {
@@ -61,7 +63,15 @@ test('чек без скидки, картой и в долг: лишних ст
   // Магазин без названия и чек без кассира не роняют печать
   const bare = saleTicket({ date: sale.date, total: 0, payment: 'cash', items: [] }, { t, money, when })
   assert.deepEqual(bare.head, ['Магазин', 'дата:2026-10-04'])
-  assert.deepEqual(bare.tail, ['Спасибо за покупку!', 'FinMax POS'])
+  // Без названия магазина внизу ничего не подставляется — ни «Магазин», ни имя программы
+  assert.deepEqual(bare.tail, ['Спасибо за покупку!'])
+  assert.equal(bare.signAt, -1)
+  const blank = saleTicket({ date: sale.date, total: 0, payment: 'cash', items: [] }, { t, money, when, pharmacy: '   ' })
+  assert.deepEqual([blank.tail, blank.signAt], [['Спасибо за покупку!'], -1])
+  assert.equal(blank.head[0], 'Магазин', 'название из одних пробелов — как без названия, пустой полосы нет')
+  // Пробелы по краям названия не печатаются ни сверху, ни снизу
+  const padded = saleTicket(sale, { ...opts, pharmacy: '  Пайкар  ' })
+  assert.deepEqual([padded.head[0], padded.tail.at(-1)], ['Пайкар', 'Пайкар'])
 })
 
 const shift = {
@@ -91,7 +101,8 @@ test('Z-отчёт: те же строки, что на экране; выруч
     'Чеков', 'Наличными', 'Картой', 'В долг', 'Скидки', 'Выручка', 'Прибыль', 'Касса на старте', 'Ожидалось в кассе', 'Пересчитано (факт)', 'Расхождение',
   ])
   assert.deepEqual(ticket.totals.filter((r) => r.big).map((r) => [r.label, r.value]), [['Выручка', '1300 с.'], ['Расхождение', '-5 с.']])
-  assert.deepEqual(ticket.tail, ['Кассир: Нилуфар', 'FinMax POS'])
+  assert.deepEqual(ticket.tail, ['Кассир: Нилуфар', 'Магазин №1'])
+  assert.equal(ticket.signAt, 1)
 
   // Возвраты и погашения долга появляются, только когда они были
   const busy = shiftTicket({ ...shift, debtPaid: 50, refundCash: 30, difference: 10 }, { gross: 1300, refunds: 150, netSales: 1150, netProfit: 350 }, opts)
@@ -113,7 +124,7 @@ test('на таджикском чек печатается таджикским
     const ticket = saleTicket(sale, opts)
     assert.equal(ticket.totals.find((r) => r.big).label, 'Ҳамагӣ')
     assert.equal(ticket.tail.at(-2), 'Ташаккур барои харид!')
-    assert.equal(ticket.tail.at(-1), 'FinMax POS', 'имя программы не переводится')
+    assert.equal(ticket.tail.at(-1), 'Магазин №1', 'название магазина не переводится')
     assert.equal(ticket.rows[0].sub, '2 қуттӣ × 150 с.')
   } finally {
     setLang('ru')
@@ -176,7 +187,8 @@ test('чек возврата: позиции с пометкой «списан
     { label: 'Способ возврата', value: 'Наличными из кассы' },
     { label: 'По чеку', value: '№ 1004-103000' },
   ])
-  assert.deepEqual(ticket.tail, ['Кассир: Нилуфар', 'FinMax POS'])
+  assert.deepEqual(ticket.tail, ['Кассир: Нилуфар', 'Магазин №1'])
+  assert.equal(ticket.signAt, 1)
   // Возврат переводом называет сервис; уменьшение долга — прямым текстом
   const via = returnTicket({ ...ret, refund: 'transfer', refundVia: 'Алиф' }, opts)
   assert.equal(via.totals[1].value, 'Возврат переводом · Алиф')

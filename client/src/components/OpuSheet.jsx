@@ -66,7 +66,7 @@ export default function OpuSheet({ d, from, to }) {
           </tbody>
         </table>
         <div className="opu-sheet-foot">
-          {/* «FinMax POS» и номер страницы — в нижнем поле листа (PrintPageStyle) */}
+          {/* Название магазина и номер страницы — в нижнем поле листа (PrintPageStyle) */}
           {t('Напечатано')}: {fmtDateTime(new Date())}
         </div>
       </div>

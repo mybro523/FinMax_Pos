@@ -153,7 +153,7 @@ export async function sendWindows({ run, fs, tmpFile, printer, bytes }) {
 // ── Настройки печати этого компьютера ──
 // mode: system — обычное окно печати Windows (как на сайте); network — чековый
 // принтер по сети; windows — чековый принтер, заведённый в Windows.
-export const PRINT_DEFAULTS = { mode: 'system', host: '', port: 9100, name: '', width: 32, codepage: 'cp866', cut: true, drawer: false, auto: false, logo: true }
+export const PRINT_DEFAULTS = { mode: 'system', host: '', port: 9100, name: '', width: 32, codepage: 'cp866', cut: true, drawer: false, auto: false }
 
 export function sanitizePrint(raw) {
   const v = raw && typeof raw === 'object' ? raw : {}
@@ -169,7 +169,7 @@ export function sanitizePrint(raw) {
     drawer: v.drawer === true,
     // Печатать чек сразу после продажи, не дожидаясь нажатия «Печать»
     auto: v.auto === true,
-    // Эмблема FinMax в начале чека
-    logo: v.logo !== false,
+    // Эмблемы FinMax на чеке больше нет (с 1.5.2): прежняя отметка в файле настроек
+    // просто не читается
   }
 }

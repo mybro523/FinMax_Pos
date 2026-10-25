@@ -34,19 +34,23 @@ function payLabel(payment, t) {
 // эту строку жирной (-1 — такой строки нет)
 function shapka(pharmacy, rekvizity, t) {
   const r = rekvizity || {}
-  return [pharmacy || t('Магазин'), ...(r.address ? [r.address] : []), ...(r.phone ? [`${t('Тел.')} ${r.phone}`] : [])]
+  return [String(pharmacy || '').trim() || t('Магазин'), ...(r.address ? [r.address] : []), ...(r.phone ? [`${t('Тел.')} ${r.phone}`] : [])]
 }
 
-// Подвал тоже один: кассир, подпись владельца («Будьте здоровы!» и т.п.) и имя
-// программы — по нему покупатель и проверяющий видят, чем напечатан чек
-function podval(who, rekvizity, t, spasibo) {
+// Подвал тоже один: кассир, подпись владельца («Будьте здоровы!» и т.п.) и последней
+// строкой — название магазина (то, что задано магазину в панели): чек покупателя несёт
+// имя магазина, а не программы. Её номер в подвале — в signAt: экран и лента печатают
+// её жирной (-1 — магазин без названия, строки нет)
+function podval(who, rekvizity, t, spasibo, pharmacy) {
   const r = rekvizity || {}
-  return [
+  const shop = String(pharmacy || '').trim()
+  const tail = [
     ...(who ? [`${t('Кассир')}: ${who}`] : []),
     ...(r.footer ? [r.footer] : []),
     ...(spasibo ? [t('Спасибо за покупку!')] : []),
-    'FinMax POS',
+    ...(shop ? [shop] : []),
   ]
+  return { tail, signAt: shop ? tail.length - 1 : -1 }
 }
 
 // ── Чек продажи ──
@@ -81,7 +85,7 @@ export function saleTicket(sale, { t, money, when, pharmacy = '', cashier = '', 
       value: money(lineNet(i)),
     })),
     totals,
-    tail: podval(who, rekvizity, t, true),
+    ...podval(who, rekvizity, t, true, pharmacy),
   }
 }
 
@@ -116,7 +120,7 @@ export function returnTicket(ret, { t, money, when, pharmacy = '', cashier = '',
       { label: t('Способ возврата'), value: sposob },
       ...(saleNomer ? [{ label: t('По чеку'), value: `№ ${saleNomer}` }] : []),
     ],
-    tail: podval(cashier || ret.user?.name || '', rekvizity, t, false),
+    ...podval(cashier || ret.user?.name || '', rekvizity, t, false, pharmacy),
   }
 }
 
@@ -163,6 +167,6 @@ export function shiftTicket(shift, totals, { t, money, when, pharmacy = '', rekv
     docAt: shapka(pharmacy, rekvizity, t).length,
     rows: [],
     totals: rows,
-    tail: podval(shift.user?.name || '', rekvizity, t, false),
+    ...podval(shift.user?.name || '', rekvizity, t, false, pharmacy),
   }
 }

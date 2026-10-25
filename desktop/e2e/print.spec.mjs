@@ -51,6 +51,10 @@ function text866(buf) {
       i += buf[i + 1] === 0x56 ? 3 : 2
       continue
     }
+    if (b === 0x1c) {
+      i += 1 // FS . — выключить режим иероглифов
+      continue
+    }
     if (b === 0x0a) out += '\n'
     else if (b < 0x80) out += String.fromCharCode(b)
     else if (b <= 0xaf) out += String.fromCharCode(b - 0x80 + 0x410)
@@ -129,21 +133,27 @@ test('чековый принтер по сети: пробная печать �
   await panel().getByTestId('print-host').fill('127.0.0.1')
   await panel().getByTestId('print-port').fill(String(printer.port))
   await panel().getByTestId('print-width').selectOption('48')
-  // Эмблема — растровые байты: проверки ниже читают ленту как текст, поэтому без неё
-  await panel().getByTestId('print-logo').uncheck()
+  // Галочки эмблемы больше нет (с 1.5.2): чек начинается сразу с названия магазина
+  await expect(panel().getByTestId('print-logo')).toHaveCount(0)
   await panel().getByRole('button', { name: 'Пробная печать' }).click()
   await expect(page.locator('.toast')).toContainText('Пробный чек отправлен на принтер', { timeout: 20_000 })
   await jobsCount(1)
 
   const job = printer.jobs[0]
-  // Сброс принтера и таблица русских букв — первым делом; отрез — последним
-  expect([...job.subarray(0, 5)]).toEqual([0x1b, 0x40, 0x1b, 0x74, 17])
+  // Сброс принтера, выключение китайского режима и таблица русских букв — первым делом;
+  // растровой картинки (эмблемы) нет; отрез — последним
+  expect([...job.subarray(0, 7)]).toEqual([0x1b, 0x40, 0x1c, 0x2e, 0x1b, 0x74, 17])
+  expect(job.indexOf(Buffer.from([0x1d, 0x76, 0x30]))).toBe(-1)
   expect([...job.subarray(-4)]).toEqual([0x1d, 0x56, 0x42, 0x00])
   const text = text866(job)
   expect(text).toContain('Пробная печать')
   expect(text).toContain('АБВГД абвгд ЁЖЗ')
   expect(text.split('\n').every((l) => l.length <= 48)).toBe(true)
   expect(text).toContain('-'.repeat(48))
+  // Пробный чек — как настоящий: название магазина на полосе сверху и последней строкой
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean)
+  expect(lines.at(-1)).toBe(lines[0])
+  expect(text).not.toContain('FinMax')
 })
 
 test('адрес принтера — только из сети аптеки: чужой адрес программа не принимает и прежнюю настройку не портит', async () => {

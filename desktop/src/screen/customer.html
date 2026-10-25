@@ -11,10 +11,10 @@
 <body>
   <!-- Экран покупателя: второй экран моноблока. Что показать, присылает окно кассы -->
   <main id="screen" class="screen" data-view="idle">
-    <header class="bar">
-      <span class="bar-shop" id="bar-shop"></span>
+    <!-- Название магазина — крупно по центру; пока покупателя нет, оно и так во весь экран -->
+    <header class="bar" id="bar" hidden>
+      <div class="bar-shop" id="bar-shop"></div>
       <span class="bar-test" id="bar-test" hidden></span>
-      <span class="bar-brand"><span class="b-fin">Fin</span><span class="b-max">Max</span> <span class="b-pos">POS</span></span>
     </header>
 
     <section class="view view-idle" aria-live="polite">

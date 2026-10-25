@@ -7,7 +7,7 @@
 // Запуск: npm test (в папке desktop)
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { fullCenter, layoutTicket, rasterImage, encode, escpos, printable, renderTicket, sanitizeTicket, twoColumns, wrap } from '../src/print/escpos.mjs'
+import { fullCenter, layoutTicket, encode, escpos, printable, renderTicket, sanitizeTicket, twoColumns, wrap } from '../src/print/escpos.mjs'
 
 // Байты обратно в текст — чтобы сверять раскладку глазами. Команды выкидываются
 function text866(buf) {
@@ -110,7 +110,8 @@ const TICKET = {
     { label: 'Итого', value: '345 сомони', big: true },
     { label: 'Оплата', value: 'Наличные' },
   ],
-  tail: ['Кассир: Нилуфар', 'Спасибо за покупку!'],
+  tail: ['Кассир: Нилуфар', 'Спасибо за покупку!', 'Магазин №1'],
+  signAt: 2,
 }
 
 test('чек на ленте 58 мм: всё на своих местах и ни одна строка не шире ленты', () => {
@@ -127,6 +128,8 @@ test('чек на ленте 58 мм: всё на своих местах и н�
   // Итог — тоже полосой во всю ширину, с пробелом по краям
   assert.ok(lines.includes(' Итого' + ' '.repeat(15) + '345 сомони '))
   assert.ok(lines.includes('Спасибо за покупку!'))
+  // Последняя строка чека — название магазина (за ней только подача до ножа)
+  assert.equal(lines.filter(Boolean).at(-1), 'Магазин №1')
   // Длинное название перенесено, а не обрезано
   assert.ok(text866(bytes).includes('(очень длинное\nназвание товара)') || text866(bytes).includes('название товара)'))
 })
@@ -184,8 +187,8 @@ test('байты: полоса белым по чёрному включаетс
 })
 
 test('чек из мусора не роняет печать: лишнее отбрасывается, размеры ограничены', () => {
-  assert.deepEqual(sanitizeTicket(null), { head: [], docAt: -1, rows: [], totals: [], tail: [] })
-  assert.deepEqual(sanitizeTicket({ head: 'строка', rows: {}, totals: 5, docAt: '1' }), { head: [], docAt: -1, rows: [], totals: [], tail: [] })
+  assert.deepEqual(sanitizeTicket(null), { head: [], docAt: -1, rows: [], totals: [], tail: [], signAt: -1 })
+  assert.deepEqual(sanitizeTicket({ head: 'строка', rows: {}, totals: 5, docAt: '1', signAt: '0' }), { head: [], docAt: -1, rows: [], totals: [], tail: [], signAt: -1 })
   const huge = sanitizeTicket({ head: Array(5000).fill('x'.repeat(5000)), rows: [null, 7, { name: 12 }] })
   assert.equal(huge.head.length, 400)
   assert.equal(huge.head[0].length, 200)
@@ -193,25 +196,24 @@ test('чек из мусора не роняет печать: лишнее от
   // Пустой чек — всё равно корректное задание: сброс, подача, отрез
   assert.deepEqual([...renderTicket(null)], [0x1b, 0x40, 0x1c, 0x2e, 0x1b, 0x74, 17, 0x1b, 0x61, 0, 0x1b, 0x64, 3, 0x1d, 0x56, 0x42, 0x00])
 })
-test('эмблема: растровый блок GS v 0 с верной шириной в байтах, битая — не печатается', () => {
-  // 16×8: две полосы — проверяем и заголовок, и сами точки
-  const data = Buffer.alloc(16, 0).fill(0xff, 0, 8).toString('base64')
-  const img = rasterImage({ width: 16, height: 8, data })
-  assert.deepEqual([...img.slice(0, 8)], [0x1d, 0x76, 0x30, 0x00, 2, 0, 8, 0])
-  assert.equal(img.length, 8 + 16)
-  assert.equal(img[8], 0xff)
-  // Длина точек не сходится с размерами — блок пустой, лента не портится
-  assert.equal(rasterImage({ width: 16, height: 9, data }).length, 0)
-  assert.equal(rasterImage({ width: 0, height: 8, data }).length, 0)
-  assert.equal(rasterImage(null).length, 0)
+test('внизу чека — название магазина жирным; эмблемы программы на ленте нет', () => {
+  const lines = layoutTicket(TICKET, { width: 32 })
+  const sign = lines.at(-1)
+  assert.deepEqual([sign.text, sign.center, sign.bold, !!sign.tall, !!sign.invert], ['Магазин №1', true, true, false, false])
+  // Остальные строки подвала — обычные
+  for (const t of ['Кассир: Нилуфар', 'Спасибо за покупку!']) assert.ok(!lines.find((l) => l.text === t).bold, t)
+  // Длинное название переносится — жирные все его строки
+  const long = layoutTicket({ tail: ['Спасибо!', 'Магазин строительных материалов «Душанбе-Сити»'], signAt: 1 }, { width: 32 })
+  assert.ok(long.length >= 4 && long.slice(2).every((l) => l.bold && l.text.length <= 32))
+  // Без signAt (магазин без названия) жирных строк в подвале нет
+  assert.ok(layoutTicket({ tail: ['Спасибо!'] }, { width: 32 }).every((l) => !l.bold))
 
-  // В чеке эмблема идёт первой, после выбора таблицы букв, по центру
-  const bytes = renderTicket({ head: ['Магазин'], rows: [], totals: [], tail: [] }, { width: 32, cut: false, logo: { width: 16, height: 8, data } })
-  const hex = bytes.toString('hex')
-  const raster = img.toString('hex')
-  assert.ok(hex.includes(raster), 'растровый блок попал в чек')
-  assert.ok(hex.indexOf(raster) < hex.indexOf(Buffer.from('1b6100', 'hex').toString('hex')), 'эмблема раньше возврата к левому краю')
-  // Без эмблемы байты прежние — как у всех старых проверок
-  const plain = renderTicket({ head: ['Магазин'], rows: [], totals: [], tail: [] }, { width: 32, cut: false })
-  assert.ok(!plain.toString('hex').includes('1d7630'), 'нет логотипа — нет растрового блока')
+  // Байты: жирный включается перед названием и выключается после; растровой картинки
+  // (GS v 0 — так печаталась эмблема FinMax) в задании нет
+  const bytes = renderTicket(TICKET, { width: 32, cut: false })
+  assert.equal(bytes.indexOf(Buffer.from([0x1d, 0x76, 0x30])), -1, 'эмблемы нет')
+  const name = encode('Магазин №1', 'cp866')
+  const at = bytes.lastIndexOf(name)
+  assert.deepEqual([...bytes.subarray(at - 6, at)], [0x1b, 0x61, 1, 0x1b, 0x45, 1], 'по центру и жирным')
+  assert.deepEqual([...bytes.subarray(at + name.length, at + name.length + 4)], [0x0a, 0x1b, 0x45, 0], 'после строки жирный выключается')
 })

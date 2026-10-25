@@ -1,20 +1,17 @@
-import emblem from '../assets/brand/emblem-192.webp'
-import { BrandWord } from './ui'
-
 // ── Чек на экране и на листе ──
 // Рисует то, что собрал lib/ticket.js, и ровно в том же порядке, что уйдёт на
-// ленту и в PDF: эмблема, шапка, позиции, итоги, подвал. Никаких собственных
-// строк здесь нет — иначе экран и бумага снова разойдутся.
+// ленту и в PDF: шапка, позиции, итоги, подвал. Никаких собственных строк здесь
+// нет — иначе экран и бумага снова разойдутся.
 //
 // Оформление фирменное, как у «Отчёта о прибылях и убытках»: название магазина на
 // тёмно-синей полосе, строка документа («Чек № …») жирной, итог — синей плашкой.
-// Чек — бумага, поэтому он белый и при тёмной теме программы.
-export default function TicketView({ ticket, logo = true }) {
-  const { head = [], rows = [], totals = [], tail = [], docAt = -1 } = ticket || {}
+// Внизу — снова название магазина, жирным. Эмблемы программы на чеке нет: чек —
+// бумага магазина. Чек белый и при тёмной теме программы.
+export default function TicketView({ ticket }) {
+  const { head = [], rows = [], totals = [], tail = [], docAt = -1, signAt = -1 } = ticket || {}
   const [shop, ...rest] = head
   return (
     <div className="ticket">
-      {logo && <img className="ticket-emblem" src={emblem} alt="" width="48" height="48" />}
       {shop !== undefined && <div className="tk-band">{shop}</div>}
       {rest.length > 0 && (
         <div className="ticket-head">
@@ -56,7 +53,7 @@ export default function TicketView({ ticket, logo = true }) {
           <div className="ticket-rule" aria-hidden="true" />
           <div className="ticket-tail">
             {tail.map((line, i) => (
-              <div key={i} className={line === 'FinMax POS' ? 'ticket-brand' : ''}>{line === 'FinMax POS' ? <BrandWord /> : line}</div>
+              <div key={i} className={i === signAt ? 'tk-sign' : undefined}>{line}</div>
             ))}
           </div>
         </>

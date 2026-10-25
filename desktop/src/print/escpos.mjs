@@ -152,38 +152,18 @@ export function escpos({ codepage = 'cp866', width = 32 } = {}) {
     // Открыть денежный ящик, подключённый к принтеру
     drawer: () => raw(0x1b, 0x70, 0x00, 0x19, 0xfa),
     raw,
-    // Готовые байты (картинка) — отдельным куском, без перекодировки
-    blob(buf) {
-      chunks.push(buf)
-      return api
-    },
     bytes: () => Buffer.concat(chunks),
   }
   return api
 }
 
-// ── Эмблема ──
-// GS v 0 — растровая картинка: 1 бит = одна точка, строки упакованы по 8 точек
-// в байт (print/logo.mjs). Битый блок не печатаем вовсе: кривая картинка на ленте
-// хуже, чем её отсутствие.
-export function rasterImage(img) {
-  const width = Number(img?.width) || 0
-  const height = Number(img?.height) || 0
-  const bits = Buffer.from(String(img?.data || ''), 'base64')
-  const perRow = Math.ceil(width / 8)
-  if (!perRow || !height || height > 1024 || bits.length !== perRow * height) return Buffer.alloc(0)
-  return Buffer.concat([
-    Buffer.from([0x1d, 0x76, 0x30, 0x00, perRow & 0xff, (perRow >> 8) & 0xff, height & 0xff, (height >> 8) & 0xff]),
-    bits,
-  ])
-}
-
 // ── Что печатаем ──
 // Окно программы присылает уже готовые слова и числа (на выбранном языке, с деньгами
 // в принятом виде): { head: [строки], docAt, rows: [{ name, sub, value }],
-// totals: [{ label, value, big }], tail: [строки] }. Здесь это только раскладывается
-// по ленте. Размеры ограничены: чек на тысячу строк — это ошибка, а не чек.
-// docAt — какая строка шапки называет документ («Чек № …»): она печатается жирной
+// totals: [{ label, value, big }], tail: [строки], signAt }. Здесь это только
+// раскладывается по ленте. Размеры ограничены: чек на тысячу строк — это ошибка, а не чек.
+// docAt — какая строка шапки называет документ («Чек № …»), signAt — какая строка
+// подвала — название магазина: обе печатаются жирными
 const MAX_LINES = 400
 const MAX_TEXT = 200
 const str = (v) => String(v ?? '').slice(0, MAX_TEXT)
@@ -197,6 +177,7 @@ export function sanitizeTicket(raw) {
     rows: list(t.rows).map((r) => ({ name: str(r?.name), sub: str(r?.sub), value: str(r?.value) })),
     totals: list(t.totals).map((r) => ({ label: str(r?.label), value: str(r?.value), big: !!r?.big })),
     tail: list(t.tail).map(str),
+    signAt: Number.isInteger(t.signAt) ? t.signAt : -1,
   }
 }
 
@@ -213,7 +194,7 @@ export function fullCenter(text, width) {
 // жирно, крупно, белым по чёрному). По этой же раскладке экран печати программы
 // показывает ленту — поэтому предпросмотр совпадает с бумагой строка в строку.
 // Фирменный вид — как на экране и в PDF, только чёрным: название магазина и итог на
-// чёрной полосе во всю ширину ленты, строка документа — жирная
+// чёрной полосе во всю ширину ленты, строка документа и название магазина внизу — жирные
 export function layoutTicket(ticket, { width = 32 } = {}) {
   const t = sanitizeTicket(ticket)
   const out = []
@@ -251,20 +232,18 @@ export function layoutTicket(ticket, { width = 32 } = {}) {
 
   if (t.tail.length) {
     rule()
-    for (const line of t.tail) for (const l of wrap(line, width)) push(l, { center: true })
+    t.tail.forEach((line, n) => {
+      for (const l of wrap(line, width)) push(l, { center: true, bold: n === t.signAt })
+    })
   }
   return out
 }
 
-export function renderTicket(ticket, { width = 32, codepage = 'cp866', cut = true, drawer = false, logo = null } = {}) {
+// Чек начинается сразу с названия магазина: эмблемы программы на ленте нет — чек
+// покупателя несёт имя магазина
+export function renderTicket(ticket, { width = 32, codepage = 'cp866', cut = true, drawer = false } = {}) {
   const p = escpos({ codepage, width }).init()
   if (drawer) p.drawer()
-
-  // Эмблема — первой, по центру ленты
-  if (logo) {
-    const img = rasterImage(logo)
-    if (img.length) p.align('center').blob(img).feed(1)
-  }
 
   for (const l of layoutTicket(ticket, { width })) {
     p.align(l.center ? 'center' : 'left')

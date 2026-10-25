@@ -4,7 +4,7 @@
 // не то: чек вместо отчёта, отчёт вместо чека.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { activeDoc, closePechat, hasPreview, onPechat, pdfName, pechat, pechatState, pechatTicket } from '../src/lib/pechat.js'
+import { activeDoc, closePechat, cssString, hasPreview, onPechat, pdfName, pechat, pechatState, pechatTicket, printTitle } from '../src/lib/pechat.js'
 
 const withPreview = { print: { preview: () => {} } }
 
@@ -61,6 +61,36 @@ test('печатается один документ: окно поверх ли
   assert.equal(activeDoc({ children: [chek, sheet] }).getAttribute('data-title'), 'Чек продажи', 'порядок в слое не важен — важен prio')
   // Два листа — последний
   assert.equal(activeDoc({ children: [sheet, node(1, 'ОПУ')] }).getAttribute('data-title'), 'ОПУ')
+})
+
+test('название магазина внизу листа: строка CSS, которую не сломать кавычкой или переводом строки', () => {
+  assert.equal(cssString('Пайкар'), '"Пайкар"')
+  assert.equal(cssString('Магазин "Сомон"'), '"Магазин \\"Сомон\\""')
+  assert.equal(cssString('Склад\\Душанбе'), '"Склад\\\\Душанбе"')
+  // Перевод строки внутри строки CSS недопустим — он становится пробелом
+  assert.equal(cssString('  Аптека\n№1  '), '"Аптека №1"')
+  assert.equal(cssString(null), '""')
+  // Длина ограничена до экранирования: обратная косая черта на границе не остаётся одна
+  // и не съедает закрывающую кавычку
+  const s = cssString('я'.repeat(79) + '\\' + 'хвост')
+  assert.equal(s, '"' + 'я'.repeat(79) + '\\\\' + '"')
+  assert.ok(!/(^|[^\\])(\\\\)*\\"$/.test(s), 'закрывающая кавычка не экранирована')
+  // Строка, вставленная в правило страницы, остаётся одной строкой: снаружи кавычек
+  // ничего не появляется
+  const evil = cssString('"; } body { display: none } @page { content: "')
+  assert.equal(evil.replace(/\\./g, '').split('"').length, 3, 'ровно одна пара кавычек без экранирования')
+  // Обрезка по знакам: эмодзи на границе не разрезается пополам («�» в поле листа)
+  const emoji = cssString('я'.repeat(79) + '🛒' + 'хвост')
+  assert.equal(emoji, '"' + 'я'.repeat(79) + '🛒' + '"')
+})
+
+test('заголовок на время печати: «документ — магазин» — из него имя PDF и свойства файла', () => {
+  assert.equal(printTitle('Чек продажи', 'Магазин «Шифо»'), 'Чек продажи — Магазин «Шифо»')
+  assert.equal(printTitle('  Долги  клиентов ', ''), 'Долги клиентов')
+  assert.equal(printTitle('', 'Пайкар'), 'Пайкар')
+  // Нечего ставить — пусто: заголовок страницы не трогается
+  assert.equal(printTitle('', '   '), '')
+  assert.equal(printTitle(null, undefined), '')
 })
 
 test('имя PDF: название документа и дата, без знаков, запрещённых в именах файлов', () => {

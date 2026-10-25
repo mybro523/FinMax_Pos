@@ -3,10 +3,10 @@ import { LuPrinter, LuFileDown, LuChevronLeft, LuChevronRight, LuFileText } from
 import { Modal, useToast } from './ui'
 import NumberInput from './NumberInput'
 import { printRoot } from './PrintDoc'
-import emblem from '../assets/brand/emblem-192.webp'
 import { bridge } from '../lib/desktop'
 import { printConfig } from '../lib/print'
-import { activeDoc, closePechat, onPechat, pdfName, pechatState } from '../lib/pechat'
+import { activeDoc, closePechat, onPechat, pdfName, pechatState, printTitle } from '../lib/pechat'
+import { useAuth } from '../db/auth'
 import { translate as tr, useT } from '../lib/i18n'
 
 // ── Экран печати программы для Windows ──
@@ -81,6 +81,20 @@ function PrintPreview({ req, onClose }) {
   const canRotate = kind === 'sheet' || kind === 'opu' || kind === 'labels'
   const doc = useMemo(() => activeDoc(printRoot()), [])
   const title = doc?.getAttribute('data-title') || ''
+  const shop = useAuth()?.pharmacy?.name || ''
+
+  // Пока экран печати открыт, заголовок окна — «документ — магазин»: программа пишет его в
+  // свойства PDF (предпросмотр, печать, «Сохранить в PDF»), и в PDF магазина не попадёт имя
+  // программы. Закрыли — прежний
+  useEffect(() => {
+    const want = printTitle(title, shop)
+    if (!want) return undefined
+    const old = document.title
+    document.title = want
+    return () => {
+      document.title = old
+    }
+  }, [title, shop])
 
   const [paper, setPaper] = useState(() => (isTicket ? savedPaper() : 'a4'))
   // Ширина ленты в знаках; 0 — печать страницами
@@ -180,8 +194,8 @@ function PrintPreview({ req, onClose }) {
     setTape(null)
     bridge.print
       .tape({ ticket: req.ticket, width: lentaW })
-      .then((r) => alive && setTape(r?.ok ? r : { lines: [], logo: false }))
-      .catch(() => alive && setTape({ lines: [], logo: false }))
+      .then((r) => alive && setTape(r?.ok ? r : { lines: [] }))
+      .catch(() => alive && setTape({ lines: [] }))
     return () => {
       alive = false
     }
@@ -334,7 +348,6 @@ function TapeView({ tape, width }) {
   if (!tape) return <div className="pp-msg"><span className="pp-spin" aria-hidden="true" /> {tr('Готовим чек…')}</div>
   return (
     <div className="pp-tape" style={{ '--cols': width }} data-testid="pp-tape">
-      {tape.logo && <img className="pp-tape-logo" src={emblem} alt="" />}
       {tape.lines.map((l, i) => (
         <div key={i} className={'pp-tl' + (l.center ? ' c' : '') + (l.bold ? ' b' : '') + (l.tall ? ' t' : '') + (l.invert ? ' inv' : '')}>
           <span>{l.text || ' '}</span>

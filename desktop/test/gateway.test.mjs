@@ -93,6 +93,8 @@ test('вход с интернетом: ключ остаётся в основ�
   assert.equal(JSON.stringify(r).includes('ключ-kassir'), false, 'настоящий ключ утёк в окно')
   assert.match(t.session.get(), /^ключ-kassir-/)
   assert.equal(t.session.activeId(), 'acc-kassir')
+  // Название магазина вошедшего — для пробного чека на ленте
+  assert.equal(t.gw.activeShop(), 'Магазин №1')
 
   // Сотрудник запомнен для входа без интернета: отпечаток пароля, а не сам пароль
   const acc = accountByLogin(t.core, 'kassir')

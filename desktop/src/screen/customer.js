@@ -31,6 +31,27 @@
     if (el) el.hidden = !on
   }
 
+  // Длинное название магазина — мельче, но целиком (без многоточия): шрифт уменьшается, пока
+  // название не войдёт в свои строки, но не мельче нижней границы. Мерить можно только
+  // видимое — скрытое не меряется и остаётся своего размера
+  function fit(id, lines, minPx) {
+    var el = $(id)
+    if (!el) return
+    el.style.fontSize = ''
+    if (!el.textContent || !el.offsetHeight) return
+    var size = parseFloat(getComputedStyle(el).fontSize) || 0
+    for (var i = 0; i < 40 && size > minPx; i++) {
+      var lh = parseFloat(getComputedStyle(el).lineHeight) || size * 1.22
+      if (el.scrollHeight <= Math.ceil(lh * lines) + 1) return
+      size = Math.max(minPx, Math.floor(size * 0.93))
+      el.style.fontSize = size + 'px'
+    }
+  }
+  function fitShop() {
+    fit('bar-shop', 2, 20)
+    fit('idle-shop', 3, 28)
+  }
+
   // Строка корзины: название, «сколько × почём» и сумма строки
   function row(item, fresh) {
     var li = document.createElement('li')
@@ -57,12 +78,18 @@
     screen.setAttribute('data-view', view)
     document.documentElement.lang = s.lang === 'tg' ? 'tg' : 'ru'
 
-    var shop = typeof s.shop === 'string' ? s.shop : ''
+    // Название магазина — то, что задано магазину в панели; имени программы здесь нет:
+    // покупатель видит магазин. Без названия — просто «Добро пожаловать»
+    var shop = typeof s.shop === 'string' ? s.shop.trim() : ''
     text('bar-shop', shop)
-    text('idle-shop', shop || 'FinMax POS')
+    show('bar-shop', !!shop)
+    text('idle-shop', shop)
+    show('idle-shop', !!shop)
     text('idle-welcome', label(s, 'welcome'))
     text('bar-test', label(s, 'test'))
     show('bar-test', view === 'test')
+    // Полоса с названием — пока покупатель у кассы; в ожидании название и так во весь экран
+    show('bar', view !== 'idle' && (!!shop || view === 'test'))
 
     // Корзина
     var items = Array.isArray(s.items) ? s.items : []
@@ -93,9 +120,15 @@
     text('change-label', label(s, 'change'))
     text('change', s.change)
     show('change-row', !!s.change)
+
+    // Название магазина — по размеру уже после того, как всё на своих местах
+    fitShop()
   }
 
   render(null)
+  // Сменилось разрешение экрана или догрузился шрифт — подогнать название заново
+  window.addEventListener('resize', fitShop)
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitShop, function () {})
   var bridge = window.customerScreen
   if (bridge) {
     bridge.onState(render)

@@ -1539,6 +1539,8 @@ export function createGateway({
 
     // Кто сейчас за кассой: founder | cashier, пусто — никто
     activeRole: () => activeAccount()?.role || '',
+    // Название магазина вошедшего — как его задали в панели (пробный чек печатается с ним)
+    activeShop: () => String(activeAccount()?.pharmacyName || '').trim(),
     // Есть ли у вошедшего право (любое из перечисленных). Владелец может всё
     activeCan: (...keys) => hasPerm(activeAccount(), ...keys),
 

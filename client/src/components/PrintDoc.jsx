@@ -1,8 +1,9 @@
+import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import emblem from '../assets/brand/emblem-192.webp'
-import { getUser } from '../db/auth'
+import { getUser, useAuth } from '../db/auth'
 import { fmtDateTime } from '../lib/time'
 import { translate as tr } from '../lib/i18n'
+import { activeDoc, cssString, printTitle } from '../lib/pechat'
 
 // ── Печатный слой ──
 // Всё, что идёт на бумагу, рисуется сюда — в отдельный блок прямо в <body>, рядом со
@@ -43,14 +44,13 @@ export default function PrintDoc({ prio = 1, kind = 'sheet', title = '', childre
 }
 
 // ── Шапка печатного листа ──
-// Как у «Отчёта о прибылях и убытках»: тёмно-синяя полоса — эмблема, магазин, название
-// листа крупно, ниже дата и подробности. Цвета заданы прямо: на бумаге они одинаковы
-// при любой теме программы
+// Как у «Отчёта о прибылях и убытках»: тёмно-синяя полоса — магазин, название листа
+// крупно, ниже дата и подробности. Эмблемы программы нет: лист — бумага магазина.
+// Цвета заданы прямо: на бумаге они одинаковы при любой теме программы
 export function PrintHead({ title, sub }) {
   const apt = getUser()?.pharmacy?.name || ''
   return (
     <div className="pd-band">
-      <span className="pd-band-emblem"><img src={emblem} alt="" /></span>
       <div className="pd-band-text">
         {apt && <div className="pd-band-shop">{apt}</div>}
         <div className="pd-band-title">{title}</div>
@@ -74,12 +74,44 @@ export function PrintFoot({ count }) {
 }
 
 // ── Поля страницы и номера страниц ──
-// Номер «стр. 1 из 3» и «FinMax POS» печатаются в нижнем поле каждого листа. Слова
-// переводятся вместе с интерфейсом, поэтому правила страницы собираются здесь, а не
-// лежат готовыми в index.css. Чек, этикетки и наклейка — со своими полями и без номеров.
-// Пустое верхнее поле задано намеренно: так браузер не печатает поверх листа свои
-// колонтитулы — дату и заголовок вкладки (нижние он и так уступает номерам страниц)
+// Номер «стр. 1 из 3» и название магазина печатаются в нижнем поле каждого листа: бумага
+// магазина несёт его имя, а не имя программы (у владельца сервиса, вне магазина, —
+// «FinMax POS»). Слова переводятся вместе с интерфейсом, поэтому правила страницы
+// собираются здесь, а не лежат готовыми в index.css. Чек, этикетки и наклейка — со своими
+// полями и без номеров. Пустое верхнее поле задано намеренно: так браузер не печатает
+// поверх листа свои колонтитулы — дату и заголовок вкладки (нижние он и так уступает
+// номерам страниц)
 export function PrintPageStyle() {
+  const pharmacy = useAuth()?.pharmacy
+  const shop = String(pharmacy?.name || '').trim()
+  // Имя программы — только вне магазина (у владельца сервиса); у магазина без названия — пусто
+  const foot = pharmacy ? shop : 'FinMax POS'
+
+  // На время печати заголовок страницы — «документ — магазин»: из него браузер предлагает
+  // имя PDF и пишет его в свойства файла (Ctrl+P тоже сюда). После печати — прежний
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    let saved = null
+    const before = () => {
+      const want = printTitle(activeDoc(printRoot())?.getAttribute('data-title') || '', shop)
+      if (!want || saved !== null) return
+      saved = document.title
+      document.title = want
+    }
+    const after = () => {
+      if (saved === null) return
+      document.title = saved
+      saved = null
+    }
+    window.addEventListener('beforeprint', before)
+    window.addEventListener('afterprint', after)
+    return () => {
+      window.removeEventListener('beforeprint', before)
+      window.removeEventListener('afterprint', after)
+      after()
+    }
+  }, [shop])
+
   const host = printRoot()
   if (!host) return null
   const words = `"${tr('стр.')} " counter(page) " ${tr('из')} " counter(pages)`
@@ -87,7 +119,7 @@ export function PrintPageStyle() {
   const css = `
 @page { margin: 12mm 11mm 14mm; background: #fff;
   @top-center { content: ""; }
-  @bottom-left { content: "FinMax POS"; font: 600 8.5pt Inter, Arial, sans-serif; color: #4a5576; }
+  @bottom-left { content: ${cssString(foot)}; font: 600 8.5pt Inter, Arial, sans-serif; color: #4a5576; }
   @bottom-right { content: ${words}; font: 8.5pt Inter, Arial, sans-serif; color: #4a5576; } }
 @page ticket { margin: 6mm 5mm; background: #fff; @top-center { content: "" } @bottom-left { content: "" } @bottom-right { content: "" } }
 @page labels { margin: 8mm; background: #fff; @top-center { content: "" } @bottom-left { content: "" } @bottom-right { content: "" } }

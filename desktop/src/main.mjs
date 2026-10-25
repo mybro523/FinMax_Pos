@@ -36,7 +36,6 @@ import { createFetch } from './fetch-compat.mjs'
 import { LITE_ARG, liteState, sanitizeLite } from './lite.mjs'
 import { layoutTicket, renderTicket } from './print/escpos.mjs'
 import { pageRequest, pdfOptions, printerKind, printOptions } from './print/page.mjs'
-import { LOGO } from './print/logo.mjs'
 import { runPowerShell } from './print/powershell.mjs'
 import { checkHost, sendNetwork, sendWindows } from './print/transport.mjs'
 import { isAppUrl, registerAppProtocol, registerScheme, SCREEN_URL, START_URL } from './protocol.mjs'
@@ -702,7 +701,7 @@ async function start() {
     const cfg = settings.get().print
     if (cfg.mode === 'system') return { ok: true, mode: 'system' }
     try {
-      const bytes = renderTicket(ticket, { ...cfg, logo: cfg.logo === false ? null : LOGO })
+      const bytes = renderTicket(ticket, cfg)
       if (cfg.mode === 'network') await sendNetwork({ net: nodeNet, host: cfg.host, port: cfg.port, bytes })
       else {
         await sendWindows({
@@ -736,16 +735,19 @@ async function start() {
     return settings.set({ print: cfg }).print
   })
   ipcMain.handle('print:ticket', (event, ticket) => (trusted(event) && gateway.activeRole() ? printTicket(ticket) : { ok: false, mode: 'system' }))
-  ipcMain.handle('print:test', (event) =>
-    trusted(event) && allowed('settings.print')
-      ? printTicket({
-          head: ['FinMax POS', 'Пробная печать'],
-          rows: [{ name: 'Проверка русских букв: АБВГД абвгд ЁЖЗ', sub: '1 шт × 1', value: '1 сомони' }],
-          totals: [{ label: 'Итого', value: '1 сомони', big: true }],
-          tail: ['Если этот текст читается — принтер настроен верно'],
-        })
-      : { ok: false, mode: 'system' },
-  )
+  // Пробный чек — как настоящий: название магазина на полосе и жирным внизу
+  ipcMain.handle('print:test', (event) => {
+    if (!trusted(event) || !allowed('settings.print')) return { ok: false, mode: 'system' }
+    const shop = gateway.activeShop()
+    return printTicket({
+      head: [shop || 'Магазин', 'Пробная печать'],
+      docAt: 1,
+      rows: [{ name: 'Проверка русских букв: АБВГД абвгд ЁЖЗ', sub: '1 шт × 1', value: '1 сомони' }],
+      totals: [{ label: 'Итого', value: '1 сомони', big: true }],
+      tail: ['Если этот текст читается — принтер настроен верно', ...(shop ? [shop] : [])],
+      signAt: shop ? 1 : -1,
+    })
+  })
 
   // ── Свой экран печати ──
   // Окно печати Windows для этой программы предпросмотр не показывает, поэтому экран
@@ -772,7 +774,7 @@ async function start() {
   ipcMain.handle('print:tape', (event, req) => {
     if (!trusted(event) || !gateway.activeRole()) return { ok: false, error: 'Требуется вход в систему' }
     const cfg = settings.get().print
-    return { ok: true, lines: layoutTicket(req?.ticket, { width: lentaWidth(req?.width, cfg) }), logo: cfg.logo !== false }
+    return { ok: true, lines: layoutTicket(req?.ticket, { width: lentaWidth(req?.width, cfg) }) }
   })
   ipcMain.handle('print:raw', async (event, req) => {
     if (!trusted(event) || !gateway.activeRole()) return { ok: false, error: 'Требуется вход в систему' }
@@ -780,7 +782,7 @@ async function start() {
     if (!printer) return { ok: false, error: 'Не удалось отправить задание на принтер.' }
     const cfg = settings.get().print
     try {
-      const bytes = renderTicket(req?.ticket, { width: lentaWidth(req?.width, cfg), codepage: cfg.codepage, cut: cfg.cut, drawer: false, logo: cfg.logo === false ? null : LOGO })
+      const bytes = renderTicket(req?.ticket, { width: lentaWidth(req?.width, cfg), codepage: cfg.codepage, cut: cfg.cut, drawer: false })
       // Копии — отдельными чеками: каждый со своим отрезом
       for (let n = 0; n < copies; n++) {
         await sendWindows({
