@@ -23,6 +23,10 @@ function text866(buf) {
       i += buf[i + 1] === 0x56 ? 3 : 2 // GS V m n; GS ! n; GS B n
       continue
     }
+    if (b === 0x1c) {
+      i += 1 // FS . — выключить режим иероглифов
+      continue
+    }
     if (b === 0x0a) out += '\n'
     else if (b < 0x80) out += String.fromCharCode(b)
     else if (b <= 0xaf) out += String.fromCharCode(b - 0x80 + 0x410)
@@ -78,12 +82,14 @@ test('подпись слева, число справа — ровно по ш�
   assert.equal(twoColumns('', '25 сомони', 32)[0], ' '.repeat(23) + '25 сомони')
 })
 
-test('команды принтера: сброс и таблица букв, жирный, по центру, отрезать, ящик', () => {
+test('команды принтера: сброс, без китайского режима, таблица букв, жирный, по центру, отрезать, ящик', () => {
   const p = escpos({ codepage: 'cp866', width: 32 })
-  assert.deepEqual([...p.init().bytes()], [0x1b, 0x40, 0x1b, 0x74, 17])
-  assert.deepEqual([...escpos({ codepage: 'cp1251' }).init().bytes()], [0x1b, 0x40, 0x1b, 0x74, 46])
+  // ESC @ — сброс; FS . — выключить режим иероглифов (иначе китайский принтер печатает
+  // русский текст китайскими знаками); ESC t n — таблица русских букв
+  assert.deepEqual([...p.init().bytes()], [0x1b, 0x40, 0x1c, 0x2e, 0x1b, 0x74, 17])
+  assert.deepEqual([...escpos({ codepage: 'cp1251' }).init().bytes()], [0x1b, 0x40, 0x1c, 0x2e, 0x1b, 0x74, 46])
   // Незнакомая таблица — та, что знают все
-  assert.deepEqual([...escpos({ codepage: 'koi8' }).init().bytes()], [0x1b, 0x40, 0x1b, 0x74, 17])
+  assert.deepEqual([...escpos({ codepage: 'koi8' }).init().bytes()], [0x1b, 0x40, 0x1c, 0x2e, 0x1b, 0x74, 17])
   assert.deepEqual([...escpos().align('center').bytes()], [0x1b, 0x61, 1])
   assert.deepEqual([...escpos().bold(true).bold(false).bytes()], [0x1b, 0x45, 1, 0x1b, 0x45, 0])
   assert.deepEqual([...escpos().tall(true).bytes()], [0x1d, 0x21, 0x01])
@@ -109,8 +115,8 @@ const TICKET = {
 
 test('чек на ленте 58 мм: всё на своих местах и ни одна строка не шире ленты', () => {
   const bytes = renderTicket(TICKET, { width: 32, codepage: 'cp866' })
-  // Начинается со сброса и выбора таблицы, заканчивается подачей и отрезом
-  assert.deepEqual([...bytes.subarray(0, 5)], [0x1b, 0x40, 0x1b, 0x74, 17])
+  // Начинается со сброса, выключения китайского режима и выбора таблицы, заканчивается подачей и отрезом
+  assert.deepEqual([...bytes.subarray(0, 7)], [0x1b, 0x40, 0x1c, 0x2e, 0x1b, 0x74, 17])
   assert.deepEqual([...bytes.subarray(-7)], [0x1b, 0x64, 3, 0x1d, 0x56, 0x42, 0x00])
   const lines = text866(bytes).split('\n')
   assert.ok(lines.every((l) => l.length <= 32), 'строка вылезла за ленту: ' + lines.find((l) => l.length > 32))
@@ -133,7 +139,8 @@ test('лента 80 мм шире — колонки раздвигаются; �
   const noCut = renderTicket(TICKET, { cut: false })
   assert.deepEqual([...noCut.subarray(-3)], [0x1b, 0x64, 3])
   const withDrawer = renderTicket(TICKET, { drawer: true })
-  assert.deepEqual([...withDrawer.subarray(5, 10)], [0x1b, 0x70, 0x00, 0x19, 0xfa], 'ящик открывается до печати — кассир уже отсчитывает сдачу')
+  // Сразу за началом задания (сброс, без китайского режима, таблица букв — 7 байт)
+  assert.deepEqual([...withDrawer.subarray(7, 12)], [0x1b, 0x70, 0x00, 0x19, 0xfa], 'ящик открывается до печати — кассир уже отсчитывает сдачу')
 })
 
 test('итоговая строка печатается крупно и жирно, остальные — обычно', () => {
@@ -184,7 +191,7 @@ test('чек из мусора не роняет печать: лишнее от
   assert.equal(huge.head[0].length, 200)
   assert.deepEqual(huge.rows, [{ name: '', sub: '', value: '' }, { name: '', sub: '', value: '' }, { name: '12', sub: '', value: '' }])
   // Пустой чек — всё равно корректное задание: сброс, подача, отрез
-  assert.deepEqual([...renderTicket(null)], [0x1b, 0x40, 0x1b, 0x74, 17, 0x1b, 0x61, 0, 0x1b, 0x64, 3, 0x1d, 0x56, 0x42, 0x00])
+  assert.deepEqual([...renderTicket(null)], [0x1b, 0x40, 0x1c, 0x2e, 0x1b, 0x74, 17, 0x1b, 0x61, 0, 0x1b, 0x64, 3, 0x1d, 0x56, 0x42, 0x00])
 })
 test('эмблема: растровый блок GS v 0 с верной шириной в байтах, битая — не печатается', () => {
   // 16×8: две полосы — проверяем и заголовок, и сами точки
