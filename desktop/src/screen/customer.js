@@ -55,7 +55,7 @@
     var view = VIEWS[s.mode] ? s.mode : 'idle'
     var screen = $('screen')
     screen.setAttribute('data-view', view)
-    document.documentElement.lang = s.lang === 'tj' ? 'tg' : 'ru'
+    document.documentElement.lang = s.lang === 'tg' ? 'tg' : 'ru'
 
     var shop = typeof s.shop === 'string' ? s.shop : ''
     text('bar-shop', shop)

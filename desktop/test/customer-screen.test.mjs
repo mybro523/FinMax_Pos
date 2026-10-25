@@ -10,7 +10,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { join, resolve } from 'node:path'
 import { MAX_ITEMS, pickDisplay, sanitizeCustomer, sanitizeScreenState } from '../src/customer-screen.mjs'
-import { createCustomerScreen, CUSTOMER_TITLE, MOVE_MS, TEST_MS } from '../src/customer-window.mjs'
+import { createCustomerScreen, CUSTOMER_TITLE, MOVE_MS, SETTLE_MS, TEST_MS } from '../src/customer-window.mjs'
 import { ORIGIN, resolveAsset, SCREEN_URL } from '../src/protocol.mjs'
 
 const KASSA = { id: 1, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, size: { width: 1920, height: 1080 } }
@@ -44,7 +44,7 @@ test('настройка из файла — только известные з�
 test('что показать: только строки и только с пределами — окно покупателя ничего не разбирает', () => {
   const s = sanitizeScreenState({
     mode: 'cart',
-    lang: 'tj',
+    lang: 'tg',
     shop: 'Магазин «Шифо»',
     labels: { total: 'Ҷамъ', welcome: 42, lishnee: 'x' },
     items: [{ name: 'Нурофен 200 мг', sub: '2 уп × 15', sum: '30 сомони', price: 15 }, null, { name: 'x'.repeat(500) }],
@@ -53,7 +53,8 @@ test('что показать: только строки и только с пр
     change: '12 сомони',
   })
   assert.equal(s.mode, 'cart')
-  assert.equal(s.lang, 'tj')
+  assert.equal(s.lang, 'tg', 'язык программы — как в i18n: tg')
+  assert.equal(sanitizeScreenState({ lang: 'xx' }).lang, 'ru')
   assert.equal(s.labels.total, 'Ҷамъ')
   assert.equal(s.labels.welcome, '', 'не строка — пусто (страница возьмёт свою подпись)')
   assert.equal(s.labels.lishnee, undefined)
@@ -61,7 +62,11 @@ test('что показать: только строки и только с пр
   assert.deepEqual(s.items[1], { name: '', sub: '', sum: '' })
   assert.equal(s.items[2].name.length, 200)
   assert.equal(s.change, '', 'сдача — только после оплаты')
-  assert.equal(sanitizeScreenState({ mode: 'cart', items: Array.from({ length: 1000 }, () => ({ name: 'a' })) }).items.length, MAX_ITEMS)
+  const many = sanitizeScreenState({ mode: 'cart', items: Array.from({ length: 1000 }, (_, k) => ({ name: 'Товар ' + (k + 1) })) }).items
+  assert.equal(many.length, MAX_ITEMS)
+  // Покупатель видит свежие строки — в конце корзины; отрезается начало
+  assert.equal(many.at(-1).name, 'Товар 1000')
+  assert.equal(many[0].name, 'Товар ' + (1000 - MAX_ITEMS + 1))
   // Ожидание покупателя: ни строк, ни сумм
   const idle = sanitizeScreenState({ mode: 'idle', items: [{ name: 'a' }], total: '5' })
   assert.deepEqual([idle.items, idle.total], [[], ''])
@@ -307,4 +312,30 @@ test('кассу перенесли на другой экран — покуп�
   h.timers.at(-1).fn()
   assert.equal(h.cs.window(), null)
   assert.equal(h.windows.length, 1, 'нового окна нет')
+})
+
+test('окно встало не того размера (экран с другим масштабом) — через миг ставится заново, без бесконечных поправок', () => {
+  const h = harness()
+  h.cs.place()
+  const w = h.windows[0]
+  // Электрон показал окно, а оно на экране с другим масштабом вышло крупнее экрана
+  w.bounds = { x: 1920, y: 0, width: 1280, height: 750 }
+  w.events.get('ready-to-show')()
+  assert.equal(w.shown, true)
+  assert.equal(h.timers.at(-1).ms, SETTLE_MS)
+  h.timers.at(-1).fn()
+  assert.deepEqual(w.bounds, POKUPATEL.bounds, 'поставили заново — ровно на экран покупателя')
+  // Округление Windows на точку-две — то же самое: окно не дёргают
+  w.bounds = { x: 1920, y: 0, width: 1026, height: 601 }
+  const before = h.timers.length
+  h.cs.place()
+  assert.deepEqual(w.bounds, { x: 1920, y: 0, width: 1026, height: 601 })
+  assert.equal(h.timers.length, before, 'лишней сверки нет')
+  // Окно закрылось раньше сверки — сверка ничего не делает
+  w.bounds = { x: 0, y: 0, width: 10, height: 10 }
+  w.events.get('ready-to-show')()
+  h.setDisplays([KASSA])
+  h.fire('display-removed')
+  h.timers.at(-1).fn()
+  assert.deepEqual(w.bounds, { x: 0, y: 0, width: 10, height: 10 })
 })

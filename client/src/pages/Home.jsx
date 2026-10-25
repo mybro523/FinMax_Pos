@@ -1,10 +1,12 @@
+import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { LuLogOut, LuMoon, LuSun, LuPower, LuLock, LuInfo } from 'react-icons/lu'
 import Layout, { NAV, allowedNav } from '../components/Layout'
 import { useCollection } from '../db/store'
 import { useAuth, logout } from '../db/auth'
 import { expiringProducts } from '../lib/expiry'
-import { useT } from '../lib/i18n'
+import { useLang, useT } from '../lib/i18n'
+import { customerLabels, showCustomer } from '../lib/customerScreen'
 import { useTheme, toggleTheme } from '../lib/theme'
 import { isDesktop } from '../lib/desktop'
 import { useCloseApp } from '../components/WindowButtons'
@@ -41,6 +43,14 @@ export default function Home() {
     else items.push({ ...n, группа })
   }
   const temaText = theme === 'dark' ? t('Светлая тема') : t('Тёмная тема')
+
+  // Экран покупателя (программа для Windows): после входа, при входе в другой магазин и
+  // при смене языка — название магазина и «Добро пожаловать». Корзину покажет касса
+  const lang = useLang()
+  const shop = user?.pharmacy?.name || ''
+  useEffect(() => {
+    showCustomer({ mode: 'idle', lang, shop, labels: customerLabels(t) })
+  }, [lang, shop, t])
 
   return (
     <Layout

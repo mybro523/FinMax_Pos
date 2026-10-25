@@ -15,6 +15,12 @@ export const CUSTOMER_TITLE = 'FinMax POS — экран покупателя'
 export const TEST_MS = 6000
 // Окно кассы переносят — переставляем покупателя, когда перенос закончился
 export const MOVE_MS = 300
+// Через столько сверяем, встало ли окно покупателя на экран целиком
+export const SETTLE_MS = 500
+
+// Совпадают ли границы окна и экрана. Windows при масштабе 125% округляет размер окна на
+// точку-две — это то же самое
+const near = (a, b) => Math.abs(a.x - b.x) <= 2 && Math.abs(a.y - b.y) <= 2 && Math.abs(a.width - b.width) <= 2 && Math.abs(a.height - b.height) <= 2
 
 export function createCustomerScreen({ BrowserWindow, screen, ipcMain, ses, settings, mainWindow, trusted, allowed, activeRole, preload, url, isOurs, dev = false, log, timers = { set: setTimeout, clear: clearTimeout } }) {
   let win = null
@@ -51,6 +57,17 @@ export function createCustomerScreen({ BrowserWindow, screen, ipcMain, ses, sett
     win = null
   }
 
+  // Окно, переехавшее на экран с другим масштабом Windows, Электрон иногда оставляет не
+  // того размера — оно не закрыло бы экран покупателя целиком или вылезло бы на экран
+  // кассы. Сверяем один раз чуть позже и, если нужно, ставим заново
+  function settle() {
+    timers.set(() => {
+      if (!alive()) return
+      const target = pickDisplay(settings.get().customer, displays(), mainId())
+      if (target && !near(win.getBounds(), target.bounds)) win.setBounds(target.bounds)
+    }, SETTLE_MS)
+  }
+
   // ── Открыть, переставить или закрыть — по настройке и по тому, какие экраны есть ──
   function place() {
     // Окна кассы нет (программа закрывается) — нет и окна покупателя
@@ -67,8 +84,10 @@ export function createCustomerScreen({ BrowserWindow, screen, ipcMain, ses, sett
     const b = target.bounds
     if (alive()) {
       // Экран сменили (переподключили, поменяли разрешение) — окно встаёт на новый целиком
-      const cur = win.getBounds()
-      if (cur.x !== b.x || cur.y !== b.y || cur.width !== b.width || cur.height !== b.height) win.setBounds(b)
+      if (!near(win.getBounds(), b)) {
+        win.setBounds(b)
+        settle()
+      }
       return target
     }
     win = new BrowserWindow({
@@ -103,7 +122,9 @@ export function createCustomerScreen({ BrowserWindow, screen, ipcMain, ses, sett
     const own = win
     own.setAlwaysOnTop(true, 'screen-saver')
     own.once('ready-to-show', () => {
-      if (!own.isDestroyed()) own.showInactive()
+      if (own.isDestroyed()) return
+      own.showInactive()
+      settle()
     })
     own.on('closed', () => {
       if (win === own) win = null

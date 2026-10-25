@@ -4,6 +4,7 @@ import {
 import { LuTrendingUp, LuBoxes } from 'react-icons/lu'
 import { money } from '../db/store'
 import { translate as tr } from '../lib/i18n'
+import { axisNumber } from '../lib/number'
 
 // Графики вынесены в отдельный файл: библиотека диаграмм весит ~370 КБ и грузится
 // уже после того, как показаны карточки и таблицы — панель открывается мгновенно.
@@ -24,7 +25,7 @@ export default function DashboardCharts({ chart, topProducts, onDay, onProduct }
         </h2>
         <ResponsiveContainer width="100%" height={258}>
           <AreaChart
-            data={chart} margin={{ left: -12, right: 8 }} style={{ cursor: 'pointer' }}
+            data={chart} margin={{ left: -4, right: 8 }} style={{ cursor: 'pointer' }}
             onClick={(e) => { const pt = e?.activePayload?.[0]?.payload; if (pt) onDay(pt) }}
           >
             <defs>
@@ -35,7 +36,7 @@ export default function DashboardCharts({ chart, topProducts, onDay, onProduct }
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--track)" vertical={false} />
             <XAxis dataKey="day" tick={{ fontSize: 12, fill: 'var(--muted)' }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fontSize: 12, fill: 'var(--muted)' }} axisLine={false} tickLine={false} width={50} />
+            <YAxis tick={{ fontSize: 12, fill: 'var(--muted)' }} axisLine={false} tickLine={false} width={64} tickFormatter={(v) => axisNumber(v, tr)} />
             <Tooltip formatter={(v) => money(v)} contentStyle={TOOLTIP} />
             <Area
               type="monotone" dataKey="sum" stroke="#00359f" strokeWidth={2.5} fill="url(#g)"

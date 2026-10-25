@@ -47,12 +47,13 @@ export function sanitizeScreenState(raw) {
   for (const k of LABELS) labels[k] = str(src[k], 80)
   const withItems = mode === 'cart' || mode === 'test'
   const items = withItems && Array.isArray(s.items)
-    ? s.items.slice(0, MAX_ITEMS).map((i) => ({ name: str(i?.name, 200), sub: str(i?.sub, 160), sum: str(i?.sum, 40) }))
+    ? // Свежие строки — в конце корзины, их покупатель и видит: при переборе отрезаем начало
+      s.items.slice(-MAX_ITEMS).map((i) => ({ name: str(i?.name, 200), sub: str(i?.sub, 160), sum: str(i?.sum, 40) }))
     : []
   return {
     mode,
     // Язык подписей — как в программе (подписи присылает окно кассы уже переведёнными)
-    lang: s.lang === 'tj' ? 'tj' : 'ru',
+    lang: s.lang === 'tg' ? 'tg' : 'ru',
     shop: str(s.shop, 120),
     labels,
     items,

@@ -891,6 +891,11 @@ export default function Pos() {
     const id = setTimeout(() => setThanks(null), 5000)
     return () => clearTimeout(id)
   }, [thanks])
+  // Следующий покупатель уже у кассы — «Спасибо» с суммой прошлого чека больше не нужно:
+  // убрали его товар — покупатель увидит «Добро пожаловать», а не чужую сдачу
+  useEffect(() => {
+    if (cart.length && thanks) setThanks(null)
+  }, [cart.length, thanks])
   // Ушли из кассы (в другой раздел, вышли) — покупателю снова «Добро пожаловать»
   const idleScreen = useRef(null)
   idleScreen.current = { mode: 'idle', lang, shop: shopName, labels: customerLabels(t) }

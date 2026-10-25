@@ -63,3 +63,21 @@ test('строки из полей формы разбираются', () => {
   assert.equal(sellsBelowCost('200', '20'), true)
   assert.equal(sellsBelowCost('20.5', '30.1'), false)
 })
+
+test('подписи шкалы графика: крупные числа сокращены и не обрезаются', async () => {
+  const { axisNumber } = await import('../src/lib/number.js')
+  assert.equal(axisNumber(0), '0')
+  assert.equal(axisNumber(3500), '3500')
+  assert.equal(axisNumber(9999), '9999')
+  assert.equal(axisNumber(10500), '10,5 тыс.')
+  assert.equal(axisNumber(14000), '14 тыс.')
+  assert.equal(axisNumber(140000), '140 тыс.')
+  assert.equal(axisNumber(1250000), '1,3 млн')
+  assert.equal(axisNumber(12000000), '12 млн')
+  assert.equal(axisNumber(-14000), '-14 тыс.')
+  assert.equal(axisNumber('abc'), '')
+  // Подпись не длиннее девяти знаков — в шкалу шириной 64 она влезает целиком
+  for (const v of [9999, 99500, 999000, 9950000, 99000000]) assert.ok(axisNumber(v).length <= 9, axisNumber(v))
+  // Перевод — снаружи
+  assert.equal(axisNumber(14000, (s) => (s === 'тыс.' ? 'ҳаз.' : s)), '14 ҳаз.')
+})
