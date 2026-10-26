@@ -106,6 +106,13 @@ contextBridge.exposeInMainWorld('apteka', {
     page: (req) => ipcRenderer.invoke('print:page', req),
     pdf: (req) => ipcRenderer.invoke('print:pdf', req),
   },
+  // Принтер этикеток: настройка этого компьютера (принтер, размер наклейки, сдвиг) и печать
+  // наклеек из печатного слоя окна страницами размера наклейки — сразу, без экрана печати
+  labels: {
+    config: () => ipcRenderer.invoke('labels:config'),
+    setConfig: (cfg) => ipcRenderer.invoke('labels:setConfig', cfg),
+    print: (req) => ipcRenderer.invoke('labels:print', req),
+  },
   // Экран покупателя (второй экран моноблока): корзина и итог готовыми строками, настройка
   // «где показывать» и проба из «Настроек» (desktop/src/customer-window.mjs)
   customer: {

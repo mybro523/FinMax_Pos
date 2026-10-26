@@ -30,7 +30,8 @@ export function printRoot() {
 }
 
 // kind — вид документа: sheet (лист раздела), opu, ticket (чек), labels (этикетки),
-// sticker (наклейка 58 мм). От вида зависят поля страницы и номера страниц.
+// sticker (наклейки на принтере этикеток — страница размера наклейки, components/Nakleyka.jsx).
+// От вида зависят поля страницы и номера страниц.
 // title — название документа: экран печати пишет его в заголовке и в имени PDF
 export default function PrintDoc({ prio = 1, kind = 'sheet', title = '', children }) {
   const host = printRoot()

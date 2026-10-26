@@ -12,7 +12,7 @@
 //
 // Расширение в путях указано намеренно: файл загружается и проверками, без сборщика.
 import { bridge } from './desktop.js'
-import { printConfig, printTicket } from './print.js'
+import { labelConfig, labelPrinterOf, printConfig, printTicket } from './print.js'
 
 let current = null
 const subs = new Set()
@@ -35,7 +35,7 @@ export const hasPreview = (b = bridge) => !!b?.print?.preview
 // ── Напечатать то, что лежит в печатном слое ──
 // kind: 'sheet' — лист раздела или «Отчёт о прибылях и убытках»; 'ticket' — чек,
 // возврат или Z-отчёт (ticket — его строки: их можно отдать и на чековую ленту);
-// 'labels' — этикетки (roll — наклейка 58 мм на термопринтере этикеток).
+// 'labels' — лист этикеток A4; 'sticker' — наклейки на принтере этикеток (size — их размер).
 // system — что сделать на сайте; b — мост программы (подменяется проверками).
 // Возвращает, где печатается: 'system' — окно браузера, 'preview' — экран программы
 export function pechat(opts = {}, { system = () => window.print(), b = bridge } = {}) {
@@ -61,6 +61,28 @@ export async function pechatTicket(ticket, { system = () => window.print(), b = 
     }
   }
   return pechat({ kind: 'ticket', ticket }, { system, b })
+}
+
+// ── Наклейки со штрихкодом ──
+// В программе с выбранным принтером этикеток наклейки уходят в него сразу — страницами
+// размера наклейки, без экрана печати. Иначе — экран печати программы с предпросмотром
+// (сайт — окно печати браузера). size — размер наклейки, мм; cfg — настройка принтера,
+// по которой окно нарисовало наклейки (печатать надо ровно по ней). Не вышло — ошибка словами
+export async function pechatNakleyki(size, { cfg, system = () => window.print(), b = bridge } = {}) {
+  if (b?.labels) {
+    const c = cfg !== undefined ? cfg : await labelConfig()
+    if (labelPrinterOf(c)) {
+      let r = null
+      try {
+        r = await b.labels.print({ w: size?.w, h: size?.h })
+      } catch {
+        r = null
+      }
+      if (!r?.ok) throw new Error(r?.error || 'Не удалось отправить задание на принтер.')
+      return 'printer'
+    }
+  }
+  return pechat({ kind: 'sticker', size }, { system, b })
 }
 
 // ── Какой документ печатается ──

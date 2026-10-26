@@ -36,6 +36,7 @@ import { createFetch } from './fetch-compat.mjs'
 import { LITE_ARG, liteState, sanitizeLite } from './lite.mjs'
 import { layoutTicket, renderTicket } from './print/escpos.mjs'
 import { pageRequest, pdfOptions, printerKind, printOptions } from './print/page.mjs'
+import { labelPrintOptions, labelSize } from './print/labels.mjs'
 import { runPowerShell } from './print/powershell.mjs'
 import { checkHost, sendNetwork, sendWindows } from './print/transport.mjs'
 import { isAppUrl, registerAppProtocol, registerScheme, SCREEN_URL, START_URL } from './protocol.mjs'
@@ -837,6 +838,35 @@ async function start() {
       log.warn('PDF не сохранён: ' + (e?.message || e))
       return { ok: false, error: 'Не получилось. Повторите.' }
     }
+  })
+
+  // ── Принтер этикеток ──
+  // Наклейки со штрихкодом: окно рисует их страницами ровно размера наклейки, здесь они
+  // уходят на принтер этикеток, выбранный в настройках, — сразу, без экрана печати.
+  // Размер страницы передаётся явно (print/labels.mjs): иначе новый движок печати
+  // отдал бы принтеру лист A4. Принтер не выбран — окно печатает через экран печати
+  ipcMain.handle('labels:config', async (event) => (trusted(event) && gateway.activeRole() ? { ...settings.get().labels, printers: await printerNames() } : null))
+  ipcMain.handle('labels:setConfig', (event, cfg) => {
+    if (!trusted(event) || !allowed('settings.print')) return null
+    return settings.set({ labels: cfg }).labels
+  })
+  ipcMain.handle('labels:print', async (event, req) => {
+    if (!trusted(event) || !gateway.activeRole()) return { ok: false, error: 'Требуется вход в систему' }
+    // Печатает тот, кому можно печатать этикетки; пробную наклейку — и тот, кто настраивает печать
+    if (!allowed('products.labels') && !allowed('settings.print')) return { ok: false, error: 'Нет права печатать этикетки.' }
+    const cfg = settings.get().labels
+    if (!cfg.printer) return { ok: false, error: 'Не выбран принтер этикеток.' }
+    const list = await win.webContents.getPrintersAsync().catch(() => null)
+    if (Array.isArray(list) && !list.some((p) => p?.name === cfg.printer)) return { ok: false, error: 'Принтер с таким именем в Windows не найден.' }
+    // Старый движок (Windows 7 и 8): на принтере, который сохраняет файл, печать без окна зависает
+    if (LEGACY && printerKind(list, cfg.printer) === 'file') return { ok: false, error: 'Этот принтер не печатает на бумаге, а сохраняет файл. Выберите принтер этикеток.' }
+    const size = labelSize(req, cfg)
+    return await new Promise((resolve) => {
+      win.webContents.print(labelPrintOptions({ printer: cfg.printer, ...size }), (done, reason) => {
+        if (!done) log.warn(`наклейки не напечатаны (${cfg.printer}, ${size.w}×${size.h} мм): ${reason || ''}`)
+        resolve(done ? { ok: true } : { ok: false, error: 'Принтер не принял задание. Проверьте, что он включён и подключён.' })
+      })
+    })
   })
 
   // ── Выгрузка в Excel ──

@@ -18,7 +18,7 @@ test('просьба окна: принтер, ориентация, копии 
   assert.equal(pageRequest({ copies: 2.7 }).copies, 2)
   assert.equal(pageRequest({ printer: 'x'.repeat(500) }).printer.length, 220)
   // Наклейку не поворачивают: она по размеру этикетки
-  assert.deepEqual(pageRequest({ roll: true, landscape: true }), { printer: '', landscape: false, roll: true, copies: 1 })
+  assert.deepEqual(pageRequest({ roll: true, landscape: true }), { printer: '', landscape: false, roll: true, copies: 1, size: { w: 58, h: 40 } })
 })
 
 test('предпросмотр и печать — одинаковые страницы: A4, ориентация, фон печатается', () => {
@@ -31,15 +31,28 @@ test('предпросмотр и печать — одинаковые стра
   assert.equal(job.silent, true)
 })
 
-test('наклейка 58×40 мм: в PDF — по размеру этикетки, на принтер — на заправленную бумагу', () => {
+test('наклейка: в PDF и на принтер — страница ровно размера наклейки, без полей', () => {
+  // Размер не прислали — 58×40, как раньше
   const ask = pageRequest({ roll: true, printer: 'Xprinter XP-365B' })
+  assert.deepEqual(ask.size, { w: STICKER_MM.width, h: STICKER_MM.height })
   const pdf = pdfOptions(ask)
   assert.equal(pdf.landscape, false)
-  assert.ok(Math.abs(pdf.pageSize.width * 25.4 - STICKER_MM.width) < 1e-9)
-  assert.ok(Math.abs(pdf.pageSize.height * 25.4 - STICKER_MM.height) < 1e-9)
+  assert.ok(Math.abs(pdf.pageSize.width * 25.4 - 58) < 1e-9)
+  assert.ok(Math.abs(pdf.pageSize.height * 25.4 - 40) < 1e-9)
+  // На принтер — размер явно, в микронах: без него новый движок печати отдал бы лист A4
   const job = printOptions(ask)
-  assert.equal(job.pageSize, undefined, 'размер наклейки знает драйвер принтера этикеток')
+  assert.deepEqual(job.pageSize, { width: 58000, height: 40000 })
+  assert.deepEqual(job.margins, { marginType: 'none' })
   assert.equal(job.deviceName, 'Xprinter XP-365B')
+  // Свой размер: 40×30 — и в PDF, и на принтер
+  const small = pageRequest({ roll: true, size: { w: 40, h: 30 } })
+  assert.deepEqual(printOptions(small).pageSize, { width: 40000, height: 30000 })
+  assert.ok(Math.abs(pdfOptions(small).pageSize.width * 25.4 - 40) < 1e-9)
+  // Мусор или вне пределов — в пределах
+  assert.deepEqual(pageRequest({ roll: true, size: { w: 'x', h: 30 } }).size, { w: 58, h: 40 })
+  assert.deepEqual(pageRequest({ roll: true, size: { w: 1000, h: 2 } }).size, { w: 110, h: 20 })
+  // У листа размера наклейки нет
+  assert.equal(pageRequest({ size: { w: 40, h: 30 } }).size, undefined)
 })
 
 test('имя PDF: название документа и дата, без запрещённых знаков, всегда .pdf', () => {

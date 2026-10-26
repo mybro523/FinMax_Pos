@@ -1,7 +1,7 @@
 {
   "name": "finmax-pos-desktop",
   "productName": "FinMax POS",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "description": "FinMax POS — касса и склад торговли. Программа для Windows 7 и 8 (старый движок Electron 22)",
   "private": true,
   "author": "FinMax",

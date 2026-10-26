@@ -55,3 +55,33 @@ export async function printTicket(ticket, system = () => window.print()) {
   if (!r.ok) throw new Error(r.error || 'Не удалось отправить задание на принтер.')
   return 'printer'
 }
+
+// ── Принтер этикеток (программа для Windows) ──
+// Какой принтер и какой размер наклейки выбраны на этом компьютере. Спрашиваем один раз
+// и помним, как настройки чекового принтера; настройки поменяли — забыть
+let labels = null
+
+export async function labelConfig(fresh = false) {
+  if (!bridge?.labels) return null
+  if (!labels || fresh) {
+    try {
+      labels = await bridge.labels.config()
+    } catch {
+      labels = null
+    }
+  }
+  return labels
+}
+
+export function forgetLabelConfig() {
+  labels = null
+}
+
+// Принтер этикеток, на который можно печатать сразу: выбран в настройках и есть в Windows.
+// Пропал из Windows (отключили, переустановили под другим именем) — как не выбран: окно
+// печатает через экран печати, а не упирается в «принтер не найден»
+export function labelPrinterOf(cfg) {
+  const name = typeof cfg?.printer === 'string' ? cfg.printer : ''
+  if (!name) return ''
+  return !Array.isArray(cfg.printers) || cfg.printers.includes(name) ? name : ''
+}

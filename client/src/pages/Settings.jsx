@@ -15,6 +15,7 @@ import { useT, useLang, setLang, LANGS } from '../lib/i18n'
 import { useTheme, setTheme } from '../lib/theme'
 import DevicesPanel from '../components/DevicesPanel'
 import PrintPanel from '../components/PrintPanel'
+import LabelPrinterPanel from '../components/LabelPrinterPanel'
 import CustomerScreenPanel from '../components/CustomerScreenPanel'
 import ChekPanel from '../components/ChekPanel'
 import VesyPanel from '../components/VesyPanel'
@@ -286,6 +287,8 @@ export default function Settings() {
               <ChekPanel />
               {/* Чековый принтер настраивается на каждом компьютере отдельно — только в программе */}
               {isDesktop && <PrintPanel />}
+              {/* Принтер этикеток — тоже у каждого компьютера свой */}
+              {isDesktop && <LabelPrinterPanel />}
               {/* Экран покупателя — второй экран моноблока, тоже настройка этого компьютера */}
               {isDesktop && <CustomerScreenPanel />}
               {!isDesktop && (

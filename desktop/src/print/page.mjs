@@ -5,15 +5,16 @@
 // просьбы и параметры для движка печати, без Electron: так их можно проверить.
 //
 // Предпросмотр и печать обязаны совпадать, поэтому PDF для предпросмотра и задание
-// на принтер собираются из одних и тех же значений: лист A4 (или наклейка 58×40 мм),
-// ориентация, фон печатается. Поля и номера страниц задают стили печатного слоя.
+// на принтер собираются из одних и тех же значений: лист A4 (или наклейка своего
+// размера), ориентация, фон печатается. Поля и номера страниц задают стили печатного слоя.
+import { labelSize, pageMicrons } from './labels.mjs'
 
-// Наклейка на термопринтере этикеток: 58 × 40 мм
+// Наклейка на принтере этикеток — по умолчанию 58 × 40 мм; размер присылает окно
 export const STICKER_MM = { width: 58, height: 40 }
 const MM_PER_INCH = 25.4
 
 // Просьба окна → проверенные значения: принтер — строкой не длиннее 220 знаков
-// (пусто — принтер по умолчанию), копий — от 1 до 99
+// (пусто — принтер по умолчанию), копий — от 1 до 99; у наклейки — её размер, мм
 export function pageRequest(req) {
   const roll = req?.roll === true
   return {
@@ -22,28 +23,32 @@ export function pageRequest(req) {
     landscape: !roll && req?.landscape === true,
     roll,
     copies: Math.max(1, Math.min(99, Math.trunc(Number(req?.copies) || 1))),
+    ...(roll ? { size: labelSize(req?.size, { w: STICKER_MM.width, h: STICKER_MM.height }) } : {}),
   }
 }
 
 // Для PDF (предпросмотр и «Сохранить в PDF»): размер — в дюймах
-export function pdfOptions({ landscape, roll }) {
+export function pdfOptions({ landscape, roll, size }) {
+  const s = size || { w: STICKER_MM.width, h: STICKER_MM.height }
   return {
     printBackground: true,
     landscape: !!landscape && !roll,
-    pageSize: roll ? { width: STICKER_MM.width / MM_PER_INCH, height: STICKER_MM.height / MM_PER_INCH } : 'A4',
+    pageSize: roll ? { width: s.w / MM_PER_INCH, height: s.h / MM_PER_INCH } : 'A4',
   }
 }
 
 // Для задания на принтер: без окна печати Windows, на выбранный принтер. Наклейка —
-// на бумаге, которая заправлена в принтер этикеток (её размер знает его драйвер)
-export function printOptions({ printer, landscape, roll, copies }) {
+// страницей ровно своего размера (в микронах) и без полей: без размера новый движок
+// печати отдал бы принтеру этикеток лист A4
+export function printOptions({ printer, landscape, roll, copies, size }) {
+  const s = size || { w: STICKER_MM.width, h: STICKER_MM.height }
   return {
     silent: true,
     deviceName: printer,
     printBackground: true,
     landscape: !!landscape && !roll,
     copies,
-    ...(roll ? {} : { pageSize: 'A4' }),
+    ...(roll ? { margins: { marginType: 'none' }, pageSize: pageMicrons(s) } : { pageSize: 'A4' }),
   }
 }
 

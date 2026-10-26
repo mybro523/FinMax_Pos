@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { LuTrash2, LuPencil, LuList, LuPackagePlus, LuWallet, LuChartColumn, LuSearch, LuRotateCcw, LuUndo2 } from 'react-icons/lu'
+import { LuTrash2, LuPencil, LuList, LuPackagePlus, LuWallet, LuChartColumn, LuSearch, LuRotateCcw, LuUndo2, LuTag } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { isVesovoy, uppOf, gramsOfKg, kgText, edinica } from '../lib/units'
 import { Modal, useToast, useDialog } from '../components/ui'
@@ -24,6 +24,7 @@ import NewArrival from './prihod/NewArrival'
 import Balance, { useBalance } from './prihod/Balance'
 import Reports, { useReports } from './prihod/Reports'
 import ReturnTab, { REFUNDS } from './prihod/ReturnTab'
+import PrihodNakleyki from '../components/PrihodNakleyki'
 
 // ── Приход товара ──
 // Один экран, как в привычных программах приёмки: слева — поставщики, сверху — период
@@ -124,6 +125,7 @@ export default function Arrivals() {
 
   const [view, setView] = useState(null)
   const [edit, setEdit] = useState(null) // приход, загруженный для правки
+  const [labelsFor, setLabelsFor] = useState(null) // приход, на товары которого печатаем наклейки
   const [busy, setBusy] = useState(false)
 
   // Для правки нужен не тот приход, что лежит в списке, а подробный: с ним
@@ -380,11 +382,18 @@ export default function Arrivals() {
           sposob={sposob}
           busy={busy}
           canEdit={can('arrivals.edit')}
+          canLabels={can('products.labels')}
           onClose={() => setView(null)}
           onEdit={() => openEdit(view)}
           onDelete={() => askDelete(view)}
+          onLabels={() => {
+            setLabelsFor(view)
+            setView(null)
+          }}
         />
       )}
+
+      {labelsFor && <PrihodNakleyki arrival={labelsFor} products={products} onClose={() => setLabelsFor(null)} />}
 
       {edit && (
         <EditArrival
@@ -455,7 +464,7 @@ function PeriodBar({ value, onChange, loading }) {
 }
 
 // ── Приход · подробно ──
-function ArrivalDetails({ a, products, sposob, busy, canEdit, onClose, onEdit, onDelete }) {
+function ArrivalDetails({ a, products, sposob, busy, canEdit, canLabels, onClose, onEdit, onDelete, onLabels }) {
   const t = useT()
   const items = a.items || []
   const withDisc = items.some((i) => num(i.discount) > 0)
@@ -502,15 +511,29 @@ function ArrivalDetails({ a, products, sposob, busy, canEdit, onClose, onEdit, o
         </>
       )}
 
-      {/* Кассиру этих кнопок не видно, и запрос от него сервер тоже отклонит */}
-      {canEdit && (
+      {/* «Удалить» и «Изменить» кассиру не видно, и запрос от него сервер тоже отклонит.
+          «Этикетки» — наклейки со штрихкодом на все товары прихода */}
+      {(canEdit || canLabels) && (
         <div className="modal-actions" style={{ justifyContent: 'space-between' }}>
-          <button className="btn ghost" style={{ color: 'var(--danger)' }} onClick={onDelete} disabled={busy}>
-            <span className="ic"><LuTrash2 size={16} /></span> {t('Удалить')}
-          </button>
-          <button className="btn" onClick={onEdit} disabled={busy}>
-            <span className="ic"><LuPencil size={16} /></span> {t('Изменить')}
-          </button>
+          {canEdit ? (
+            <button className="btn ghost" style={{ color: 'var(--danger)' }} onClick={onDelete} disabled={busy}>
+              <span className="ic"><LuTrash2 size={16} /></span> {t('Удалить')}
+            </button>
+          ) : (
+            <span />
+          )}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {canLabels && (
+              <button className="btn ghost" onClick={onLabels} disabled={busy || !(a.items || []).length} data-testid="arr-labels">
+                <span className="ic"><LuTag size={16} /></span> {t('Этикетки')}
+              </button>
+            )}
+            {canEdit && (
+              <button className="btn" onClick={onEdit} disabled={busy}>
+                <span className="ic"><LuPencil size={16} /></span> {t('Изменить')}
+              </button>
+            )}
+          </div>
         </div>
       )}
     </Modal>
