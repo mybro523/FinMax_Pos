@@ -72,20 +72,22 @@ function OpuModal({ kind, d, onClose }) {
     },
     sebest: {
       title: 'Себестоимость',
-      rows: [],
+      rows: [
+        ['Проданный товар (закупочная)', fin.cost],
+        ...(fin.returnedCost > 0 ? [['Товар вернулся от покупателей (закупочная)', -fin.returnedCost]] : []),
+        ...(fin.writeOffCost > 0 ? [['Списано (просрочка, бой, недостача)', fin.writeOffCost]] : []),
+      ],
       total: ['Себестоимость', d.sebestoimost],
-      text: 'Во сколько магазину обошёлся проданный за период товар — по закупочной цене.',
+      text: 'Во сколько магазину обошёлся товар за период по закупочной цене: проданный, минус вернувшийся от покупателей, плюс списанный.',
     },
     valovoy: {
       title: 'Валовой доход',
       rows: [
-        ['Наценка с продаж', fin.profitGross],
-        ...(fin.refunds > 0 ? [['Возвращено покупателям', -fin.refunds]] : []),
-        ...(fin.returnedCost > 0 ? [['Товар вернулся на склад (закупочная)', fin.returnedCost]] : []),
-        ...(fin.writeOffCost > 0 ? [['Списано (просрочка, бой, недостача)', -fin.writeOffCost]] : []),
+        ['Выручка', d.prodazha],
+        ['Себестоимость', -d.sebestoimost],
       ],
       total: ['Валовой доход', d.valovoy],
-      text: 'Заработок на товаре: продажи минус их закупочная цена, минус потери на возвратах и списаниях.',
+      text: 'Валовой доход = Выручка − Себестоимость.',
     },
     postavshik: {
       title: 'Поставщик',
@@ -101,7 +103,7 @@ function OpuModal({ kind, d, onClose }) {
       title: 'Прочие доходы',
       rows: (d.dohodyByCategory || []).map((c) => [c.category, c.amount]),
       total: ['Прочие доходы', d.prochieDohody],
-      text: 'Деньги, полученные не за товар: аренда, услуги, бонусы поставщиков — по статьям раздела «Доходы». Прибавляются к чистому доходу.',
+      text: 'Деньги, полученные не за товар: аренда, услуги, бонусы поставщиков — по статьям раздела «Доходы». Прибавляются к чистому доходу и к кассе.',
     },
     zarplata: {
       title: 'Зарплата',
@@ -133,23 +135,25 @@ function OpuModal({ kind, d, onClose }) {
     chistiy: {
       title: 'Чистый доход',
       rows: [
-        ['Валовой доход', d.valovoy],
-        ...(d.prochieDohody > 0 ? [['Прочие доходы', d.prochieDohody]] : []),
+        ['Выручка', d.prodazha],
+        ['Себестоимость', -d.sebestoimost],
+        ['Оплата поставщику', -d.supplierPaid],
         ['Все расходы', -d.allExpenses],
-        ['Отдано поставщикам', -d.supplierPaid],
+        ...(d.prochieDohody > 0 ? [['Прочие доходы', d.prochieDohody]] : []),
       ],
       total: ['Чистый доход', d.chistiy],
-      text: 'Сколько денег на самом деле осталось: валовой доход плюс прочие доходы, минус все расходы и минус деньги, отданные поставщикам за товар.',
+      text: 'Чистый доход = Выручка − Себестоимость − Оплата поставщику − Все расходы + Прочие доходы.',
     },
     kassa: {
       title: 'Касса',
       rows: [
-        ['Продажи наличными', d.cashSales],
-        ['Погашения долгов клиентов', d.debtPaid],
-        ...(d.refundsCash > 0 ? [['Возвраты наличными', -d.refundsCash]] : []),
+        ['Продажа', d.prodazha],
+        ['Оплата поставщику', -d.supplierPaid],
+        ['Все расходы', -d.allExpenses],
+        ...(d.prochieDohody > 0 ? [['Прочие доходы', d.prochieDohody]] : []),
       ],
       total: ['Касса', d.kassa],
-      text: 'Наличные, пришедшие за период: продажи налом и погашения долгов клиентов минус возвраты, выданные наличными.',
+      text: 'Касса = Продажа − Оплата поставщику − Все расходы + Прочие доходы. Продажа — все продажи за период (наличные, карта, перевод, в долг) минус деньги, возвращённые покупателям.',
     },
   }
   const v = VIDY[kind]
@@ -171,7 +175,7 @@ function OpuModal({ kind, d, onClose }) {
   )
 }
 
-const OPU_KEYS = ['sales', 'returns', 'writeoffs', 'expenses', 'incomes', 'payments', 'supplierPayments', 'arrivals', 'supplierReturns']
+const OPU_KEYS = ['sales', 'returns', 'writeoffs', 'expenses', 'incomes', 'supplierPayments', 'arrivals', 'supplierReturns']
 const dstr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 function Opu({ onExcelRef }) {
@@ -182,7 +186,6 @@ function Opu({ onExcelRef }) {
   const expenses = useCollection('expenses')
   // Доходы вне продаж — прибавляются к чистому доходу
   const incomes = useCollection('incomes')
-  const debtPayments = useCollection('payments')
   const supplierPayments = useCollection('supplierPayments')
   const arrivals = useCollection('arrivals')
   // Возвраты товара поставщикам: деньги, которые они вернули, уменьшают «Оплату поставщику»
@@ -229,14 +232,13 @@ function Opu({ onExcelRef }) {
         writeOffs: (deep && deep.writeoffs) || writeOffs,
         expenses: (deep && deep.expenses) || expenses,
         incomes: (deep && deep.incomes) || incomes,
-        debtPayments: (deep && deep.payments) || debtPayments,
         supplierPayments: (deep && deep.supplierPayments) || supplierPayments,
         arrivals: (deep && deep.arrivals) || arrivals,
         supplierReturns: (deep && deep.supplierReturns) || supplierReturns,
         from: range.from,
         to: range.to,
       }),
-    [deep, sales, returns, writeOffs, expenses, incomes, debtPayments, supplierPayments, arrivals, supplierReturns, range],
+    [deep, sales, returns, writeOffs, expenses, incomes, supplierPayments, arrivals, supplierReturns, range],
   )
 
   const apt = getUser()?.pharmacy?.name || ''
@@ -253,6 +255,7 @@ function Opu({ onExcelRef }) {
     [t('Другие расходы'), d.other],
     [t('Все расходы'), d.allExpenses, 'b'],
     [t('Чистый доход'), d.chistiy, 'big'],
+    [t('Касса'), d.kassa, 'big'],
   ]
 
   // Экспорт таблицы ОПУ в Excel — кнопка живёт в шапке раздела
@@ -320,7 +323,7 @@ function Opu({ onExcelRef }) {
       </div>
 
       <p className="tag-cat no-print" style={{ marginTop: 10, lineHeight: 1.6, maxWidth: 720 }}>
-        {t('Чистый доход — кассовый: валовой доход плюс прочие доходы, минус все расходы и деньги, отданные поставщикам за товар.')}{' '}
+        {t('Валовой доход = Выручка − Себестоимость. Чистый доход = Выручка − Себестоимость − Оплата поставщику − Все расходы + Прочие доходы. Касса = Продажа − Оплата поставщику − Все расходы + Прочие доходы.')}{' '}
         {t('Чтобы зарплата и налоги попали в свои строки, записывайте их в разделе «Расходы» в статьи «Зарплата», «Налоги» и «Расход магазина».')}
       </p>
 
@@ -342,9 +345,8 @@ export default function Reports() {
   const expenses = useCollection('expenses')
   // Доходы вне продаж: аренда, услуги, бонусы — к чистой прибыли
   const incomes = useCollection('incomes')
-  // Для листа «Отчёт о прибылях и убытках» за период этой вкладки: погашения долгов
-  // клиентов, оплаты поставщикам и приходы (см. lib/opu.js)
-  const debtPayments = useCollection('payments')
+  // Для листа «Отчёт о прибылях и убытках» за период этой вкладки: оплаты поставщикам,
+  // приходы и возвраты поставщикам (см. lib/opu.js)
   const supplierPayments = useCollection('supplierPayments')
   const arrivals = useCollection('arrivals')
   const supplierReturns = useCollection('supplierReturns')
@@ -387,13 +389,11 @@ export default function Reports() {
   // которой их сюда и добавляли.
   const needSales = needsServerFor('sales', range.from)
   const needJournals = needsServerFor('returns', range.from)
-  // Погашения долгов, оплаты поставщикам и приходы — для листа печати (у каждого своя
-  // глубина кэша)
-  const needPay = needsServerFor('payments', range.from)
+  // Оплаты поставщикам и приходы — для листа печати (у каждого своя глубина кэша)
   const needSupPay = needsServerFor('supplierPayments', range.from)
   const needArr = needsServerFor('arrivals', range.from)
   const needSupRet = needsServerFor('supplierReturns', range.from)
-  const needsServer = needSales || needJournals || needPay || needSupPay || needArr || needSupRet
+  const needsServer = needSales || needJournals || needSupPay || needArr || needSupRet
   const [deep, setDeep] = useState(null) // отрезок, загруженный с сервера
   const [loadingOlder, setLoadingOlder] = useState(false)
 
@@ -411,18 +411,17 @@ export default function Reports() {
       some(needJournals, 'writeoffs'),
       some(needJournals, 'expenses'),
       some(needJournals, 'incomes'),
-      some(needPay, 'payments'),
       some(needSupPay, 'supplierPayments'),
       some(needArr, 'arrivals'),
       some(needSupRet, 'supplierReturns'),
     ])
-      .then(([s, r, w, x, inc, pay, sup, arr, supRet]) => {
-        if (!cancelled) setDeep({ sales: s, returns: r, writeoffs: w, expenses: x, incomes: inc, payments: pay, supplierPayments: sup, arrivals: arr, supplierReturns: supRet })
+      .then(([s, r, w, x, inc, sup, arr, supRet]) => {
+        if (!cancelled) setDeep({ sales: s, returns: r, writeoffs: w, expenses: x, incomes: inc, supplierPayments: sup, arrivals: arr, supplierReturns: supRet })
       })
       .catch(() => { if (!cancelled) setDeep(null) })
       .finally(() => { if (!cancelled) setLoadingOlder(false) })
     return () => { cancelled = true }
-  }, [needsServer, needSales, needJournals, needPay, needSupPay, needArr, needSupRet, range.from, range.to])
+  }, [needsServer, needSales, needJournals, needSupPay, needArr, needSupRet, range.from, range.to])
 
   const data = useMemo(
     () =>
@@ -447,14 +446,13 @@ export default function Reports() {
         writeOffs: (deep && deep.writeoffs) || writeOffs,
         expenses: (deep && deep.expenses) || expenses,
         incomes: (deep && deep.incomes) || incomes,
-        debtPayments: (deep && deep.payments) || debtPayments,
         supplierPayments: (deep && deep.supplierPayments) || supplierPayments,
         arrivals: (deep && deep.arrivals) || arrivals,
         supplierReturns: (deep && deep.supplierReturns) || supplierReturns,
         from: range.from,
         to: range.to,
       }),
-    [sales, returns, writeOffs, expenses, incomes, debtPayments, supplierPayments, arrivals, supplierReturns, deep, range],
+    [sales, returns, writeOffs, expenses, incomes, supplierPayments, arrivals, supplierReturns, deep, range],
   )
 
   // Снимок склада (не зависит от периода)

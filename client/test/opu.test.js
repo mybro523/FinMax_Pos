@@ -1,12 +1,15 @@
 // ── Отчёт ОПУ: формулы прибылей и убытков ──
 //
-// Чистый доход в ОПУ — кассовый: валовой доход минус расходы минус деньги,
-// отданные поставщикам. Главные ловушки, которые здесь прибиты:
+// Формулы владельца (26.10.2026), строки листа вычитаются ровно:
+//   Валовой доход = Выручка − Себестоимость
+//   Чистый доход  = Выручка − Себестоимость − Оплата поставщику − Все расходы + Прочие доходы
+//   Касса         = Продажа − Оплата поставщику − Все расходы + Прочие доходы
+// Главные ловушки, которые здесь прибиты:
+//   • себестоимость — проданное минус вернувшееся плюс списанное: тогда валовой
+//     доход совпадает с «Прибылью» вкладки «Подробно»;
 //   • оплата прихода «из кассы» лежит и в записи оплаты, и в самом приходе —
 //     посчитать её дважды нельзя;
-//   • расходы раскладываются по статьям по названию без регистра;
-//   • «Касса» — только наличные: продажи налом и погашения долгов минус
-//     возвраты наличными.
+//   • расходы раскладываются по статьям по названию без регистра.
 //
 // Запуск: npm test (в папке client)
 import test from 'node:test'
@@ -29,7 +32,35 @@ test('ОПУ: продажа, себестоимость и валовой до�
   assert.equal(d.sebestoimost, 900)
   assert.equal(d.valovoy, 600)
   assert.equal(d.chistiy, 600) // расходов и оплат нет
-  assert.equal(d.kassa, 1000) // наличными была только первая продажа
+  assert.equal(d.kassa, 1500) // продажа любым способом оплаты, расходов и оплат нет
+})
+
+test('ОПУ: себестоимость с возвратами и списаниями — валовой доход = выручка − себестоимость', () => {
+  const d = opuFinance({
+    sales: [sale(1000, 600, 400), sale(500, 300, 200, 'card')],
+    // Покупатель вернул товар закупочной ценой 60 за 100 сомони
+    returns: [{ date: D, total: 100, refund: 'cash', items: [{ cost: 60, unitsPerPack: 1, units: 1, restock: true }] }],
+    // Списали просрочку на 45 по закупочной цене
+    writeOffs: [{ date: D, totalCost: 45 }],
+    from,
+    to,
+  })
+  assert.equal(d.prodazha, 1400)
+  assert.equal(d.sebestoimost, 900 - 60 + 45)
+  assert.equal(d.valovoy, d.prodazha - d.sebestoimost)
+  assert.equal(d.valovoy, d.fin.profit, 'на круглых суммах — то же число, что «Прибыль» во вкладке «Подробно»')
+  // Списание денег не тратит — касса от него не меняется
+  assert.equal(d.kassa, 1400)
+  assert.equal(d.chistiy, d.valovoy)
+})
+
+test('ОПУ: суммы в копейках — строки листа вычитаются ровно', () => {
+  const d = opuFinance({ sales: [sale(0.1, 0.07, 0.03), sale(0.2, 0.05, 0.15)], expenses: [{ date: D, category: 'x', amount: 0.1 }], from, to })
+  assert.equal(d.prodazha, 0.3)
+  assert.equal(d.sebestoimost, 0.12)
+  assert.equal(d.valovoy, 0.18)
+  assert.equal(d.chistiy, 0.08)
+  assert.equal(d.kassa, 0.2)
 })
 
 test('ОПУ: расходы раскладываются по статьям, регистр не важен', () => {
@@ -75,17 +106,23 @@ test('ОПУ: оплата поставщику без двойного счёт
   assert.equal(d.chistiy, 400 - 620)
 })
 
-test('ОПУ: касса — наличные с погашениями долгов и без возвратов налом', () => {
+test('ОПУ: касса = продажа − оплата поставщику − все расходы + прочие доходы', () => {
   const d = opuFinance({
-    sales: [sale(1000, 600, 400), sale(300, 200, 100, 'card')],
-    debtPayments: [{ createdAt: D, amount: 120 }, { createdAt: OUT, amount: 999 }],
-    returns: [{ date: D, total: 80, refund: 'cash', items: [] }, { date: D, total: 60, refund: 'card', items: [] }],
+    sales: [sale(1000, 600, 400), sale(300, 200, 100, 'card'), sale(200, 120, 80, 'debt')],
+    returns: [{ date: D, total: 80, refund: 'cash', items: [{ cost: 50, unitsPerPack: 1, units: 1, restock: true }] }],
+    expenses: [{ date: D, category: OPU_MAGAZIN, amount: 150 }, { date: OUT, category: OPU_MAGAZIN, amount: 999 }],
+    incomes: [{ date: D, category: 'Аренда', amount: 40 }],
+    supplierPayments: [{ date: D, amount: 300 }],
     from,
     to,
   })
-  assert.equal(d.kassa, 1000 + 120 - 80)
-  // возвраты уменьшили и продажу
-  assert.equal(d.prodazha, 1300 - 140)
+  // Продажа — все способы оплаты, в том числе в долг, минус деньги, возвращённые покупателям
+  assert.equal(d.prodazha, 1500 - 80)
+  assert.equal(d.kassa, d.prodazha - d.supplierPaid - d.allExpenses + d.prochieDohody)
+  assert.equal(d.kassa, 1420 - 300 - 150 + 40)
+  // Чистый доход — то же, только ещё минус себестоимость
+  assert.equal(d.chistiy, d.prodazha - d.sebestoimost - d.supplierPaid - d.allExpenses + d.prochieDohody)
+  assert.equal(d.chistiy, d.kassa - d.sebestoimost)
 })
 
 test('ОПУ: старый приход без способа оплаты — оплаченная сразу часть идёт поставщику', () => {
@@ -109,7 +146,6 @@ test('лист для печати: все строки таблицы ОПУ и
     expenses: [e(OPU_MAGAZIN, 30), e(OPU_NALOGI, 50), e(OPU_ZARPLATA, 100), e('Реклама', 20)],
     incomes: [{ date: D, amount: 70, category: 'Аренда' }],
     supplierPayments: [{ date: D, amount: 200 }],
-    debtPayments: [{ createdAt: D, amount: 40 }],
     from,
     to,
   })
@@ -126,7 +162,8 @@ test('лист для печати: все строки таблицы ОПУ и
   assert.equal(value('Оплата поставщику'), 200)
   assert.equal(value('Все расходы'), 200)
   assert.equal(value('Чистый доход'), d.chistiy)
-  assert.equal(value('Касса'), 1000 + 40)
+  assert.equal(value('Чистый доход'), 600 - 200 - 200 + 70)
+  assert.equal(value('Касса'), 1500 - 200 - 200 + 70)
   // Разделы: доходы, затем расходы; внизу — чистый доход и касса крупно
   assert.deepEqual(rows.filter((r) => r.kind === 'section').map((r) => r.label), ['Доходы', 'Расходы'])
   assert.deepEqual(rows.filter((r) => r.kind === 'final').map((r) => r.label), ['Чистый доход', 'Касса'])

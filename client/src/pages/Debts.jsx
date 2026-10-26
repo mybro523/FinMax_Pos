@@ -1,21 +1,31 @@
 import { useState, useMemo } from 'react'
-import { LuUserPlus, LuTrash2, LuReceipt, LuBanknote, LuChevronRight } from 'react-icons/lu'
+import { LuUserPlus, LuTrash2, LuReceipt, LuBanknote, LuChevronRight, LuPrinter } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
-import { useCollection, money, db } from '../db/store'
-import { useCan } from '../db/auth'
+import TicketView from '../components/TicketView'
+import PrintDoc from '../components/PrintDoc'
+import { useCollection, money, db, SALES_CACHE_DAYS } from '../db/store'
+import { useAuth, useCan } from '../db/auth'
 import { payDebt } from '../db/ops'
-import { fmtDateTime } from '../lib/time'
+import { fmtDate, fmtDateTime, chekNomer } from '../lib/time'
 import { useT, translate as tr } from '../lib/i18n'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
 import { getUser } from '../db/auth'
+import { istoriyaDolga, tovaryText } from '../lib/dolg'
+import { debtTicket } from '../lib/ticket'
+import { getRekvizity } from '../lib/rekvizity'
+import { pechatTicket } from '../lib/pechat'
 
 export default function Debts() {
   const customers = useCollection('customers')
   const sales = useCollection('sales')
   const payments = useCollection('payments')
+  // Возвраты в счёт долга (и отмены чеков) — тоже строки истории клиента
+  const returns = useCollection('returns')
+  // Единицы строк (кг, л…) — из карточек товаров: у строк с сервера их нет
+  const products = useCollection('products')
   const toast = useToast()
   const dialog = useDialog()
   const t = useT()
@@ -125,31 +135,42 @@ export default function Debts() {
 
       {detail && (
         <CustomerHistory
-          customer={detail}
+          customer={customers.find((c) => c.id === detail.id) || detail}
           sales={sales}
           payments={payments}
+          returns={returns}
+          products={products}
+          canPay={can('debts.pay')}
           onClose={() => setDetail(null)}
-          onPay={() => { setDetail(null); pay(detail) }}
+          onPay={() => { setDetail(null); pay(customers.find((c) => c.id === detail.id) || detail) }}
         />
       )}
     </Layout>
   )
 }
 
-// ── История операций клиента: покупки в долг + погашения ──
-function CustomerHistory({ customer, sales, payments, onClose, onPay }) {
-  const data = useMemo(() => {
-    const purchases = sales
-      .filter((s) => s && s.payment === 'debt' && (s.customerId === customer.id || s.customer?.id === customer.id) && Array.isArray(s.items))
-      .map((s) => ({ kind: 'debt', date: s.date, amount: s.total || 0, items: s.items }))
-    const pays = payments
-      .filter((p) => p && p.customerId === customer.id)
-      .map((p) => ({ kind: 'pay', date: p.createdAt, amount: p.amount || 0 }))
-    const events = [...purchases, ...pays].sort((a, b) => new Date(b.date) - new Date(a.date))
-    const totalCredit = purchases.reduce((s, e) => s + e.amount, 0)
-    const totalPaid = pays.reduce((s, e) => s + e.amount, 0)
-    return { events, totalCredit, totalPaid }
-  }, [customer, sales, payments])
+// ── История операций клиента: покупки в долг, возвраты и погашения ──
+// Расчёт — в lib/dolg.js: там же «Прежний долг до <даты>» за всё, что было раньше истории
+// устройства, — чтобы итоги сходились. «Печать» выдаёт эту же историю клиенту на руки
+// в виде чека (lib/ticket.js, debtTicket): на чековый принтер или через экран печати
+function CustomerHistory({ customer, sales, payments, returns, products, canPay, onClose, onPay }) {
+  const auth = useAuth()
+  const toast = useToast()
+  const data = useMemo(
+    () => istoriyaDolga({ customer, sales, payments, returns, products, days: SALES_CACHE_DAYS }),
+    [customer, sales, payments, returns, products],
+  )
+  const ticket = debtTicket(customer, data, {
+    t: tr,
+    money,
+    when: fmtDateTime,
+    day: fmtDate,
+    pharmacy: auth?.pharmacy?.name,
+    rekvizity: getRekvizity(auth?.pharmacy?.code),
+    tovary: (items) => tovaryText(items, tr),
+    nomer: chekNomer,
+  })
+  const print = () => pechatTicket(ticket).catch((e) => toast(tr(e.message), 'err'))
 
   return (
     <Modal wide title={<><span className="ic"><LuReceipt size={18} /></span>{customer.name}</>} onClose={onClose}>
@@ -158,6 +179,9 @@ function CustomerHistory({ customer, sales, payments, onClose, onPay }) {
       <div className="mini-cards">
         <div className="mini-card"><div className="m-label">{tr('Текущий долг')}</div><div className="m-value" style={{ color: customer.debt > 0 ? 'var(--danger)' : 'var(--green)' }}>{money(customer.debt)}</div></div>
         <div className="mini-card"><div className="m-label">{tr('Куплено в долг')}</div><div className="m-value sm">{money(data.totalCredit)}</div></div>
+        {data.totalReturned > 0 && (
+          <div className="mini-card"><div className="m-label">{tr('Возвращено')}</div><div className="m-value sm">{money(data.totalReturned)}</div></div>
+        )}
         <div className="mini-card"><div className="m-label">{tr('Погашено')}</div><div className="m-value sm" style={{ color: 'var(--green)' }}>{money(data.totalPaid)}</div></div>
       </div>
 
@@ -171,7 +195,12 @@ function CustomerHistory({ customer, sales, payments, onClose, onPay }) {
                   {e.kind === 'debt' ? (
                     <>
                       <b>{tr('Покупка в долг')}</b>
-                      <div className="tag-cat">{e.items.map((i) => `${i.name}${i.qty ? ' ×' + i.qty : ''}${i.pieces ? ' +' + i.pieces + 'шт' : ''}`).join(', ').slice(0, 70)}</div>
+                      <div className="tag-cat">{tovaryText(e.items, tr).slice(0, 90)}</div>
+                    </>
+                  ) : e.kind === 'return' ? (
+                    <>
+                      <b style={{ color: 'var(--green)' }}>{e.otmena ? tr('Отмена чека') : tr('Возврат товара')}</b>
+                      <div className="tag-cat">{tovaryText(e.items, tr).slice(0, 90)}</div>
                     </>
                   ) : (
                     <><b style={{ color: 'var(--green)' }}>{tr('Погашение')}</b> <span className="ic" style={{ color: 'var(--green)', verticalAlign: '-2px' }}><LuBanknote size={13} /></span></>
@@ -183,13 +212,26 @@ function CustomerHistory({ customer, sales, payments, onClose, onPay }) {
                 </td>
               </tr>
             ))}
-            {data.events.length === 0 && <tr><td colSpan="2" className="empty">{tr('Операций пока нет')}</td></tr>}
+            {data.opening !== 0 && (
+              <tr>
+                <td>
+                  <b>{tr('Прежний долг до')} {fmtDate(data.start)}</b>
+                  <div className="tag-cat">{tr('всё, что было раньше, одной суммой')}</div>
+                </td>
+                <td className="num" style={{ whiteSpace: 'nowrap' }}><b>{money(data.opening)}</b></td>
+              </tr>
+            )}
+            {data.events.length === 0 && data.opening === 0 && <tr><td colSpan="2" className="empty">{tr('Операций пока нет')}</td></tr>}
           </tbody>
         </table>
       </div>
 
+      {/* На бумагу — эта же история, из печатного слоя */}
+      <PrintDoc prio={2} kind="ticket" title={tr('Долг клиента')}><TicketView ticket={ticket} /></PrintDoc>
+
       <div className="modal-actions">
-        {customer.debt > 0 && <button className="btn" onClick={onPay}>{tr('Погасить долг')}</button>}
+        <button className="btn ghost" data-testid="debt-print" onClick={print}><span className="ic"><LuPrinter size={16} /></span> {tr('Печать')}</button>
+        {customer.debt > 0 && canPay && <button className="btn" onClick={onPay}>{tr('Погасить долг')}</button>}
         <button className="btn ghost" onClick={onClose}>{tr('Закрыть')}</button>
       </div>
     </Modal>

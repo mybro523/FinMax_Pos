@@ -96,6 +96,23 @@ export const EDINICY = [
 // а toLocaleString вставлял бы неразрывный пробел в тысячи килограммов
 export const kgText = (units) => String(num(units) / KG).replace('.', ',')
 
+// Единица строки документа (чека, возврата). В строках, пришедших с сервера, её нет —
+// только «штук в упаковке», поэтому она берётся из карточки товара. Угадывается она только
+// у удалённого товара: 1000 в упаковке — килограммы (у живой карточки без единицы это
+// обычные упаковки по 1000 штук). Без неё весовой товар печатался бы «1500 шт × 0,01»
+// вместо «1,5 кг × 10»
+export function edinicaStroki(i, product) {
+  const own = String(i?.unit || '').trim()
+  if (own) return own
+  if (product) return String(product.unit || '').trim() || 'уп'
+  return uppOf(i) === KG ? 'кг' : 'уп'
+}
+// Строки документа с единицей у каждой. products — список товаров или Map(id → товар)
+export function sEdinicami(items, products) {
+  const byId = products instanceof Map ? products : new Map((products || []).map((p) => [p.id, p]))
+  return (items || []).map((i) => (String(i?.unit || '').trim() ? i : { ...i, unit: edinicaStroki(i, byId.get(i?.productId)) }))
+}
+
 // «1,25» или «1.25» кг → 1250 г. Мусор и минус превращаются в ноль
 export const gramsOfKg = (kg) => Math.max(0, Math.round((Number(String(kg ?? '').replace(',', '.')) || 0) * KG))
 

@@ -451,7 +451,10 @@ function applyUnits(list, byProduct, sign) {
 // Кассир не должен ждать сервер, стоя перед покупателем: товар возвращается на
 // склад и в журнал сразу, запись уходит следом. У возврата есть ключ повтора,
 // поэтому короткий обрыв связи можно тихо переиграть — второго возврата не будет.
-export function returnGoods({ saleId, refund, refundVia, customerId, lines, total }) {
+// note — пометка возврата; «Отмена чека» (lib/otmena.js) ставит кнопка «Отмена» в окне чека.
+// clientId — ключ повтора: у отмены он один на продажу, поэтому повторное нажатие после
+// оборванного ответа получит уже записанный возврат, а не отказ «уже возвращено»
+export function returnGoods({ saleId, refund, refundVia, customerId, lines, total, note = '', clientId = '' }) {
   lines = lines.map((l) => (l.productId ? { ...l, productId: realId(l.productId) } : l))
   if (customerId) customerId = realId(customerId)
   const items = lines.filter((l) => l.units > 0 && !l.deleted)
@@ -463,14 +466,14 @@ export function returnGoods({ saleId, refund, refundVia, customerId, lines, tota
   const openShiftId = (db.get('shifts').find((s) => !s.closedAt) || {}).id ?? null
 
   const temp = {
-    id: 'ret_' + uid(),
+    id: clientId || 'ret_' + uid(),
     date: serverNow().toISOString(),
     saleId: saleId ?? null,
     shiftId: openShiftId,
     refund,
     refundVia: refund === 'transfer' ? refundVia || null : null,
     total,
-    note: '',
+    note: note || '',
     user: null,
     items: items.map((l, n) => ({
       id: 'reti_' + n + '_' + uid(),
@@ -503,6 +506,7 @@ export function returnGoods({ saleId, refund, refundVia, customerId, lines, tota
     saleId: saleId ?? undefined,
     refund,
     ...(refund === 'transfer' && refundVia ? { refundVia } : {}),
+    ...(note ? { note } : {}),
     clientId: temp.id,
     items: items.map((l) => ({
       productId: l.productId,

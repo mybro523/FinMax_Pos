@@ -7,6 +7,8 @@
 // Деньги считаем до дирама: копейки, расползшиеся по строкам, в итоге должны
 // сходиться ровно с суммой документа.
 import { uppOf, lineNet, lineCost, lineUnits, isVesovoy, kgText, edinica, KG } from './units.js'
+import { isOtmena } from './otmena.js'
+import { tovarPodhodit } from './poisk.js'
 
 const num = (v) => Number(v) || 0
 // До дирама, половина — от нуля. 8,325 в двоичной арифметике хранится как
@@ -107,6 +109,56 @@ export function vseProdazhi({ sales, products, from, to, t = (s) => s }) {
   rows.sort((a, b) => ts(b.date) - ts(a.date))
   const itogo = rows.reduce((a, r) => ({ sum: a.sum + r.sum, discount: a.discount + r.discount }), { sum: 0, discount: 0 })
   return { rows, itogo: { sum: kop(itogo.sum), discount: kop(itogo.discount), lines: rows.length, cheki: new Set(rows.map((r) => r.saleId)).size } }
+}
+
+// ── Чеки за период ──
+// Один чек — одна строка: когда, кто продал, как оплатили, клиент, сколько позиций,
+// скидка и сумма. Чек, отменённый кнопкой «Отмена» в кассе, остаётся в списке с
+// отметкой, но в итоги не входит: продажи не было. У чеков с обычным возвратом — сколько
+// вернули (возвраты нужны и после конца периода: вернуть могут и через неделю)
+export function spisokChekov({ sales, returns = [], from, to }) {
+  const poCheku = new Map()
+  for (const r of returns || []) {
+    if (!r || !r.saleId) continue
+    const list = poCheku.get(r.saleId) || []
+    list.push(r)
+    poCheku.set(r.saleId, list)
+  }
+  const rows = []
+  for (const s of sales || []) {
+    if (!s || !Array.isArray(s.items) || !vPeriode(s.date, from, to)) continue
+    const vozvraty = poCheku.get(s.id) || []
+    const otmena = vozvraty.find(isOtmena) || null
+    rows.push({
+      id: s.id,
+      date: s.date,
+      cashier: s.user?.name || '',
+      payment: s.payment || 'cash',
+      payVia: s.payVia || '',
+      customer: s.customer?.name || '',
+      positions: s.items.length,
+      discount: kop(s.items.reduce((a, i) => a + Math.max(0, num(i.discount)), 0)),
+      total: kop(num(s.total)),
+      otmena,
+      vozvrat: kop(vozvraty.filter((r) => !isOtmena(r)).reduce((a, r) => a + num(r.total), 0)),
+      vozvraty,
+      sale: s,
+    })
+  }
+  rows.sort((a, b) => ts(b.date) - ts(a.date))
+  const zhivye = rows.filter((r) => !r.otmena)
+  return { rows, itogo: { cheki: zhivye.length, sum: kop(zhivye.reduce((a, r) => a + r.total, 0)), otmeneno: rows.length - zhivye.length } }
+}
+
+// Чек подходит под поиск: номер чека (с чёрточкой или без), товар — название или
+// штрихкод (barcodes: id товара → штрихкод), клиент или кассир. Пустой запрос — подходит
+export function chekPodhodit(z, row, nomer, barcodes) {
+  if (!z) return true
+  const n = String(nomer || '').toLowerCase()
+  const plain = z.text.replace(/[\s-]/g, '')
+  if (n.includes(z.text) || (plain && n.replace(/-/g, '').includes(plain))) return true
+  if (String(row?.customer || '').toLowerCase().includes(z.text) || String(row?.cashier || '').toLowerCase().includes(z.text)) return true
+  return (row?.sale?.items || []).some((i) => tovarPodhodit(z, i.name, barcodes?.get(i.productId)))
 }
 
 // Оплата прихода из ящика кассы записывается оплатой поставщику с ключом

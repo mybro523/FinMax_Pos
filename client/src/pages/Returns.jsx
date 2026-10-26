@@ -16,6 +16,7 @@ import NumberInput from '../components/NumberInput'
 import VesInput from '../components/VesInput'
 import { uppOf, lineUnits as soldUnits, isVesovoy, kgText, edinica } from '../lib/units'
 import { returnTicket } from '../lib/ticket'
+import { isOtmena } from '../lib/otmena'
 import TicketView from '../components/TicketView'
 import PrintDoc from '../components/PrintDoc'
 import { pechatTicket } from '../lib/pechat'
@@ -206,7 +207,7 @@ export default function Returns() {
         const drob = isVesovoy({ unit: i.unit }) || isVesovoy(prod)
         return `${i.name} ×${drob ? `${kgText(i.units)} ${t(isVesovoy({ unit: i.unit }) ? i.unit : edinica(prod))}` : i.units}`
       })
-      .join(', ') + ((r.items || []).some((i) => !i.restock) ? ` (${t('часть списана')})` : '')
+      .join(', ') + ((r.items || []).some((i) => !i.restock) ? ` (${t('часть списана')})` : '') + (isOtmena(r) ? ` (${t('Отмена чека')})` : '')
   const exCols = [
     { header: t('Дата'), key: 'date', width: 18 },
     { header: t('Товары'), key: 'items', width: 46, wrap: true },
@@ -429,6 +430,8 @@ export default function Returns() {
                   {r.items.some((i) => !i.restock) && (
                     <div className="tag-cat" style={{ color: 'var(--warn)' }}>{t('часть списана')}</div>
                   )}
+                  {/* Отмена только что проведённой продажи кнопкой «Отмена» в окне чека */}
+                  {isOtmena(r) && <div className="tag-cat" style={{ color: 'var(--danger)' }}>{t('Отмена чека')}</div>}
                 </td>
                 <td>{r.user?.name || '—'}</td>
                 <td className="num"><b>{money(r.total)}</b></td>

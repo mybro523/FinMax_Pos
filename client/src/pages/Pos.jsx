@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useDeferredValue, lazy, Suspense } from 'react'
 import {
   LuCamera, LuShoppingCart, LuPlus, LuMinus, LuTrash2, LuCheck, LuPrinter, LuScanLine, LuClock,
-  LuTriangleAlert, LuX, LuLock, LuChevronRight,
+  LuTriangleAlert, LuX, LuLock, LuChevronRight, LuUndo2,
 } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { Modal, useToast, useDialog, PAYMENTS } from '../components/ui'
@@ -21,7 +21,8 @@ import {
   MAX_CHEKOV, klyuch, chitat, pisat, razobrat, novyChek, svobodnyNomer, posleProdazhi,
   osvezhit, sdacha, kupyury, pohozheNaKod, estBukva, raspredelit,
 } from '../lib/cheki'
-import { findByBarcode, checkout, openShift as openShiftOp } from '../db/ops'
+import { findByBarcode, checkout, returnGoods, openShift as openShiftOp } from '../db/ops'
+import { otmenaVozvrat } from '../lib/otmena'
 import { productPayload } from '../components/ProductForm'
 import NewProductModal from '../components/NewProductModal'
 import { beepOk, beepError, unlockAudio } from '../lib/sound'
@@ -189,6 +190,9 @@ export default function Pos() {
   const [paying, setPaying] = useState(false)
   const [analogFor, setAnalogFor] = useState(null) // товар нет в наличии -> предложить аналоги
   const [failedSale, setFailedSale] = useState(null) // продажа не записалась на сервер
+  // Последняя продажа — для кнопки «Отмена» в окне чека: промис её записи (настоящий
+  // номер чека приходит с ним) и корзина, какой она была до оплаты
+  const lastSaleRef = useRef(null)
   const [selId, setSelId] = useState(null) // выбранная строка чека — с ней работают клавиши
   const [cat, setCat] = useState(VSE)
   // Шапка категорий свёрнута или раскрыта — как оставили на этом компьютере в прошлый раз
@@ -1077,9 +1081,44 @@ export default function Pos() {
         payVia: via,
         customer,
       })
+      lastSaleRef.current = {
+        tempId: sale.id,
+        synced,
+        chek: { cart: soldCart, payment, payVia: via, customerId, received, ...soldDisc },
+      }
       // «Получено» и «Сдача» — только для бумажного чека. На сервер они не уходят:
-      // на деньги смены сдача не влияет, в кассе остаётся ровно сумма чека
-      setReceipt({ ...sale, received: sd.state === 'ok' ? sd.received : null, change: sd.state === 'ok' ? sd.diff : 0 })
+      // на деньги смены сдача не влияет, в кассе остаётся ровно сумма чека.
+      // _key — какой это чек для окна (номер записи сменится, когда продажа запишется)
+      setReceipt({ ...sale, received: sd.state === 'ok' ? sd.received : null, change: sd.state === 'ok' ? sd.diff : 0, _key: sale.id })
+      // Номер чека — из времени продажи, а записанная продажа получает время базы кассы
+      // или сервера (на долю секунды позже). Чтобы номер на бумаге совпадал с номером в
+      // отчётах и при поиске, окно чека переходит на записанную продажу, как только она
+      // записалась, — и печатает уже её (см. Receipt)
+      synced
+        .then((stored) => {
+          if (!stored?.date) return
+          setReceipt((r) =>
+            r && r._key === sale.id
+              ? {
+                  ...r,
+                  ...stored,
+                  customer: stored.customer || r.customer,
+                  // У строк продажи на сервере нет единицы — берём её из строк кассы
+                  items: stored.items?.length
+                    ? stored.items.map((i) => (i.unit ? i : { ...i, unit: r.items.find((x) => x.productId === i.productId)?.unit || '' }))
+                    : r.items,
+                  received: r.received,
+                  change: r.change,
+                  _key: r._key,
+                  _stored: true,
+                }
+              : r,
+          )
+        })
+        .catch(() => {
+          // Не записалась — чек не печатается (окно «Продажа не записана» вернёт корзину)
+          setReceipt((r) => (r && r._key === sale.id ? { ...r, _failed: true } : r))
+        })
       // Покупателю на втором экране — «Спасибо за покупку!» и сдача (если платил наличными)
       setThanks({ total: money(sale.total), change: sd.state === 'ok' && sd.diff > 0 ? money(sd.diff) : '' })
       // Чек продан — вкладка остаётся и готова к следующему покупателю: всё как у
@@ -1101,14 +1140,14 @@ export default function Pos() {
     }
   }
 
-  // Продажа не записалась — возвращаем её чеком. Если кассир уже начал следующего
-  // покупателя, не смешиваем их: несостоявшаяся продажа встаёт отдельной вкладкой
-  function vernutProdazhu() {
+  // Вернуть чек в корзину. Если кассир уже начал следующего покупателя, не смешиваем их:
+  // возвращённый чек встаёт отдельной вкладкой
+  function vernutChek(c) {
     const data = {
-      cart: failedSale.cart, payment: failedSale.payment, payVia: failedSale.payVia || '',
-      customerId: failedSale.customerId || '', received: '',
+      cart: c.cart, payment: c.payment, payVia: c.payVia || '',
+      customerId: c.customerId || '', received: c.received || '',
       // Скидка на чек — та же, что была при продаже: чек возвращается целиком
-      discMode: failedSale.discMode === 'pct' ? 'pct' : 'sum', discValue: failedSale.discValue || '',
+      discMode: c.discMode === 'pct' ? 'pct' : 'sum', discValue: c.discValue || '',
     }
     setCheki((s) => {
       const cur = s.list.find((c) => c.id === s.active)
@@ -1118,8 +1157,45 @@ export default function Pos() {
       const c = { ...novyChek(svobodnyNomer(s.list)), ...data }
       return { ...s, list: [...s.list, c].sort((a, b) => a.n - b.n), active: c.id }
     })
+  }
+
+  // Продажа не записалась — возвращаем её чеком
+  function vernutProdazhu() {
+    vernutChek({ ...failedSale, received: '' })
     setFailedSale(null)
     setReceipt(null)
+  }
+
+  // ── «Отмена» в окне чека ──
+  // Продажа уже записана, поэтому отменяется она возвратом всего чека с пометкой «Отмена
+  // чека» (lib/otmena.js): товар — на полку, деньги — тем же способом, каким платили. Чек
+  // возвращается в корзину только после того, как возврат записан: иначе продажа осталась
+  // бы, а кассир провёл бы её второй раз
+  async function otmenitProdazhu() {
+    const last = lastSaleRef.current
+    if (!last || !receipt || last.tempId !== receipt._key) throw new Error(t('Эту продажу уже нельзя отменить здесь — оформите возврат'))
+    let real
+    try {
+      real = await last.synced // записанная продажа — с настоящим номером
+    } catch {
+      // Продажа не записалась вовсе — её вернёт в корзину окно «Продажа не записана»
+      setReceipt((r) => (r && r._key === last.tempId ? null : r))
+      return
+    }
+    const v = otmenaVozvrat(real)
+    if (!v.lines.length) throw new Error(t('В чеке нет товаров для возврата'))
+    const { synced } = returnGoods(v)
+    await synced
+    // Возврат записан — чек в корзину в любом случае (кассир уже начал следующего — чек
+    // встанет отдельной вкладкой). Окно и «Спасибо» закрываем, только если это всё ещё
+    // эта продажа: пока шла отмена, могли провести следующую
+    vernutChek(last.chek)
+    if (lastSaleRef.current === last) {
+      lastSaleRef.current = null
+      setThanks(null)
+    }
+    setReceipt((r) => (r && r._key === last.tempId ? null : r))
+    toast(t('Продажа отменена — товары снова в корзине'))
   }
 
   async function addCustomer() {
@@ -1721,7 +1797,7 @@ export default function Pos() {
           <div className="modal-actions"><button className="btn ghost" onClick={() => setAnalogFor(null)}>{t('Закрыть')}</button></div>
         </Modal>
       )}
-      {receipt && <Receipt sale={receipt} onClose={() => setReceipt(null)} />}
+      {receipt && <Receipt sale={receipt} onClose={() => setReceipt(null)} onCancel={can('returns.create') ? otmenitProdazhu : null} />}
       {/* Продажа не записалась. Окно — после чека, чтобы лечь поверх него: кассир
           должен увидеть отказ, а не закрыть его вместе с чеком одним Escape.
           Закрыть окно любым способом — значит вернуть товары в корзину, как в нём
@@ -1843,10 +1919,13 @@ function UnknownBarcode({ barcode, onDefer, onClose }) {
 // ── Чек ──
 // Собирается один раз в общий вид (lib/ticket.js): то, что на экране, без изменений
 // уходит на ленту, в окно печати и в PDF
-function Receipt({ sale, onClose }) {
+function Receipt({ sale, onClose, onCancel }) {
   const auth = useAuth()
   const customers = useCollection('customers')
   const toast = useToast()
+  // «Отмена»: сначала спрашиваем, потом отменяем. Пока отмена идёт — кнопки заняты
+  const [confirm, setConfirm] = useState(false)
+  const [busy, setBusy] = useState(false)
   // Печать: чековый принтер программы, её экран печати или окно браузера (lib/pechat.js)
   const print = (tk) => pechatTicket(tk).catch((e) => toast(tr(e.message), 'err'))
   // После продажи в долг покупатель видит в чеке, сколько он теперь должен магазину
@@ -1861,25 +1940,84 @@ function Receipt({ sale, onClose }) {
     nomer: chekNomer(sale.date),
     customerDebt: dolg,
   })
-  // «Печатать чек сразу после продажи» — настройка чекового принтера
+  // «Печатать чек сразу после продажи» — настройка чекового принтера. Печатается
+  // записанная продажа: её номер — тот, что в отчётах (на кассе запись — доли секунды).
+  // Записи всё нет — через 2,5 с печатается то, что есть, чтобы покупатель не ждал;
+  // продажа не записалась вовсе — чек не печатается. Один раз на чек
+  const ticketRef = useRef(ticket)
+  ticketRef.current = ticket
+  const printedFor = useRef('')
+  const key = sale._key || sale.id
   useEffect(() => {
+    if (sale._failed || printedFor.current === key) return undefined
     let alive = true
-    autoPrint().then((on) => on && alive && print(ticket))
+    const go = () => {
+      if (!alive || printedFor.current === key) return
+      printedFor.current = key
+      autoPrint().then((on) => on && print(ticketRef.current))
+    }
+    if (sale._stored) {
+      go()
+      return () => {
+        alive = false
+      }
+    }
+    const timer = setTimeout(go, 2500)
     return () => {
       alive = false
+      clearTimeout(timer)
     }
-    // Один раз на чек: печатается то, что продано, а не то, что перерисовалось
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sale.id])
+  }, [key, sale._stored, sale._failed])
   return (
-    <Modal title={<><span className="ic"><LuPrinter size={18} /></span>{tr('Чек продажи')}</>} onClose={onClose}>
+    <Modal title={<><span className="ic"><LuPrinter size={18} /></span>{tr('Чек продажи')}</>} onClose={busy ? () => {} : onClose}>
       <TicketView ticket={ticket} />
       {/* На бумагу — этот же чек, из печатного слоя */}
       <PrintDoc prio={2} kind="ticket" title={tr('Чек продажи')}><TicketView ticket={ticket} /></PrintDoc>
-      <div className="modal-actions">
-        <button className="btn ghost" onClick={() => print(ticket)}><span className="ic"><LuPrinter size={16} /></span> {tr('Печать')}</button>
-        <button className="btn" onClick={onClose}>{tr('Готово')}</button>
-      </div>
+      {confirm ? (
+        <div className="otmena-confirm" data-testid="otmena-confirm">
+          <div className="note err" style={{ marginTop: 14 }}>
+            <b>{tr('Отменить продажу на')} {money(sale.total)}?</b>
+            <div style={{ marginTop: 4 }}>
+              {tr('Товар вернётся на склад')}, {otmenaDengi(sale)}. {tr('Товары снова окажутся в корзине — можно поправить и провести заново.')}
+            </div>
+          </div>
+          <div className="modal-actions">
+            <button className="btn ghost" disabled={busy} onClick={() => setConfirm(false)}>{tr('Назад')}</button>
+            <button
+              className="btn danger"
+              data-testid="otmena-yes"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true)
+                Promise.resolve(onCancel())
+                  .catch((e) => toast(tr(e?.message || 'Не получилось. Повторите.'), 'err'))
+                  .finally(() => setBusy(false))
+              }}
+            >
+              {busy ? tr('Отменяем…') : tr('Отменить продажу')}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="modal-actions">
+          {onCancel && !sale._failed && (
+            <button className="btn ghost" data-testid="otmena" onClick={() => setConfirm(true)} title={tr('Отменить продажу и вернуть товары в корзину')}>
+              <span className="ic"><LuUndo2 size={16} /></span> {tr('Отмена')}
+            </button>
+          )}
+          <button className="btn ghost" onClick={() => print(ticket)}><span className="ic"><LuPrinter size={16} /></span> {tr('Печать')}</button>
+          <button className="btn" onClick={onClose}>{tr('Готово')}</button>
+        </div>
+      )}
     </Modal>
   )
+}
+
+// Куда вернутся деньги при отмене — тем же способом, каким платили
+function otmenaDengi(sale) {
+  if (sale.payment === 'card') return tr('деньги — обратно на карту')
+  if (sale.payment === 'transfer') return tr('деньги — обратно переводом') + (sale.payVia ? ` (${sale.payVia})` : '')
+  if (sale.payment === 'debt') return tr('долг клиента уменьшится')
+  return tr('деньги — покупателю наличными из кассы')
 }

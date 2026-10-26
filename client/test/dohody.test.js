@@ -45,13 +45,14 @@ test('без доходов чистая прибыль прежняя', () => {
   assert.equal(f.netProfit, 250)
 })
 
-test('ОПУ: прочие доходы входят в чистый доход, касса и валовой доход прежние', () => {
+test('ОПУ: прочие доходы входят и в чистый доход, и в кассу; валовой доход прежний', () => {
   const base = opuFinance({ sales: [sale], expenses: [expense], from, to })
   const d = opuFinance({ sales: [sale], expenses: [expense], incomes, from, to })
   assert.equal(d.prochieDohody, 550.5)
   assert.equal(d.chistiy, base.chistiy + 550.5)
   assert.equal(d.valovoy, base.valovoy)
-  assert.equal(d.kassa, base.kassa)
+  // Касса = Продажа − Оплата поставщику − Все расходы + Прочие доходы (выбор владельца, 26.10.2026)
+  assert.equal(d.kassa, base.kassa + 550.5)
   assert.equal(d.allExpenses, base.allExpenses)
   assert.equal(d.dohodyByCategory[0].category, 'Аренда')
 })

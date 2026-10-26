@@ -56,8 +56,9 @@ function podval(who, rekvizity, t, spasibo, pharmacy) {
 // ── Чек продажи ──
 // rekvizity — адрес/телефон/подпись с этого устройства; nomer — номер чека из даты
 // (lib/time.js, chekNomer); customerDebt — долг клиента после продажи в долг:
-// покупатель видит в чеке, сколько он теперь должен магазину
-export function saleTicket(sale, { t, money, when, pharmacy = '', cashier = '', rekvizity = null, nomer = '', customerDebt = null }) {
+// покупатель видит в чеке, сколько он теперь должен магазину; pometka — строка под датой
+// (повтор отменённого чека из отчёта «Чеки» печатается с «Чек отменён …»)
+export function saleTicket(sale, { t, money, when, pharmacy = '', cashier = '', rekvizity = null, nomer = '', customerDebt = null, pometka = '' }) {
   const items = Array.isArray(sale?.items) ? sale.items : []
   const discount = items.reduce((s, i) => s + (i.discount || 0), 0)
   const totals = []
@@ -77,7 +78,7 @@ export function saleTicket(sale, { t, money, when, pharmacy = '', cashier = '', 
   const who = cashier || sale.user?.name || ''
   const top = shapka(pharmacy, rekvizity, t)
   return {
-    head: [...top, ...(nomer ? [`${t('Чек')} № ${nomer}`] : []), when(sale.date)],
+    head: [...top, ...(nomer ? [`${t('Чек')} № ${nomer}`] : []), when(sale.date), ...(pometka ? [pometka] : [])],
     docAt: nomer ? top.length : -1,
     rows: items.map((i) => ({
       name: i.name,
@@ -124,10 +125,44 @@ export function returnTicket(ret, { t, money, when, pharmacy = '', cashier = '',
   }
 }
 
+// ── Долг клиента ──
+// Выписка клиенту на руки (раздел «Долги клиентов», кнопка «Печать» в окне клиента):
+// что он брал в долг, что вернул и сколько погасил, внизу итоги и крупно — текущий долг.
+// h — расчёт istoriyaDolga (lib/dolg.js). Строки — от старых к новым, как в выписке
+// банка; всё, что было раньше истории устройства, — строкой «Прежний долг до <даты>» в
+// итогах: прежний долг + куплено − возвращено − погашено = текущий долг.
+// tovary(items) — товары строкой, nomer(date) — номер чека: их дают снаружи, чтобы
+// модуль проверялся без браузера
+export function debtTicket(customer, h, { t, money, when, day = when, pharmacy = '', rekvizity = null, now = new Date(), tovary = () => '', nomer = () => '' }) {
+  const x = h || { events: [], opening: 0, totalCredit: 0, totalPaid: 0, totalReturned: 0, debt: 0, start: now }
+  const top = shapka(pharmacy, rekvizity, t)
+  const line = (e) => [when(e.date), tovary(e.items)].filter(Boolean).join(' · ')
+  const rows = [...(x.events || [])].reverse().map((e) => {
+    if (e.kind === 'pay') return { name: t('Погашение'), sub: when(e.date), value: '−' + money(e.amount) }
+    if (e.kind === 'return') return { name: e.otmena ? t('Отмена чека') : t('Возврат товара'), sub: line(e), value: '−' + money(e.amount) }
+    const n = nomer(e.date)
+    return { name: t('Покупка в долг') + (n ? ` · ${t('Чек')} № ${n}` : ''), sub: line(e), value: '+' + money(e.amount) }
+  })
+  return {
+    head: [...top, t('Долг клиента'), String(customer?.name || ''), ...(customer?.phone ? [`${t('Тел.')} ${customer.phone}`] : []), when(now)],
+    docAt: top.length,
+    rows,
+    totals: [
+      ...(x.opening ? [{ label: `${t('Прежний долг до')} ${day(x.start)}`, value: money(x.opening) }] : []),
+      { label: t('Куплено в долг'), value: money(x.totalCredit) },
+      ...(x.totalReturned > 0 ? [{ label: t('Возвращено'), value: money(x.totalReturned) }] : []),
+      { label: t('Погашено'), value: money(x.totalPaid) },
+      { label: t('Текущий долг'), value: money(x.debt), big: true },
+    ],
+    ...podval('', rekvizity, t, false, pharmacy),
+  }
+}
+
 // ── Z-отчёт смены ──
 // totals — чистые числа смены (shiftTotals из lib/finance): выручка и прибыль за
-// вычетом возвратов
-export function shiftTicket(shift, totals, { t, money, when, pharmacy = '', rekvizity = null }) {
+// вычетом возвратов. otmeny — { count, total }: сколько чеков отменили кнопкой «Отмена»
+// в кассе (они среди возвратов, но владелец видит их отдельной строкой)
+export function shiftTicket(shift, totals, { t, money, when, pharmacy = '', rekvizity = null, otmeny = null }) {
   const rows = [
     { label: t('Чеков'), value: String(shift.count ?? 0) },
     { label: t('Наличными'), value: money(shift.salesCash) },
@@ -145,6 +180,7 @@ export function shiftTicket(shift, totals, { t, money, when, pharmacy = '', rekv
   if (totals.refunds > 0) {
     rows.push({ label: t('Продано за смену'), value: money(totals.gross) })
     rows.push({ label: t('Возвраты покупателям'), value: '−' + money(totals.refunds) })
+    if (otmeny?.total > 0) rows.push({ label: `  ${t('в т.ч. отмены чеков')} (${otmeny.count})`, value: '−' + money(otmeny.total) })
   }
   rows.push({ label: t('Выручка'), value: money(totals.netSales), big: true })
   rows.push({ label: t('Прибыль'), value: money(totals.netProfit) })

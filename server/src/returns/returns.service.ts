@@ -45,6 +45,18 @@ export class ReturnsService {
         // должен увидеть первый, иначе оба решат, что «возвращено ноль»
         await lockProducts(tx, items.map((i) => i.productId))
 
+        // Повтор того же возврата, пришедший, пока первый ещё записывался (ответа не
+        // дождались — запрос ушёл снова): замок на товары дождался первого, и его запись
+        // теперь видна — отдаём её, а не «уже возвращено». Так отмена чека в кассе,
+        // нажатая повторно на медленной связи, не упирается в ошибку
+        if (clientId) {
+          const done = await tx.saleReturn.findUnique({
+            where: { clientId },
+            include: { items: true, user: { select: { id: true, name: true } } },
+          })
+          if (done) return done
+        }
+
         const sale = saleId
           ? await tx.sale.findUnique({ where: { id: saleId }, include: { items: true, returns: { include: { items: true } } } })
           : null
@@ -126,6 +138,10 @@ export class ReturnsService {
         }
 
         if (!returnItems.length) throw new BadRequestException('Укажите количество для возврата')
+        // Сумма возврата — до дирама, как суммы чеков и долг клиента. Продажа прибавила
+        // к долгу округлённую сумму (треть упаковки по 100 — 33,33), и точная 33,333…
+        // не должна оказаться «больше долга»: иначе продажу в долг нельзя вернуть целиком
+        total = total.toDecimalPlaces(2)
 
         const openShift = await tx.shift.findFirst({ where: WEB_SHIFT, select: { id: true } })
         const refund = dto.refund || sale?.payment || 'cash'

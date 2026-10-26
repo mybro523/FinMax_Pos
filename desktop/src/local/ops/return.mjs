@@ -140,6 +140,10 @@ export function createReturn(ctx, raw) {
 
     if (!returnItems.length) throw bad('Укажите количество для возврата')
     sumOk(total)
+    // Сумма возврата — до дирама, как суммы чеков и долг клиента: продажа прибавила к
+    // долгу округлённую сумму (треть упаковки по 100 — 33,33), и точная 33,333… не должна
+    // оказаться «больше долга» — иначе продажу в долг нельзя вернуть целиком
+    total = fromCentsD(toCents(total))
 
     const shift = myOpenShift(db, ctx.deviceId)
     const refund = refundAsked || sale?.payment || 'cash'

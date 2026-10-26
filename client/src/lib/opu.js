@@ -1,20 +1,28 @@
 // ── Отчёт ОПУ: прибыли и убытки за период ──
 //
 // Вид и строки повторяют отчёт, к которому привыкли владельцы магазинов:
-// продажа, себестоимость, валовой доход, оплата поставщику, расходы по статьям
-// и чистый доход. Чистый доход здесь КАССОВЫЙ — по просьбе владельца из него
-// вычитаются и расходы, и деньги, отданные поставщикам за товар:
-// «сколько денег на самом деле осталось за период».
-//
-// Валовой доход берётся из общего расчёта periodFinance (как «Прибыль» во вкладке
-// «Подробно»), поэтому возвраты и списания учтены и отчёты не спорят друг с другом.
+// продажа, себестоимость, валовой доход, оплата поставщику, расходы по статьям,
+// чистый доход и касса. Формулы — владельца (26.10.2026), и на листе они сходятся
+// простым вычитанием строк:
+//   Валовой доход = Выручка − Себестоимость
+//   Чистый доход  = Выручка − Себестоимость − Оплата поставщику − Все расходы + Прочие доходы
+//   Касса         = Продажа − Оплата поставщику − Все расходы + Прочие доходы
+// Выручка и продажа — одно число: все продажи за период минус деньги, возвращённые
+// покупателям. Себестоимость — проданное по закупочной цене минус вернувшееся от
+// покупателей плюс списанное (просрочка, бой, недостача): товар пропал — его цена
+// здесь, а не в расходах (денег при списании не тратят, и касса от него не меняется).
+// Поэтому валовой доход сходится с «Прибылью» во вкладке «Подробно» (общий расчёт
+// periodFinance) — с точностью до дирамов округления: там прибыль складывается из
+// округлённой прибыли каждого чека, здесь — из округлённых итогов.
 //
 // Прочие доходы (раздел «Доходы»: аренда, услуги, бонусы поставщиков) прибавляются
-// к чистому доходу: это тоже деньги, которые остались у магазина за период.
+// и к чистому доходу, и к кассе: это тоже деньги магазина за период.
 
 import { periodFinance } from './finance.js'
 
 const num = (v) => Number(v) || 0
+// Копейки: суммы складываются из дробных, а на листе строки должны вычитаться ровно
+const kop = (v) => Math.round(num(v) * 100) / 100
 const inRange = (date, from, to) => {
   const t = new Date(date).getTime()
   return t >= from.getTime() && (!to || t < to.getTime())
@@ -28,7 +36,7 @@ export const OPU_NALOGI = 'Налоги'
 export const OPU_MAGAZIN = 'Расход магазина'
 const norm = (s) => String(s || '').trim().toLowerCase()
 
-export function opuFinance({ sales = [], returns = [], writeOffs = [], expenses = [], incomes = [], debtPayments = [], supplierPayments = [], arrivals = [], supplierReturns = [], from, to }) {
+export function opuFinance({ sales = [], returns = [], writeOffs = [], expenses = [], incomes = [], supplierPayments = [], arrivals = [], supplierReturns = [], from, to }) {
   const fin = periodFinance({ sales, returns, writeOffs, expenses, incomes, from, to })
 
   // Расходы по статьям: зарплата, налоги, магазин, всё прочее — «другие»
@@ -75,42 +83,32 @@ export function opuFinance({ sales = [], returns = [], writeOffs = [], expenses 
   for (const r of supplierReturns) {
     if (r && r.date && inRange(r.date, from, to) && r.refund && r.refund !== 'debt') vozvratDengami += num(r.total)
   }
-  const supplierPaid = paidZapisi + paidPriPrihode - vozvratDengami
+  const supplierPaid = kop(paidZapisi + paidPriPrihode - vozvratDengami)
 
-  // Касса — наличные, пришедшие за период: продажи налом и погашения долгов
-  // клиентов минус возвраты, выданные наличными
-  let debtPaid = 0
-  for (const p of debtPayments) {
-    const d = p && (p.createdAt || p.date)
-    if (d && inRange(d, from, to)) debtPaid += num(p.amount)
-  }
-  let refundsCash = 0
-  for (const r of returns) {
-    if (r && r.date && inRange(r.date, from, to) && r.refund === 'cash') refundsCash += num(r.total)
-  }
-  const kassa = fin.byPay.cash + debtPaid - refundsCash
-
-  const valovoy = fin.profit
-  const prochieDohody = fin.incomes
-  const chistiy = valovoy + prochieDohody - allExpenses - supplierPaid
+  // Строки листа — в копейках: каждая следующая считается из уже округлённых, и на
+  // бумаге вычитание сходится до дирама
+  const prodazha = kop(fin.revenue)
+  const sebestoimost = kop(fin.cost - fin.returnedCost + fin.writeOffCost)
+  const valovoy = kop(prodazha - sebestoimost)
+  const prochieDohody = kop(fin.incomes)
+  const vseRashody = kop(allExpenses)
+  const chistiy = kop(valovoy - supplierPaid - vseRashody + prochieDohody)
+  const kassa = kop(prodazha - supplierPaid - vseRashody + prochieDohody)
 
   return {
-    prodazha: fin.revenue,
-    sebestoimost: fin.cost,
+    prodazha,
+    sebestoimost,
     valovoy,
     supplierPaid,
     // Составляющие — модалка «из чего сложилось» показывает их по отдельности
-    paidZapisi,
-    paidPriPrihode,
-    vozvratDengami,
-    debtPaid,
-    refundsCash,
-    cashSales: fin.byPay.cash,
-    zarplata,
-    nalogi,
-    magazin,
-    other,
-    allExpenses,
+    paidZapisi: kop(paidZapisi),
+    paidPriPrihode: kop(paidPriPrihode),
+    vozvratDengami: kop(vozvratDengami),
+    zarplata: kop(zarplata),
+    nalogi: kop(nalogi),
+    magazin: kop(magazin),
+    other: kop(other),
+    allExpenses: vseRashody,
     prochieDohody,
     dohodyByCategory: fin.incomesByCategory,
     chistiy,

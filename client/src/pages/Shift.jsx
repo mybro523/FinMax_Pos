@@ -18,6 +18,7 @@ import { useT, translate as tr } from '../lib/i18n'
 import { restockedCost, shiftTotals } from '../lib/finance'
 import NumberInput from '../components/NumberInput'
 import { shiftTicket } from '../lib/ticket'
+import { isOtmena } from '../lib/otmena'
 import TicketView from '../components/TicketView'
 import PrintDoc from '../components/PrintDoc'
 import { pechatTicket } from '../lib/pechat'
@@ -91,6 +92,8 @@ export default function Shift() {
     const rr = returns.filter((r) => r.shiftId === current.id)
     const refundTotal = rr.reduce((sum, r) => sum + (r.total || 0), 0)
     const refundCash = rr.filter((r) => r.refund === 'cash').reduce((sum, r) => sum + (r.total || 0), 0)
+    // Отмены чеков кнопкой «Отмена» в кассе — среди возвратов, но видны отдельной строкой
+    const otmeny = otmenySmeny(rr)
     // Себестоимость товара, вернувшегося на полку: он снова в продаже,
     // поэтому прибыль смены на неё не уменьшается
     const refundCost = rr.reduce((sum, r) => sum + restockedCost(r), 0)
@@ -106,7 +109,7 @@ export default function Shift() {
     const supplierRefund = Number(current.supplierRefund) || 0
     const total = cash + card + debt + transfer
     return {
-      cash, card, debt, transfer, transferBy, debtPaid, discount, profit, refundCash, refundTotal, refundCost, expenseCash,
+      cash, card, debt, transfer, transferBy, debtPaid, discount, profit, refundCash, refundTotal, refundCost, expenseCash, otmeny,
       cashIn, cashOut, supplierCash, supplierRefund,
       total,
       netSales: total - refundTotal,
@@ -379,6 +382,12 @@ export default function Shift() {
                   </span>
                 </div>
               )}
+              {live.otmeny.total > 0 && (
+                <div className="total-row">
+                  <span className="tag-cat">{t('в т.ч. отмены чеков')} ({live.otmeny.count})</span>
+                  <span className="tag-cat">−{money(live.otmeny.total)}</span>
+                </div>
+              )}
               {live.expenseCash > 0 && (
                 <div className="total-row" data-tour="shift.expenses">
                   <span>{t('Расходы из кассы')}</span>
@@ -501,6 +510,8 @@ export default function Shift() {
 function ZReport({ shift, onClose }) {
   const auth = useAuth()
   const toast = useToast()
+  // Отмены чеков этой смены — из журнала возвратов устройства
+  const returns = useCollection('returns')
   const print = (tk) => pechatTicket(tk).catch((e) => toast(tr(e.message), 'err'))
   const ok = Math.abs(shift.difference) < 0.01
   // Чистые числа считаем из сохранённых полей смены: у смен, закрытых до учёта
@@ -512,6 +523,7 @@ function ZReport({ shift, onClose }) {
     when: fmtDateTime,
     pharmacy: auth?.pharmacy?.name,
     rekvizity: getRekvizity(auth?.pharmacy?.code),
+    otmeny: otmenySmeny(returns.filter((r) => r.shiftId === shift.id)),
   })
   return (
     <Modal title={<><span className="ic"><LuCalculator size={18} /></span>{tr('Z-отчёт смены')}</>} onClose={onClose}>
@@ -534,4 +546,10 @@ function ZReport({ shift, onClose }) {
       </div>
     </Modal>
   )
+}
+
+// Отмены чеков среди возвратов смены: сколько и на какую сумму
+function otmenySmeny(list) {
+  const oo = (list || []).filter(isOtmena)
+  return { count: oo.length, total: Math.round(oo.reduce((a, r) => a + (Number(r.total) || 0), 0) * 100) / 100 }
 }

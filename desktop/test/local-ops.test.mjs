@@ -283,6 +283,24 @@ test('возврат по чеку в долг уменьшает долг, но
   assert.equal(customersList(db)[0].debt, 2)
 })
 
+test('продажу в долг с дробной суммой можно вернуть целиком: сумма возврата — до дирама, как долг', () => {
+  // Треть упаковки по 100 — 33,333…; к долгу прибавилось 33,33. Отмена чека в кассе —
+  // это возврат всего чека «в долг», и он не должен упираться в «долг меньше суммы»
+  const tri = product({ id: 'tri', name: 'Тройчатка', unitsPerPack: 3, price: 100, cost: 60, stock: 5 })
+  const kg = product({ id: 'kg', name: 'Мука', unit: 'кг', unitsPerPack: 1000, price: 13.99, cost: 9, stock: 20 })
+  const db = pharmacy({ products: [tri, kg], customers: [customer({ id: 'bunyod', name: 'Бунёд', debt: 0 })] })
+  for (const [id, item] of [['tri', { qty: 0, pieces: 1 }], ['kg', { qty: 0, pieces: 755 }]]) {
+    const sale = checkout(ctx(db), { payment: 'debt', customerId: 'bunyod', items: [{ productId: id, ...item }] })
+    const before = customersList(db).find((c) => c.id === 'bunyod').debt
+    assert.ok(before > 0)
+    const ret = createReturn(ctx(db), { saleId: sale.id, note: 'Отмена чека', items: [{ productId: id, units: item.pieces }] })
+    assert.equal(ret.refund, 'debt')
+    assert.equal(ret.total, sale.total, 'вернули ровно сумму чека')
+    assert.equal(ret.note, 'Отмена чека')
+    assert.equal(customersList(db).find((c) => c.id === 'bunyod').debt, 0, 'долг как до продажи')
+  }
+})
+
 test('возврат «в долг» по чеку без клиента невозможен', () => {
   const { db, sale } = sold('cash')
   refused(
