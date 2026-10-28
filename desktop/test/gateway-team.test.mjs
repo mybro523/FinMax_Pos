@@ -1320,3 +1320,50 @@ test('отпечаток пароля открыто не лежит нигде 
   await A.gw.syncNow()
   check(calls.some((b) => b.includes('s3$')) && !calls.some((b) => b.includes('passwordSealed')), 'в отправке на сервер — открытый отпечаток, зашифрованного поля нет')
 })
+
+test('встроенная роль «Кассир» (1.5.5): приходит с сервера, помнится для входа без интернета и меняется вместе с ролью', async (t) => {
+  const S = makeServer()
+  const A = makeTill(S, 'A')
+  closeAfter(t, A)
+  const roleOf = (login) => A.core.prepare('SELECT roleSystem FROM accounts WHERE login = ?').get(login)?.roleSystem
+
+  const boss = await A.login('boss', 'Boss-pass-1')
+  check(boss.status === 201 && boss.data.user.roleSystem === 'owner', 'владелец — встроенная роль owner', boss.data?.user)
+  await A.gw.syncNow()
+  A.gw.logout()
+  const ali = await A.login('ali', 'Ali-pass-1')
+  check(ali.status === 201 && ali.data.user.roleSystem === 'cashier', 'ali с интернетом — роль «Кассир»', ali.data?.user)
+  check(roleOf('ali') === 'cashier', 'касса запомнила роль ali для входа без интернета', roleOf('ali'))
+  await A.gw.syncNow()
+
+  // Без связи касса отвечает по сохранённому — и на вход, и на «кто я»
+  S.srv.state.online = false
+  A.gw.logout()
+  const off = await A.login('ali', 'Ali-pass-1')
+  check(off.status === 201 && off.data.user.roleSystem === 'cashier', 'ali без интернета — по-прежнему «Кассир»: касса откроется сразу', off.data?.user)
+  const me = await A.req('GET', '/auth/me')
+  check(me.status === 200 && me.data.roleSystem === 'cashier', '«кто я» без интернета — тоже «Кассир»', me.data)
+
+  // Владелец без связи переводит ali в свою роль «Старший» — касса знает это сразу
+  A.gw.logout()
+  check((await A.login('boss', 'Boss-pass-1')).status === 201, 'владелец входит без интернета')
+  const asg = await A.req('PATCH', '/users/acc-ali', { roleId: 'r-senior' })
+  check(asg.status === 200, 'без связи: ali — в роли «Старший»', asg.status)
+  check(roleOf('ali') === '', 'запись входа ali: уже не «Кассир»', roleOf('ali'))
+  A.gw.logout()
+  const sen = await A.login('ali', 'Ali-pass-1')
+  check(sen.status === 201 && !sen.data.user.roleSystem, 'ali без интернета после смены роли — обычное меню', sen.data?.user)
+
+  // И обратно в «Кассира»
+  A.gw.logout()
+  check((await A.login('boss', 'Boss-pass-1')).status === 201, 'владелец снова входит без интернета')
+  const back = await A.req('PATCH', '/users/acc-ali', { roleId: 'r-cashier' })
+  check(back.status === 200 && roleOf('ali') === 'cashier', 'ali снова «Кассир»', { status: back.status, role: roleOf('ali') })
+
+  // Связь вернулась: правка ушла на сервер, вход с интернетом называет ту же роль
+  S.srv.state.online = true
+  await A.gw.syncNow()
+  A.gw.logout()
+  const on = await A.login('ali', 'Ali-pass-1')
+  check(on.status === 201 && on.data.user.roleSystem === 'cashier' && roleOf('ali') === 'cashier', 'с интернетом — «Кассир», и касса помнит то же', { user: on.data?.user, role: roleOf('ali') })
+})

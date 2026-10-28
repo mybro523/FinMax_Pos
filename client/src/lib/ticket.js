@@ -167,13 +167,14 @@ export function shiftTicket(shift, totals, { t, money, when, pharmacy = '', rekv
     { label: t('Чеков'), value: String(shift.count ?? 0) },
     { label: t('Наличными'), value: money(shift.salesCash) },
     { label: t('Картой'), value: money(shift.salesCard) },
-    { label: t('В долг'), value: money(shift.salesDebt) },
+    // Переводы — всегда (и нулём), сразу под картой: безналичные рядом. Под ними — по каждому
+    // сервису («DC», «Алиф»): их сверяют с выпиской каждого банка
+    { label: t('Переводом'), value: money(shift.salesTransfer || 0) },
   ]
-  // Переводы — и всего, и по сервисам: их сверяют с выпиской каждого
-  if ((shift.salesTransfer || 0) > 0) {
-    rows.push({ label: t('Переводом'), value: money(shift.salesTransfer) })
-    for (const [via, sum] of Object.entries(shift.transferBy || {})) rows.push({ label: '  ' + via, value: money(sum) })
+  for (const [via, sum] of Object.entries(shift.transferBy || {})) {
+    if ((Number(sum) || 0) !== 0) rows.push({ label: '  ' + via, value: money(sum) })
   }
+  rows.push({ label: t('В долг'), value: money(shift.salesDebt) })
   if ((shift.debtPaid || 0) > 0) rows.push({ label: t('Погашено долгов (нал.)'), value: money(shift.debtPaid) })
   // Скидок не было — просто ноль, без «−0»
   rows.push({ label: t('Скидки'), value: (Number(shift.discount) > 0 ? '−' : '') + money(shift.discount) })

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import {
   LuTrendingUp, LuBriefcase, LuChartColumn, LuCalculator, LuCalendar, LuWallet, LuCog, LuWorkflow, LuTarget,
   LuChartPie, LuChartLine, LuShield, LuCpu, LuCircleCheck, LuPhone, LuMessageCircle, LuMail, LuGlobe,
@@ -9,6 +9,7 @@ import { BrandWord, useToast } from '../components/ui'
 import { useT } from '../lib/i18n'
 import { bridge, isDesktop } from '../lib/desktop'
 import { COMPANY, COMPANY_CONTACTS, ICONS8 } from '../lib/company'
+import { getTheme, useTheme } from '../lib/theme'
 import emblem from '../assets/brand/emblem-64.png'
 import founderPhoto from '../assets/brand/founder.jpg'
 
@@ -65,6 +66,16 @@ export default function About() {
   const t = useT()
   const toast = useToast()
   const [version, setVersion] = useState('')
+
+  // «О компании» — всегда в тёмной теме (1.5.5): фирменный тёмно-синий FinMax. Выбранная тема
+  // программы при этом не меняется: вышли из раздела — всё как было. Тему переключили, пока
+  // раздел открыт (окно «Меню» кассира), — раздел остаётся тёмным, выбор запомнен для остальных
+  const theme = useTheme()
+  useLayoutEffect(() => {
+    const html = document.documentElement
+    html.setAttribute('data-theme', 'dark')
+    return () => html.setAttribute('data-theme', getTheme())
+  }, [theme])
 
   // Версия программы — чтобы назвать её в поддержке
   useEffect(() => {

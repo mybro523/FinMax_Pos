@@ -5,8 +5,9 @@
 // элемента на странице. Справочник показывает текст, тур показывает тот же текст
 // рядом с подсвеченной кнопкой. Поправили урок — поправился и тур; перевод один на
 // оба способа, и разъехаться им негде.
-import { OBUCHENIE, OBSHIY_TUR, dostupno } from './obuchenie'
-import { OBSHIY } from './tur'
+import { OBUCHENIE, OBSHIY_TUR, dostupno } from './obuchenie.js'
+import { OBSHIY } from './tur.js'
+import { kassaFirst } from './permissions.js'
 
 // Третий элемент пункта: строка — это просто метка элемента, объект — метка
 // с уточнениями (открыть форму, открыть меню, только для владельца, что сказать,
@@ -24,7 +25,14 @@ const кстати = (sreda) => (x) => !sreda || !x.kogda || !!sreda[x.kogda]
 
 export function stepsFor(id, user, sreda) {
   const can = (x) => можно(user)(x) && кстати(sreda)(x)
-  if (id === OBSHIY) return OBSHIY_TUR.filter(can)
+  if (id === OBSHIY) {
+    // Кассир главного экрана не видит: шаги про плитки пропускаем, «Меню» у него — окно
+    // со списком разделов, и шаг о нём говорит своими словами
+    if (kassaFirst(user)) {
+      return OBSHIY_TUR.filter((x) => can(x) && x.to !== '/').map((x) => (x.kassir ? { ...x, text: x.kassir } : x))
+    }
+    return OBSHIY_TUR.filter(can)
+  }
 
   const u = OBUCHENIE.find((x) => x.to === id)
   if (!u || !can(u)) return []

@@ -1,13 +1,21 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { overlayHost } from './ui'
 import { LuDelete, LuCornerDownLeft, LuX, LuLanguages, LuArrowBigUp, LuEraser } from 'react-icons/lu'
 import { useT } from '../lib/i18n'
 
-// ── Экранная клавиатура кассы ──
-// У кассового места часто нет клавиатуры: сенсорный экран, сканер и всё. Набрать
-// название товара, сумму «Получено» или имя клиента тогда нечем. Эта панель
-// печатает в то поле, где стоит курсор, — любое поле кассы, включая формы в окнах.
+// ── Экранная клавиатура ──
+// У кассового места часто нет клавиатуры: сенсорный моноблок, сканер и всё. Набрать
+// название товара, сумму «Получено», имя клиента или пароль на входе тогда нечем. Эта
+// панель печатает в то поле, где стоит курсор, — в любом разделе, включая формы в окнах.
+// Кнопка «Клавиатура» — в полосе внизу каждого раздела и в углу экрана входа.
+//
+// Клавиатура лежит ПОВЕРХ страницы и ничего не сдвигает: касса не сжимается, корзина
+// остаётся на месте (так попросил владелец, 1.5.5) — низ кассы с оплатой, пока клавиатура
+// открыта, под ней; закрыли — всё на виду. Открытое окно (форма, вопрос) поднимается, только
+// если клавиатура закрыла бы его низ, — ровно настолько, чтобы он встал над ней. Поле длинной
+// страницы, на которое поставили курсор, а оно под клавишами, — страница доводит до него
+// прокрутку. Пока открыто окно, клавиатура печатает только в его поля.
 //
 // Поле остаётся активным, пока нажимают кнопки: у кнопок отменено перехватывание
 // фокуса (onMouseDown → preventDefault). Знаки вставляются в позицию курсора через
@@ -79,6 +87,44 @@ const vernutKursor = (el, pos) => {
   }
 }
 
+const vidno = (el) => {
+  const r = el.getBoundingClientRect()
+  return r.width > 0 && r.height > 0
+}
+
+// Куда печатать, если курсора нет нигде: первое поле открытого окна (верхнего), иначе поле
+// с пометкой data-vkb-default (поле сканера кассы), иначе первое поле страницы — обычно поиск
+export function poleDlyaVvoda() {
+  if (typeof document === 'undefined') return null
+  const okna = [...document.querySelectorAll('.overlay .modal')].reverse()
+  for (const m of okna) for (const el of m.querySelectorAll('input, textarea')) if (godnoe(el) && vidno(el)) return el
+  const d = document.querySelector('[data-vkb-default]')
+  if (godnoe(d) && vidno(d)) return d
+  const page = document.querySelector('.content') || document.body
+  for (const el of page.querySelectorAll('input, textarea')) if (godnoe(el) && vidno(el)) return el
+  return null
+}
+
+const ZAZOR = 12 // окно и поле не подходят к клавиатуре ближе этого
+
+// Что поднимается над клавиатурой: открытые окна и то, что помечено data-vkb-lift
+// (форма входа: под клавишами оказались бы «Войти» и выбор языка)
+const PODNYAT = '.overlay > .modal, [data-vkb-lift]'
+
+// Поднятое над клавиатурой — вернуть на место
+function opustitOkna() {
+  for (const m of document.querySelectorAll('[data-kb-lift]')) {
+    m.style.removeProperty('top')
+    m.style.removeProperty('max-height')
+    m.removeAttribute('data-kb-lift')
+    const o = m.parentElement
+    if (o?.classList.contains('overlay')) {
+      o.style.removeProperty('align-items')
+      o.style.removeProperty('padding-top')
+    }
+  }
+}
+
 export default function VirtualKeyboard({ fallbackRef, onClose }) {
   const t = useT()
   const [lang, setLang] = useState(() => {
@@ -91,23 +137,108 @@ export default function VirtualKeyboard({ fallbackRef, onClose }) {
   })
   const [shift, setShift] = useState(false)
   const last = useRef(null)
+  const panelRef = useRef(null)
+
+  // Верх клавиатуры на экране: над ним должно оставаться то, во что печатают. Клавиатуры не
+  // видно (окно сузили меньше 1280 — она спрятана стилями) — верха нет, поднимать нечего
+  const verh = () => {
+    const r = panelRef.current?.getBoundingClientRect()
+    return r && r.height > 0 ? r.top : null
+  }
+
+  // Поле страницы под клавишами — довести до него прокрутку (поля окон поднимает само окно)
+  const pokazat = (el) => {
+    if (!el || el.closest?.('.modal')) return
+    const top = verh()
+    if (top !== null && el.getBoundingClientRect().bottom > top - ZAZOR) el.scrollIntoView({ block: 'center' })
+  }
 
   // Помним последнее поле, в котором стоял курсор: нажатие на кнопку панели фокус
   // не трогает, но поле могло потерять его иначе — закрылось окно, перерисовался чек
   useEffect(() => {
-    if (godnoe(document.activeElement)) last.current = document.activeElement
+    if (godnoe(document.activeElement)) {
+      last.current = document.activeElement
+      pokazat(document.activeElement)
+    }
     const onFocus = (e) => {
       const el = e.target
-      if (el && !el.closest?.('.vkb') && godnoe(el)) last.current = el
+      if (el && !el.closest?.('.vkb') && godnoe(el)) {
+        last.current = el
+        pokazat(el)
+      }
     }
     document.addEventListener('focusin', onFocus)
     return () => document.removeEventListener('focusin', onFocus)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Пока клавиатура открыта, страница и окна отдают ей место снизу (см. index.css)
+  // Пока клавиатура открыта, у длинной страницы снизу есть запас прокрутки — последние
+  // поля можно поднять над клавишами. Видимое при этом не сдвигается (см. index.css)
   useEffect(() => {
     document.documentElement.classList.add('kb-open')
     return () => document.documentElement.classList.remove('kb-open')
+  }, [])
+
+  // ── Окно не прячется под клавиатурой ──
+  // Низ открытого окна ниже верха клавиатуры — окно поднимается ровно настолько, чтобы
+  // встать над ней (сдвигом top, а не transform: transform ломал бы всплывающие списки
+  // внутри окна). Выше свободного места — встаёт к верху экрана и листается внутри себя.
+  // Пересчёт — когда окно открылось, закрылось или поменяло размер и при смене размера экрана
+  useLayoutEffect(() => {
+    let raf = 0
+    const seen = new Set()
+    let sizes = null
+    const fit = () => {
+      raf = 0
+      // Высокое окно листается внутри себя: пересчёт не должен сбрасывать его прокрутку
+      const prokrutka = new Map([...document.querySelectorAll('[data-kb-lift]')].map((m) => [m, m.scrollTop]))
+      opustitOkna()
+      const top = verh()
+      if (top === null) return
+      for (const m of document.querySelectorAll(PODNYAT)) {
+        if (sizes && !seen.has(m)) {
+          seen.add(m)
+          sizes.observe(m)
+        }
+        const r = m.getBoundingClientRect()
+        if (!r.height || r.bottom <= top - ZAZOR) continue
+        m.setAttribute('data-kb-lift', '')
+        const nado = r.bottom - (top - ZAZOR)
+        const mozhno = Math.max(0, r.top - ZAZOR)
+        const o = m.parentElement
+        if (nado <= mozhno || !o?.classList.contains('overlay')) {
+          m.style.top = `-${Math.ceil(Math.min(nado, mozhno))}px`
+        } else {
+          o.style.alignItems = 'flex-start'
+          o.style.paddingTop = ZAZOR + 'px'
+          m.style.maxHeight = Math.max(160, Math.floor(top - 2 * ZAZOR)) + 'px'
+        }
+      }
+      for (const [m, st] of prokrutka) if (st && m.isConnected) m.scrollTop = st
+    }
+    const plan = () => {
+      if (!raf) raf = requestAnimationFrame(fit)
+    }
+    // Перерисовки самой клавиатуры (смена раскладки, Shift) окна не двигают
+    const vne = (r) => !(r.target.nodeType === 1 ? r.target : r.target.parentElement)?.closest?.('.vkb')
+    if (typeof ResizeObserver === 'function') sizes = new ResizeObserver(plan)
+    fit()
+    // Окна форм — в #overlay-root, вопросы и подтверждения (useDialog) — прямо в body
+    const host = document.getElementById('overlay-root')
+    const changes = new MutationObserver((list) => {
+      if (list.some(vne)) plan()
+    })
+    if (host) changes.observe(host, { childList: true, subtree: true })
+    changes.observe(document.body, { childList: true })
+    window.addEventListener('resize', plan)
+    if (sizes && panelRef.current) sizes.observe(panelRef.current)
+    return () => {
+      if (raf) cancelAnimationFrame(raf)
+      changes.disconnect()
+      if (sizes) sizes.disconnect()
+      window.removeEventListener('resize', plan)
+      opustitOkna()
+    }
   }, [])
 
   useEffect(() => {
@@ -118,15 +249,19 @@ export default function VirtualKeyboard({ fallbackRef, onClose }) {
     }
   }, [lang])
 
-  // Поле, в которое печатаем: активное, иначе последнее, иначе поле сканера
+  // Поле, в которое печатаем: активное, иначе последнее, иначе поле по умолчанию (сканер
+  // кассы, первое поле страницы). Открыто окно — только его поля: иначе цифры суммы ушли бы
+  // в поиск страницы за затемнением, а курсор — из окна
   const pole = () => {
+    const okno = [...document.querySelectorAll('.overlay > .modal')].pop() || null
+    const goditsya = (el) => godnoe(el) && !el.closest?.('.vkb') && (!okno || okno.contains(el))
     const a = document.activeElement
-    if (godnoe(a) && !a.closest?.('.vkb')) return a
-    if (godnoe(last.current)) {
+    if (goditsya(a)) return a
+    if (goditsya(last.current)) {
       last.current.focus()
       return last.current
     }
-    const f = fallbackRef?.current
+    const f = okno ? poleDlyaVvoda() : fallbackRef?.current
     if (godnoe(f)) {
       f.focus()
       return f
@@ -165,13 +300,22 @@ export default function VirtualKeyboard({ fallbackRef, onClose }) {
     if (el) postavit(el, '')
   }
 
-  // Enter — как с настоящей клавиатуры: поле сканера добавит товар, форма сохранится
+  // Enter — как с настоящей клавиатуры: поле сканера добавит товар, форма сохранится.
+  // Нажатие, созданное программой, браузер форму сам не отправляет — отправляем сами,
+  // как отправил бы настоящий Enter: поле в форме и никто Enter не перехватил (вход,
+  // формы в окнах)
   const vvod = () => {
     const el = pole()
     if (!el) return
     const init = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }
-    el.dispatchEvent(new KeyboardEvent('keydown', init))
+    const down = new KeyboardEvent('keydown', init)
+    el.dispatchEvent(down)
     el.dispatchEvent(new KeyboardEvent('keyup', init))
+    const form = el.tagName === 'INPUT' ? el.form : null
+    if (form && !down.defaultPrevented && el.isConnected) {
+      if (typeof form.requestSubmit === 'function') form.requestSubmit()
+      else form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    }
   }
 
   const derzhat = (e) => e.preventDefault() // кнопка не забирает фокус у поля
@@ -180,7 +324,7 @@ export default function VirtualKeyboard({ fallbackRef, onClose }) {
 
   const host = overlayHost()
   const panel = (
-    <div className="vkb" role="group" aria-label={t('Экранная клавиатура')} data-tour="pos.vkb">
+    <div className="vkb" ref={panelRef} role="group" aria-label={t('Экранная клавиатура')} data-tour="pos.vkb">
       <div className="vkb-rows">
         <div className="vkb-row">
           {DIGITS.map((d) => (

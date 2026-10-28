@@ -26,7 +26,6 @@ const navBlock = () => {
 }
 
 const адресаМеню = () => [...navBlock().matchAll(/to:\s*'([^']+)'/g)].map((m) => m[1])
-const группыМеню = () => [...navBlock().matchAll(/section:\s*'([^']+)'/g)].map((m) => m[1])
 const spec = (s) => (typeof s === 'string' ? { t: s } : s || {})
 
 test('у каждого пункта меню есть свой урок', () => {
@@ -106,11 +105,11 @@ const меткиТуров = () => {
 test('каждая метка тура указывает на настоящий элемент в разметке', () => {
   const src = разметка()
   const адреса = адресаМеню()
-  const группы = группыМеню()
   const нет = меткиТуров().filter((id) => {
-    // Пункты и группы меню размечаются в цикле по списку меню — сверяем со списком
+    // Пункты меню размечаются в цикле по списку меню — сверяем со списком. Групп у плиток
+    // больше нет (1.5.5: порядок плиток — как попросил владелец, не по группам)
     if (id.startsWith('nav:')) return !адреса.includes(id.slice(4))
-    if (id.startsWith('grp:')) return !группы.includes(id.slice(4))
+    if (id.startsWith('grp:')) return true
     // Кнопки разделов настроек размечаются в цикле по списку разделов
     if (id.startsWith('set.nav-')) return !разделыНастроек().includes(id.slice('set.nav-'.length))
     // Метка бывает и полем списка, из которого кнопки рисуются в цикле: { tour: 'arr.new' }
@@ -127,11 +126,17 @@ const разделыНастроек = () => {
 }
 
 test('метки в цикле меню на месте', () => {
-  // Метки плиток главного экрана ставятся не буквально, а в цикле — проверяем сам цикл.
-  // Заголовков групп на экране нет: группу тур подсвечивает по метке на самих плитках
+  // Метки плиток главного экрана ставятся не буквально, а в цикле — проверяем сам цикл
   const home = read('src/pages/Home.jsx')
   assert.ok(home.includes("data-tour={'nav:' + n.to}"), 'у плиток меню пропала метка тура')
-  assert.ok(home.includes('data-tour-grp={n.группа}'), 'у плиток меню пропала метка группы')
+})
+
+test('порядок плиток меню — как попросил владелец (6 × 4, касса на две клетки)', () => {
+  assert.deepEqual(адресаМеню(), [
+    '/dashboard', '/pos', '/shift', '/debts', '/discounts', '/deferred', '/sales-report', '/arrivals',
+    '/products', '/returns', '/writeoffs', '/expiry', '/inventory', '/orders', '/suppliers',
+    '/supplier-report', '/incomes', '/expenses', '/reports', '/employees', '/roles', '/obuchenie', '/settings',
+  ])
 })
 
 test('тур никогда не нажимает кнопки, которые что-то сохраняют', () => {
@@ -174,6 +179,7 @@ function текстВсего() {
     if (s.title) all.push(s.title)
     if (s.text) all.push(s.text)
     if (s.tip) all.push(s.tip)
+    if (s.kassir) all.push(s.kassir)
   }
   return [...new Set(all)]
 }

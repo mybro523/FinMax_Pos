@@ -98,8 +98,16 @@ test('Z-отчёт: те же строки, что на экране; выруч
   assert.deepEqual(ticket.head, ['Магазин №1', 'Z-отчёт смены', 'дата:2026-10-04 — дата:2026-10-04', 'Касса 2'])
   assert.deepEqual(ticket.rows, [])
   assert.deepEqual(ticket.totals.map((r) => r.label), [
-    'Чеков', 'Наличными', 'Картой', 'В долг', 'Скидки', 'Выручка', 'Прибыль', 'Касса на старте', 'Ожидалось в кассе', 'Пересчитано (факт)', 'Расхождение',
+    'Чеков', 'Наличными', 'Картой', 'Переводом', 'В долг', 'Скидки', 'Выручка', 'Прибыль', 'Касса на старте', 'Ожидалось в кассе', 'Пересчитано (факт)', 'Расхождение',
   ])
+  // Переводов не было — строка всё равно есть, с нулём (1.5.5: владелец сверяет безналичные)
+  assert.equal(ticket.totals.find((r) => r.label === 'Переводом').value, '0 с.')
+
+  // Переводы были — под строкой «Переводом» суммы по каждому сервису, затем «В долг»
+  const per = shiftTicket({ ...shift, salesTransfer: 280, transferBy: { DC: 200, 'Алиф': 80 } }, { gross: 1580, refunds: 0, netSales: 1580, netProfit: 400 }, opts)
+  const pl = per.totals.map((r) => [r.label, r.value])
+  const i = pl.findIndex(([l]) => l === 'Переводом')
+  assert.deepEqual(pl.slice(i - 1, i + 4), [['Картой', pl[i - 1][1]], ['Переводом', '280 с.'], ['  DC', '200 с.'], ['  Алиф', '80 с.'], ['В долг', pl[i + 3][1]]])
   assert.deepEqual(ticket.totals.filter((r) => r.big).map((r) => [r.label, r.value]), [['Выручка', '1300 с.'], ['Расхождение', '-5 с.']])
   assert.deepEqual(ticket.tail, ['Кассир: Нилуфар', 'Магазин №1'])
   assert.equal(ticket.signAt, 1)

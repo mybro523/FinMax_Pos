@@ -104,12 +104,13 @@ export function saveAccount(db, user, { verifier, now }) {
   q(db, 'DELETE FROM accounts WHERE login = ? AND id <> ?').run(user.name, user.id)
   q(
     db,
-    `INSERT INTO accounts (id, login, role, pharmacyCode, pharmacyName, verifier, subStatus, paidUntil, seenAt, permissions, roleName)
-     VALUES (@id, @login, @role, @code, @name, @verifier, @subStatus, @paidUntil, @seenAt, @permissions, @roleName)
+    `INSERT INTO accounts (id, login, role, pharmacyCode, pharmacyName, verifier, subStatus, paidUntil, seenAt, permissions, roleName, roleSystem)
+     VALUES (@id, @login, @role, @code, @name, @verifier, @subStatus, @paidUntil, @seenAt, @permissions, @roleName, @roleSystem)
      ON CONFLICT(id) DO UPDATE SET
        login = excluded.login, role = excluded.role, pharmacyCode = excluded.pharmacyCode,
        pharmacyName = excluded.pharmacyName, subStatus = excluded.subStatus, paidUntil = excluded.paidUntil,
        seenAt = excluded.seenAt, permissions = excluded.permissions, roleName = excluded.roleName,
+       roleSystem = excluded.roleSystem,
        verifier = CASE WHEN @keep = 1 THEN accounts.verifier ELSE excluded.verifier END`,
   ).run({
     id: user.id,
@@ -126,6 +127,9 @@ export function saveAccount(db, user, { verifier, now }) {
     // тогда права кассира по умолчанию (пустая строка, см. permissionsOf)
     permissions: Array.isArray(user.permissions) ? JSON.stringify(user.permissions) : '',
     roleName: user.roleName || '',
+    // Встроенная роль ('cashier' — касса сразу после входа). Сервер прежней версии её не
+    // называет — пусто, программа покажет плитки меню, как раньше
+    roleSystem: typeof user.roleSystem === 'string' ? user.roleSystem : '',
   })
   return accountById(db, user.id)
 }
@@ -217,6 +221,7 @@ export const userView = (acc, now) => ({
   role: acc.role,
   roleId: acc.role === 'founder' ? 'owner' : null,
   roleName: acc.role === 'founder' ? 'Владелец' : acc.roleName || 'Кассир',
+  roleSystem: acc.role === 'founder' ? 'owner' : acc.roleSystem || null,
   permissions: permissionsOf(acc),
   pharmacy: { code: acc.pharmacyCode, name: acc.pharmacyName },
   subscription: subscriptionOf(acc, now),

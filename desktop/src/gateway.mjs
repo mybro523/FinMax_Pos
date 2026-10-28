@@ -504,10 +504,12 @@ export function createGateway({
   function teamToCore(ph) {
     const db = ph.db
     const code = ph.code
-    let byId, roles, peerRoles, per, known, teamAt, outcome
+    let byId, roles, roleSys, peerRoles, per, known, teamAt, outcome
     try {
       byId = new Map(q(db, 'SELECT * FROM team_accounts').all().map((a) => [a.id, a]))
       roles = new Map(q(db, 'SELECT id, permissions FROM team_roles').all().map((r) => [r.id, r.permissions]))
+      // Встроенная роль ('cashier' — «Кассир»: касса сразу после входа, без плиток меню)
+      roleSys = new Map(q(db, 'SELECT id, system FROM team_roles').all().map((r) => [r.id, r.system || '']))
       // Роли, права которых поменяла соседняя касса, а сервер ещё не подтвердил: такие права
       // сюда не переносятся (кроме урезания) — расширить права может только своя правка или сервер
       peerRoles = new Set(
@@ -588,6 +590,9 @@ export function createGateway({
             if ((perms ?? '') !== (row.permissions ?? '')) set.permissions = perms ?? ''
             const roleName = founder ? 'Владелец' : a.roleName || row.roleName
             if (roleName !== row.roleName) set.roleName = roleName
+            // Сотрудник без роли — кассир прежней версии; роли нет в списке — прежняя отметка
+            const roleSystem = founder ? 'owner' : !a.roleId ? 'cashier' : roleSys.has(a.roleId) ? roleSys.get(a.roleId) : row.roleSystem || ''
+            if (roleSystem !== (row.roleSystem || '')) set.roleSystem = roleSystem
           }
           if (a.userId && a.userId !== row.tenantUserId) set.tenantUserId = a.userId
           // Блокировка действует сразу, от кого бы ни пришла. Снять её может своя правка или
@@ -714,12 +719,13 @@ export function createGateway({
           if (q(core, 'SELECT 1 FROM accounts WHERE login = ?').get(a.login)) continue
           q(
             core,
-            `INSERT INTO accounts (id, login, role, pharmacyCode, pharmacyName, verifier, subStatus, paidUntil, tenantUserId, seenAt, permissions, roleName, blocked, localPw)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO accounts (id, login, role, pharmacyCode, pharmacyName, verifier, subStatus, paidUntil, tenantUserId, seenAt, permissions, roleName, blocked, localPw, roleSystem)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           ).run(
             id, a.login, a.role, code, tmpl.pharmacyName || '', p.sealed, tmpl.subStatus || 'active', tmpl.paidUntil ?? null, a.userId ?? null,
             new Date(clock.now()).toISOString(), founder ? '' : roles.has(a.roleId) ? permsJson(roles.get(a.roleId)) : '', founder ? 'Владелец' : a.roleName || '',
             a.active && x.activeBy !== 'peer' ? 0 : 1, p.state === 'pending' ? p.opId : null,
+            founder ? 'owner' : !a.roleId ? 'cashier' : roleSys.get(a.roleId) || '',
           )
         }
       })

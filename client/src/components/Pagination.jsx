@@ -1,63 +1,52 @@
-import { useState, useRef } from 'react'
-import { LuChevronLeft, LuChevronRight } from 'react-icons/lu'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
-// Хук пагинации: срез текущей страницы + управление. resetKey сбрасывает на 1-ю страницу
-// при смене фильтра/периода. По умолчанию 10 строк на страницу.
-export function usePagination(items, perPage = 10, resetKey) {
+// ── Списки целиком, без страниц ──
+// Владелец попросил (1.5.5): никаких страниц «1 2 3 … 20» — каждый список раздела
+// показывается весь, одной лентой. Чтобы моноблок на Windows 7 не задумывался на тысячах
+// товаров, строки дорисовываются при прокрутке: сначала первые FIRST, дальше по STEP, когда
+// низ списка подходит к экрану (заранее, за 800 px). Для человека это один длинный список
+// без кнопок. Поиск и фильтры раздела работают по всему списку, как и раньше.
+//
+// Хук и компонент сохранили прежние имена и поля (slice, start, total…) — разделам ничего
+// менять не пришлось. resetKey — при смене фильтра или периода список снова рисуется с начала
+const FIRST = 80
+const STEP = 160
+
+export function usePagination(items, _perPage, resetKey) {
   const list = Array.isArray(items) ? items : []
-  const [page, setPage] = useState(1)
-  // Сброс на 1-ю страницу при смене фильтра — синхронно в рендере (без «мигания» и гонки эффектов)
+  const [shown, setShown] = useState(FIRST)
+  // Сброс при смене фильтра — синхронно в рендере (без «мигания» и гонки эффектов)
   const keyRef = useRef(resetKey)
   if (keyRef.current !== resetKey) {
     keyRef.current = resetKey
-    if (page !== 1) setPage(1)
+    if (shown !== FIRST) setShown(FIRST)
   }
   const total = list.length
-  const pages = Math.max(1, Math.ceil(total / perPage))
-  // Клэмп ВО ВРЕМЯ рендера — нет пустого/обратного кадра при сжатии списка
-  const cur = Math.min(Math.max(1, page), pages)
-  const start = (cur - 1) * perPage
-  const slice = list.slice(start, start + perPage)
-  return { page: cur, setPage, pages, slice, total, start, perPage }
+  const more = total > shown
+  const slice = more ? list.slice(0, shown) : list
+  const loadMore = useCallback(() => setShown((n) => n + STEP), [])
+  return { page: 1, setPage: () => {}, pages: 1, slice, total, start: 0, perPage: total, more, shown, loadMore }
 }
 
-// Компактный список номеров страниц: 1 … 4 5 6 … 20
-function pageList(cur, pages) {
-  if (pages <= 7) return Array.from({ length: pages }, (_, i) => i + 1)
-  const out = [1]
-  const from = Math.max(2, cur - 1)
-  const to = Math.min(pages - 1, cur + 1)
-  if (from > 2) out.push('…')
-  for (let p = from; p <= to; p++) out.push(p)
-  if (to < pages - 1) out.push('…')
-  out.push(pages)
-  return out
-}
-
-export function Pagination({ page, pages, setPage, total, start, perPage }) {
-  if (total <= perPage) return null
-  const from = start + 1
-  const to = Math.min(start + perPage, total)
-  return (
-    <div className="pager">
-      <span className="pager-info">{from}–{to} из {total}</span>
-      <div className="pager-btns">
-        <button className="pager-btn" disabled={page <= 1} onClick={() => setPage(page - 1)} aria-label="Назад">
-          <LuChevronLeft size={16} />
-        </button>
-        {pageList(page, pages).map((p, i) =>
-          p === '…' ? (
-            <span key={'d' + i} className="pager-dots">…</span>
-          ) : (
-            <button key={p} className={'pager-btn' + (p === page ? ' active' : '')} onClick={() => setPage(p)}>
-              {p}
-            </button>
-          ),
-        )}
-        <button className="pager-btn" disabled={page >= pages} onClick={() => setPage(page + 1)} aria-label="Вперёд">
-          <LuChevronRight size={16} />
-        </button>
-      </div>
-    </div>
-  )
+// Метка в конце списка: подошла к экрану — дорисовать ещё. После каждой дорисовки
+// наблюдение начинается заново: метка всё ещё у экрана (строки короткие, экран высокий) —
+// дорисовывается следующая порция, пока она не уйдёт вниз
+export function Pagination({ more, shown, loadMore }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!more || !loadMore) return undefined
+    const el = ref.current
+    if (!el) return undefined
+    if (typeof IntersectionObserver !== 'function') {
+      loadMore()
+      return undefined
+    }
+    const io = new IntersectionObserver((list) => {
+      if (list.some((e) => e.isIntersecting)) loadMore()
+    }, { rootMargin: '0px 0px 800px 0px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [more, shown, loadMore])
+  if (!more) return null
+  return <div ref={ref} className="list-more" aria-hidden="true" data-testid="list-more" />
 }

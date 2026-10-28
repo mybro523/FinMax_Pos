@@ -10,7 +10,7 @@ import { useAuth, refreshMe, getUser, useSuspended, acknowledgeSuspension } from
 import Suspended from './components/Suspended'
 import { setThemeScope } from './lib/theme'
 import { setLangScope } from './lib/i18n'
-import { can } from './lib/permissions'
+import { can, kassaFirst } from './lib/permissions'
 
 // Ленивые страницы — код грузится по требованию (быстрый первый экран)
 const Home = lazy(() => import('./pages/Home'))
@@ -33,6 +33,7 @@ const Obuchenie = lazy(() => import('./pages/Obuchenie'))
 // Тур лежит отдельно: главная сборка несёт только его состояние, тексты грузятся при запуске
 import TurHost from './components/TurHost'
 import { PechatHost } from './components/PrintPreview'
+import PrintKeeper from './components/PrintKeeper'
 import { PrintPageStyle } from './components/PrintDoc'
 import { startTour, obucheniePokazano, OBSHIY } from './lib/tur'
 const WriteOffs = lazy(() => import('./pages/WriteOffs'))
@@ -117,12 +118,14 @@ function ErrorBridge() {
   return null
 }
 
-// Стартовая страница: владелец сервиса — его панель, все остальные — главный экран
-const homeFor = (user) => (user?.role === 'superadmin' ? '/admin' : '/')
+// Стартовая страница: владелец сервиса — его панель, кассир (роль «Кассир») — касса,
+// все остальные — главный экран
+const homeFor = (user) => (user?.role === 'superadmin' ? '/admin' : kassaFirst(user) ? '/pos' : '/')
 
 // ── Раздел по праву ──
-// Нет права — на главный экран, где этот раздел показан серым. Проверка здесь —
-// для удобства, а не для защиты: сервер отклонит запрос и без неё
+// Нет права — на главный экран, где этот раздел показан серым (кассира главный экран
+// сам уводит в кассу). Проверка здесь — для удобства, а не для защиты: сервер отклонит
+// запрос и без неё
 function Allowed({ user, perm, owner, children }) {
   const ok = owner ? user?.role === 'founder' : !perm || can(user, perm)
   return ok ? children : <Navigate to="/" replace />
@@ -189,12 +192,16 @@ function AuthedApp({ user }) {
   return (
     <ErrorBoundary>
       <TurHost />
-      {/* Печать: поля и номера страниц (везде) и экран печати программы для Windows */}
+      {/* Печать: поля и номера страниц (везде), экран печати программы для Windows и чек,
+          который печатается после того, как его окно уже закрыли */}
       <PrintPageStyle />
       <PechatHost />
+      <PrintKeeper />
       <Suspense fallback={<PageFallback />}>
         <Routes>
-          <Route path="/" element={<Home />} />
+          {/* Кассир плиток меню не видит: после входа и по адресу главного экрана — касса.
+              Его «Меню» в полосе внизу — окно со списком его разделов (KassirMenu.jsx) */}
+          <Route path="/" element={kassaFirst(user) ? <Navigate to="/pos" replace /> : <Home />} />
           <Route path="/dashboard" element={guarded('dashboard.view', <Dashboard />)} />
           <Route path="/pos" element={guarded('pos.sell', <Pos />)} />
           <Route path="/products" element={guarded('products.view', <Products />)} />

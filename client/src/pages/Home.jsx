@@ -12,13 +12,14 @@ import { isDesktop } from '../lib/desktop'
 import { useCloseApp } from '../components/WindowButtons'
 
 // ── Главный экран ──
-// Открывается после входа вместо бокового меню: квадратные плитки с объёмными
-// картинками одной сплошной сеткой, как на кассовом аппарате. Заголовков групп нет
-// и ряды не разрываются: разделы идут в порядке групп (продажи, склад, финансы,
-// управление), и группа читается по соседям и картинке. Касса — главное действие:
-// золотая и вдвое шире остальных. Раздел, на который у сотрудника нет права, остаётся
-// на месте, но серый: человек видит, что такой раздел есть, и понимает, что его
-// открывает владелец.
+// Открывается после входа вместо бокового меню: плитки с объёмными картинками одной
+// сплошной сеткой, как на кассовом аппарате. Сетка одна на любом экране, кроме
+// телефона: 6 колонок × 4 ряда, без прокрутки — плитки растягиваются под экран (см.
+// index.css). Порядок разделов — как попросил владелец (NAV в Layout.jsx). Касса —
+// главное действие: золотая и вдвое шире остальных. Раздел, на который у сотрудника нет
+// права, остаётся на месте, но серый: человек видит, что такой раздел есть, и понимает,
+// что его открывает владелец. Кассир (роль «Кассир») этого экрана не видит вовсе —
+// после входа у него сразу касса (App.jsx).
 //
 // Кто вошёл, видно в полосе внизу окна (она одна на весь проект). Тема, выход и — в
 // программе для Windows — «Закрыть программу» стоят в правом верхнем углу шапки,
@@ -35,13 +36,6 @@ export default function Home() {
   const products = useCollection('products')
   const expiring = expiringProducts(products).length
 
-  // Плитки подряд, без заголовков. Каждая помнит свою группу: общий тур подсвечивает группу целиком
-  const items = []
-  let группа = null
-  for (const n of NAV) {
-    if (n.section) группа = n.section
-    else items.push({ ...n, группа })
-  }
   const temaText = theme === 'dark' ? t('Светлая тема') : t('Тёмная тема')
 
   // Экран покупателя (программа для Windows): после входа, при входе в другой магазин и
@@ -90,10 +84,7 @@ export default function Home() {
       title={t('Главное меню')}
       subtitle={user?.pharmacy?.name || ''}
       actions={
-        // В программе для Windows рядом стоят ещё значки версии, отправки и касс в сети:
-        // на экране уже 1700 у этих кнопок остаются значки, иначе название меню
-        // сжимается в столбик (см. .hub-acts.desk в index.css)
-        <div className={'hub-acts' + (isDesktop ? ' desk' : '')}>
+        <div className="hub-acts">
           <Link to="/about" className="btn ghost" data-tour="hub.about" title={t('О компании')} aria-label={t('О компании')}>
             <span className="ic"><LuInfo size={16} /></span> <span className="btn-text">{t('О компании')}</span>
           </Link>
@@ -113,7 +104,7 @@ export default function Home() {
     >
       <div className="hub" data-tour="sidebar">
         <div className="hub-grid">
-          {items.map((n) => {
+          {NAV.map((n) => {
                 const ok = allowedNav(user, n)
                 const badge = n.badge && deferred.length > 0 ? deferred.length : n.expiryBadge && expiring > 0 ? expiring : 0
                 const cls = 'hub-tile' + (n.main ? ' gold wide' : '') + (ok ? '' : ' off')
@@ -129,7 +120,7 @@ export default function Home() {
                   </>
                 )
                 return ok ? (
-                  <Link key={n.to} to={n.to} className={cls} data-tour={'nav:' + n.to} data-tour-grp={n.группа}>
+                  <Link key={n.to} to={n.to} className={cls} data-tour={'nav:' + n.to}>
                     {inner}
                   </Link>
                 ) : (
@@ -137,7 +128,6 @@ export default function Home() {
                     key={n.to}
                     className={cls}
                     data-tour={'nav:' + n.to}
-                    data-tour-grp={n.группа}
                     title={t('Доступно по решению владельца')}
                     aria-disabled="true"
                   >

@@ -64,6 +64,16 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
     role: u.role,
     roleId: u.roleId ?? null,
     roleName: u.roleName ?? null,
+    // Встроенная роль — как у настоящего сервера (1.5.5): владелец — owner, роль «Кассир» —
+    // cashier, своя роль владельца — null, без роли — кассир прежней версии
+    roleSystem:
+      u.role === 'founder'
+        ? 'owner'
+        : u.roleSystem !== undefined
+          ? u.roleSystem
+          : u.roleId
+            ? ((s.roles || []).find((r) => r.id === u.roleId)?.system ?? null)
+            : 'cashier',
     ...(Array.isArray(u.permissions) ? { permissions: u.permissions } : {}),
     pharmacy: u.role === 'superadmin' ? null : { code: s.pharmacy.code, name: s.pharmacy.name },
     subscription:

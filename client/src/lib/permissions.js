@@ -128,6 +128,14 @@ export function can(user, ...keys) {
   return keys.some((k) => own.includes(k))
 }
 
+// ── Кассир: касса сразу после входа ──
+// Сотрудник со встроенной ролью «Кассир» (её имя владелец может сменить, но не удалить)
+// плиток меню не видит вовсе: после входа сразу открывается касса, а «Меню» внизу
+// открывает окно со списком его разделов. Касса закрыта для его роли — обычное меню.
+// Сервер и программа прежней версии роль не называют — тогда тоже обычное меню
+export const isKassir = (user) => user?.role === 'cashier' && user?.roleSystem === 'cashier'
+export const kassaFirst = (user) => isKassir(user) && can(user, 'pos.sell')
+
 export function labelOf(key) {
   for (const g of PERMISSION_GROUPS) for (const [k, label] of g.items) if (k === key) return label
   return key

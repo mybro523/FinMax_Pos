@@ -482,4 +482,10 @@ export const CORE_SCHEMA = [
   ALTER TABLE accounts ADD COLUMN localPw TEXT;
   ALTER TABLE accounts ADD COLUMN prevVerifier TEXT;
   `,
+  // ── Встроенная роль (версия 1.5.5) ──
+  // 'cashier' — роль «Кассир»: после входа сразу открывается касса, без плиток меню;
+  // 'owner' — владелец; пусто — своя роль владельца или сервер прежней версии
+  `
+  ALTER TABLE accounts ADD COLUMN roleSystem TEXT NOT NULL DEFAULT '';
+  `,
 ]

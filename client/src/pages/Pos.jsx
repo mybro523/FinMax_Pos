@@ -37,6 +37,7 @@ import { showCustomer, customerLabels, cartScreen } from '../lib/customerScreen'
 import { autoPrint } from '../lib/print'
 import TicketView from '../components/TicketView'
 import PrintDoc from '../components/PrintDoc'
+import { pechatBezOkna } from '../components/PrintKeeper'
 import { pechatTicket } from '../lib/pechat'
 import { getRekvizity } from '../lib/rekvizity'
 import { useCategories, categoryNames } from '../lib/categories'
@@ -2006,7 +2007,18 @@ function Receipt({ sale, onClose, onCancel }) {
               <span className="ic"><LuUndo2 size={16} /></span> {tr('Отмена')}
             </button>
           )}
-          <button className="btn ghost" onClick={() => print(ticket)}><span className="ic"><LuPrinter size={16} /></span> {tr('Печать')}</button>
+          {/* «Печать» — окно закрывается сразу, чек печатается без него (PrintKeeper.jsx):
+              следующий покупатель не ждёт, пока принтер допечатает */}
+          <button
+            className="btn ghost"
+            data-testid="chek-print"
+            onClick={() => {
+              onClose()
+              pechatBezOkna(ticket, tr('Чек продажи')).catch((e) => toast(tr(e?.message || 'Не удалось отправить задание на принтер.'), 'err'))
+            }}
+          >
+            <span className="ic"><LuPrinter size={16} /></span> {tr('Печать')}
+          </button>
           <button className="btn" onClick={onClose}>{tr('Готово')}</button>
         </div>
       )}

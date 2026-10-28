@@ -108,7 +108,7 @@ export class AuthService {
     login: string
     role: string
     roleId?: string | null
-    roleRef?: { id: string; name: string; permissions: string[] } | null
+    roleRef?: { id: string; name: string; permissions: string[]; system?: string | null } | null
     pharmacy?: { code: string; name: string; paidUntil: Date; trial: boolean; blocked: boolean; offlineDays?: number } | null
   }) {
     const ph = acc.pharmacy
@@ -121,6 +121,10 @@ export class AuthService {
       // проверяет действия и без связи
       roleId: acc.role === 'founder' ? 'owner' : acc.roleId ?? null,
       roleName: acc.role === 'founder' ? 'Владелец' : acc.roleRef?.name || 'Кассир',
+      // Встроенная роль: 'owner' — владелец, 'cashier' — роль «Кассир» (её не удалить, имя
+      // владелец может сменить). У кассира после входа сразу открывается касса, без плиток
+      // меню. Учётная запись без роли — кассир прежней версии
+      roleSystem: acc.role === 'founder' ? 'owner' : acc.roleRef ? acc.roleRef.system || null : 'cashier',
       permissions: permissionsOf(acc),
       pharmacy: ph ? { code: ph.code, name: ph.name } : null,
       subscription: sub && {

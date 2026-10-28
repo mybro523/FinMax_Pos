@@ -4,21 +4,23 @@ import { LuCircleHelp, LuKeyboard, LuLayoutGrid, LuLock, LuUserRound } from 'rea
 import { useAuth, logout } from '../db/auth'
 import { useT } from '../lib/i18n'
 import { startTour } from '../lib/tur'
-import { isDesktop } from '../lib/desktop'
-import SyncBadge from './SyncBadge'
-import VirtualKeyboard from './VirtualKeyboard'
+import { kassaFirst } from '../lib/permissions'
+import VirtualKeyboard, { poleDlyaVvoda } from './VirtualKeyboard'
 import WindowButtons from './WindowButtons'
+import KassirMenu from './KassirMenu'
 
 // ── Полоса внизу окна: кто работает, «Меню», тур, экранная клавиатура, блокировка ──
 // В программе для Windows — ещё «Свернуть» и «Закрыть программу»: она открыта на весь
 // экран, и своих кнопок у окна не видно (см. WindowButtons.jsx).
 // Одна на весь проект: на любой странице видно, под чьим именем работают, и экран
-// можно закрыть, отходя от компьютера.
+// можно закрыть, отходя от компьютера. Высокая, с крупными подписями: у кассы на неё
+// нажимают пальцем.
 //
 // razdel — открыт раздел, а не главный экран. Шапки у разделов нет, поэтому сюда
 // переехали её кнопки: «Меню» (назад к плиткам) и «?» — тур по разделу (tour — тур
-// у раздела есть). В программе для Windows слева встают значки версии, отправки и
-// касс в сети. На главном экране всё это остаётся в его шапке.
+// у раздела есть). У кассира (роль «Кассир») плиток нет: «Меню» открывает окно со
+// списком его разделов (KassirMenu.jsx). Значки версии, отправки и касс в сети живут
+// только в «Настройках» (вкладка «Профиль»).
 //
 // Полоса прикреплена к низу окна, а не «липнет»: у страницы задан overflow-x, и
 // sticky внутри неё не держится (см. index.css). Место под неё оставляет класс
@@ -26,13 +28,15 @@ import WindowButtons from './WindowButtons'
 // клавиатура поднимаются над полосой. На узком экране подписи кнопок прячутся —
 // остаются значки, подпись видна во всплывающей подсказке.
 //
-// Экранная клавиатура — только в кассе: в меню и других разделах её кнопки нет. Она
-// печатает в поле, где стоит курсор, а если курсора нет — в поле с пометкой
-// data-vkb-default (поле сканера). Ушли из кассы — клавиатура закрылась: у каждой
-// страницы полоса своя, и при возвращении касса откроется без неё
-const poleSkanera = {
+// Экранная клавиатура — в каждом разделе (на главном экране полей нет), только на
+// широком экране: моноблок у кассы часто без клавиатуры, а телефон и планшет носят
+// свою. Она печатает в поле, где стоит курсор, а если курсора нет — в поле с пометкой
+// data-vkb-default (поле сканера кассы) или в первое поле страницы. Клавиатура лежит
+// поверх страницы и ничего не сдвигает. Ушли из раздела — клавиатура закрылась: у каждой
+// страницы полоса своя
+const poleStranicy = {
   get current() {
-    return typeof document !== 'undefined' ? document.querySelector('[data-vkb-default]') : null
+    return poleDlyaVvoda()
   },
 }
 
@@ -40,8 +44,8 @@ export default function AppFoot({ razdel = false, tour = false }) {
   const auth = useAuth()
   const t = useT()
   const { pathname } = useLocation()
-  const naKasse = pathname === '/pos'
   const [kb, setKb] = useState(false)
+  const [menu, setMenu] = useState(false)
 
   useEffect(() => {
     document.documentElement.classList.add('has-foot')
@@ -50,53 +54,67 @@ export default function AppFoot({ razdel = false, tour = false }) {
 
   if (!auth) return null
   const roleName = auth.roleName || (auth.role === 'founder' ? t('Владелец') : t('Кассир'))
+  const kassir = kassaFirst(auth)
 
   return (
     <>
-      {naKasse && kb && <VirtualKeyboard fallbackRef={poleSkanera} onClose={() => setKb(false)} />}
-      <footer className={'app-foot' + (isDesktop ? ' desk' : '')} data-tour="app.foot">
+      {razdel && kb && <VirtualKeyboard fallbackRef={poleStranicy} onClose={() => setKb(false)} />}
+      {menu && <KassirMenu onClose={() => setMenu(false)} />}
+      <footer className="app-foot" data-tour="app.foot">
         <div className="kf-left">
           <span className="kf-user" title={`${auth.name || ''} (${roleName})`}>
-            <span className="ic"><LuUserRound size={15} /></span>
+            <span className="ic"><LuUserRound size={18} /></span>
             <span className="kf-pre">{t('Кассир')}:</span> <b>{auth.name || '—'}</b> <span className="kf-role">({roleName})</span>
           </span>
-          {razdel && isDesktop && <div className="kf-status"><SyncBadge /></div>}
         </div>
         <div className="kf-actions">
           {razdel && tour && (
             <button
               type="button"
-              className="btn ghost sm icon kf-help"
+              className="btn ghost icon kf-help"
               onClick={() => startTour(pathname)}
               data-tour="app.help"
               title={t('Тур по разделу')}
               aria-label={t('Тур по разделу')}
             >
-              <LuCircleHelp size={17} />
+              <LuCircleHelp size={20} />
             </button>
           )}
-          {razdel && (
-            <Link to="/" className="btn ghost sm kf-menu" data-tour="app.menu" title={t('Главное меню')} aria-label={t('Главное меню')}>
-              <span className="ic"><LuLayoutGrid size={15} /></span> <span className="btn-text">{t('Меню')}</span>
-            </Link>
-          )}
-          {naKasse && (
+          {razdel && kassir && (
             <button
               type="button"
-              className={'btn ghost sm kf-kb' + (kb ? ' on' : '')}
+              className={'btn ghost kf-menu' + (menu ? ' on' : '')}
+              onClick={() => setMenu(true)}
+              data-tour="app.menu"
+              title={t('Меню')}
+              aria-label={t('Меню')}
+              aria-haspopup="dialog"
+            >
+              <span className="ic"><LuLayoutGrid size={18} /></span> <span className="btn-text">{t('Меню')}</span>
+            </button>
+          )}
+          {razdel && !kassir && (
+            <Link to="/" className="btn ghost kf-menu" data-tour="app.menu" title={t('Главное меню')} aria-label={t('Главное меню')}>
+              <span className="ic"><LuLayoutGrid size={18} /></span> <span className="btn-text">{t('Меню')}</span>
+            </Link>
+          )}
+          {razdel && (
+            <button
+              type="button"
+              className={'btn ghost kf-kb' + (kb ? ' on' : '')}
               onClick={() => setKb(!kb)}
               aria-pressed={kb}
               data-tour="app.keyboard"
               title={t('Клавиатура')}
               aria-label={t('Клавиатура')}
             >
-              <span className="ic"><LuKeyboard size={15} /></span> <span className="btn-text">{t('Клавиатура')}</span>
+              <span className="ic"><LuKeyboard size={18} /></span> <span className="btn-text">{t('Клавиатура')}</span>
             </button>
           )}
-          <button type="button" className="btn ghost sm kf-lock" onClick={() => logout()} data-tour="app.lock" title={t('Блокировка')} aria-label={t('Блокировка')}>
-            <span className="ic"><LuLock size={15} /></span> <span className="btn-text">{t('Блокировка')}</span>
+          <button type="button" className="btn ghost kf-lock" onClick={() => logout()} data-tour="app.lock" title={t('Блокировка')} aria-label={t('Блокировка')}>
+            <span className="ic"><LuLock size={18} /></span> <span className="btn-text">{t('Блокировка')}</span>
           </button>
-          <WindowButtons />
+          <WindowButtons className="btn ghost" />
         </div>
       </footer>
     </>

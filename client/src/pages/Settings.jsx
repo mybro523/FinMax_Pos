@@ -21,6 +21,7 @@ import ChekPanel from '../components/ChekPanel'
 import VesyPanel from '../components/VesyPanel'
 import LanPanel from '../components/LanPanel'
 import LitePanel from '../components/LitePanel'
+import SyncBadge from '../components/SyncBadge'
 import { isDesktop } from '../lib/desktop'
 
 // ── Подписка ──
@@ -208,6 +209,17 @@ export default function Settings() {
         <div className="set-body">
           {active === 'profil' && (
             <>
+              {/* Версия, отправка на сервер и кассы в сети (программа для Windows). Раньше —
+                  значками в шапке меню и в полосе внизу; владелец попросил держать их только
+                  здесь (1.5.5). Нажатие на значок — подробности: что ушло, что ждёт, обновление */}
+              {isDesktop && (
+                <div className="panel set-status" data-tour="set.status" style={{ maxWidth: 640, marginBottom: 16 }}>
+                  <h2><span className="h2-title"><span className="ic"><LuMonitorSmartphone size={17} /></span>{t('Программа')}</span></h2>
+                  <div className="set-status-row"><SyncBadge /></div>
+                  <p className="tag-cat" style={{ marginTop: 10 }}>{t('Нажмите значок — откроются подробности: что ушло на сервер, что ждёт отправки, обновление программы и кассы в сети.')}</p>
+                </div>
+              )}
+
               <Podpiska t={t} />
 
               {/* Оформление: язык + тема */}

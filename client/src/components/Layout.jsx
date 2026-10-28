@@ -8,10 +8,9 @@ import {
 } from 'react-icons/lu'
 import { useConnection } from '../db/store'
 import { useAuth, leavePharmacy } from '../db/auth'
-import { can } from '../lib/permissions'
+import { can, kassaFirst } from '../lib/permissions'
 import { useT } from '../lib/i18n'
 import { isDesktop } from '../lib/desktop'
-import SyncBadge from './SyncBadge'
 import AppFoot from './AppFoot'
 import { BrandWord } from './ui'
 import emblem from '../assets/brand/emblem-64.png'
@@ -19,42 +18,37 @@ import emblem from '../assets/brand/emblem-64.png'
 // ── Разделы программы ──
 // Бокового меню больше нет: после входа открывается главный экран с плитками
 // (pages/Home.jsx), а раздел занимает весь экран. Список здесь один на всех:
-// по нему строятся плитки, маршруты, туры и обучение.
+// по нему строятся плитки, маршруты, туры, обучение и окно «Меню» кассира.
 //
 // perm — право, без которого раздел закрыт (плитка серая, адрес уводит на главный
 // экран). owner — только владелец магазина. main — главное действие, золотая плитка.
-// Порядок — группами по смыслу, соседи подсказывают группу (заголовков на экране нет):
-// всё для работы за кассой, затем склад, затем деньги и отчёты, в конце управление
+// Порядок — как попросил владелец магазина (1.5.5), слева направо и сверху вниз: сетка
+// меню — 6 колонок × 4 ряда, касса занимает две клетки, и 23 раздела встают в неё ровно
 export const NAV = [
-  { section: 'Продажи' },
   { to: '/dashboard', label: 'Панель управления', Icon: LuLayoutDashboard, perm: 'dashboard.view' },
   { to: '/pos', label: 'Касса', Icon: LuShoppingCart, perm: 'pos.sell', main: true },
   { to: '/shift', label: 'Смена кассы', Icon: LuCalculator, perm: 'shift.view' },
-  { to: '/returns', label: 'Возврат товара', Icon: LuUndo2, perm: 'returns.view' },
   { to: '/debts', label: 'Долги клиентов', Icon: LuReceipt, perm: 'debts.view' },
   { to: '/discounts', label: 'История скидок', Icon: LuTag, perm: 'discounts.view' },
   { to: '/deferred', label: 'Отложенные штрихкоды', Icon: LuClock, perm: 'deferred.view', badge: true },
-  { section: 'Склад' },
-  { to: '/products', label: 'Товары', Icon: LuPill, perm: 'products.view' },
+  { to: '/sales-report', label: 'Отчёт продажи', Icon: LuChartColumn, perm: 'reports.view' },
   { to: '/arrivals', label: 'Приход товара', Icon: LuPackagePlus, perm: 'arrivals.view' },
-  { to: '/suppliers', label: 'Поставщики', Icon: LuTruck, perm: 'suppliers.view' },
-  { to: '/expiry', label: 'Срок годности', Icon: LuCalendarClock, perm: 'expiry.view', expiryBadge: true },
+  { to: '/products', label: 'Товары', Icon: LuPill, perm: 'products.view' },
+  { to: '/returns', label: 'Возврат товара', Icon: LuUndo2, perm: 'returns.view' },
   { to: '/writeoffs', label: 'Списание', Icon: LuTrash2, perm: 'writeoffs.view' },
+  { to: '/expiry', label: 'Срок годности', Icon: LuCalendarClock, perm: 'expiry.view', expiryBadge: true },
   { to: '/inventory', label: 'Инвентаризация', Icon: LuClipboardCheck, perm: 'inventory.view' },
   { to: '/orders', label: 'Авто-заявка', Icon: LuClipboardList, perm: 'orders.view' },
-  { section: 'Финансы' },
-  { to: '/expenses', label: 'Расходы', Icon: LuHandCoins, perm: 'expenses.view' },
-  { to: '/incomes', label: 'Доходы', Icon: LuCoins, perm: 'incomes.view' },
-  { to: '/reports', label: 'Отчёт ОПУ', Icon: LuTrendingUp, perm: 'reports.view' },
-  { to: '/sales-report', label: 'Отчёт продажи', Icon: LuChartColumn, perm: 'reports.view' },
+  { to: '/suppliers', label: 'Поставщики', Icon: LuTruck, perm: 'suppliers.view' },
   { to: '/supplier-report', label: 'Отчёт поставщиков', Icon: LuScale, perm: 'suppliers.view' },
-  { section: 'Управление' },
+  { to: '/incomes', label: 'Доходы', Icon: LuCoins, perm: 'incomes.view' },
+  { to: '/expenses', label: 'Расходы', Icon: LuHandCoins, perm: 'expenses.view' },
+  { to: '/reports', label: 'Отчёт ОПУ', Icon: LuTrendingUp, perm: 'reports.view' },
   { to: '/employees', label: 'Сотрудники', Icon: LuUsers, owner: true },
   { to: '/roles', label: 'Роли и права', Icon: LuShieldCheck, owner: true },
-  { to: '/settings', label: 'Настройки', Icon: LuSettings },
-  // Обучение стоит последним и отдельно от рабочих разделов: в него заходят
-  // не по делу, а когда забыли, как что-то делается
+  // Обучение — не рабочий раздел: в него заходят, когда забыли, как что-то делается
   { to: '/obuchenie', label: 'Обучение', Icon: LuGraduationCap, help: true },
+  { to: '/settings', label: 'Настройки', Icon: LuSettings },
 ]
 
 // Открыт ли раздел этому сотруднику
@@ -81,13 +75,15 @@ export default function Layout({ title, subtitle, note, actions, fill, hub, chil
   // ── Тур просит показать меню ──
   // Меню теперь — главный экран. Шаги общего тура сами ведут на него (у них
   // указан адрес), а старый запрос «открой меню» на всякий случай ведёт туда же.
+  // У кассира главного экрана нет — его шаги тура пропускаются (lib/tury.js)
+  const kassir = kassaFirst(user)
   useEffect(() => {
     const onMenu = (e) => {
-      if (e.detail && location.pathname !== '/') navigate('/')
+      if (e.detail && !kassir && location.pathname !== '/') navigate('/')
     }
     window.addEventListener('tur:menu', onMenu)
     return () => window.removeEventListener('tur:menu', onMenu)
-  }, [location.pathname, navigate])
+  }, [location.pathname, navigate, kassir])
 
   // Тур по разделу есть у каждого пункта меню, кроме самого «Обучения»:
   // что у каждого пункта есть урок, стережёт отдельная проверка
@@ -103,17 +99,18 @@ export default function Layout({ title, subtitle, note, actions, fill, hub, chil
             <button className="back" onClick={() => leavePharmacy()}>{t('вернуться к себе')}</button>
           </div>
         )}
-        {/* В программе для Windows о связи говорит значок в шапке: касса там работает
-            и без интернета, и полоса «нет связи» только пугала бы */}
+        {/* В программе для Windows полосы «нет связи» нет: касса там работает и без
+            интернета, а что ушло на сервер, видно в «Настройках» (вкладка «Профиль») */}
         {conn === 'error' && !isDesktop && (
           <div className="conn-banner">
             <span className="ic"><LuWifiOff size={15} /></span>
             {t('Нет связи с сервером — показаны сохранённые данные, изменения синхронизируются автоматически')}
           </div>
         )}
-        {/* Шапка — только у главного экрана: имя системы и его кнопки. В разделах её
-            нет, место отдано странице: «Меню» и «?» стоят в полосе внизу (AppFoot.jsx),
-            кнопки раздела — строкой вверху страницы */}
+        {/* Шапка — только у главного экрана: имя системы и его кнопки; закреплена вверху
+            окна. В разделах её нет, место отдано странице: «Меню» и «?» стоят в полосе
+            внизу (AppFoot.jsx), кнопки раздела — строкой вверху страницы. Значков версии,
+            отправки и касс в сети в шапке нет — они в «Настройках» */}
         {hub && (
           <header className="topbar">
             <div className="topbar-left">
@@ -126,10 +123,7 @@ export default function Layout({ title, subtitle, note, actions, fill, hub, chil
                 {subtitle && <div className="sub">{subtitle}</div>}
               </div>
             </div>
-            <div className="topbar-actions">
-              {isDesktop && <SyncBadge />}
-              {actions}
-            </div>
+            <div className="topbar-actions">{actions}</div>
           </header>
         )}
         <main className="content" key={location.pathname}>

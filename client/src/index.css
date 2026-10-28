@@ -1193,8 +1193,10 @@ input, select { transition: border 0.14s, box-shadow 0.14s, background 0.14s; }
 .auth-brand-body { max-width: 540px; margin: auto; text-align: center; }
 /* Логотип FinMax POS — картинка с прозрачным фоном: лежит прямо на синей панели, без
    тёмного прямоугольника вокруг */
-.auth-hero { width: min(100%, 540px); margin: 0 auto 26px; }
-.auth-hero img { width: 100%; height: auto; display: block; }
+.auth-hero { width: min(100%, 440px); margin: 0 auto 26px; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.auth-hero img { display: block; height: auto; user-select: none; }
+.auth-hero-emblem { width: clamp(120px, 11vw, 176px); }
+.auth-hero-word { width: 100%; }
 .auth-brand-body h2 { font-size: clamp(25px, 2.5vw, 32px); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 12px; text-wrap: balance; }
 .auth-brand-body p { font-size: 15px; line-height: 1.6; color: #b9c4e4; max-width: 420px; margin: 0 auto; }
 .auth-points { list-style: none; margin: 24px 0 0; padding: 0; display: grid; gap: 10px; }
@@ -1235,6 +1237,8 @@ input, select { transition: border 0.14s, box-shadow 0.14s, background 0.14s; }
    окне — строкой над формой, чтобы не наезжать на неё */
 .auth-pane { position: relative; }
 .auth-win { position: absolute; top: 14px; right: 16px; display: flex; gap: 8px; }
+/* Экранная клавиатура на входе — в правом нижнем углу (только широкий экран) */
+.auth-kb { position: absolute; right: 20px; bottom: 20px; min-height: 46px; padding: 0 16px; font-size: 15px; gap: 8px; }
 @media (max-width: 900px) {
   .auth-win { position: static; justify-self: end; margin-bottom: 14px; }
 }
@@ -1254,20 +1258,8 @@ input, select { transition: border 0.14s, box-shadow 0.14s, background 0.14s; }
 
 
 /* ───────── Пагинация таблиц ───────── */
-.pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; flex-wrap: wrap; border-top: 1px solid var(--border); }
-.pager-info { font-size: 12.5px; color: var(--muted); }
-.pager-btns { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
-.pager-btn {
-  min-width: 32px; height: 32px; padding: 0 8px; border-radius: 8px;
-  border: 1px solid var(--border-strong); background: var(--card); color: var(--text);
-  font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center;
-  transition: background 0.13s, border-color 0.13s, transform 0.12s;
-}
-.pager-btn:hover:not(:disabled) { border-color: var(--muted-2); }
-.pager-btn:active:not(:disabled) { transform: scale(0.94); }
-.pager-btn.active { background: var(--accent-btn); color: #fff; border-color: var(--accent-btn); }
-.pager-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.pager-dots { color: var(--muted-2); padding: 0 2px; }
+/* Списки показываются целиком: метка в конце списка дорисовывает строки при прокрутке */
+.list-more { height: 1px; }
 
 /* Кликабельная карточка-метрика и строка таблицы */
 .metric.clickable { cursor: pointer; }
@@ -1447,10 +1439,15 @@ input.pn-count { width: 84px; text-align: right; }
 .emp-zp-bar .tag-cat { flex: 1 1 260px; }
 .emp-zp-pay { padding: 3px 8px; font-size: 12px; vertical-align: middle; }
 
-/* ── Отчёт ОПУ ── */
-.opu-table td, .opu-table th { padding: 11px 16px; }
+/* ── Отчёт ОПУ ──
+   Таблица узкая и крупная (1.5.5): сумма стоит рядом со своей строкой, а не у дальнего
+   края экрана — глаз не теряет строку по дороге */
+.opu-panel { max-width: 600px; }
+.opu-table th { padding: 12px 20px; font-size: 13px; }
+.opu-table td { padding: 12px 20px; font-size: 17px; }
+.opu-table td.num { white-space: nowrap; }
 .opu-b td { font-weight: 600; }
-.opu-big td { font-size: 15px; }
+.opu-big td { font-size: 19px; }
 
 /* ── Лист «Отчёт о прибылях и убытках» (печать раздела «Отчёт ОПУ») ──
    Как привычная бумажная форма владельца: полоса с заголовком, «Наименование | Сумма»,
@@ -1790,20 +1787,24 @@ input.pn-count { width: 84px; text-align: right; }
 }
 
 /* ═════════ Главный экран: плитки разделов ═════════
-   Как на кассовом аппарате: квадратные плитки одной сплошной сеткой, без заголовков
-   групп и пустых мест (dense добивает ряд следующими плитками). У каждой объёмная
-   картинка раздела в правом нижнем углу и название в левом верхнем. Касса золотая
-   и вдвое шире — главное действие. Серая плитка — раздел закрыт для этой роли: он
-   виден, но не нажимается, картинка приглушена. */
-/* Меню на всю ширину окна: плитки прежнего размера, в ряд встаёт столько, сколько помещается */
-.hub { width: 100%; display: flex; flex-direction: column; gap: 22px; }
-/* Экран выше меню — плитки стоят посередине по высоте, а не прижаты к верху с пустотой
-   внизу. Не помещаются — меню, как и раньше, начинается сверху и листается */
-.app-hub .content { display: flex; flex-direction: column; justify-content: center; }
-.hub-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); grid-auto-flow: dense; gap: 12px; }
+   Как на кассовом аппарате: плитки одной сплошной сеткой, без заголовков групп. У каждой
+   объёмная картинка раздела в правом нижнем углу и название в левом верхнем. Касса золотая
+   и вдвое шире — главное действие. Серая плитка — раздел закрыт для этой роли: он виден,
+   но не нажимается, картинка приглушена.
+
+   Сетка одна на любом экране, кроме телефона: 6 колонок × 4 ряда (23 раздела, касса — две
+   клетки), всегда целиком, без прокрутки. Шапка и полоса внизу стоят на месте, плитки
+   растягиваются на остаток окна, а надпись и картинка подстраиваются под размер самой
+   плитки (единицы cq). На телефоне — две колонки, меню листается, шапка закреплена: окно
+   главного экрана листается само (.main), и sticky шапки в нём держится */
+.hub { width: 100%; display: flex; flex-direction: column; }
+.app-hub .main { height: 100vh; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+@supports (height: 100dvh) { .app-hub .main { height: 100dvh; } }
+.app-hub .topbar { flex: 0 0 auto; }
+.hub-grid { display: grid; gap: 12px; grid-template-columns: repeat(6, minmax(0, 1fr)); grid-template-rows: repeat(4, minmax(0, 1fr)); }
 .hub-tile {
   position: relative; display: flex; flex-direction: column; align-items: flex-start; overflow: hidden;
-  aspect-ratio: 1 / 1; min-height: 150px; padding: 14px 14px 12px; border-radius: 16px;
+  min-width: 0; min-height: 0; padding: 14px 14px 12px; border-radius: 16px; container-type: size;
   background: linear-gradient(160deg, var(--sidebar-2) 0%, var(--sidebar) 68%); color: #fff; text-decoration: none;
   border: 1px solid var(--tile-line); box-shadow: var(--shadow-sm);
   transition: background 0.14s, transform 0.1s, box-shadow 0.14s, border-color 0.14s;
@@ -1811,19 +1812,24 @@ input.pn-count { width: 84px; text-align: right; }
 .hub-tile:hover { border-color: var(--gold); box-shadow: var(--shadow); }
 .hub-tile:hover .hub-pic { transform: scale(1.06) rotate(-2deg); }
 .hub-tile:active { transform: scale(0.985); }
-.hub-tile .hub-name { position: relative; z-index: 1; font-size: 20px; font-weight: 700; line-height: 1.15; letter-spacing: -0.01em; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); max-width: 100%; }
-/* Картинка 100 px (размер бесплатной лицензии Icons8): на плитке она стоит почти
-   в натуральную величину, чтобы не замыливаться от растяжения */
+/* Надпись — от размера плитки: на 1366×768 около 18 px, на 1920×1080 — 23 */
+.hub-tile .hub-name {
+  position: relative; z-index: 1; max-width: 100%;
+  font-size: clamp(12px, min(9cqw, 13cqh), 23px); font-weight: 700; line-height: 1.15; letter-spacing: -0.01em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); overflow-wrap: break-word;
+}
+/* Картинка 100 px (размер бесплатной лицензии Icons8): по высоте плитки, не больше
+   натуральной величины, чтобы не замыливаться от растяжения */
 .hub-tile .hub-pic {
-  position: absolute; right: 5%; bottom: 5%; width: 58%; max-width: 108px; height: auto; aspect-ratio: 1 / 1; object-fit: contain;
+  position: absolute; right: 6%; bottom: 7%; height: min(56%, 108px); width: auto; aspect-ratio: 1 / 1; object-fit: contain;
   pointer-events: none; user-select: none; filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.35));
   transition: transform 0.18s ease;
 }
 /* Касса: золотая и на две колонки; картинка стоит справа, надпись — крупнее */
-.hub-tile.wide { grid-column: span 2; aspect-ratio: auto; }
-.hub-tile.wide .hub-pic { width: 36%; max-width: 132px; right: 4%; bottom: 2%; }
+.hub-tile.wide { grid-column: span 2; }
+.hub-tile.wide .hub-pic { height: min(76%, 132px); right: 4%; bottom: 6%; }
 .hub-tile.gold { background: linear-gradient(160deg, #ffd65a 0%, var(--gold) 55%, var(--gold-dark) 100%); border-color: var(--gold-dark); color: var(--on-gold); }
-.hub-tile.gold .hub-name { font-size: 26px; text-shadow: none; }
+.hub-tile.gold .hub-name { font-size: clamp(16px, min(7cqw, 20cqh), 32px); text-shadow: none; }
 .hub-tile.gold:hover { border-color: var(--on-gold); }
 .hub-tile.off { background: var(--track); border-color: var(--border-strong); color: var(--muted-2); box-shadow: none; cursor: not-allowed; }
 .hub-tile.off .hub-name { text-shadow: none; }
@@ -1839,27 +1845,62 @@ input.pn-count { width: 84px; text-align: right; }
 .hub-lock { position: absolute; top: 14px; right: 14px; z-index: 1; display: inline-flex; color: var(--muted-2); }
 /* Кнопки шапки главного меню: «О компании», тема, выход, «Закрыть программу» */
 .hub-acts { display: flex; align-items: center; gap: 8px; }
-@media (max-width: 1700px) {
-  .hub-acts.desk .btn-text { display: none; }
-  .hub-acts.desk .btn { padding: 9px 11px; }
-}
 @media (max-width: 1100px) {
-  .hub-grid { grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); }
-  .hub-tile { min-height: 136px; }
-  .hub-tile .hub-name { font-size: 18px; }
-  .hub-tile.gold .hub-name { font-size: 23px; }
+  .hub-acts .btn-text { display: none; }
+  .hub-acts .btn { padding: 9px 11px; }
 }
+/* Экран шире телефона: сетка — на всю высоту между шапкой и полосой внизу */
+@media (min-width: 601px) {
+  .app-hub .content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 16px 20px; }
+  .app-hub .hub { flex: 1 1 auto; min-height: 0; }
+  .app-hub .hub-grid { flex: 1 1 auto; min-height: 0; }
+}
+/* Окно ниже 520 px — плиткам не сжаться в нечитаемое: ряды постоянной высоты, меню листается */
+@media (min-width: 601px) and (max-height: 520px) {
+  .app-hub .hub-grid { grid-template-rows: repeat(4, 104px); }
+}
+/* Узкий экран (планшет стоя): та же сетка 6×4, но поля плиток и зазоры меньше, надпись — от
+   11 px, длинное слово («Инвентаризация») переносится по слогам, а не вылезает из плитки */
+@media (min-width: 601px) and (max-width: 900px) {
+  .app-hub .content { padding: 12px; }
+  .app-hub .hub-grid { gap: 8px; }
+  .hub-tile { padding: 10px 9px 8px; border-radius: 12px; }
+  .hub-tile .hub-name { font-size: clamp(11px, min(9cqw, 13cqh), 23px); hyphens: auto; -webkit-hyphens: auto; }
+}
+/* Телефон: две колонки, меню листается, шапка закреплена */
 @media (max-width: 600px) {
-  .hub { gap: 20px; }
-  .hub-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
-  .hub-tile { min-height: 118px; padding: 12px 12px 10px; border-radius: 14px; }
+  .hub-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: none; grid-auto-rows: 118px; gap: 10px; }
+  .hub-tile { padding: 12px 12px 10px; border-radius: 14px; }
   .hub-tile .hub-name { font-size: 16px; }
   .hub-tile.gold .hub-name { font-size: 20px; }
-  .hub-tile.wide .hub-pic { width: 34%; }
 }
 @media (prefers-reduced-motion: reduce) {
   .hub-tile .hub-pic, .hub-tile { transition: none; }
   .hub-tile:hover .hub-pic { transform: none; }
+}
+
+/* ── «Меню» кассира: столбик крупных строк с картинками, как в кассовых программах ── */
+.km-overlay .modal { max-width: 460px; }
+.km-list { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.km-item {
+  display: flex; align-items: center; gap: 14px; width: 100%; min-height: 60px; padding: 8px 16px;
+  border-radius: 12px; border: 1px solid var(--border); background: var(--soft); color: var(--text);
+  font: inherit; font-size: 18px; font-weight: 600; text-align: left; cursor: pointer; touch-action: manipulation;
+  transition: background 0.12s, border-color 0.12s, transform 0.08s;
+}
+.km-item:hover { border-color: var(--gold); background: var(--hover); }
+.km-item:active { transform: scale(0.985); }
+.km-item.current { border-color: var(--accent); background: var(--accent-soft); }
+.km-item.gold { background: linear-gradient(160deg, #ffd65a 0%, var(--gold) 55%, var(--gold-dark) 100%); border-color: var(--gold-dark); color: var(--on-gold); }
+.km-item.gold.current { box-shadow: 0 0 0 3px var(--accent-soft); }
+.km-pic { width: 40px; height: 40px; flex-shrink: 0; object-fit: contain; pointer-events: none; user-select: none; }
+.km-ic { width: 40px; height: 40px; display: inline-grid; place-items: center; flex-shrink: 0; color: var(--accent); }
+.km-name { min-width: 0; }
+.km-extra { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.km-item.small { min-height: 50px; font-size: 15.5px; gap: 8px; padding: 6px 12px; }
+.km-item.small .km-ic { width: 28px; }
+@media (prefers-reduced-motion: reduce) {
+  .km-item { transition: none; }
 }
 
 /* ═════════ Роли и права ═════════ */
@@ -1949,65 +1990,58 @@ input.pn-count { width: 84px; text-align: right; }
 /* ── Полоса внизу окна: кто работает, «Меню», тур, клавиатура, блокировка ──
    Одна на весь проект: фирменный тёмно-синий во всю ширину, всегда на виду — и на
    телефоне тоже. Шапки в разделах нет, её кнопки «Меню» и «?» стоят здесь, справа.
+   Высокая, с крупными подписями: у кассы на неё нажимают пальцем (1.5.5).
    Прикреплена к низу окна (sticky здесь не держится — у страницы задан overflow-x),
    а место под неё оставляет класс has-foot на <html> */
-:root { --app-foot-h: 52px; }
+:root { --app-foot-h: 64px; }
 .app-foot {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; height: var(--app-foot-h);
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  padding: 0 28px; background: var(--sidebar); border-top: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 13.5px; color: #e6ebf7;
+  padding: 0 24px; background: var(--sidebar); border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 16px; color: #e6ebf7;
 }
 html.has-foot .main { padding-bottom: var(--app-foot-h); }
-.app-foot .kf-user { display: inline-flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-foot .kf-user { display: inline-flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 16.5px; }
 .app-foot .kf-user .ic { display: inline-flex; color: var(--gold); flex-shrink: 0; }
 .app-foot .kf-user b { color: #fff; font-weight: 700; }
 .app-foot .kf-role { color: var(--sidebar-muted); }
 .app-foot .kf-left { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.app-foot .kf-status { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.app-foot .kf-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.app-foot .kf-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.app-foot .btn { min-height: 46px; padding: 0 16px; font-size: 15.5px; font-weight: 600; border-radius: 10px; gap: 8px; }
+.app-foot .btn.icon { width: 46px; padding: 0; justify-content: center; }
 .app-foot a.btn { text-decoration: none; }
 /* «Меню» и «?» — значки золотом, как прежде в шапке: их ищут взглядом первыми */
 .app-foot .kf-menu .ic, .app-foot .kf-help svg { color: var(--gold); }
 /* Кнопки на тёмно-синем: светлые полупрозрачные плашки с белой надписью */
 .app-foot .btn.ghost { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.26); color: #fff; }
 .app-foot .btn.ghost:hover { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.46); }
-/* Экранная клавиатура включена — кнопка золотая */
-.app-foot .kf-kb.on { background: var(--gold); color: var(--on-gold); border-color: var(--gold); }
+/* Экранная клавиатура включена или открыто «Меню» кассира — кнопка золотая */
+.app-foot .kf-kb.on, .app-foot .kf-menu.on { background: var(--gold); color: var(--on-gold); border-color: var(--gold); }
+.app-foot .kf-kb.on .ic, .app-foot .kf-menu.on .ic { color: inherit; }
 .app-foot .kf-kb.on:hover { background: var(--gold-dark); border-color: var(--gold-dark); }
 /* Уведомления и экранная клавиатура — над полосой, а не поверх неё */
 html.has-foot .toast { bottom: calc(var(--app-foot-h) + 14px); }
 html.has-foot .vkb { bottom: calc(var(--app-foot-h) + 10px); }
-/* Клавиатура стоит над полосой: страница уже кончается у полосы, поэтому отступ
-   снизу — ровно на клавиатуру (256) с зазором, без лишнего; окнам — с учётом полосы */
-html.has-foot.kb-open .content { padding-bottom: 272px !important; }
-html.has-foot.kb-open .overlay { padding-bottom: 342px; }
-html.has-foot.kb-open .modal { max-height: calc(100vh - 372px); }
-/* Программа для Windows: в полосе ещё значки версии, отправки и касс в сети и кнопки
-   «Свернуть» и «Закрыть программу». Становится тесно — подписи уходят по очереди:
-   сначала у версии и касс в сети, потом у остальных значков и роль, потом у кнопок.
-   Подпись видна во всплывающей подсказке, у значков — ещё и по нажатию */
-@media (max-width: 1439px) {
-  .app-foot.desk .sync-badge.ver .sync-label, .app-foot.desk .sync-badge.lan .sync-label { display: none; }
-  .app-foot.desk .sync-badge.ver, .app-foot.desk .sync-badge.lan { padding: 0 9px; }
-}
+/* Становится тесно — сначала уходит роль, потом подписи кнопок (кроме «Меню»).
+   Подпись видна во всплывающей подсказке */
 @media (max-width: 1279px) {
-  .app-foot.desk .kf-status .sync-label { display: none; }
-  .app-foot.desk .kf-status .sync-badge { padding: 0 9px; }
-  .app-foot.desk .kf-role { display: none; }
+  .app-foot .kf-role { display: none; }
 }
 @media (max-width: 1099px) {
-  .app-foot.desk { padding: 0 16px; }
-  .app-foot.desk .kf-actions .btn-text { display: none; }
-  .app-foot.desk .kf-actions .btn { padding-left: 10px; padding-right: 10px; }
+  .app-foot { padding: 0 16px; }
+  .app-foot .kf-actions .btn:not(.kf-menu) .btn-text { display: none; }
+  .app-foot .kf-actions .btn { padding-left: 12px; padding-right: 12px; }
 }
-/* Телефон: полоса так же закреплена внизу. Остаются имя, «?», «Меню» с подписью и
-   значки клавиатуры и блокировки */
+/* Телефон: полоса так же закреплена внизу, чуть ниже. Остаются имя, «?», «Меню» с
+   подписью и значок блокировки */
 @media (max-width: 600px) {
-  .app-foot { padding: 0 12px; gap: 10px; font-size: 13px; }
+  :root { --app-foot-h: 58px; }
+  .app-foot { padding: 0 12px; gap: 10px; font-size: 14px; }
+  .app-foot .kf-user { font-size: 14px; }
   .app-foot .kf-pre, .app-foot .kf-role { display: none; }
   .app-foot .kf-actions { gap: 6px; }
-  .app-foot .kf-kb .btn-text, .app-foot .kf-lock .btn-text { display: none; }
+  .app-foot .btn { min-height: 42px; font-size: 14px; }
+  .app-foot .btn.icon { width: 42px; }
   .app-foot .kf-actions .btn { padding-left: 10px; padding-right: 10px; }
 }
 @media print {
@@ -2017,17 +2051,18 @@ html.has-foot.kb-open .modal { max-height: calc(100vh - 372px); }
 
 /* ── Экранная клавиатура ──
    Закреплена внизу окна поверх всего, включая открытые окна форм: кассир печатает
-   и в поле сканера, и в карточку нового товара. Страница и окна отдают ей место снизу
-   (html.kb-open), чтобы кнопка оплаты и кнопки форм не прятались под клавишами */
+   и в поле сканера, и в карточку нового товара. Лежит ПОВЕРХ страницы и ничего не
+   сдвигает — касса не сжимается (1.5.5). Окно, которое она закрыла бы, поднимается над
+   ней (VirtualKeyboard.jsx); у длинной страницы снизу — запас прокрутки на её высоту,
+   чтобы последние поля можно было поднять над клавишами (видимое при этом не двигается) */
 .vkb {
   position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 120;
   width: min(1180px, calc(100vw - 32px)); box-sizing: border-box;
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 10px; border-radius: 14px;
   background: var(--sidebar); border: 1px solid var(--tile-line); box-shadow: var(--shadow-lg); user-select: none;
 }
-html.kb-open .content { padding-bottom: 290px !important; }
-html.kb-open .overlay { align-items: start; padding: 20px 20px 290px; overflow-y: auto; }
-html.kb-open .modal { max-height: calc(100vh - 320px); }
+html.kb-open .main:not(.main-fill) .content { padding-bottom: 300px; }
+[data-kb-lift] { position: relative; }
 .vkb-rows { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .vkb-row { display: flex; gap: 6px; }
 .vkb-key {
@@ -2049,7 +2084,7 @@ html.kb-open .modal { max-height: calc(100vh - 320px); }
 .vkb-num .num-enter { grid-column: span 2; }
 /* Без физической клавиатуры обходятся на кассовом ПК; телефон и планшет носят свою */
 @media (max-width: 1279px) {
-  .app-foot .kf-kb, .vkb { display: none; }
+  .app-foot .kf-kb, .vkb, .auth-kb { display: none; }
 }
 /* На широком экране касса занимает окно целиком: подвал и клавиатура не растягивают
    страницу, а отнимают высоту у чека — он листается внутри себя. Если высоты всё же
@@ -2206,7 +2241,7 @@ tfoot .zak-total td { font-weight: 700; border-top: 2px solid var(--border-stron
 .about-foot { text-align: center; color: var(--muted); font-size: 13px; padding: 4px 0 12px; }
 .about-foot .brand-word { font-size: 14px; }
 /* Картинки меню взяты у Icons8 по бесплатной лицензии: она требует ссылку на их сайт */
-.about-credits { margin-top: 6px; font-size: 11.5px; color: var(--muted-2); }
+.about-credits { margin-top: 6px; font-size: 10.5px; color: var(--muted-2); opacity: 0.75; }
 .about-credits a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .about-credits a:hover { color: var(--accent); }
 @media (max-width: 860px) {
