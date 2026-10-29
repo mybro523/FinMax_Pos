@@ -11,7 +11,8 @@ import KassirMenu from './KassirMenu'
 
 // ── Полоса внизу окна: кто работает, «Меню», тур, экранная клавиатура, блокировка ──
 // В программе для Windows — ещё «Свернуть» и «Закрыть программу»: она открыта на весь
-// экран, и своих кнопок у окна не видно (см. WindowButtons.jsx).
+// экран, и своих кнопок у окна не видно (см. WindowButtons.jsx). На главном меню —
+// только «Свернуть»: «Закрыть программу» там стоит в шапке справа вверху.
 // Одна на весь проект: на любой странице видно, под чьим именем работают, и экран
 // можно закрыть, отходя от компьютера. Высокая, с крупными подписями: у кассы на неё
 // нажимают пальцем.
@@ -114,7 +115,7 @@ export default function AppFoot({ razdel = false, tour = false }) {
           <button type="button" className="btn ghost kf-lock" onClick={() => logout()} data-tour="app.lock" title={t('Блокировка')} aria-label={t('Блокировка')}>
             <span className="ic"><LuLock size={18} /></span> <span className="btn-text">{t('Блокировка')}</span>
           </button>
-          <WindowButtons className="btn ghost" />
+          <WindowButtons className="btn ghost" quit={razdel} />
         </div>
       </footer>
     </>

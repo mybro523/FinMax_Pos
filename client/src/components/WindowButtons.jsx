@@ -12,6 +12,9 @@ import { useDialog } from './ui'
 //
 // Закрыть программу — переспрашиваем: кнопка стоит рядом с «Блокировкой», и случайное
 // нажатие выключило бы кассу посреди очереди.
+//
+// quit={false} — только «Свернуть»: на главном меню «Закрыть программу» уже есть в шапке
+// справа вверху, и вторая такая же внизу лишняя (1.5.6, просьба владельца).
 
 export function useCloseApp() {
   const dialog = useDialog()
@@ -30,7 +33,7 @@ export function useCloseApp() {
 
 const minimize = () => bridge?.app?.minimize?.().catch(() => {})
 
-export default function WindowButtons({ className = 'btn ghost sm' }) {
+export default function WindowButtons({ className = 'btn ghost sm', quit = true }) {
   const t = useT()
   const closeApp = useCloseApp()
   if (!isDesktop) return null
@@ -40,9 +43,11 @@ export default function WindowButtons({ className = 'btn ghost sm' }) {
       <button type="button" className={className} onClick={minimize} data-tour="app.minimize" title={t('Свернуть программу. F11 — выйти из полноэкранного режима')} aria-label={t('Свернуть')}>
         <span className="ic"><LuMinus size={15} /></span> <span className="btn-text">{t('Свернуть')}</span>
       </button>
-      <button type="button" className={className} onClick={closeApp} data-tour="app.quit" title={t('Закрыть программу')} aria-label={t('Закрыть программу')}>
-        <span className="ic"><LuPower size={15} /></span> <span className="btn-text">{t('Закрыть программу')}</span>
-      </button>
+      {quit && (
+        <button type="button" className={className} onClick={closeApp} data-tour="app.quit" title={t('Закрыть программу')} aria-label={t('Закрыть программу')}>
+          <span className="ic"><LuPower size={15} /></span> <span className="btn-text">{t('Закрыть программу')}</span>
+        </button>
+      )}
     </>
   )
 }
