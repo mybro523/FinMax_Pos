@@ -161,7 +161,11 @@ function RestoreView({ st, onBack }) {
     setSel(c.id)
     setOkForeign(false)
   }
-  const whereText = (c) => (c.where === 'main' ? t('Эта касса') : c.where === 'extra' ? t('Вторая папка') : c.place || t('Из выбранной папки'))
+  const whereText = (c) =>
+    c.where === 'main' ? t('Эта касса')
+      : c.where === 'extra' ? t('Вторая папка')
+        : c.where === 'disk' ? `${t('Копия на диске')}: ${c.place || ''}`.trim()
+          : c.place || t('Из выбранной папки')
 
   const pickFolder = async () => {
     setBusy('pick')
@@ -299,6 +303,22 @@ function StatusModal({ st, onClose }) {
   const backup = st?.backup || {}
   const update = st?.update || {}
   const pending = st?.pending || 0
+
+  // Копия на диск D (раз в 2 дня сама) — сейчас же; и открыть её папку
+  const disk = backup.disk || {}
+  const diskNow = async () => {
+    setBusy('disk')
+    const next = await bridge.backup.diskNow().catch(() => null)
+    setBusy('')
+    refreshDesktopStatus()
+    const d = next?.backup?.disk
+    if (d && !d.error && d.at) toast(`${t('Копия сохранена на диск')}: ${d.dir}`)
+    else toast(`${t('Копию на диск записать не удалось')}${d?.error ? ': ' + d.error : ''}`, 'err')
+  }
+  const diskOpen = async () => {
+    const ok = await bridge.backup.diskOpen().catch(() => false)
+    if (!ok) toast(t('Папку копий открыть не удалось'), 'err')
+  }
 
   // Свежая копия — в папку, которую выберет владелец (флешка, другой диск)
   const saveTo = async () => {
@@ -468,14 +488,23 @@ function StatusModal({ st, onClose }) {
           )}
           <Row label={t('Последняя копия')} tone={backup.at ? undefined : 'warn'}>{backup.at ? fmtShort(backup.at) : t('ещё не снималась')}</Row>
           <div className="tag-cat">{t('Программа сама снимает копию раз в сутки и хранит семь последних.')}</div>
+          {/* Копия на диск D (с 1.5.8): переживает переустановку Windows и отказ диска C */}
+          <div data-testid="disk-copy" style={{ marginTop: 10 }}>
+            <Row label={t('Копия на диск')} tone={disk.error || !disk.at ? 'warn' : undefined}>
+              {disk.running ? t('сохраняется…') : disk.at ? fmtShort(disk.at) : t('ещё не снималась')}
+            </Row>
+            {disk.dir && <div className="tag-cat" data-testid="disk-dir">{t('Папка')}: {disk.dir}</div>}
+            <div className="tag-cat">{t('Раз в 2 дня программа сама кладёт копию на диск D (нет диска D — на диск C) и хранит 15 последних. Интернет не нужен.')}</div>
+            {disk.error && <div className="note err" style={{ marginTop: 6 }} data-testid="disk-error">{t('Копию на диск записать не удалось')}: {disk.error}</div>}
+          </div>
           {backup.error && <div className="note err" style={{ marginTop: 6 }}>{t('Копию снять не удалось')}: {backup.error}</div>}
           {backup.skipped?.length > 0 && (
             <div className="note warn" style={{ marginTop: 6 }}>
               {t('В последнюю копию не попали базы')}: {backup.skipped.join(', ')}. {t('Файл такой базы повреждён или занят. Её прежняя копия сохранена.')}
             </div>
           )}
-          {/* Две кнопки — и всё: сохранить копию в файл (например, на флешку) и загрузить её.
-              Копию раз в сутки программа снимает сама */}
+          {/* Сохранить копию в файл (например, на флешку) и загрузить её; копия на диск D
+              сейчас же и её папка. Копии раз в сутки и раз в 2 дня программа снимает сама */}
           {isFounder && (
             <div className="modal-actions" style={{ justifyContent: 'flex-start', flexWrap: 'wrap' }}>
               <button className="btn ghost" disabled={!!busy} onClick={saveTo} data-testid="backup-save-to">
@@ -483,6 +512,12 @@ function StatusModal({ st, onClose }) {
               </button>
               <button className="btn ghost" disabled={!!busy} onClick={() => setView('restore')} data-testid="restore-open">
                 {t('Загрузить копию')}
+              </button>
+              <button className="btn ghost" disabled={!!busy || disk.running} onClick={diskNow} data-testid="disk-now">
+                {busy === 'disk' || disk.running ? t('Сохраняем…') : t('Сделать копию на диск сейчас')}
+              </button>
+              <button className="btn ghost" disabled={!!busy} onClick={diskOpen} data-testid="disk-open">
+                {t('Открыть папку копий')}
               </button>
             </div>
           )}

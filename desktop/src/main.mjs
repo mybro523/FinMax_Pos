@@ -22,6 +22,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { io } from 'socket.io-client'
 import { copyTime, createBackups, hostFolderOf, openOrRestore } from './backup.mjs'
+import { chooseDiskFolder, diskDue as diskDueOf, diskLabel, DISK_KEEP, DISK_ROOTS, writeDiskCopy } from './disk-backup.mjs'
 import { readBuildConfig, resolveApiUrl, resolveUpdateFeed, serverOrigin } from './config.mjs'
 import { createGateway } from './gateway.mjs'
 import { createCustomerScreen } from './customer-window.mjs'
@@ -361,9 +362,83 @@ async function start() {
   // со сбитыми часами первое идёт, только пока программа работает, и «раз в сутки» по нему
   // выходило бы раз в два с половиной дня; второе идёт почти как настоящее
   const backupDue = () => backups.due() || clock.lic() - (Number(getMeta(core, 'backupLicAt')) || 0) >= 24 * 3600 * 1000
-  const backupTimer = setInterval(() => backupDue() && backupNow(), 60 * 60 * 1000)
-  // Первая проверка — через минуту после запуска: не мешаем входу
-  const backupFirst = setTimeout(() => backupDue() && backupNow(), 60 * 1000)
+
+  // ── Копия на диск D (1.5.8) ──
+  // Раз в 2 дня — копия баз ещё и на диск D (нет D или не записать — C, потом «Документы»),
+  // в папку «FinMax POS — копии», 15 последних. Без интернета. Подробно — disk-backup.mjs.
+  // Сначала снимается свежая обычная копия (средствами SQLite, с проверкой), её и кладём
+  // на диск. Проверка — вместе с обычной копией: при запуске и раз в час
+  const diskRoots = DEV && process.env.APTEKA_DISK_ROOTS
+    ? process.env.APTEKA_DISK_ROOTS.split(';').filter(Boolean)
+    : [...DISK_ROOTS, join(os.homedir(), 'Documents')]
+  let diskNote = { dir: getMeta(core, 'diskCopyDir') || '', at: Number(getMeta(core, 'diskCopyAt')) || 0, error: '' }
+  let diskRunning = null
+  // Чей магазин в имени папки: того, кто сейчас за кассой, иначе того, кто входил последним
+  const diskShop = () => {
+    const now = gateway.activeShop()
+    if (now) return now
+    try {
+      return String(core.prepare('SELECT pharmacyName FROM accounts ORDER BY seenAt DESC LIMIT 1').get()?.pharmacyName || '')
+    } catch {
+      return ''
+    }
+  }
+  // Базы магазина на компьютере ещё нет (программу только поставили, никто не входил) —
+  // копировать на диск нечего: копия без базы магазина ничего не спасёт. Подождём входа
+  const hasShopDb = () => {
+    try {
+      return fs.readdirSync(dataDir).some((f) => /^pharmacy-[A-Za-z0-9_-]+\.db$/.test(f))
+    } catch {
+      return false
+    }
+  }
+  function diskCopyNow() {
+    if (diskRunning) return diskRunning
+    if (!hasShopDb()) return Promise.resolve(false)
+    diskRunning = (async () => {
+      if (!(await backupNow())) throw new Error(backupNote.error || 'копия баз не снята')
+      const last = backups.last()
+      if (!last) throw new Error('копия баз не снята')
+      const { dir, tried } = chooseDiskFolder({ fs, roots: diskRoots })
+      if (!dir) throw new Error('не удалось записать ни на один диск: ' + tried.join('; '))
+      const path = writeDiskCopy({
+        from: last.folder,
+        dir,
+        label: diskLabel(diskShop(), localStamp(last.at)),
+        at: last.at,
+        info: { version: app.getVersion(), computer: os.hostname() },
+        fs,
+        Database,
+        keep: DISK_KEEP,
+        log,
+      })
+      setMeta(core, 'diskCopyAt', String(last.at))
+      setMeta(core, 'diskCopyLicAt', String(clock.lic()))
+      setMeta(core, 'diskCopyDir', dir)
+      diskNote = { dir, at: last.at, error: '' }
+      log.info('копия базы на диск: ' + path)
+      return true
+    })()
+      .catch((e) => {
+        log.warn('копия базы на диск не записалась', e)
+        diskNote = { ...diskNote, error: String(e?.message || e) }
+        return false
+      })
+      .finally(() => {
+        diskRunning = null
+        pushStatus()
+      })
+    return diskRunning
+  }
+  const diskDue = () =>
+    diskDueOf({ lastAt: getMeta(core, 'diskCopyAt'), lastLic: getMeta(core, 'diskCopyLicAt'), now: appNow(), lic: clock.lic() })
+  // Пора копия на диск — она снимает и обычную; иначе — обычная, если пора
+  const backupTick = () => (diskDue() && hasShopDb() ? diskCopyNow() : backupDue() && backupNow())
+  const backupTimer = setInterval(backupTick, 60 * 60 * 1000)
+  // Первая проверка — через минуту после запуска: не мешаем входу (проверка программы может
+  // попросить раньше)
+  const firstMs = DEV && Number(process.env.APTEKA_BACKUP_FIRST_MS) > 0 ? Number(process.env.APTEKA_BACKUP_FIRST_MS) : 60 * 1000
+  const backupFirst = setTimeout(backupTick, firstMs)
   if (coreOpened.restored) log.error('общая база была повреждена — ' + (coreOpened.restored.at ? 'поднята из копии' : 'начата заново'))
 
   // ── Обновление программы ──
@@ -422,6 +497,14 @@ async function start() {
         // но номер кассы не перенёсся)
         restoreError: restoreResult && !restoreResult.ok ? restoreResult.error : '',
         restoreWarning: restoreResult?.ok ? restoreResult.warning || '' : '',
+        // Копия на диск D (раз в 2 дня): куда, когда последняя, что не вышло
+        disk: {
+          dir: diskNote.dir,
+          at: diskNote.at ? new Date(diskNote.at).toISOString() : null,
+          error: diskNote.error,
+          running: !!diskRunning,
+          keep: DISK_KEEP,
+        },
       },
     }
   }
@@ -596,6 +679,19 @@ async function start() {
     backupNote = { ...backupNote, extraOk: null }
     return fullStatus()
   })
+  // Копия на диск D — сейчас же, не дожидаясь двух суток
+  ipcMain.handle('backup:diskNow', async (event) => {
+    if (!trusted(event) || !allowed('settings.backup')) return null
+    await diskCopyNow()
+    return fullStatus()
+  })
+  // Открыть папку копий на диске в проводнике. Копий ещё не было — папку, куда они лягут
+  ipcMain.handle('backup:diskOpen', async (event) => {
+    if (!trusted(event) || !allowed('settings.backup')) return false
+    const dir = diskNote.dir && fs.existsSync(diskNote.dir) ? diskNote.dir : chooseDiskFolder({ fs, roots: diskRoots }).dir
+    if (!dir) return false
+    return (await shell.openPath(dir)) === ''
+  })
   ipcMain.handle('backup:open', async (event) => {
     if (!trusted(event) || !allowed('settings.backup')) return false
     fs.mkdirSync(backups.dir, { recursive: true })
@@ -642,7 +738,7 @@ async function start() {
     // Подпись копии из выбранной папки — имя её папки («FinMax POS — копия 2026-10-18 12-40»).
     // У обычной копии имя — служебная отметка времени: дата и так видна, подписи не нужно
     const name = c.folder.split(/[\\/]/).filter(Boolean).pop() || ''
-    const place = where === 'picked' && !Number.isFinite(copyTime(name)) ? name : ''
+    const place = (where === 'picked' || where === 'disk') && !Number.isFinite(copyTime(name)) ? name : ''
     return { id, where, place, at: Number.isFinite(d.at) ? new Date(d.at).toISOString() : null, computer: d.computer, pending: d.pending, foreign: d.foreign, problem: d.problem }
   }
   const newestFirst = (a, b) => String(b.at || '').localeCompare(String(a.at || ''))
@@ -652,6 +748,9 @@ async function start() {
     if (!gateway.pharmacyFile()) return { copies: [] }
     const st = gateway.status()
     const copies = backups.listAll({ extra: settings.get().backupDir }).map((c) => copyView(c, c.where))
+    // Копии на диске D (C) — в папке «FinMax POS — копии», по папке на копию
+    const diskDir = diskNote.dir && fs.existsSync(diskNote.dir) ? diskNote.dir : ''
+    if (diskDir) for (const c of findCopies(diskDir, { fs, depth: 1 })) if (c.folder !== diskDir) copies.push(copyView(c, 'disk'))
     return { pending: st.pending, online: st.online, copies: copies.sort(newestFirst) }
   })
   ipcMain.handle('backup:pick', async (event) => {
