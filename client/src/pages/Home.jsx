@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { LuLogOut, LuMoon, LuSun, LuPower, LuLock, LuInfo } from 'react-icons/lu'
 import Layout, { NAV, allowedNav } from '../components/Layout'
@@ -9,6 +9,7 @@ import { useLang, useT } from '../lib/i18n'
 import { customerLabels, showCustomer } from '../lib/customerScreen'
 import { useTheme, toggleTheme } from '../lib/theme'
 import { isDesktop } from '../lib/desktop'
+import { fitHub, resetHubMeasure } from '../lib/hubFont'
 import { useCloseApp } from '../components/WindowButtons'
 
 // ── Главный экран ──
@@ -25,6 +26,41 @@ import { useCloseApp } from '../components/WindowButtons'
 // программе для Windows — «Закрыть программу» стоят в правом верхнем углу шапки,
 // рядом с «О компании»: у кассы часто нет мыши с крестиком под рукой. На телефоне
 // у этих кнопок остаются значки, подпись — во всплывающей подсказке.
+//
+// Надписи на плитках (31.10): как можно крупнее, слово целиком, у всех плиток один размер,
+// растут вместе с экраном; «КАССА» — в полтора раза крупнее. Размер считает lib/hubFont.js
+// до того, как окно нарисуется, и заново — при смене размера окна, языка, цифр в углу и
+// после загрузки шрифта.
+function useHubFont(ref, key) {
+  useLayoutEffect(() => {
+    const grid = ref.current
+    if (!grid) return undefined
+    let alive = true
+    const run = () => {
+      if (!alive) return
+      try {
+        fitHub(grid)
+      } catch {
+        // расчёт не удался — остаются запасные размеры из CSS, меню работает
+      }
+    }
+    run()
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(run) : null
+    ro?.observe(grid)
+    const fonts = document.fonts
+    const onFonts = () => {
+      resetHubMeasure()
+      run()
+    }
+    fonts?.addEventListener?.('loadingdone', onFonts)
+    fonts?.ready?.then(onFonts, () => {})
+    return () => {
+      alive = false
+      ro?.disconnect()
+      fonts?.removeEventListener?.('loadingdone', onFonts)
+    }
+  }, [ref, key])
+}
 
 export default function Home() {
   const user = useAuth()
@@ -37,6 +73,9 @@ export default function Home() {
   const expiring = expiringProducts(products).length
 
   const temaText = theme === 'dark' ? t('Светлая тема') : t('Тёмная тема')
+
+  const gridRef = useRef(null)
+  useHubFont(gridRef, NAV.map((n) => t(n.label)).join('|') + '#' + deferred.length + '#' + expiring)
 
   // Экран покупателя (программа для Windows): после входа, при входе в другой магазин и
   // при смене языка — название магазина и «Добро пожаловать». Корзину покажет касса
@@ -103,19 +142,23 @@ export default function Home() {
       }
     >
       <div className="hub" data-tour="sidebar">
-        <div className="hub-grid">
+        <div className="hub-grid" ref={gridRef}>
           {NAV.map((n) => {
                 const ok = allowedNav(user, n)
                 const badge = n.badge && deferred.length > 0 ? deferred.length : n.expiryBadge && expiring > 0 ? expiring : 0
                 const cls = 'hub-tile' + (n.main ? ' gold wide' : '') + (ok ? '' : ' off')
                 const inner = (
                   <>
-                    <span className="hub-name">{t(n.label)}</span>
+                    {/* Цифра в углу — внутри надписи, справа: текст её обтекает и под неё не
+                        заходит (размеры значка тоже из lib/hubFont.js) */}
+                    <span className="hub-name">
+                      {badge > 0 && <span className={'hub-badge' + (n.expiryBadge ? ' warn' : '')}>{badge}</span>}
+                      <span className="hub-label">{t(n.label)}</span>
+                    </span>
                     {/* Объёмная картинка раздела (Icons8 «3D Fluency», 100 px — размер бесплатной
                         лицензии, ссылка на Icons8 стоит внизу «О компании»): раздел узнаётся по
                         картинке, а не по надписи */}
                     <img className="hub-pic" src={`/menu/${n.to.slice(1)}.png`} alt="" width="100" height="100" loading="lazy" draggable="false" />
-                    {badge > 0 && <span className={'hub-badge' + (n.expiryBadge ? ' warn' : '')}>{badge}</span>}
                     {!ok && <span className="hub-lock" aria-hidden="true"><LuLock size={14} /></span>}
                   </>
                 )

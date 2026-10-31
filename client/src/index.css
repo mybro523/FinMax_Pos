@@ -1794,17 +1794,24 @@ input.pn-count { width: 84px; text-align: right; }
 
    Сетка одна на любом экране, кроме телефона: 6 колонок × 4 ряда (23 раздела, касса — две
    клетки), всегда целиком, без прокрутки. Шапка и полоса внизу стоят на месте, плитки
-   растягиваются на остаток окна, а надпись и картинка подстраиваются под размер самой
-   плитки (единицы cq). На телефоне — две колонки, меню листается, шапка закреплена: окно
-   главного экрана листается само (.main), и sticky шапки в нём держится */
+   растягиваются на остаток окна, картинка подстраивается под размер самой плитки (единицы
+   cq). На телефоне — две колонки, меню листается, шапка закреплена: окно главного экрана
+   листается само (.main), и sticky шапки в нём держится.
+
+   Надписи (31.10): как можно крупнее, слово всегда целиком, у всех плиток один размер, растут
+   вместе с плиткой; «КАССА» заглавными и в полтора раза крупнее. Размер упирается в самое
+   длинное слово, поэтому его считает lib/hubFont.js и ставит на сетку переменными
+   (--hub-fs, --hub-fs-gold, значок --hub-b*, замочек --hub-lock). Числа в запасных значениях
+   var() — на миг до расчёта и на случай, если скрипт не справился */
 .hub { width: 100%; display: flex; flex-direction: column; }
 .app-hub .main { height: 100vh; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 @supports (height: 100dvh) { .app-hub .main { height: 100dvh; } }
 .app-hub .topbar { flex: 0 0 auto; }
 .hub-grid { display: grid; gap: 12px; grid-template-columns: repeat(6, minmax(0, 1fr)); grid-template-rows: repeat(4, minmax(0, 1fr)); }
 .hub-tile {
+  --hub-pt: 14px; --hub-px: 12px; --hub-pb: 12px;
   position: relative; display: flex; flex-direction: column; align-items: flex-start; overflow: hidden;
-  min-width: 0; min-height: 0; padding: 14px 14px 12px; border-radius: 16px; container-type: size;
+  min-width: 0; min-height: 0; padding: var(--hub-pt) var(--hub-px) var(--hub-pb); border-radius: 16px; container-type: size;
   background: linear-gradient(160deg, var(--sidebar-2) 0%, var(--sidebar) 68%); color: #fff; text-decoration: none;
   border: 1px solid var(--tile-line); box-shadow: var(--shadow-sm);
   transition: background 0.14s, transform 0.1s, box-shadow 0.14s, border-color 0.14s;
@@ -1812,37 +1819,51 @@ input.pn-count { width: 84px; text-align: right; }
 .hub-tile:hover { border-color: var(--gold); box-shadow: var(--shadow); }
 .hub-tile:hover .hub-pic { transform: scale(1.06) rotate(-2deg); }
 .hub-tile:active { transform: scale(0.985); }
-/* Надпись — от размера плитки: на 1366×768 около 18 px, на 1920×1080 — 23 */
+/* Надпись — на всю ширину плитки (цифра в углу встаёт к правому краю). Размер — из
+   lib/hubFont.js; line-height 1.15 — то же число LINE там. Интервал −0,02 em — как советуют
+   для крупного Inter, заодно самое длинное слово уже и надписи крупнее. overflow-wrap —
+   последняя страховка: расчёт подбирает размер так, что слова не рвутся */
 .hub-tile .hub-name {
-  position: relative; z-index: 1; max-width: 100%;
-  font-size: clamp(12px, min(9cqw, 13cqh), 23px); font-weight: 700; line-height: 1.15; letter-spacing: -0.01em;
+  position: relative; z-index: 1; align-self: stretch; max-width: 100%;
+  font-size: var(--hub-fs, clamp(12px, min(9cqw, 13cqh), 23px)); font-weight: 700; line-height: 1.15; letter-spacing: -0.02em;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); overflow-wrap: break-word;
 }
 /* Картинка 100 px (размер бесплатной лицензии Icons8): по высоте плитки, не больше
-   натуральной величины, чтобы не замыливаться от растяжения */
+   натуральной величины, чтобы не замыливаться от растяжения. Половина высоты и в самом углу —
+   чтобы вторая строка крупной надписи кончалась выше картинки */
 .hub-tile .hub-pic {
-  position: absolute; right: 6%; bottom: 7%; height: min(56%, 108px); width: auto; aspect-ratio: 1 / 1; object-fit: contain;
+  position: absolute; right: 5%; bottom: 5%; height: min(50%, 108px); width: auto; aspect-ratio: 1 / 1; object-fit: contain;
   pointer-events: none; user-select: none; filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.35));
   transition: transform 0.18s ease;
 }
-/* Касса: золотая и на две колонки; картинка стоит справа, надпись — крупнее */
+/* Касса: золотая и на две колонки; картинка стоит справа, «КАССА» — заглавными и в полтора
+   раза крупнее остальных надписей (если помещается левее тележки) */
 .hub-tile.wide { grid-column: span 2; }
 .hub-tile.wide .hub-pic { height: min(76%, 132px); right: 4%; bottom: 6%; }
 .hub-tile.gold { background: linear-gradient(160deg, #ffd65a 0%, var(--gold) 55%, var(--gold-dark) 100%); border-color: var(--gold-dark); color: var(--on-gold); }
-.hub-tile.gold .hub-name { font-size: clamp(16px, min(7cqw, 20cqh), 32px); text-shadow: none; }
+.hub-tile.gold .hub-name { font-size: var(--hub-fs-gold, clamp(16px, min(7cqw, 20cqh), 32px)); text-transform: uppercase; letter-spacing: 0.02em; text-shadow: none; }
 .hub-tile.gold:hover { border-color: var(--on-gold); }
 .hub-tile.off { background: var(--track); border-color: var(--border-strong); color: var(--muted-2); box-shadow: none; cursor: not-allowed; }
 .hub-tile.off .hub-name { text-shadow: none; }
 .hub-tile.off .hub-pic { filter: grayscale(1) opacity(0.45); }
 .hub-tile.off:hover { background: var(--track); box-shadow: none; border-color: var(--border-strong); }
 .hub-tile.off:hover .hub-pic { transform: none; }
+/* Цифра в углу (отложенные штрихкоды, сроки годности) стоит в самой надписи, справа: текст
+   обтекает её и под неё не заходит. Размеры — badgeGeom в lib/hubFont.js, там же меряется
+   ширина цифр (поэтому без tabular-nums: canvas их не знает) */
 .hub-badge {
-  position: absolute; top: 12px; right: 12px; z-index: 1; min-width: 24px; height: 24px; padding: 0 8px;
-  border-radius: 12px; background: rgba(255, 255, 255, 0.18); color: #fff;
-  font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums;
+  float: right; margin: var(--hub-bmt, 0px) 0 0 var(--hub-bgap, 8px);
+  height: var(--hub-bh, 24px); min-width: var(--hub-bh, 24px); padding: 0 var(--hub-bpad, 7px);
+  border-radius: 999px; background: rgba(255, 255, 255, 0.18); color: #fff;
+  font-size: var(--hub-bfs, 13px); font-weight: 700; line-height: 1; letter-spacing: 0; text-shadow: none;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .hub-badge.warn { background: var(--gold); color: var(--on-gold); }
-.hub-lock { position: absolute; top: 14px; right: 14px; z-index: 1; display: inline-flex; color: var(--muted-2); }
+/* На серой закрытой плитке белая цифра на полупрозрачном белом не видна — тёмно-серый кружок */
+.hub-tile.off .hub-badge:not(.warn) { background: var(--muted-2); color: var(--track); }
+/* Замочек закрытого раздела — внизу слева, под надписью: на неё не налезает */
+.hub-lock { position: absolute; left: var(--hub-px); bottom: var(--hub-pb); z-index: 1; display: inline-flex; color: var(--muted-2); }
+.hub-lock svg { width: var(--hub-lock, 14px); height: var(--hub-lock, 14px); }
 /* Кнопки шапки главного меню: «О компании», тема, выход, «Закрыть программу» */
 .hub-acts { display: flex; align-items: center; gap: 8px; }
 @media (max-width: 1100px) {
@@ -1859,20 +1880,20 @@ input.pn-count { width: 84px; text-align: right; }
 @media (min-width: 601px) and (max-height: 520px) {
   .app-hub .hub-grid { grid-template-rows: repeat(4, 104px); }
 }
-/* Узкий экран (планшет стоя): та же сетка 6×4, но поля плиток и зазоры меньше, надпись — от
-   11 px, длинное слово («Инвентаризация») переносится по слогам, а не вылезает из плитки */
+/* Узкий экран (планшет стоя): та же сетка 6×4, но поля плиток и зазоры меньше. Слова и тут
+   целиком — размер считается под самое длинное слово */
 @media (min-width: 601px) and (max-width: 900px) {
   .app-hub .content { padding: 12px; }
   .app-hub .hub-grid { gap: 8px; }
-  .hub-tile { padding: 10px 9px 8px; border-radius: 12px; }
-  .hub-tile .hub-name { font-size: clamp(11px, min(9cqw, 13cqh), 23px); hyphens: auto; -webkit-hyphens: auto; }
+  .hub-tile { --hub-pt: 10px; --hub-px: 9px; --hub-pb: 8px; border-radius: 12px; }
+  .hub-tile .hub-name { font-size: var(--hub-fs, clamp(11px, min(9cqw, 13cqh), 23px)); }
 }
 /* Телефон: две колонки, меню листается, шапка закреплена */
 @media (max-width: 600px) {
   .hub-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: none; grid-auto-rows: 118px; gap: 10px; }
-  .hub-tile { padding: 12px 12px 10px; border-radius: 14px; }
-  .hub-tile .hub-name { font-size: 16px; }
-  .hub-tile.gold .hub-name { font-size: 20px; }
+  .hub-tile { --hub-pt: 12px; --hub-px: 12px; --hub-pb: 10px; border-radius: 14px; }
+  .hub-tile .hub-name { font-size: var(--hub-fs, 16px); }
+  .hub-tile.gold .hub-name { font-size: var(--hub-fs-gold, 20px); }
 }
 @media (prefers-reduced-motion: reduce) {
   .hub-tile .hub-pic, .hub-tile { transition: none; }
