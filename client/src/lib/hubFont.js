@@ -16,6 +16,11 @@
 // «КАССА» помещается левее тележки. Готовые размеры встают CSS-переменными на сетку (index.css,
 // «Главный экран: плитки разделов»); пересчёт — при смене размера окна, языка, цифр в углу и
 // после загрузки шрифта (Home.jsx).
+//
+// 1.5.10 (владелец 31.10: «чуть-чуть меньше, слишком увеличил»): надпись — на 15 % мельче
+// самого крупного размера (SCALE), на любом экране одинаково; «КАССА» — по-прежнему в GOLD раз
+// крупнее уже уменьшенных. На самых узких экранах (планшет стоя) уменьшение не опускает надпись
+// ниже READABLE, если столько помещается.
 
 export const LINE = 1.15 // высота строки надписи — как line-height в index.css
 export const FILL = 0.6 // надпись обычной плитки — не выше этой доли её высоты
@@ -24,6 +29,8 @@ export const GOLD = 1.5 // «КАССА» крупнее остальных на
 // мельче надпись не бывает даже в крошечном окне; 9 — чтобы и на планшете стоя (плитка ~100 px)
 // таджикское «Таъминкунандагон» встало целиком
 export const MIN_FS = 9
+export const SCALE = 0.85 // доля самого крупного размера (1.5.10: на 15 % мельче)
+export const READABLE = 11 // уменьшение не делает надпись мельче этого
 const SAFE = 0.99 // запас ширины на расхождение мерки и страницы (canvas и страница сходятся до 0,1 %)
 const STEP = 0.5
 
@@ -74,7 +81,8 @@ export function lineCount(words, space, fs, w, flt) {
 //           значка, null — значка нет);
 //   space — ширина пробела в em;
 //   gold  — касса { w, h, words, space } (w — ширина левее тележки) или null.
-// Ответ: { fs, gold, badge } — размер надписей, размер «КАССА», значок (badgeGeom).
+// Ответ: { fs, max, gold, badge } — размер надписей, самый крупный возможный (до уменьшения),
+// размер «КАССА», значок (badgeGeom).
 export function hubSizes({ box, tiles, space, gold }) {
   const w = box.w * SAFE
   const maxH = box.h * FILL
@@ -86,7 +94,13 @@ export function hubSizes({ box, tiles, space, gold }) {
       return lineCount(t.words, space, f, w, flt) * f * LINE <= maxH
     })
   }
-  let fs = Math.floor(w / longest / STEP) * STEP
+  let max = Math.floor(w / longest / STEP) * STEP
+  while (max > MIN_FS && !fits(max)) max -= STEP
+  max = Math.max(MIN_FS, max)
+  // На 15 % мельче самого крупного, но не мельче READABLE (если столько помещается). Меньший
+  // размер проверяется заново: значок в углу не уменьшается вместе с надписью (не мельче 24 px)
+  // и при мелкой надписи обтекается ещё и вторая строка
+  let fs = Math.max(Math.floor((max * SCALE) / STEP) * STEP, Math.min(max, READABLE))
   while (fs > MIN_FS && !fits(fs)) fs -= STEP
   fs = Math.max(MIN_FS, fs)
 
@@ -98,7 +112,7 @@ export function hubSizes({ box, tiles, space, gold }) {
     while (gfs > MIN_FS && !ok(gfs)) gfs -= STEP
     gfs = Math.max(MIN_FS, gfs)
   }
-  return { fs, gold: gfs, badge: badgeGeom(fs) }
+  return { fs, max, gold: gfs, badge: badgeGeom(fs) }
 }
 
 // ── Мерки на странице ──
