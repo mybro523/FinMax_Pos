@@ -3,6 +3,7 @@ import { randomInt } from 'node:crypto'
 import { AdminDbService } from './admin-db.service'
 import { FOREVER, dateOfDay, dayOf, formatComputerCode, issueCode, makeKeys, parseComputerCode, publicOf, todayDay } from '../common/licence-code'
 import { LICENCE_PUBLIC_KEY } from '../common/licence-pin'
+import { isProd } from '../common/config'
 
 // ── Коды активации программы без интернета (версия 1.6.0) ──
 // Магазин без интернета работает на компьютере владельца, сервер его не видит. Владелец
@@ -33,8 +34,9 @@ export type LicenceView = {
 export class LicencesService {
   private readonly log = new Logger('Licences')
 
-  // Открытый ключ, закреплённый в исходниках (licence-pin.ts); проверки подставляют свой
-  pin = LICENCE_PUBLIC_KEY
+  // Открытый ключ, закреплённый в исходниках (licence-pin.ts) — для боевого сервера. У сервера
+  // разработки и проверок ключ свой (заводится сам); проверки подставляют закреплённый сами
+  pin = isProd() ? LICENCE_PUBLIC_KEY : ''
   private cached: { privateKey: string; publicKey: string } | null = null
 
   constructor(private admin: AdminDbService) {}

@@ -4,4 +4,4 @@
 // или подменён, или адрес сервера не тот). Пусто — ключа у сервиса ещё нет: сервер заведёт его при
 // первом обращении, после этого его закрепляют здесь и в server/src/common/licence-pin.ts
 // (совпадение сверяет test/licence-code.test.mjs)
-export const LICENCE_PUBLIC_KEY = ''
+export const LICENCE_PUBLIC_KEY = 'd01cb7078be83f318094613d55663fa51b7a3d59b648b05821de0f97bf7a5464'
