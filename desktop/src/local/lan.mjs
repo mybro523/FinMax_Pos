@@ -192,7 +192,7 @@ function logOwn(db, op, deviceId, pwOut = null) {
 // которую уже знает очередь (сервер принял или отверг), для соседей
 // Магазин без интернета (1.7.0): отметок о судьбе нет (fates: false) — принятое кассы узнают из
 // основы главного компьютера (local/solonet.mjs); pwOut — см. effectsOf
-export function lanCatchUp(db, { deviceId, now, fates = true, pwOut = null }) {
+export function lanCatchUp(db, { deviceId, now, fates: withFates = true, pwOut = null }) {
   let logged = 0
   inTx(db, () => {
     const last = Number(getMeta(db, 'lanOutboxSeq') || 0)
@@ -203,7 +203,7 @@ export function lanCatchUp(db, { deviceId, now, fates = true, pwOut = null }) {
       logged++
     }
     if (rows.length) setMeta(db, 'lanOutboxSeq', String(rows[rows.length - 1].seq))
-    if (!fates) return
+    if (!withFates) return
     const fates = q(
       db,
       `SELECT l.id, o.state, o.error FROM lan_log l JOIN outbox o ON o.id = l.id
