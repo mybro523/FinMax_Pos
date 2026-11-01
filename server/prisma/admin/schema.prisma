@@ -77,6 +77,15 @@ model Pharmacy {
   calledAt DateTime?
   callNote String    @default("")
 
+  // ── Логотип магазина (1.6.4) ──
+  // Картинку заводит владелец сервиса; она печатается на чеках, листах и на экране
+  // покупателя. Сама картинка — в отдельной таблице PharmacyLogo: список магазинов и вход
+  // читают эту запись постоянно, и тащить с каждой сотню килобайт незачем. Здесь — только
+  // момент, когда логотип поставили (пусто — логотипа нет): по нему кассы узнают, что
+  // картинку пора забрать заново.
+  logoAt DateTime?
+  logo   PharmacyLogo?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -86,6 +95,16 @@ model Pharmacy {
 
   // Главный экран панели — «у кого заканчивается оплата»
   @@index([paidUntil])
+}
+
+// ── Логотип магазина: сама картинка ──
+// data URL (PNG или JPEG), уже проверенный сервером (src/admin/logo.ts).
+// Удалили магазин — уходит и его логотип
+model PharmacyLogo {
+  pharmacyId String   @id
+  pharmacy   Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+  data       String
+  updatedAt  DateTime @updatedAt
 }
 
 // ── Учётная запись для входа ──

@@ -109,7 +109,7 @@ export class AuthService {
     role: string
     roleId?: string | null
     roleRef?: { id: string; name: string; permissions: string[]; system?: string | null } | null
-    pharmacy?: { code: string; name: string; paidUntil: Date; trial: boolean; blocked: boolean; offlineDays?: number } | null
+    pharmacy?: { code: string; name: string; paidUntil: Date; trial: boolean; blocked: boolean; offlineDays?: number; logoAt?: Date | null } | null
   }) {
     const ph = acc.pharmacy
     const sub = ph ? subscriptionOf(ph) : null
@@ -126,7 +126,9 @@ export class AuthService {
       // меню. Учётная запись без роли — кассир прежней версии
       roleSystem: acc.role === 'founder' ? 'owner' : acc.roleRef ? acc.roleRef.system || null : 'cashier',
       permissions: permissionsOf(acc),
-      pharmacy: ph ? { code: ph.code, name: ph.name } : null,
+      // logoAt — когда владелец сервиса поставил логотип (null — логотипа нет): сменилась
+      // отметка — касса забирает картинку заново (GET /shop/logo)
+      pharmacy: ph ? { code: ph.code, name: ph.name, logoAt: ph.logoAt ? ph.logoAt.toISOString() : null } : null,
       subscription: sub && {
         status: sub.status,
         daysLeft: sub.daysLeft,
