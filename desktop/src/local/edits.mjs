@@ -35,7 +35,7 @@ import { foldSheetEdit, SHEET_TBL } from './sheet.mjs'
 // по сети — писать в базу что попало нельзя
 const COLS = {
   products: [
-    'ord', 'name', 'barcode', 'category', 'type', 'priceC', 'minStock', 'unit', 'unitsPerPack', 'dosage', 'analogIds', 'image',
+    'ord', 'name', 'barcode', 'category', 'type', 'priceC', 'pieceC', 'minStock', 'unit', 'unitsPerPack', 'dosage', 'analogIds', 'image',
     'createdAt', 'sCostC', 'costC', 'sExpiry', 'expiryDate',
   ],
   categories: ['ord', 'name', 'noExpiry', 'createdAt'],

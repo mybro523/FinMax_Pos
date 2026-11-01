@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
+import { piecePriceIn } from '../common/piece'
 import { D, discountOf } from '../common/money'
 import { weightedPackCost, costFromBatches } from '../common/cost'
 import { addUnits, expiryFrom, lockProducts, syncProduct, uppOf } from '../common/stock'
@@ -192,9 +193,25 @@ export class ArrivalsService {
         await tx.product.update({ where: { id: pid }, data: { price } })
         priceMoved.add(pid)
       }
+      // Своя цена штуки из строк прихода (1.5.11): прислана — ставим (или убираем, если
+      // пусто); не прислана — остаётся прежней. Решает последняя строка товара
+      const newPiece = new Map<string, Prisma.Decimal | null>()
+      for (const it of items) if (it.piecePrice !== undefined) newPiece.set(it.productId, piecePriceIn(it.piecePrice))
+      const pieceMoved = new Set<string>()
+      for (const [pid, piecePrice] of newPiece) {
+        if (same(byId.get(pid)!.piecePrice, piecePrice)) continue
+        await tx.product.update({ where: { id: pid }, data: { piecePrice } })
+        pieceMoved.add(pid)
+      }
       // Приход меняет закупочную цену (и цену продажи, если её назначили): это правка
       // карточки, и касса без связи должна видеть, что она была (common/stamps.ts)
-      for (const pid of agg.keys()) await stamp(tx, 'Product', pid, [...(costMoved.has(pid) ? ['cost'] : []), ...(priceMoved.has(pid) ? ['price'] : [])])
+      for (const pid of agg.keys()) {
+        await stamp(tx, 'Product', pid, [
+          ...(costMoved.has(pid) ? ['cost'] : []),
+          ...(priceMoved.has(pid) ? ['price'] : []),
+          ...(pieceMoved.has(pid) ? ['piecePrice'] : []),
+        ])
+      }
 
       let total = D(0)
       for (const it of arrivalItems) {

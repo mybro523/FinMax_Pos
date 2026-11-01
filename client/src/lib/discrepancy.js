@@ -28,6 +28,7 @@ const FIELD = {
   type: 'Тип товара',
   cost: 'Закупочная цена',
   price: 'Цена продажи',
+  piecePrice: 'Цена за 1 шт',
   minStock: 'Минимальный остаток',
   unit: 'Единица',
   unitsPerPack: 'Штук в упаковке',
@@ -55,7 +56,7 @@ const FIELD = {
   description: 'Описание',
   permissions: 'Права',
 }
-const MONEY_FIELDS = new Set(['cost', 'price', 'amount', 'salary'])
+const MONEY_FIELDS = new Set(['cost', 'price', 'piecePrice', 'amount', 'salary'])
 export const fieldLabel = (f, t) => t(FIELD[f] || f)
 
 // Значение поля для человека: деньги — деньгами, да/нет — словами, пусто — прочерком
@@ -75,6 +76,7 @@ export function discrepancyTitle(kind, t) {
   if (kind === 'sale') return t('Продано больше, чем было на складе')
   if (kind === 'writeoff') return t('Списано больше, чем было на складе')
   if (kind === 'price') return t('Цена в чеке не та, что была в базе')
+  if (kind === 'piece') return t('Цена за 1 шт в чеке не та, что была в базе')
   if (kind === 'return') return t('По чеку вернули больше, чем продали')
   if (kind === 'counted') return t('Операция кассы пришла после пересчёта остатка')
   if (kind === 'debt') return t('Сумма больше долга клиента')
@@ -93,7 +95,7 @@ export function discrepancyDetail(d, t, money = String) {
       : `${t('код')} ${n.barcode || '—'} ${t('уже у товара')} ${who} — ${t('принят с кодом')} ${n.internal || ''}`.trim()
   }
   if (d.kind === 'supdebt') return `${t('оплачено')} ${money(d.checkPrice)}, ${t('долг был')} ${money(d.basePrice)}`
-  if (d.kind === 'price') return `${t('в чеке')} ${money(d.checkPrice)}, ${t('в базе')} ${money(d.basePrice)}`
+  if (d.kind === 'price' || d.kind === 'piece') return `${t('в чеке')} ${money(d.checkPrice)}, ${t('в базе')} ${money(d.basePrice)}`
   if (d.kind === 'return') return `${t('лишних')} ${d.units} ${t('шт')}`
   if (d.kind === 'counted') return `${d.units} ${t('шт')} — ${t('остаток не менялся')}`
   if (d.kind === 'debt') return `${t('принято')} ${money(d.checkPrice)}, ${t('долг был')} ${money(d.basePrice)}`

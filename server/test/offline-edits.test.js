@@ -71,6 +71,13 @@ test('товар с кассы: поля карточки — в предела�
   rejected(() => parseProductCreate({ product: { ...base, price: -1 } }, NOW), /сумма/)
   rejected(() => parseProductCreate({ product: { ...base, unitsPerPack: 0 } }, NOW))
   rejected(() => parseProductCreate({ product: { ...base, image: 'javascript:alert(1)' } }, NOW), /Фото/)
+  // Своя цена штуки (1.5.11): нет — пусто; число — она; минус — отказ
+  assert.equal(parseProductCreate({ product: base }, NOW).piecePrice, null)
+  assert.equal(parseProductCreate({ product: { ...base, piecePrice: 2 } }, NOW).piecePrice, 2)
+  rejected(() => parseProductCreate({ product: { ...base, piecePrice: -2 } }, NOW))
+  // Правка: поле в списке сверяемых, пусто — «своей цены нет»
+  const up = parseProductUpdate({ id: base.id, at: AT, set: { piecePrice: null }, base: { piecePrice: 2 } }, NOW)
+  assert.deepEqual([up.set.piecePrice, up.base.piecePrice], [null, 2])
   rejected(() => parseProductCreate({ product: { ...base, stock: 3_000_000_000 } }, NOW))
 })
 

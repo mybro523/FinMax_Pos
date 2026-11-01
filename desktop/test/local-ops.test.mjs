@@ -68,7 +68,7 @@ test('продажа: суммы, скидка, остаток в штуках, 
   )
   // Вид чека — как у сервера: те же поля в том же порядке
   assert.deepEqual(Object.keys(sale), ['id', 'clientId', 'date', 'total', 'cost', 'profit', 'payment', 'payVia', 'customerId', 'shiftId', 'userId', 'items', 'customer', 'user'])
-  assert.deepEqual(Object.keys(sale.items[0]), ['id', 'saleId', 'productId', 'name', 'qty', 'pieces', 'unitsPerPack', 'unit', 'price', 'cost', 'discount'])
+  assert.deepEqual(Object.keys(sale.items[0]), ['id', 'saleId', 'productId', 'name', 'qty', 'pieces', 'unitsPerPack', 'unit', 'price', 'piecePrice', 'cost', 'discount'])
 
   assert.deepEqual(stockOf(db, 'par'), [7, 15])
   assert.deepEqual(stockOf(db, 'nur'), [3, 0])

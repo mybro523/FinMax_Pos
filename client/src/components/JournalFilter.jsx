@@ -4,6 +4,7 @@ import { useCollection, loadRange, needsServerFor } from '../db/store'
 import { startOfDay, startOfDaysAgo } from '../lib/time'
 import { useT, translate as tr } from '../lib/i18n'
 import { poiskZapros, kodyPodhodyat } from '../lib/poisk'
+import StickyBar from './StickyBar'
 
 // ── Поиск и период в журналах ──
 // В возвратах, списаниях и приходах была только листалка по десять строк. Найти
@@ -93,29 +94,35 @@ export function useJournalFilter(key, { dateOf = (r) => r.date, textOf = () => '
 export function JournalFilter({ controls, placeholder, children }) {
   const t = useT()
   const { period, setPeriod, fromDate, setFromDate, toDate, setToDate, q, setQ } = controls
+  // Поиск и период закреплены вверху, пока листается журнал; даты ниже — нет: полоса с
+  // ними заняла бы пол-экрана (1.5.11). Фильтр стоит прямо в панели журнала (без обёртки
+  // с отступами — иначе полосе не к чему было бы липнуть), отступы задаёт сама полоса
   return (
-    <div className="journal-filter">
-      <div className="toolbar" style={{ marginBottom: 10 }}>
-        <input
-          className="search"
-          placeholder={placeholder || t('Поиск по товару…')}
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        {children}
-      </div>
-      <div className="chips" style={{ marginBottom: 10 }}>
-        {PERIODS.map((p) => (
-          <button
-            key={p.key}
-            className={'chip ' + (period === p.key ? 'active' : '')}
-            onClick={() => setPeriod(p.key)}
-          >
-            {t(p.label)}
-          </button>
-        ))}
-      </div>
-      <div className="row" style={{ maxWidth: 420, marginBottom: 14, gap: 10, alignItems: 'flex-end' }}>
+    <>
+      <StickyBar panel pad="12px 16px 10px" className="journal-filter-bar">
+        <div className="toolbar">
+          <input
+            className="search"
+            placeholder={placeholder || t('Поиск по товару…')}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          {children}
+        </div>
+        <div className="chips">
+          {PERIODS.map((p) => (
+            <button
+              key={p.key}
+              className={'chip ' + (period === p.key ? 'active' : '')}
+              onClick={() => setPeriod(p.key)}
+            >
+              {t(p.label)}
+            </button>
+          ))}
+        </div>
+      </StickyBar>
+      <div className="journal-filter">
+      <div className="row" style={{ maxWidth: 420, gap: 10, alignItems: 'flex-end' }}>
         <div className="field" style={{ flex: 1, marginBottom: 0 }}>
           <label>{t('С даты')}</label>
           <input type="date" value={fromDate} onChange={(e) => { setFromDate(e.target.value); setPeriod('custom') }} />
@@ -125,7 +132,8 @@ export function JournalFilter({ controls, placeholder, children }) {
           <input type="date" value={toDate} onChange={(e) => { setToDate(e.target.value); setPeriod('custom') }} />
         </div>
       </div>
-    </div>
+      </div>
+    </>
   )
 }
 

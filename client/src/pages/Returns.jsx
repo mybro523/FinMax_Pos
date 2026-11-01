@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react'
 import { LuUndo2, LuSearch, LuTriangleAlert, LuCircleCheck, LuPrinter } from 'react-icons/lu'
 import Layout from '../components/Layout'
+import StickyBar from '../components/StickyBar'
 import { Modal, useToast, PayBadge } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { JournalFilter, JournalCount, useJournalFilter, periodText } from '../components/JournalFilter'
@@ -14,7 +15,7 @@ import { poiskZapros, kodyPodhodyat, shtrihkodyPoId } from '../lib/poisk'
 import { useCategories, needsExpiry } from '../lib/categories'
 import NumberInput from '../components/NumberInput'
 import VesInput from '../components/VesInput'
-import { uppOf, lineUnits as soldUnits, isVesovoy, kgText, edinica } from '../lib/units'
+import { uppOf, lineUnits as soldUnits, isVesovoy, kgText, edinica, vozvratSumma } from '../lib/units'
 import { returnTicket } from '../lib/ticket'
 import { isOtmena } from '../lib/otmena'
 import TicketView from '../components/TicketView'
@@ -112,6 +113,8 @@ export default function Returns() {
         ves: isVesovoy(products.find((p) => p.id === i.productId) || i),
         unit: (products.find((p) => p.id === i.productId) || i).unit || '',
         max: i.productId ? Math.max(0, soldUnits(i) - (already[i.productId] || 0)) : 0,
+        // Сколько штук уже вернули раньше: сначала возвращаются отдельные штуки по своей цене
+        already: i.productId ? already[i.productId] || 0 : 0,
         units: 0,
         restock: true,
         expiry: '', // срок с упаковки, если кассир его вписал
@@ -124,10 +127,7 @@ export default function Returns() {
       lines.reduce((s, l) => {
         const item = sale?.items.find((i) => i.productId === l.productId)
         if (!item || !l.units) return s
-        const upp = uppOf(item)
-        const sold = soldUnits(item)
-        const paid = (item.price / upp) * sold - (item.discount || 0)
-        return s + (sold > 0 ? (paid / sold) * l.units : 0)
+        return s + vozvratSumma(item, l.units, l.already)
       }, 0),
     [lines, sale],
   )
@@ -150,10 +150,7 @@ export default function Returns() {
   function amountOf(l) {
     const item = sale?.items.find((i) => i.productId === l.productId)
     if (!item || !l.units) return 0
-    const upp = uppOf(item)
-    const sold = soldUnits(item)
-    const paid = (item.price / upp) * sold - (item.discount || 0)
-    return sold > 0 ? (paid / sold) * l.units : 0
+    return vozvratSumma(item, l.units, l.already)
   }
 
   function submit() {
@@ -240,16 +237,20 @@ export default function Returns() {
       </div>
 
       {!sale ? (
-        <>
-          <div className="toolbar">
-            <input
-              className="search"
-              data-tour="ret.search"
-              placeholder={t('Поиск чека: товар, штрихкод или сумма…')}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-          </div>
+        // Полоса поиска чека держится, пока виден список найденных чеков: ниже — история
+        // возвратов со своей полосой, и две полосы наехали бы друг на друга
+        <div className="stick-scope">
+          <StickyBar>
+            <div className="toolbar">
+              <input
+                className="search"
+                data-tour="ret.search"
+                placeholder={t('Поиск чека: товар, штрихкод или сумма…')}
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+            </div>
+          </StickyBar>
           <div className="panel" style={{ padding: 0 }}>
             <table>
               <thead>
@@ -275,7 +276,7 @@ export default function Returns() {
               </tbody>
             </table>
           </div>
-        </>
+        </div>
       ) : (
         <div className="panel" style={{ maxWidth: 900 }}>
           <h2>
@@ -406,10 +407,12 @@ export default function Returns() {
         <h2 style={{ padding: '16px 16px 0' }}>
           <span className="h2-title"><span className="ic"><LuUndo2 size={17} /></span>{t('История возвратов')}</span>
         </h2>
-        <div style={{ padding: '12px 16px 0' }}>
-          <JournalFilter controls={journal.controls} placeholder={t('Товар, штрихкод или кассир…')} />
+        <JournalFilter controls={journal.controls} placeholder={t('Товар, штрихкод или кассир…')} />
+        <div style={{ padding: '0 16px' }}>
           <JournalCount rows={journal.rows.length} loading={journal.loading} />
         </div>
+        {/* Своя прокрутка вбок: на телефоне панель её не даёт — иначе полоса поиска не держалась бы */}
+        <div className="table-scroll">
         <table>
           <thead>
             <tr><th>{t('Дата')}</th><th>{t('Товары')}</th><th>{t('Кассир')}</th><th className="num">{t('Возвращено')}</th></tr>
@@ -442,6 +445,7 @@ export default function Returns() {
             )}
           </tbody>
         </table>
+        </div>
         <Pagination {...pg} />
       </div>
 

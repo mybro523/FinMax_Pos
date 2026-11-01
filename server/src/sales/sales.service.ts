@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
+import { grossOf, ownPiece } from '../common/piece'
 import { D } from '../common/money'
 import { consumeUnits, lockProducts } from '../common/stock'
 import { TX } from '../common/tx'
@@ -84,16 +85,17 @@ export class SalesService {
         unitsById.set(l.productId, (unitsById.get(l.productId) || 0) + l.qty * upp + l.pieces)
       }
 
-      // Позиции чека + суммы. Цена за штуку = цена упаковки / штук в упаковке.
+      // Позиции чека + суммы. Упаковки — по цене упаковки, отдельные штуки — по своей цене
+      // штуки, если её задали, иначе цена упаковки / штук в упаковке (common/piece.ts)
       let total = D(0)
       let cost = D(0)
       const saleItems = lines.map((l) => {
         const p = byId.get(l.productId)!
         const upp = Math.max(1, p.unitsPerPack || 1)
         const units = l.qty * upp + l.pieces
-        const unitPrice = D(p.price).dividedBy(upp)
+        const own = ownPiece(p)
         const unitCost = D(p.cost).dividedBy(upp)
-        const gross = unitPrice.times(units)
+        const gross = grossOf({ qty: l.qty, pieces: l.pieces, price: p.price, piecePrice: own, unitsPerPack: upp })
         const discount = Prisma.Decimal.min(Prisma.Decimal.max(0, D(l.discount)), gross)
         total = total.plus(gross.minus(discount))
         cost = cost.plus(unitCost.times(units))
@@ -104,6 +106,8 @@ export class SalesService {
           pieces: l.pieces,
           unitsPerPack: upp,
           price: p.price,
+          // Цена штуки, по которой продали, — снимком: возврат и отчёты считают по ней
+          piecePrice: own,
           cost: p.cost,
           discount,
         }

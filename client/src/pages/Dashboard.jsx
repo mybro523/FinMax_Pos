@@ -14,7 +14,7 @@ import { Modal, PayBadge, PAYMENTS } from '../components/ui'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
 import { useCollection, money, stockText } from '../db/store'
-import { isDivisible, stockUnits, stockValue, stockCost as stockCostOf, unitPrice, lineUnits } from '../lib/units'
+import { isDivisible, stockUnits, stockValue, stockCost as stockCostOf, pricePerPiece, lineUnits, lineGross } from '../lib/units'
 import { dayKey, lastNDayKeys, fmtShort, fmtDayMonth, startOfDay } from '../lib/time'
 import { expiringProducts } from '../lib/expiry'
 import { periodFinance } from '../lib/finance'
@@ -151,7 +151,7 @@ export default function Dashboard() {
       top[i.name] = top[i.name] || { name: i.name, qty: 0, sum: 0 }
       top[i.name].qty += units
       // Выручка — чистая (за вычетом скидки), как s.total
-      top[i.name].sum += Math.max(0, unitPrice(i) * units - (i.discount || 0))
+      top[i.name].sum += Math.max(0, lineGross(i) - (i.discount || 0))
     }))
     returns.forEach((r) => (r.items || []).forEach((i) => {
       const t = top[i.name]
@@ -306,7 +306,7 @@ export default function Dashboard() {
         if (i.name === name) {
           const un = lineUnits(i)
           units += un
-          revenue += Math.max(0, unitPrice(i) * un - (i.discount || 0)) // чистая выручка
+          revenue += Math.max(0, lineGross(i) - (i.discount || 0)) // чистая выручка
         }
       }))
       const prod = products.find((p) => p.name === name)
@@ -319,7 +319,7 @@ export default function Dashboard() {
           </div>
           {prod && (
             <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8 }}>
-              {t('Цена')} {money(prod.price)}{isDivisible(prod) ? ` · ${money(unitPrice(prod))}/${t('шт')}` : ''} · {t('закуп.')} {money(prod.cost)}
+              {t('Цена')} {money(prod.price)}{isDivisible(prod) ? ` · ${money(pricePerPiece(prod))}/${t('шт')}` : ''} · {t('закуп.')} {money(prod.cost)}
             </p>
           )}
         </Modal>

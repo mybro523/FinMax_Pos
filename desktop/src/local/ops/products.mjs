@@ -17,6 +17,7 @@ import { enqueue } from '../docs.mjs'
 import { productByBarcode, productView1 } from '../catalog.mjs'
 import { recordEdit } from '../edits.mjs'
 import { fromCents, toCents } from '../money.mjs'
+import { pieceCentsIn } from '../piece.mjs'
 import { move, productById, unitsOf } from '../stock.mjs'
 import { isoOrNull } from '../time.mjs'
 import { uppOf } from '../units.mjs'
@@ -33,6 +34,8 @@ const FIELDS = {
   category: { col: 'category' },
   type: { col: 'type' },
   price: { col: 'priceC', toDb: (v) => toCents(v), fromRow: (r) => fromCents(r.priceC) },
+  // Своя цена штуки (1.5.11): пусто — своей нет (NULL)
+  piecePrice: { col: 'pieceC', toDb: (v) => pieceCentsIn(v), fromRow: (r) => (r.pieceC === null || r.pieceC === undefined ? null : fromCents(r.pieceC)) },
   // Закупочная цена — основа для пересчёта средней цены: что «знает сервер» (sCostC)
   cost: { col: 'sCostC', also: 'costC', toDb: (v) => toCents(v), fromRow: (r) => fromCents(r.costC) },
   minStock: { col: 'minStock' },
@@ -68,6 +71,9 @@ function readFields(raw) {
   take('type', c.str(dto.type, 'type', opt))
   take('cost', c.num(dto.cost, 'cost', { ...opt, max: MAX_MONEY }))
   take('price', c.num(dto.price, 'price', { ...opt, max: MAX_MONEY }))
+  // Своя цена штуки: пусто или ноль — своей нет; не прислана — не трогали
+  if (dto.piecePrice === null || dto.piecePrice === '' || dto.piecePrice === 0) out.piecePrice = null
+  else take('piecePrice', c.num(dto.piecePrice, 'piecePrice', { ...opt, max: MAX_MONEY }))
   take('minStock', c.int(dto.minStock, 'minStock', opt))
   take('unit', c.str(dto.unit, 'unit', opt))
   take('unitsPerPack', c.int(dto.unitsPerPack, 'unitsPerPack', { ...opt, min: 1, max: MAX_UPP }))
@@ -128,6 +134,7 @@ export function createProduct(ctx, raw) {
       category: f.category ?? 'Прочее',
       type: f.type ?? '',
       priceC: toCents(f.price ?? 0),
+      pieceC: pieceCentsIn(f.piecePrice),
       minStock: f.minStock ?? 5,
       unit: f.unit ?? 'уп',
       unitsPerPack: upp,
@@ -157,6 +164,7 @@ export function createProduct(ctx, raw) {
           type: row.type,
           cost: f.cost ?? 0,
           price: f.price ?? 0,
+          piecePrice: row.pieceC === null ? null : fromCents(row.pieceC),
           minStock: row.minStock,
           unit: row.unit,
           unitsPerPack: upp,

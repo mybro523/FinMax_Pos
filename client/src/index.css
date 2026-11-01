@@ -129,6 +129,13 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body { max-width: 100%; overflow-x: hidden; }
+/* Прокрутку страницы вбок обрезаем через clip, а не hidden: с hidden body сам считается
+   прокручиваемым, и position: sticky внутри него не липнет ни к чему — закреплённые
+   поиск, шапка меню и колонки слева уезжали вместе со страницей (1.5.11). Браузер без clip
+   останется с hidden: всё работает, как раньше, только не липнет */
+@supports (overflow-x: clip) {
+  html, body { overflow-x: clip; }
+}
 
 body {
   font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
@@ -530,6 +537,10 @@ input::placeholder { color: var(--muted-2); }
 .kassa-table .kt-sum { white-space: nowrap; }
 .kassa-table .kt-upp-m { display: none; }
 .kassa-table .disc-input { width: 64px; }
+/* Вес в колонке «Штук»: поле и единица рядом — «[ 2 ] кг» (1.5.11) */
+.kassa-table .ves-cell { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.kassa-table .ves-cell .disc-input { width: 72px; }
+.kassa-table .ves-unit { font-size: 13px; font-weight: 600; color: var(--muted); }
 /* Выбранная строка: с ней работают «+», «−», Delete, F2 и F4 */
 .kassa-table tbody tr.sel { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 /* Подсказка прижата к низу панели: чек растёт сверху, она остаётся на месте */
@@ -636,9 +647,9 @@ input::placeholder { color: var(--muted-2); }
    сколько бы товара ни было в чеке. Листается сам чек и сам каталог — каждый
    внутри себя, — а страница стоит на месте.
 
-   «Липкие» панели тут не годятся: у body задано overflow-x, из-за чего он сам
-   считается прокручиваемым, и position: sticky внутри него не липнет ни к чему.
-   Поэтому высоту раздаёт раскладка: окно → шапка → касса на весь остаток.
+   «Липкие» панели тут не годятся: итог и оплата должны стоять на месте всегда, а не
+   прилипать, когда до них докрутили. Поэтому высоту раздаёт раскладка: окно → шапка →
+   касса на весь остаток.
    На низком экране (меньше 600) всё это выключено и касса листается страницей. */
 @media (min-width: 1280px) and (min-height: 600px) {
   .main-fill { height: 100vh; min-height: 0; }
@@ -729,6 +740,8 @@ input::placeholder { color: var(--muted-2); }
   .kassa-table .kt-sum { order: 2; flex: 0 0 auto; }
   .kassa-table .kt-qty { order: 4; }
   .kassa-table .kt-pcs { order: 5; }
+  /* У весового упаковок нет — пустую клетку на карточке не показываем */
+  .kassa-table .kt-qty.kt-empty { display: none; }
   .kassa-table .kt-disc { order: 6; flex: 1 1 auto; }
   /* Корзинка без подписи — прижата к низу, вровень с полями, а не с их подписями */
   .kassa-table .kt-del { order: 7; align-self: flex-end; }
@@ -741,6 +754,7 @@ input::placeholder { color: var(--muted-2); }
   .kassa-table .qty-ctrl { gap: 6px; }
   .kassa-table .qty-ctrl button { width: 32px; height: 32px; }
   .kassa-table .disc-input { width: 64px; padding: 6px; font-size: 16px; }
+  .kassa-table .ves-cell .disc-input { width: 80px; }
 }
 
 /* Подсказки по клавишам — только там, где есть клавиатура */
@@ -778,12 +792,38 @@ input::placeholder { color: var(--muted-2); }
 
 /* ───────── Прочее ───────── */
 .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+/* ── Поиск и фильтры, закреплённые вверху (components/StickyBar.jsx, 1.5.11) ──
+   Полоса во всю ширину содержимого: отступ страницы (или панели — --stick-px) она
+   закрывает своим фоном, иначе строки списка просвечивали бы по бокам. Сверху и снизу —
+   свой отступ, а отрицательное поле сверху его возвращает: пока полоса не прилипла,
+   страница выглядит как раньше */
+.stick-mark { height: 1px; margin-bottom: -1px; }
+.stick-top {
+  --stick-px: 28px;
+  position: sticky; top: 0; z-index: 20;
+  background: var(--bg);
+  margin: -10px calc(-1 * var(--stick-px)) 6px;
+  padding: 10px var(--stick-px);
+}
+/* В панели — фон панели и её края; отступы внутри задаёт сама полоса (pad) */
+.stick-top.in-panel { margin: 0; padding: 0; background: var(--card); }
+.stick-top .toolbar { margin-bottom: 10px; }
+.stick-top .toolbar:last-child, .stick-top .chips:last-child { margin-bottom: 0; }
+.stick-top select { max-width: 260px; }
+/* Категорий бывает много (в тестовом магазине их сотня — 13 рядов кнопок): в полосе — не
+   больше двух-трёх рядов, остальные листаются внутри. Иначе полоса закрыла бы весь список */
+.stick-top .chips { max-height: max(84px, 16vh); overflow-y: auto; overscroll-behavior: contain; }
+/* Прилипла — тень снизу: видно, что список едет под ней */
+.stick-top.is-stuck { box-shadow: 0 10px 14px -12px rgba(0, 0, 0, 0.35); border-bottom: 1px solid var(--border); }
+@media (max-width: 600px) {
+  .stick-top { --stick-px: 14px; }
+}
 .toolbar .search { flex: 1; max-width: 360px; position: relative; }
 
 /* Панель поиска и периода в журналах: отделена от таблицы, но не отрывается от неё */
-.journal-filter { border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 4px; }
-.journal-filter .toolbar { margin-bottom: 10px; }
-.journal-filter select { max-width: 220px; }
+/* Даты журнала под закреплённой полосой поиска и периода (JournalFilter) */
+.journal-filter { border-bottom: 1px solid var(--border); padding-bottom: 12px; margin: 0 16px 4px; }
+.journal-filter-bar select { max-width: 220px; }
 .empty { text-align: center; padding: 42px 20px; color: var(--muted-2); font-size: 14px; }
 .tag-cat { font-size: 12px; color: var(--muted-2); }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -866,6 +906,9 @@ input::placeholder { color: var(--muted-2); }
   .metric .value { font-size: 20px; }
   .metric .ic-box { width: 32px; height: 32px; font-size: 16px; }
   .panel { padding: 14px; overflow-x: auto; }
+  /* Панель с закреплённой полосой поиска вбок не листается — иначе полоса не держалась бы;
+     таблицы в таких панелях листаются сами (table-cards-wrap, table-scroll) */
+  .panel:has(> .stick-top) { overflow-x: visible; }
   .panel h2 { font-size: 14px; }
   table { font-size: 13px; }
   th { font-size: 10.5px; padding: 8px 8px; }
@@ -1629,9 +1672,10 @@ input.pn-count { width: 84px; text-align: right; }
 .pp-tl { white-space: pre; line-height: 1.4; min-height: 1.4em; }
 .pp-tl.c { text-align: center; }
 .pp-tl.b { font-weight: 700; }
-.pp-tl.t { height: 2.8em; display: flex; align-items: center; }
-.pp-tl.t.c { justify-content: center; }
-.pp-tl.t span { display: inline-block; transform: scaleY(2); }
+/* Крупная строка (название магазина, итог): буквы вдвое выше и вдвое шире — как на ленте
+   (GS ! 0x11). Знаков в ней вдвое меньше, поэтому шрифт вдвое крупнее, а ширина та же.
+   Раньше здесь было scaleY(2) — вытянутые вверх буквы, как печатал принтер (1.5.11) */
+.pp-tl.big { font-size: 2em; line-height: 1.25; min-height: 1.25em; }
 .pp-tl.inv span { background: #000; color: #fff; }
 @media (max-width: 860px) {
   .pp-body { flex-direction: column; }
@@ -2012,7 +2056,7 @@ input.pn-count { width: 84px; text-align: right; }
    Одна на весь проект: фирменный тёмно-синий во всю ширину, всегда на виду — и на
    телефоне тоже. Шапки в разделах нет, её кнопки «Меню» и «?» стоят здесь, справа.
    Высокая, с крупными подписями: у кассы на неё нажимают пальцем (1.5.5).
-   Прикреплена к низу окна (sticky здесь не держится — у страницы задан overflow-x),
+   Прикреплена к низу окна (fixed: она стоит внизу всегда, даже на короткой странице),
    а место под неё оставляет класс has-foot на <html> */
 :root { --app-foot-h: 64px; }
 .app-foot {
@@ -2376,6 +2420,14 @@ html.has-foot .prh-side { max-height: calc(100vh - 56px - var(--app-foot-h)); }
 }
 
 .prh-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 14px 16px 10px; }
+/* Цена за 1 шт в форме прихода: по расчёту — и рядом поле своей цены (1.5.11) */
+.prh-piece { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.prh-piece .prh-piece-own { width: auto; }
+.prh-piece .prh-piece-own input { width: 84px; }
+/* Пустая половина строки в карточке товара: на телефоне строка — столбиком, её не видно */
+.modal .pf-spacer:empty { min-height: 0; }
+@media (max-width: 600px) { .pf-spacer { display: none; } }
+.prh-val-off { color: var(--muted); text-decoration: line-through; font-weight: 500; }
 .prh-panel-head h2 { margin: 0; }
 .prh-panel-head .prh-sheet-search { flex: 0 1 340px; min-width: 200px; }
 .prh-scroll { max-height: 46vh; overflow: auto; }

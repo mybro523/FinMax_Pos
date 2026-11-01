@@ -7,8 +7,8 @@
 //
 // Поэтому формулы живут здесь, и правится каждая в одном месте.
 //
-// Позиция чека (i): { qty, pieces, unitsPerPack, price, cost, discount }
-// Карточка товара (p): { stock, looseUnits, unitsPerPack, price, cost }
+// Позиция чека (i): { qty, pieces, unitsPerPack, price, piecePrice, cost, discount }
+// Карточка товара (p): { stock, looseUnits, unitsPerPack, price, piecePrice, cost }
 
 const num = (v) => Number(v) || 0
 
@@ -18,15 +18,36 @@ export const uppOf = (x) => Math.max(1, num(x?.unitsPerPack))
 // Делится ли товар на штуки
 export const isDivisible = (x) => uppOf(x) > 1
 
-// Цена и себестоимость ОДНОЙ ШТУКИ (в карточке они хранятся за упаковку)
+// Цена и себестоимость ОДНОЙ ШТУКИ из цены упаковки (в карточке они хранятся за упаковку)
 export const unitPrice = (x) => num(x?.price) / uppOf(x)
 export const unitCost = (x) => num(x?.cost) / uppOf(x)
+
+// ── Своя цена за 1 шт (версия 1.5.11) ──
+// Владелец задаёт цену одной штуки сам — в приходе или в карточке товара. Целые упаковки
+// продаются по цене упаковки, отдельные штуки — по своей цене: «1 уп + 5 шт» при упаковке
+// 150 и своей цене 2 — это 150 + 10. Своей цены нет — штука стоит цена упаковки / штук.
+// Своя цена бывает только у товара, который делится на штуки и продаётся целыми: у
+// дробного (кг, л, м, м²) «штука» — это грамм. Та же формула у сервера
+// (server/src/common/piece.ts) и у программы без связи (desktop/src/local/piece.mjs).
+// У позиции чека piecePrice — снимок: по какой цене штуки её продали
+export const ownPiecePrice = (x) => {
+  if (uppOf(x) <= 1 || isVesovoy(x)) return null
+  if (x?.piecePrice === null || x?.piecePrice === undefined || x?.piecePrice === '') return null
+  const v = Number(x.piecePrice)
+  return Number.isFinite(v) && v > 0 ? v : null
+}
+// Цена одной штуки: своя или цена упаковки / штук в упаковке
+export const pricePerPiece = (x) => ownPiecePrice(x) ?? unitPrice(x)
 
 // ── Позиция чека ──
 // Всего штук: целые упаковки × штук в упаковке + отдельные штуки
 export const lineUnits = (i) => num(i?.qty) * uppOf(i) + num(i?.pieces)
-// Сумма позиции до скидки
-export const lineGross = (i) => unitPrice(i) * lineUnits(i)
+// Сумма позиции до скидки: упаковки — по цене упаковки, отдельные штуки — по цене штуки.
+// Своей цены штуки нет — то же, что (цена / штук) × все штуки, как было всегда
+export const lineGross = (i) => {
+  const own = ownPiecePrice(i)
+  return own === null ? unitPrice(i) * lineUnits(i) : num(i?.qty) * num(i?.price) + num(i?.pieces) * own
+}
 // Скидка не может быть отрицательной и больше суммы позиции
 export const lineDiscount = (i) => Math.min(Math.max(0, num(i?.discount)), lineGross(i))
 // Сумма позиции к оплате
@@ -34,11 +55,35 @@ export const lineNet = (i) => lineGross(i) - lineDiscount(i)
 // Себестоимость позиции
 export const lineCost = (i) => unitCost(i) * lineUnits(i)
 
+// ── Возврат: сколько денег за units штук позиции чека ──
+// Своей цены штуки нет — как всегда: заплачено за позицию / продано штук × возвращено.
+// Есть (1.5.11) — возвращаемые штуки считаются сначала отдельными (по своей цене штуки),
+// сверх них — штуками из целых упаковок (цена упаковки / штук), а скидка позиции делится
+// пропорционально. Иначе за 5 штук, купленных по 2, вернули бы 8,42 вместо 10.
+// already — сколько штук этой позиции уже вернули раньше. Та же формула у сервера и программы
+export function vozvratSumma(i, units, already = 0) {
+  const sold = lineUnits(i)
+  const u = num(units)
+  if (!(sold > 0) || !(u > 0)) return 0
+  const gross = lineGross(i)
+  const paid = gross - num(i?.discount)
+  const own = ownPiecePrice(i)
+  if (own === null) return (paid / sold) * u
+  const piecesLeft = Math.max(0, num(i?.pieces) - Math.max(0, num(already)))
+  const asPieces = Math.min(u, piecesLeft)
+  const grossRet = asPieces * own + (u - asPieces) * unitPrice(i)
+  return gross > 0 ? (grossRet * paid) / gross : 0
+}
+
 // ── Остаток товара ──
 // Всего штук на складе: целые упаковки + остаток во вскрытой
 export const stockUnits = (p) => num(p?.stock) * uppOf(p) + num(p?.looseUnits)
-// Стоимость остатка по цене продажи и по закупочной
-export const stockValue = (p) => unitPrice(p) * stockUnits(p)
+// Стоимость остатка по цене продажи и по закупочной. Целые упаковки — по цене упаковки,
+// вскрытая — по цене штуки (своей, если задана)
+export const stockValue = (p) => {
+  const own = ownPiecePrice(p)
+  return own === null ? unitPrice(p) * stockUnits(p) : num(p?.stock) * num(p?.price) + num(p?.looseUnits) * own
+}
 export const stockCost = (p) => unitCost(p) * stockUnits(p)
 
 // ── Просрочка ──

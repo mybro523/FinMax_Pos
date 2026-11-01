@@ -10,6 +10,7 @@ import { bad, inTx, newId, notFound } from '../db.mjs'
 import { docByClientId, enqueue, myOpenShift, putDoc } from '../docs.mjs'
 import { D, dmax, dmin, fromCents, fromCentsD, toCents } from '../money.mjs'
 import { move, productById } from '../stock.mjs'
+import { grossOf, ownPieceC } from '../piece.mjs'
 import { uppOf, wholeNonNeg } from '../units.mjs'
 
 // Продажа без открытой смены не проводится — текст слово в слово как у сервера
@@ -76,7 +77,8 @@ export function checkout(ctx, raw) {
     const saleId = newId()
     const opId = newId()
 
-    // Позиции чека и суммы. Цена за штуку = цена упаковки / штук в упаковке.
+    // Позиции чека и суммы. Упаковки — по цене упаковки, отдельные штуки — по своей цене
+    // штуки, если её задали, иначе цена упаковки / штук в упаковке (local/piece.mjs).
     // Суммы копятся точными и округляются один раз, при записи, — как на сервере
     let total = D(0)
     let cost = D(0)
@@ -84,7 +86,8 @@ export function checkout(ctx, raw) {
       const p = byId.get(l.productId)
       const upp = uppOf(p)
       const units = l.qty * upp + l.pieces
-      const gross = fromCentsD(p.priceC).dividedBy(upp).times(units)
+      const ownC = ownPieceC(p)
+      const gross = grossOf({ qty: l.qty, pieces: l.pieces, price: fromCents(p.priceC), piecePrice: ownC === null ? null : fromCents(ownC), unitsPerPack: upp, unit: p.unit })
       const discount = dmin(dmax(0, D(l.discount)), gross)
       total = total.plus(gross.minus(discount))
       cost = cost.plus(fromCentsD(p.costC).dividedBy(upp).times(units))
@@ -98,6 +101,8 @@ export function checkout(ctx, raw) {
         unitsPerPack: upp,
         unit: p.unit || '',
         price: fromCents(p.priceC),
+        // Цена штуки, по которой продали, — снимком (пусто — своей не было)
+        piecePrice: ownC === null ? null : fromCents(ownC),
         cost: fromCents(p.costC),
         discount: fromCents(toCents(discount)),
       }

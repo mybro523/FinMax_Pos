@@ -13,7 +13,7 @@ import Lightbox from '../components/Lightbox'
 import { useCollection, useFirstLoading, money, db, stockText, realId } from '../db/store'
 import { useAuth, useCan } from '../db/auth'
 import { isVesovoy, kgText, KG, gramsOfKg, edinica, isKg,
-  uppOf, isDivisible as isDiv, lineUnits, lineGross, lineNet,
+  uppOf, isDivisible as isDiv, lineUnits, lineGross, lineNet, pricePerPiece,
   sellableUnits, expiredUnits, hasExpired, stockUnits,
   fitLine,
 } from '../lib/units'
@@ -453,6 +453,8 @@ export default function Pos() {
           ...c,
           {
             productId: p.id, name: p.name, price: p.price, cost: p.cost,
+            // Своя цена штуки (1.5.11): отдельные штуки — по ней, упаковки — по цене упаковки
+            piecePrice: p.piecePrice ?? null,
             unitsPerPack: upp, unit: p.unit, stock: p.stock, looseUnits: p.looseUnits,
             qty: addPack ? 1 : 0, pieces: addPack ? 0 : 1, discount: 0,
           },
@@ -773,7 +775,7 @@ export default function Pos() {
       c.map((i) => {
         if (i.productId !== productId) return i
         // Переклэмпиваем скидку под новую сумму позиции
-        const gross = (i.price / upp) * (qty * upp + pieces)
+        const gross = lineGross({ ...i, qty, pieces })
         return { ...i, qty, pieces, discount: Math.min(i.discount || 0, gross) }
       }),
     )
@@ -790,6 +792,18 @@ export default function Pos() {
   // только пока поле в фокусе: убрали курсор — показывается точный вес строки
   const [vesDraft, setVesDraft] = useState(null) // { id, val }
   const vesValue = (i) => (vesDraft?.id === i.productId ? vesDraft.val : String(lineUnits(i) / KG || ''))
+  // Нажал на поле веса — набранное выделяется, и новое число ЗАМЕНЯЕТ старое. Раньше
+  // курсор вставал в конец: в строке «1» (кг) кассир набирал 2 и получал «12» — и отказ
+  // «максимум на складе» (владелец 31.10: «хочу просто купить 2 кг, а тут невозможно»).
+  // Мышь ставит курсор уже после фокуса, поэтому первое нажатие перехватываем: фокус и
+  // выделение — сами. Второе нажатие в уже открытом поле — обычное, чтобы поправить цифру
+  const vybratVse = (e) => {
+    const el = e.currentTarget
+    if (document.activeElement === el) return
+    e.preventDefault()
+    el.focus()
+    el.select?.()
+  }
   const changeVes = (id, val) => {
     setVesDraft({ id, val })
     applyLine(id, 0, gramsOfKg(val))
@@ -917,7 +931,9 @@ export default function Pos() {
               ? `«${n.name}» ${t('закончился — убран из чека')}`
               : n.kind === 'stock'
                 ? `«${n.name}»: ${t('на складе осталось')} ${n.avail} ${t('шт')} — ${t('количество уменьшено')}`
-                : `«${n.name}»: ${t('цена изменилась')} ${money(n.was)} → ${money(n.now)}`,
+                : n.kind === 'piece'
+                  ? `«${n.name}»: ${t('цена за 1 шт изменилась')} ${money(n.was)} → ${money(n.now)}`
+                  : `«${n.name}»: ${t('цена изменилась')} ${money(n.was)} → ${money(n.now)}`,
         )
         .join(' · '),
     [t],
@@ -1076,7 +1092,7 @@ export default function Pos() {
       const { sale, synced } = checkout({
         items: items.map((i) => ({
           productId: i.productId, name: i.name, qty: i.qty, pieces: i.pieces || 0,
-          price: i.price, cost: i.cost, unitsPerPack: uppOf(i), unit: i.unit || '', discount: i.discount,
+          price: i.price, piecePrice: i.piecePrice ?? null, cost: i.cost, unitsPerPack: uppOf(i), unit: i.unit || '', discount: i.discount,
         })),
         payment,
         payVia: via,
@@ -1506,26 +1522,18 @@ export default function Pos() {
                           <b>{i.name}</b>
                           <div className="tag-cat">
                             {money(i.price)}
-                            {isVesovoy(i) ? ` / ${t(edinica(i))}` : isDiv(i) && ` · ${money(i.price / uppOf(i))}/${t('шт')}`}
+                            {isVesovoy(i) ? ` / ${t(edinica(i))}` : isDiv(i) && ` · ${money(pricePerPiece(i))}/${t('шт')}`}
                             {/* На телефоне колонки «В уп.» нет — число переезжает сюда */}
                             {!isVesovoy(i) && isDiv(i) && <span className="kt-upp-m"> · {t('в уп.')} {uppOf(i)}</span>}
                           </div>
                         </td>
                         <td className="num kt-upp">{isVesovoy(i) ? <span className="tag-cat">{t(edinica(i))}</span> : isDiv(i) ? uppOf(i) : <span className="tag-cat">—</span>}</td>
                         {/* data-label — подпись поля на телефоне: заголовка таблицы там нет */}
-                        <td className="kt-qty" data-label={isVesovoy(i) ? (isKg(i) ? t('Вес, кг') : `${t('Кол-во')}, ${t(edinica(i))}`) : t('Упаковок')}>
+                        {/* Весовой товар упаковками не продаётся: вес вводится в колонке «Штук»,
+                            как штуки (1.5.11). На карточке телефона пустая клетка не видна */}
+                        <td className={'kt-qty' + (isVesovoy(i) ? ' kt-empty' : '')} data-label={isVesovoy(i) ? undefined : t('Упаковок')}>
                           {isVesovoy(i) ? (
-                            <NumberInput
-                              className="disc-input inp-ves"
-                              value={vesValue(i)}
-                              onChange={(e) => changeVes(i.productId, e.target.value)}
-                              onKeyDown={(e) => onCellKey(e, i.productId)}
-                              onFocus={() => { snapLine(i.productId); setVesDraft({ id: i.productId, val: String(lineUnits(i) / KG || '') }) }}
-                              onBlur={() => setVesDraft(null)}
-                              placeholder="0.000"
-                              title={isKg(i) ? t('Вес в килограммах, до грамма') : `${t('Количество')}, ${t(edinica(i))}`}
-                              aria-label={isKg(i) ? t('Вес, кг') : `${t('Кол-во')}, ${t(edinica(i))}`}
-                            />
+                            <span className="tag-cat">—</span>
                           ) : (
                             <div className="qty-ctrl" data-tour="pos.qty">
                               <button onClick={() => changeQty(i.productId, -1)} aria-label={t('Упаковкой меньше')}><LuMinus size={14} /></button>
@@ -1534,9 +1542,27 @@ export default function Pos() {
                             </div>
                           )}
                         </td>
-                        <td className="kt-pcs" data-label={t('Штук')} data-tour="pos.pieces">
+                        <td className="kt-pcs" data-label={isVesovoy(i) ? (isKg(i) ? t('Вес, кг') : `${t('Кол-во')}, ${t(edinica(i))}`) : t('Штук')} data-tour="pos.pieces">
                           {isVesovoy(i) ? (
-                            <span className="tag-cat">—</span>
+                            <span className="ves-cell">
+                              <NumberInput
+                                className="disc-input inp-ves"
+                                value={vesValue(i)}
+                                onChange={(e) => changeVes(i.productId, e.target.value)}
+                                onKeyDown={(e) => onCellKey(e, i.productId)}
+                                onMouseDown={vybratVse}
+                                onFocus={(e) => {
+                                  snapLine(i.productId)
+                                  setVesDraft({ id: i.productId, val: String(lineUnits(i) / KG || '') })
+                                  e.target.select?.()
+                                }}
+                                onBlur={() => setVesDraft(null)}
+                                placeholder="0"
+                                title={isKg(i) ? t('Вес в килограммах, до грамма') : `${t('Количество')}, ${t(edinica(i))}`}
+                                aria-label={isKg(i) ? t('Вес, кг') : `${t('Кол-во')}, ${t(edinica(i))}`}
+                              />
+                              <span className="ves-unit">{t(edinica(i))}</span>
+                            </span>
                           ) : isDiv(i) ? (
                             <NumberInput
                               className="disc-input inp-pieces"
@@ -1594,7 +1620,7 @@ export default function Pos() {
               <span><kbd className="kbd">Del</kbd> {t('убрать')}</span>
               <span><kbd className="kbd">F2</kbd> {t('скидка')}</span>
               <span><kbd className="kbd">F3</kbd> {t('скидка на чек')}</span>
-              <span><kbd className="kbd">F4</kbd> {t('штуки')}</span>
+              <span><kbd className="kbd">F4</kbd> {t('штуки')}, {t('кг')}</span>
             </div>
           </div>
 

@@ -13,7 +13,7 @@
 // Товар открытые чеки НЕ бронируют: пока чек лежит, другая касса может продать
 // последнюю пачку, а владелец — сменить цену. Поэтому чек перед показом и перед
 // оплатой сверяется с базой (osvezhit) и говорит, что изменилось.
-import { uppOf, lineUnits, lineGross, sellableUnits, fitLine } from './units.js'
+import { uppOf, lineUnits, lineGross, sellableUnits, fitLine, pricePerPiece } from './units.js'
 
 // Больше пяти одновременно отложенных чеков у прилавка не бывает, а без предела
 // вкладки молча копились бы неделями
@@ -122,8 +122,10 @@ export function pisat(code, state) {
 //   out   — годного товара не осталось вовсе
 //   stock — осталось меньше, чем набрано
 //   price — изменилась цена
-const POLYA = ['productId', 'name', 'price', 'cost', 'unitsPerPack', 'unit', 'stock', 'looseUnits', 'qty', 'pieces', 'discount']
-const otlichaetsya = (a, b) => POLYA.some((k) => a[k] !== b[k])
+//   piece — цена упаковки та же, а цена штуки (своя, 1.5.11) — другая; в строке есть штуки
+const POLYA = ['productId', 'name', 'price', 'piecePrice', 'cost', 'unitsPerPack', 'unit', 'stock', 'looseUnits', 'qty', 'pieces', 'discount']
+// «Нет поля» и «пусто» — одно и то же: у строки, отложенной до 1.5.11, цены штуки нет вовсе
+const otlichaetsya = (a, b) => POLYA.some((k) => (a[k] ?? null) !== (b[k] ?? null))
 
 export function osvezhit(cart, products, mapId = (id) => id) {
   const notes = []
@@ -174,6 +176,7 @@ export function osvezhit(cart, products, mapId = (id) => id) {
       productId: p.id,
       name: p.name,
       price: p.price,
+      piecePrice: p.piecePrice ?? null,
       cost: p.cost,
       unitsPerPack: upp,
       unit: p.unit,
@@ -181,6 +184,11 @@ export function osvezhit(cart, products, mapId = (id) => id) {
       looseUnits: p.looseUnits,
       qty: fit.qty,
       pieces: fit.pieces,
+    }
+    if (num(p.price) === num(line.price) && num(fresh.pieces) > 0) {
+      const was = pricePerPiece(line)
+      const now = pricePerPiece(fresh)
+      if (Math.round(was * 100) !== Math.round(now * 100)) notes.push({ kind: 'piece', name: p.name, was, now })
     }
     // Скидка не больше суммы позиции — сумма могла уменьшиться
     fresh.discount = Math.min(Math.max(0, num(line.discount)), lineGross(fresh))

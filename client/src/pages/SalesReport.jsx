@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { LuWallet, LuTrendingUp, LuBoxes, LuReceipt, LuPrinter } from 'react-icons/lu'
 import Layout from '../components/Layout'
+import StickyBar from '../components/StickyBar'
 import { Modal, PAYMENTS, useToast } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
@@ -211,7 +212,7 @@ export default function SalesReport() {
       </div>
 
       <div className="panel" data-tour="sr.table" style={{ padding: 0 }}>
-        <div style={{ padding: '16px 16px 0' }}>
+        <StickyBar panel pad="16px 16px 14px">
           <div className="toolbar">
             <input className="search" data-tour="sr.search" placeholder={tab === 'cheki' ? t('Номер чека, товар или клиент…') : t('Поиск по товару или штрихкоду…')} value={q} onChange={(e) => setQ(e.target.value)} />
             {tab === 'products' && (
@@ -232,7 +233,7 @@ export default function SalesReport() {
             )}
             {loading && <span className="tag-cat">{t('загружаем…')}</span>}
           </div>
-        </div>
+        </StickyBar>
 
         <div className="table-cards-wrap">
           {tab === 'cheki' ? (

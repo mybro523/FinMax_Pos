@@ -16,6 +16,7 @@ import { getMeta, inTx, q, setMeta } from './db.mjs'
 import { KINDS, putDoc, WINDOW_DAYS } from './docs.mjs'
 import { docState, replayEdits } from './edits.mjs'
 import { toCents } from './money.mjs'
+import { pieceCentsIn } from './piece.mjs'
 import { rebuildStock } from './stock.mjs'
 import { DAY_MS, expiryLimit, isoOrNull } from './time.mjs'
 import { packsToUnits, uppOf, wholeNonNeg } from './units.mjs'
@@ -87,10 +88,10 @@ function applyProducts(db, products, batches, full, now) {
   const upsertProduct = q(
     db,
     `INSERT INTO products
-       (id, ord, name, barcode, category, type, priceC, minStock, unit, unitsPerPack, dosage, image, analogIds, createdAt, sCostC, costC, sExpiry, expiryDate)
-     VALUES (@id, @ord, @name, @barcode, @category, @type, @priceC, @minStock, @unit, @upp, @dosage, @image, @analogIds, @createdAt, @costC, @costC, @expiry, @expiry)
+       (id, ord, name, barcode, category, type, priceC, pieceC, minStock, unit, unitsPerPack, dosage, image, analogIds, createdAt, sCostC, costC, sExpiry, expiryDate)
+     VALUES (@id, @ord, @name, @barcode, @category, @type, @priceC, @pieceC, @minStock, @unit, @upp, @dosage, @image, @analogIds, @createdAt, @costC, @costC, @expiry, @expiry)
      ON CONFLICT(id) DO UPDATE SET
-       name = excluded.name, barcode = excluded.barcode, category = excluded.category, type = excluded.type, priceC = excluded.priceC,
+       name = excluded.name, barcode = excluded.barcode, category = excluded.category, type = excluded.type, priceC = excluded.priceC, pieceC = excluded.pieceC,
        minStock = excluded.minStock, unit = excluded.unit, unitsPerPack = excluded.unitsPerPack, dosage = excluded.dosage,
        image = excluded.image,
        analogIds = excluded.analogIds, createdAt = excluded.createdAt, sCostC = excluded.sCostC, costC = excluded.costC,
@@ -109,6 +110,8 @@ function applyProducts(db, products, batches, full, now) {
       category: String(p.category ?? 'Прочее'),
       type: String(p.type ?? ''),
       priceC: toCents(p.price),
+      // Своя цена штуки (1.5.11): сервер прежней версии поля не шлёт — своей нет
+      pieceC: pieceCentsIn(p.piecePrice),
       minStock: wholeNonNeg(p.minStock),
       unit: String(p.unit ?? 'уп'),
       upp: uppOf(p),

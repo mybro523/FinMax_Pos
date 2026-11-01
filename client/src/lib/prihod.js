@@ -55,6 +55,9 @@ export function lineFromProduct(p, { disc = '' } = {}) {
     disc: disc === '' || disc === null || disc === undefined ? '' : String(disc),
     price: String(Number(p.price) || ''),
     price0: Number(p.price) || 0,
+    // Своя цена за 1 шт (1.5.11): что в карточке сейчас и что вписали в приходе
+    piece: Number(p.piecePrice) > 0 ? String(Number(p.piecePrice)) : '',
+    piece0: Number(p.piecePrice) > 0 ? Number(p.piecePrice) : null,
     mk: null,
     expiryDate: '',
   }
@@ -77,8 +80,12 @@ export const lineBase = (l) => Math.max(0, num(l.base)) * linePacks(l)
 export const lineTotal = (l) => lineCost(l) * linePacks(l)
 export const lineRetail = (l) => Math.max(0, num(l.price)) * linePacks(l)
 
-// Цена продажи одной штуки делимой упаковки
+// Цена продажи одной штуки делимой упаковки — по расчёту: цена упаковки / штук
 export const piecePrice = (l) => (l.div ? num(l.price) / uppOf(l) : num(l.price))
+// Своя цена штуки, вписанная в строке (1.5.11): больше нуля — она, иначе null
+export const ownPiece = (l) => (l.div && num(l.piece) > 0 ? kop(num(l.piece)) : null)
+// Своя цена штуки в строке не та, что была в карточке до прихода
+export const pieceChanged = (l) => l.div && ownPiece(l) !== (l.piece0 ?? null)
 
 // ── Итоги для панели справа ──
 export function summary(lines) {
@@ -139,6 +146,8 @@ export function toItem(l) {
   const units = lineUnits(l)
   const upp = l.ves ? 1000 : uppOf(l)
   const price = num(l.price) > 0 && num(l.price) !== l.price0 ? kop(num(l.price)) : undefined
+  // Своя цена штуки — тоже только если её поменяли (пусто — «своей нет», null)
+  const piecePrice = pieceChanged(l) ? ownPiece(l) : undefined
   return {
     productId: l.productId,
     name: l.name,
@@ -148,6 +157,7 @@ export function toItem(l) {
     discount: discPct(l.disc),
     expiryDate: l.expiryDate || '',
     ...(price !== undefined ? { price } : {}),
+    ...(piecePrice !== undefined ? { piecePrice } : {}),
   }
 }
 

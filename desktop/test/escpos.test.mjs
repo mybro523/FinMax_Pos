@@ -7,7 +7,7 @@
 // Запуск: npm test (в папке desktop)
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { fullCenter, layoutTicket, encode, escpos, printable, renderTicket, sanitizeTicket, twoColumns, wrap } from '../src/print/escpos.mjs'
+import { bigPair, fullCenter, layoutTicket, encode, escpos, printable, renderTicket, sanitizeTicket, twoColumns, wrap } from '../src/print/escpos.mjs'
 
 // Байты обратно в текст — чтобы сверять раскладку глазами. Команды выкидываются
 function text866(buf) {
@@ -92,7 +92,9 @@ test('команды принтера: сброс, без китайского �
   assert.deepEqual([...escpos({ codepage: 'koi8' }).init().bytes()], [0x1b, 0x40, 0x1c, 0x2e, 0x1b, 0x74, 17])
   assert.deepEqual([...escpos().align('center').bytes()], [0x1b, 0x61, 1])
   assert.deepEqual([...escpos().bold(true).bold(false).bytes()], [0x1b, 0x45, 1, 0x1b, 0x45, 0])
-  assert.deepEqual([...escpos().tall(true).bytes()], [0x1d, 0x21, 0x01])
+  // Крупно — вдвое выше И вдвое шире (GS ! 0x11): одна двойная высота (0x01) вытягивала буквы
+  assert.deepEqual([...escpos().big(true).bytes()], [0x1d, 0x21, 0x11])
+  assert.deepEqual([...escpos().big(false).bytes()], [0x1d, 0x21, 0x00])
   assert.deepEqual([...escpos().cut().bytes()], [0x1d, 0x56, 0x42, 0x00])
   assert.deepEqual([...escpos().drawer().bytes()], [0x1b, 0x70, 0x00, 0x19, 0xfa])
   assert.deepEqual([...escpos().line('A').bytes()], [0x41, 0x0a])
@@ -121,12 +123,16 @@ test('чек на ленте 58 мм: всё на своих местах и н�
   assert.deepEqual([...bytes.subarray(-7)], [0x1b, 0x64, 3, 0x1d, 0x56, 0x42, 0x00])
   const lines = text866(bytes).split('\n')
   assert.ok(lines.every((l) => l.length <= 32), 'строка вылезла за ленту: ' + lines.find((l) => l.length > 32))
-  // Название магазина — во всю ширину ленты: оно печатается белым по чёрному
-  assert.deepEqual(lines.slice(0, 3), [' '.repeat(11) + 'Магазин №1' + ' '.repeat(11), '04.10.2026, 15:30', '-'.repeat(32)])
+  // Название магазина — во всю ширину ленты: оно печатается белым по чёрному крупными
+  // буквами, каждая на два места — 16 знаков на 32 места
+  assert.deepEqual(lines.slice(0, 3), [' '.repeat(3) + 'Магазин №1' + ' '.repeat(3), '04.10.2026, 15:30', '-'.repeat(32)])
   assert.ok(lines.includes('Нурофен 200 мг №10'))
   assert.ok(lines.includes('  2 уп x 150' + ' '.repeat(10) + '300 сомони'), 'количество слева, сумма у правого края')
-  // Итог — тоже полосой во всю ширину, с пробелом по краям
-  assert.ok(lines.includes(' Итого' + ' '.repeat(15) + '345 сомони '))
+  // Итог — тоже полосой во всю ширину, с пробелом по краям. Крупных букв в строке 16:
+  // «Итого 345 сомони» с отступами не влезает — подпись сверху, сумма под ней справа
+  const at = lines.indexOf(' Итого' + ' '.repeat(10))
+  assert.ok(at > 0, 'строка «Итого»')
+  assert.equal(lines[at + 1], ' '.repeat(5) + '345 сомони ')
   assert.ok(lines.includes('Спасибо за покупку!'))
   // Последняя строка чека — название магазина (за ней только подача до ножа)
   assert.equal(lines.filter(Boolean).at(-1), 'Магазин №1')
@@ -136,7 +142,8 @@ test('чек на ленте 58 мм: всё на своих местах и н�
 
 test('лента 80 мм шире — колонки раздвигаются; без отреза и с ящиком — по настройке', () => {
   const wide = text866(renderTicket(TICKET, { width: 48 })).split('\n')
-  assert.ok(wide.includes(' Итого' + ' '.repeat(31) + '345 сомони '))
+  // 24 крупные буквы: итог в одну строку
+  assert.ok(wide.includes(' Итого' + ' '.repeat(7) + '345 сомони '))
   assert.ok(wide.includes('-'.repeat(48)))
 
   const noCut = renderTicket(TICKET, { cut: false })
@@ -149,29 +156,58 @@ test('лента 80 мм шире — колонки раздвигаются; �
 test('итоговая строка печатается крупно и жирно, остальные — обычно', () => {
   const bytes = [...renderTicket({ totals: [{ label: 'Итого', value: '1', big: true }] })]
   const at = (seq) => bytes.findIndex((_, i) => seq.every((b, n) => bytes[i + n] === b))
-  const on = at([0x1b, 0x45, 1, 0x1d, 0x21, 0x01])
+  const on = at([0x1b, 0x45, 1, 0x1d, 0x21, 0x11])
   const off = at([0x1d, 0x21, 0x00, 0x1b, 0x45, 0])
   assert.ok(on > 0 && off > on, 'крупный шрифт должен включаться перед строкой и выключаться после')
+})
+
+test('крупные буквы ровные: вдвое выше и вдвое шире, вытянутых (только двойная высота) нет нигде', () => {
+  for (const width of [32, 42, 48]) {
+    const bytes = renderTicket({ ...TICKET, totals: [...TICKET.totals, { label: 'Текущий долг', value: '1 234 567,89 сомони', big: true }] }, { width })
+    const has = (seq) => bytes.indexOf(Buffer.from(seq)) >= 0
+    assert.ok(has([0x1d, 0x21, 0x11]), `${width}: крупные ровные буквы есть`)
+    assert.ok(!has([0x1d, 0x21, 0x01]), `${width}: вытянутых нет`)
+    // Каждая крупная строка — ровно половина знаков ленты: каждая буква на два места
+    const big = layoutTicket(TICKET, { width }).filter((l) => l.big)
+    assert.ok(big.length >= 2 && big.every((l) => l.text.length === Math.floor(width / 2) && l.invert && l.bold), `${width}: крупные строки во всю ширину`)
+  }
+})
+
+test('итог крупно: в одну строку, если влезает; иначе подпись сверху, сумма под ней справа', () => {
+  // Чек владельца: «Текущий долг 11 сомони» — на 58 мм (14 крупных знаков между отступами)
+  // в две строки, на 80 мм (22) — в одну
+  assert.deepEqual(bigPair('Текущий долг', '11 сомони', 14), ['Текущий долг  ', '     11 сомони'])
+  assert.deepEqual(bigPair('Текущий долг', '11 сомони', 22), ['Текущий долг 11 сомони'])
+  assert.deepEqual(bigPair('ИТОГО', '190 сомони', 22), ['ИТОГО' + ' '.repeat(7) + '190 сомони'])
+  // Длинная подпись — по словам, слова не режутся; длинная сумма — тоже по словам, справа
+  assert.deepEqual(bigPair('Долг на сегодня', '12 345 678,90 сомони', 14), ['Долг на       ', 'сегодня       ', ' 12 345 678,90', '        сомони'])
+  // На ленте: строки полосы белым по чёрному, крупно, по пробелу с краёв
+  const lines = layoutTicket({ totals: [{ label: 'Текущий долг', value: '11 сомони', big: true }] }, { width: 32 }).filter((l) => l.big)
+  assert.deepEqual(lines.map((l) => l.text), [' Текущий долг   ', '      11 сомони '])
+  const wide = layoutTicket({ totals: [{ label: 'Текущий долг', value: '11 сомони', big: true }] }, { width: 48 }).filter((l) => l.big)
+  assert.deepEqual(wide.map((l) => l.text), [' Текущий долг 11 сомони '])
 })
 
 test('фирменный вид на ленте: название магазина и итог — белым по чёрному во всю ширину', () => {
   const lines = layoutTicket({ ...TICKET, docAt: 1 }, { width: 32 })
   const band = lines[0]
-  assert.equal(band.text.length, 32, 'полоса — во всю ширину ленты')
-  assert.deepEqual([band.bold, band.tall, band.invert], [true, true, true])
+  assert.equal(band.text.length, 16, 'полоса — во всю ширину ленты: 16 крупных букв на 32 места')
+  assert.deepEqual([band.bold, band.big, band.invert], [true, true, true])
   assert.equal(band.text.trim(), 'Магазин №1')
   // Строка документа (docAt) — жирная, по центру; остальные строки шапки — обычные
   assert.deepEqual([lines[1].text, lines[1].center, lines[1].bold], ['04.10.2026, 15:30', true, true])
   const total = lines.find((l) => l.text.includes('345 сомони'))
-  assert.deepEqual([total.text.length, total.invert, total.bold, total.tall], [32, true, true, true])
+  assert.deepEqual([total.text.length, total.invert, total.bold, total.big], [16, true, true, true])
   // Обычные строки белым по чёрному не печатаются
   const plain = lines.filter((l) => !l.invert)
-  assert.ok(plain.length > 5 && plain.every((l) => !l.tall))
+  assert.ok(plain.length > 5 && plain.every((l) => !l.big))
   // Ни одна строка не шире ленты
   assert.ok(lines.every((l) => l.text.length <= 32))
   // Длинное название магазина переносится, и каждая его строка — полосой
   const long = layoutTicket({ head: ['Магазин строительных материалов «Душанбе-Сити»'] }, { width: 32 }).filter((l) => l.invert)
-  assert.ok(long.length >= 2 && long.every((l) => l.text.length === 32))
+  assert.ok(long.length >= 2 && long.every((l) => l.text.length === 16))
+  // Слова названия не режутся (каждое короче 14 знаков)
+  assert.deepEqual(long.map((l) => l.text.trim()), ['Магазин', 'строительных', 'материалов', '"Душанбе-Сити"'])
 })
 
 test('байты: полоса белым по чёрному включается перед строкой и выключается после', () => {
@@ -199,7 +235,7 @@ test('чек из мусора не роняет печать: лишнее от
 test('внизу чека — название магазина жирным; эмблемы программы на ленте нет', () => {
   const lines = layoutTicket(TICKET, { width: 32 })
   const sign = lines.at(-1)
-  assert.deepEqual([sign.text, sign.center, sign.bold, !!sign.tall, !!sign.invert], ['Магазин №1', true, true, false, false])
+  assert.deepEqual([sign.text, sign.center, sign.bold, !!sign.big, !!sign.invert], ['Магазин №1', true, true, false, false])
   // Остальные строки подвала — обычные
   for (const t of ['Кассир: Нилуфар', 'Спасибо за покупку!']) assert.ok(!lines.find((l) => l.text === t).bold, t)
   // Длинное название переносится — жирные все его строки

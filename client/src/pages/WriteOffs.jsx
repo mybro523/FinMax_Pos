@@ -406,15 +406,17 @@ export default function WriteOffs() {
           <span className="h2-title"><span className="ic"><LuTriangleAlert size={17} /></span>{t('История списаний')}</span>
           <span className="tag-cat">{t('убыток за период')}: <b style={{ color: 'var(--danger)' }}>{money(periodLoss)}</b></span>
         </h2>
-        <div style={{ padding: '12px 16px 0' }}>
-          <JournalFilter controls={journal.controls} placeholder={t('Товар, штрихкод, примечание или сотрудник…')}>
-            <select value={reasonFilter} onChange={(e) => setReasonFilter(e.target.value)} style={{ maxWidth: 220 }}>
-              <option value="all">{t('Все причины')}</option>
-              {REASONS.map((r) => <option key={r.key} value={r.key}>{t(r.label)}</option>)}
-            </select>
-          </JournalFilter>
+        <JournalFilter controls={journal.controls} placeholder={t('Товар, штрихкод, примечание или сотрудник…')}>
+          <select value={reasonFilter} onChange={(e) => setReasonFilter(e.target.value)} style={{ maxWidth: 220 }}>
+            <option value="all">{t('Все причины')}</option>
+            {REASONS.map((r) => <option key={r.key} value={r.key}>{t(r.label)}</option>)}
+          </select>
+        </JournalFilter>
+        <div style={{ padding: '0 16px' }}>
           <JournalCount rows={journalRows.length} loading={journal.loading} />
         </div>
+        {/* Своя прокрутка вбок: на телефоне панель её не даёт — иначе полоса поиска не держалась бы */}
+        <div className="table-scroll">
         <table>
           <thead>
             <tr><th>{t('Дата')}</th><th>{t('Товары')}</th><th>{t('Причина')}</th><th>{t('Кто')}</th><th className="num">{t('Убыток')}</th></tr>
@@ -437,6 +439,7 @@ export default function WriteOffs() {
             )}
           </tbody>
         </table>
+        </div>
         <Pagination {...pg} />
       </div>
 

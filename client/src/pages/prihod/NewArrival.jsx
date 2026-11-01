@@ -21,7 +21,7 @@ import { priceFromMarkup, markupOf } from '../../lib/pricing'
 import { retyped } from '../../lib/pick'
 import {
   lineFromProduct, lineCost, lineTotal, lineRetail, lineUnits, summary, qtyText, packText, lineProblem, toItem,
-  piecePrice, discCost, n2, pct, num,
+  piecePrice, ownPiece, pieceChanged, discCost, n2, pct, num,
 } from '../../lib/prihod'
 import { usePrihod, setPrihod, setForm, setPay, resetDraft, blankForm } from './store'
 import { SupplierPick } from './SupplierPick'
@@ -94,13 +94,13 @@ export default function NewArrival({ products, suppliers, onSaved }) {
     : null
   const baseLine = editing || (chosen ? lineFromProduct(chosen) : novLine)
   const draft = baseLine
-    ? { ...baseLine, qty: form.qty, pieces: form.pieces, base: form.base, disc: form.disc, price: form.price, expiryDate: form.expiryDate }
+    ? { ...baseLine, qty: form.qty, pieces: form.pieces, base: form.base, disc: form.disc, price: form.price, piece: form.piece, expiryDate: form.expiryDate }
     : null
 
   function editLine(l) {
     setPrihod({
       sub: 'add',
-      form: { ...blankForm(), productId: l.productId, code: l.barcode || '', q: l.name, qty: l.qty, pieces: l.pieces, base: l.base, disc: l.disc, price: l.price, price0: l.price0, mk: null, expiryDate: l.expiryDate, editKey: l.key },
+      form: { ...blankForm(), productId: l.productId, code: l.barcode || '', q: l.name, qty: l.qty, pieces: l.pieces, base: l.base, disc: l.disc, price: l.price, price0: l.price0, piece: l.piece ?? '', piece0: l.piece0 ?? null, mk: null, expiryDate: l.expiryDate, editKey: l.key },
     })
     setFocusQty((n) => n + 1)
   }
@@ -116,7 +116,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
     }
     const disc = st.discAll ? form.disc : ''
     const l = lineFromProduct(p, { disc })
-    setForm({ productId: p.id, code: p.barcode || '', q: p.name, qty: l.qty, pieces: '', base: l.base, disc, price: l.price, price0: l.price0, mk: null, expiryDate: '', editKey: '', nov: false })
+    setForm({ productId: p.id, code: p.barcode || '', q: p.name, qty: l.qty, pieces: '', base: l.base, disc, price: l.price, price0: l.price0, piece: l.piece, piece0: l.piece0, mk: null, expiryDate: '', editKey: '', nov: false })
     beepOk()
     setFocusQty((n) => n + 1)
   }
@@ -239,6 +239,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
       unitsPerPack: String(novUpp),
       cost: String(lineCost(draft)),
       price: String(form.price ?? ''),
+      piecePrice: String(form.piece ?? ''),
       expiryDate: form.expiryDate || '',
       minStock: '5',
     }
@@ -329,7 +330,11 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                     <td className="num">{n2(num(l.base))}</td>
                     <td className="num">{num(l.disc) > 0 ? pct(l.disc) : '—'}</td>
                     <td className="num">{n2(lineCost(l))}</td>
-                    <td className={'num' + (num(l.price) !== l.price0 ? ' prh-changed' : '')} title={num(l.price) !== l.price0 ? `${t('Было')}: ${money(l.price0)}` : undefined}>{n2(num(l.price))}</td>
+                    <td className={'num' + (num(l.price) !== l.price0 ? ' prh-changed' : '')} title={num(l.price) !== l.price0 ? `${t('Было')}: ${money(l.price0)}` : undefined}>
+                      {n2(num(l.price))}
+                      {/* Своя цена за 1 шт (1.5.11) — второй строкой */}
+                      {ownPiece(l) !== null && <div className={'tag-cat' + (pieceChanged(l) ? ' prh-changed' : '')}>{n2(ownPiece(l))}/{t('шт')}</div>}
+                    </td>
                     <td className="num"><b>{n2(lineTotal(l))}</b></td>
                     <td className="num">{n2(lineRetail(l))}</td>
                     <td className="prh-c-act" onClick={(e) => e.stopPropagation()}>
@@ -558,9 +563,28 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                   </div>
                 </div>
                 {draft?.div && (
-                  <div className="prh-f prh-f-info">
+                  <div className="prh-f prh-f-info" data-tour="af.piece">
                     <label>{t('Цена за 1 шт')}</label>
-                    <b className="prh-val">{money(piecePrice(draft))}</b>
+                    {/* Слева — по расчёту (цена / штук в упаковке), справа — своя (1.5.11):
+                        вписали — касса продаёт отдельные штуки по ней, пусто — по расчёту */}
+                    <div className="prh-ctl prh-piece">
+                      <b className={'prh-val' + (ownPiece(draft) !== null ? ' prh-val-off' : '')}>{money(piecePrice(draft))}</b>
+                      <label className="prh-unit prh-piece-own">
+                        <NumberInput
+                          className={'prh-num' + (!nov && pieceChanged(draft) ? ' changed' : '')}
+                          value={form.piece ?? ''}
+                          onChange={(e) => setForm({ piece: e.target.value })}
+                          onKeyDown={onEnter}
+                          placeholder={t('своя')}
+                          aria-label={t('Своя цена за 1 шт')}
+                          title={t('Своя цена за 1 шт: по ней касса продаёт отдельные штуки. Пусто — по расчёту')}
+                        />
+                        <span>{t('сомони')}</span>
+                      </label>
+                    </div>
+                    {!nov && pieceChanged(draft) && (
+                      <span className="prh-was">{t('Было')}: {draft.piece0 === null ? t('по расчёту') : money(draft.piece0)}</span>
+                    )}
                   </div>
                 )}
                 <div className="prh-f prh-f-info">

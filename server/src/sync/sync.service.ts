@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service'
 import { AccountCache } from '../admin/account-cache.service'
 import { AuthService } from '../auth/auth.service'
 import { EventsGateway } from '../events/events.gateway'
+import { grossOf, ownPiece, pieceOf, piecePriceIn, refundCeiling } from '../common/piece'
 import { D, discountOf } from '../common/money'
 import { weightedPackCost } from '../common/cost'
 import { addUnits, consumeUnitsTolerant, lockProducts, returnExpiry, shortageWorth, uppOf } from '../common/stock'
@@ -96,6 +97,8 @@ interface Ctx {
 // Виды расхождений:
 //   sale, writeoff — продано или списано больше, чем было;
 //   price          — цена в чеке не та, что была в базе;
+//   piece          — цена упаковки та, а своя цена штуки в чеке не та, что была в базе
+//                    (1.5.11): checkPrice — штука в чеке, basePrice — в базе;
 //   return         — по чеку вернули больше, чем продали;
 //   counted        — операция сделана ДО пересчёта остатка, а пришла после: пересчёт
 //                    её уже учёл, остаток не двигался (см. common/counted.ts);
@@ -107,7 +110,7 @@ interface Ctx {
 //                    его код за это время заняли (note — исходный код и второй товар);
 //   supdebt        — поставщику заплатили больше, чем был долг.
 type Flag = {
-  kind: 'sale' | 'writeoff' | 'price' | 'return' | 'counted' | 'debt' | 'supreturn' | 'edit' | 'barcode' | 'supdebt'
+  kind: 'sale' | 'writeoff' | 'price' | 'piece' | 'return' | 'counted' | 'debt' | 'supreturn' | 'edit' | 'barcode' | 'supdebt'
   productId?: string | null
   name: string
   units: number
@@ -117,7 +120,7 @@ type Flag = {
 }
 
 // Строка документа, цену которой надо сверить с историей цен
-type PricedLine = { productId: string; name: string; price: number; unitsPerPack: number; units: number }
+type PricedLine = { productId: string; name: string; price: number; unitsPerPack: number; units: number; pieces?: number; piecePrice?: number | null; unit?: string | null }
 
 export interface OpResult {
   id: string
@@ -643,8 +646,32 @@ export class SyncService {
       const valid = [before.length ? before[before.length - 1] : rows[0], ...rows.filter((h) => h.at.getTime() > from && h.at.getTime() <= to)]
       // Сравниваем цену за штуку: число штук в упаковке тоже могли сменить.
       // Перемножением, а не делением — чтобы не упереться в округление
-      if (valid.some((h) => D(l.price).times(h.unitsPerPack).equals(D(h.price).times(l.unitsPerPack)))) continue
+      const packOk = (h: (typeof history)[number]) => D(l.price).times(h.unitsPerPack).equals(D(h.price).times(l.unitsPerPack))
+      // Отдельные штуки по своей цене (1.5.11): своя цена штуки в чеке и в истории должна
+      // совпасть. Своей нет ни там, ни там — штука шла от цены упаковки, её сверили выше
+      // Единица — нынешняя, из карточки: у дробного товара (кг, л…) «штука» — грамм, и своя
+      // цена штуки, даже если осталась в истории, не действует
+      const mine = ownPiece({ price: l.price, piecePrice: l.piecePrice ?? null, unitsPerPack: l.unitsPerPack, unit: l.unit })
+      const pieceOk = (h: (typeof history)[number]) => {
+        if (!((l.pieces || 0) > 0)) return true
+        const then = ownPiece({ price: h.price, piecePrice: h.piecePrice, unitsPerPack: h.unitsPerPack, unit: l.unit })
+        return mine === null ? then === null : then !== null && mine.equals(then)
+      }
+      if (valid.some((h) => packOk(h) && pieceOk(h))) continue
       const base = valid[valid.length - 1]
+      if (valid.some(packOk)) {
+        // Упаковка — по той цене, а штука — нет: касса не знала новой цены штуки
+        const at = [...valid].reverse().find(packOk)!
+        await this.flag(tx, ctx, doc, {
+          kind: 'piece',
+          productId: l.productId,
+          name: l.name,
+          units: l.pieces || 0,
+          checkPrice: cents(pieceOf({ price: l.price, piecePrice: l.piecePrice ?? null, unitsPerPack: l.unitsPerPack, unit: l.unit })),
+          basePrice: cents(pieceOf({ price: at.price, piecePrice: at.piecePrice, unitsPerPack: at.unitsPerPack, unit: l.unit })),
+        })
+        continue
+      }
       await this.flag(tx, ctx, doc, {
         kind: 'price',
         productId: l.productId,
@@ -688,7 +715,8 @@ export class SyncService {
     let cost = D(0)
     const lines = p.items.map((i) => {
       const units = i.qty * i.unitsPerPack + i.pieces
-      const gross = D(i.price).dividedBy(i.unitsPerPack).times(units)
+      // Упаковки — по цене упаковки, штуки — по цене штуки из чека (своя, если была)
+      const gross = grossOf(i)
       const discount = Prisma.Decimal.min(Prisma.Decimal.max(0, D(i.discount)), gross)
       total = total.plus(gross.minus(discount))
       cost = cost.plus(D(i.cost).dividedBy(i.unitsPerPack).times(units))
@@ -706,13 +734,14 @@ export class SyncService {
 
     const ids = [...new Set(lines.map((l) => l.productId))]
     await lockProducts(tx, ids)
-    const known = new Map((await tx.product.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })).map((x) => [x.id, x]))
+    const known = new Map((await tx.product.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, unit: true } })).map((x) => [x.id, x]))
 
     await this.checkPrices(
       tx,
       ctx,
       p,
-      lines.filter((l) => known.has(l.productId)).map((l) => ({ ...l, name: known.get(l.productId)!.name })),
+      // Единица — из карточки: у дробного товара (кг, л…) своей цены штуки не бывает
+      lines.filter((l) => known.has(l.productId)).map((l) => ({ ...l, name: known.get(l.productId)!.name, unit: known.get(l.productId)!.unit })),
     )
 
     const unitsById = new Map<string, number>()
@@ -768,6 +797,7 @@ export class SyncService {
             pieces: l.pieces,
             unitsPerPack: l.unitsPerPack,
             price: D(l.price),
+            piecePrice: ownPiece(l),
             cost: D(l.cost),
             discount: l.discount,
           })),
@@ -831,9 +861,14 @@ export class SyncService {
       // Вернуть больше, чем за товар заплатили, нельзя — такое число не от кассы.
       // Заплачено за штуку — с учётом скидки на позицию, как считает и сайт
       const soldUnits = line ? line.qty * upp + line.pieces : it.units
-      const gross = price.dividedBy(upp).times(soldUnits)
+      // Упаковки — по цене упаковки, штуки — по цене штуки из чека (своя, если была)
+      const gross = line ? grossOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp }) : price.dividedBy(upp).times(soldUnits)
       const paid = line ? gross.minus(D(line.discount)) : gross
-      const ceiling = soldUnits > 0 ? paid.dividedBy(soldUnits).times(it.units) : D(0)
+      // Со своей ценой штуки (1.5.11) сумма зависит от того, сколько штук касса считала
+      // «уже вернули» — предел берётся с запасом на обе крайности (common/piece.ts)
+      const ceiling = line
+        ? refundCeiling({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, discount: line.discount }, it.units)
+        : soldUnits > 0 ? paid.dividedBy(soldUnits).times(it.units) : D(0)
       if (D(it.amount).gt(ceiling.plus(0.01))) throw new Reject('Сумма возврата больше цены товара')
       sum = sum.plus(it.amount)
 
@@ -1069,6 +1104,16 @@ export class SyncService {
       if (!D(byId.get(productId)!.price).equals(price)) {
         await tx.product.update({ where: { id: productId }, data: { price } })
         await stamp(tx, 'Product', productId, ['price'], p.date)
+      }
+    }
+    // Своя цена штуки из прихода (1.5.11): прислана — ставим или убираем (пусто); прежние
+    // кассы её не шлют — тогда не трогаем
+    const newPiece = new Map<string, Prisma.Decimal | null>()
+    for (const it of p.items) if (it.piecePrice !== undefined) newPiece.set(it.productId, piecePriceIn(it.piecePrice))
+    for (const [productId, piecePrice] of newPiece) {
+      if (!same(byId.get(productId)!.piecePrice, piecePrice)) {
+        await tx.product.update({ where: { id: productId }, data: { piecePrice } })
+        await stamp(tx, 'Product', productId, ['piecePrice'], p.date)
       }
     }
 

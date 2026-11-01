@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { LuTrash2, LuPencil, LuList, LuPackagePlus, LuWallet, LuChartColumn, LuSearch, LuRotateCcw, LuUndo2, LuTag } from 'react-icons/lu'
 import Layout from '../components/Layout'
+import StickyBar from '../components/StickyBar'
 import { isVesovoy, uppOf, gramsOfKg, kgText, edinica } from '../lib/units'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
@@ -320,15 +321,17 @@ export default function Arrivals() {
 
           {tab === 'journal' && (
             <div className="panel prh-journal" style={{ padding: 0 }}>
-              <div className="prh-panel-head">
-                <label className="prh-sheet-search">
-                  <LuSearch size={15} aria-hidden="true" />
-                  <input value={jq} onChange={(e) => setJq(e.target.value)} placeholder={t('Поставщик, товар или штрихкод…')} aria-label={t('Поставщик, товар или штрихкод…')} />
-                </label>
-                <span className="tag-cat">
-                  {loading ? t('Загружаем историю за выбранный период…') : `${t('Найдено записей')}: ${journal.length} · ${money(journalSum)}`}
-                </span>
-              </div>
+              <StickyBar panel>
+                <div className="prh-panel-head">
+                  <label className="prh-sheet-search">
+                    <LuSearch size={15} aria-hidden="true" />
+                    <input value={jq} onChange={(e) => setJq(e.target.value)} placeholder={t('Поставщик, товар или штрихкод…')} aria-label={t('Поставщик, товар или штрихкод…')} />
+                  </label>
+                  <span className="tag-cat">
+                    {loading ? t('Загружаем историю за выбранный период…') : `${t('Найдено записей')}: ${journal.length} · ${money(journalSum)}`}
+                  </span>
+                </div>
+              </StickyBar>
               <div className="table-cards-wrap">
                 <table className="table-cards">
                   <thead>

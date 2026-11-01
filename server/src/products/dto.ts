@@ -8,6 +8,9 @@ export class CreateProductDto {
   // в минус выручку, прибыль и стоимость склада
   @IsOptional() @IsNumber() @Min(0) cost?: number
   @IsOptional() @IsNumber() @Min(0) price?: number
+  // Своя цена ОДНОЙ ШТУКИ (1.5.11): число — касса продаёт отдельные штуки по ней; null или
+  // 0 — своей цены нет, штука стоит цена упаковки / штук в упаковке (common/piece.ts)
+  @IsOptional() @IsNumber() @Min(0) piecePrice?: number | null
   @IsOptional() @IsInt() @Min(0) stock?: number
   @IsOptional() @IsInt() @Min(0) minStock?: number
   @IsOptional() @IsString() unit?: string
@@ -33,6 +36,7 @@ export class UpdateProductDto {
   // в минус выручку, прибыль и стоимость склада
   @IsOptional() @IsNumber() @Min(0) cost?: number
   @IsOptional() @IsNumber() @Min(0) price?: number
+  @IsOptional() @IsNumber() @Min(0) piecePrice?: number | null
   @IsOptional() @IsInt() @Min(0) stock?: number
   @IsOptional() @IsInt() @Min(0) minStock?: number
   @IsOptional() @IsString() unit?: string

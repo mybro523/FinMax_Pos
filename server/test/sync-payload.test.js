@@ -65,11 +65,50 @@ test('обычный чек кассы разбирается без потер�
     pieces: 0,
     unitsPerPack: 1,
     price: 150,
+    piecePrice: null,
     cost: 100,
     discount: 0,
   })
   // Прибыль бывает отрицательной (продали ниже закупки) — это не повод для отказа
   assert.equal(parseSale(sale({ profit: -20 }), NOW).profit, -20)
+})
+
+test('своя цена штуки в чеке кассы (1.5.11): число — она, нет поля или пусто — своей нет, мусор — отказ', () => {
+  const s = parseSale(sale({ total: 160 }, { qty: 1, pieces: 5, unitsPerPack: 90, piecePrice: 2 }), NOW)
+  assert.equal(s.items[0].piecePrice, 2)
+  assert.equal(parseSale(sale(), NOW).items[0].piecePrice, null, 'прежняя касса поле не шлёт')
+  assert.equal(parseSale(sale({}, { piecePrice: '' }), NOW).items[0].piecePrice, null)
+  assert.equal(parseSale(sale({}, { piecePrice: null }), NOW).items[0].piecePrice, null)
+  rejected(() => parseSale(sale({}, { piecePrice: -1 }), NOW))
+  rejected(() => parseSale(sale({}, { piecePrice: 'дорого' }), NOW))
+})
+
+test('своя цена штуки в приходе кассы (1.5.11): нет поля — не трогать, пусто — убрать, число — поставить', () => {
+  const arr = (item) => ({ arrival: { id: ID, date: AT, supplier: 'Поставщик', total: 100, items: [{ id: ID + '-a', productId: 'cmproduct1', name: 'Памперс', qty: 1, cost: 100, ...item }] }, expiry: [] })
+  assert.equal(parseArrival(arr({}), NOW).items[0].piecePrice, undefined)
+  assert.equal(parseArrival(arr({ piecePrice: null }), NOW).items[0].piecePrice, null)
+  assert.equal(parseArrival(arr({ piecePrice: '' }), NOW).items[0].piecePrice, null)
+  assert.equal(parseArrival(arr({ piecePrice: 2.5 }), NOW).items[0].piecePrice, 2.5)
+  rejected(() => parseArrival(arr({ piecePrice: -2 }), NOW))
+})
+
+test('сумма позиции (common/piece): упаковки по цене упаковки, штуки по своей цене', () => {
+  const { grossOf, pieceOf, ownPiece, piecePriceIn } = require('../dist/common/piece')
+  const n = (d) => Number(d.toString())
+  // Пример владельца: 90 шт в упаковке по 150, своя цена штуки 2 — 1 уп + 5 шт = 160
+  assert.equal(n(grossOf({ qty: 1, pieces: 5, price: 150, piecePrice: 2, unitsPerPack: 90 })), 160)
+  // Своей цены нет — как раньше: 150 / 90 за штуку
+  assert.equal(n(grossOf({ qty: 1, pieces: 0, price: 150, piecePrice: null, unitsPerPack: 90 })), 150)
+  assert.equal(n(grossOf({ qty: 0, pieces: 9, price: 150, unitsPerPack: 90 })), 15)
+  assert.equal(n(pieceOf({ price: 150, piecePrice: null, unitsPerPack: 90 }).toDecimalPlaces(2)), 1.67)
+  // Неделимый товар и дробный (кг) своей цены штуки не имеют
+  assert.equal(ownPiece({ price: 10, piecePrice: 3, unitsPerPack: 1 }), null)
+  assert.equal(ownPiece({ price: 190, piecePrice: 1, unitsPerPack: 1000, unit: 'кг' }), null)
+  assert.equal(ownPiece({ price: 150, piecePrice: 0, unitsPerPack: 90 }), null)
+  assert.equal(n(ownPiece({ price: 150, piecePrice: '2.50', unitsPerPack: 90 })), 2.5)
+  // Что прислали: больше нуля — цена, остальное — «своей нет»
+  assert.equal(n(piecePriceIn(2.456)), 2.46)
+  for (const v of [null, undefined, '', 0, -1, 'abc']) assert.equal(piecePriceIn(v), null, String(v))
 })
 
 test('мусор вместо чека отвергается, а не роняет сервер', () => {

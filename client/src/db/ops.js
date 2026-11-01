@@ -9,7 +9,7 @@ import { api } from './api.js'
 import { db, setCollection, refresh, uid, beginMutate, endMutate, realId } from './store.js'
 import { normalizeScan, canonBarcode } from '../lib/scan.js'
 import { serverNow } from '../lib/time.js'
-import { uppOf, unitCost, sellableUnits, expiredUnits, stockUnits, splitUnits } from '../lib/units.js'
+import { uppOf, unitCost, sellableUnits, expiredUnits, stockUnits, splitUnits, lineGross, ownPiecePrice } from '../lib/units.js'
 
 // Короткие перебои связи (Wi-Fi моргнул) не должны беспокоить кассира: тихо пробуем ещё раз.
 // Повторяем только сетевые сбои — отказ сервера («нет на складе») повторять бессмысленно.
@@ -83,15 +83,13 @@ export function checkout({ items, payment, payVia, customer }) {
 
   const saleItems = items.map((i) => {
     const upp = uppOf(i)
-    const units = (Number(i.qty) || 0) * upp + (Number(i.pieces) || 0)
-    const gross = (i.price / upp) * units
+    const line = { qty: Number(i.qty) || 0, pieces: Number(i.pieces) || 0, unitsPerPack: upp, unit: i.unit || '', price: i.price, piecePrice: i.piecePrice ?? null }
+    // Упаковки — по цене упаковки, штуки — по своей цене штуки, если задана (как сервер)
+    const gross = lineGross(line)
     const discount = Math.min(Math.max(0, Number(i.discount) || 0), gross)
-    return { productId: i.productId, name: i.name, qty: Number(i.qty) || 0, pieces: Number(i.pieces) || 0, unitsPerPack: upp, unit: i.unit || '', price: i.price, cost: i.cost, discount }
+    return { productId: i.productId, name: i.name, ...line, piecePrice: ownPiecePrice(line), cost: i.cost, discount }
   })
-  const total = saleItems.reduce((s, i) => {
-    const units = i.qty * i.unitsPerPack + i.pieces
-    return s + (i.price / i.unitsPerPack) * units - i.discount
-  }, 0)
+  const total = saleItems.reduce((s, i) => s + lineGross(i) - i.discount, 0)
   const cost = saleItems.reduce((s, i) => {
     const units = i.qty * i.unitsPerPack + i.pieces
     return s + ((i.cost || 0) / i.unitsPerPack) * units
@@ -185,6 +183,8 @@ export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash
     expiryDate: i.expiryDate || '',
     // Новая цена продажи, назначенная в приходе (наценкой). Нет — цена прежняя
     ...(Number(i.price) > 0 ? { price: Math.round(Number(i.price) * 100) / 100 } : {}),
+    // Своя цена за 1 шт (1.5.11): прислана — ставим (null — своей больше нет); нет поля — не трогаем
+    ...(i.piecePrice !== undefined ? { piecePrice: Number(i.piecePrice) > 0 ? Math.round(Number(i.piecePrice) * 100) / 100 : null } : {}),
   }))
   // Цена за упаковку (за килограмм): штуки сверх целых упаковок (граммы весового)
   // оплачиваются долей — как считает сервер
@@ -213,7 +213,7 @@ export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash
     // Граммы сверх целых килограммов складываются со вскрытым остатком и
     // перекладываются в целые — иначе «350 + 800 г» показывались бы как 1150 г
     const vsego = stockUnits(p) + it.qty * uppOf(p) + it.pieces
-    return { ...p, ...splitUnits(vsego, p), ...(it.price ? { price: it.price } : {}) }
+    return { ...p, ...splitUnits(vsego, p), ...(it.price ? { price: it.price } : {}), ...('piecePrice' in it ? { piecePrice: it.piecePrice } : {}) }
   }))
   setCollection('arrivals', [tempArrival, ...prevA])
 
@@ -234,6 +234,7 @@ export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash
         // Пустую строку не шлём: у категорий без срока сервер ждёт именно её отсутствия
         ...(i.expiryDate ? { expiryDate: i.expiryDate } : {}),
         ...(i.price ? { price: i.price } : {}),
+        ...('piecePrice' in i ? { piecePrice: i.piecePrice } : {}),
       })),
     })
     .then((arrival) => {

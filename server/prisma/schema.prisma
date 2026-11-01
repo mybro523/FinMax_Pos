@@ -20,6 +20,9 @@ model Product {
   minStock     Int           @default(5)
   unit         String        @default("уп")
   unitsPerPack Int           @default(1) // штук в одной упаковке (для поштучной продажи)
+  // Своя цена ОДНОЙ ШТУКИ — владелец задал её сам (приход, карточка). Пусто — штука стоит
+  // цена упаковки / штук в упаковке. Целые упаковки всегда по price (common/piece.ts)
+  piecePrice   Decimal?      @db.Decimal(12, 2)
   looseUnits   Int           @default(0) // штук во вскрытой упаковке (остаток)
   dosage       String        @default("") // дозировка, напр. «500 мг»
   expiryDate   DateTime? // ближайший срок годности среди партий (дата окончания)
@@ -113,6 +116,9 @@ model SaleItem {
   pieces       Int      @default(0) // штук (из вскрытой упаковки)
   unitsPerPack Int      @default(1) // штук в упаковке на момент продажи (снимок)
   price        Decimal  @db.Decimal(12, 2) // цена за упаковку (снимок)
+  // Своя цена штуки на момент продажи (снимок): по ней продали отдельные штуки, по ней же
+  // их вернут. Пусто — штука стоила price / unitsPerPack
+  piecePrice   Decimal? @db.Decimal(12, 2)
   cost         Decimal  @db.Decimal(12, 2) // себестоимость за упаковку (снимок)
   discount     Decimal  @default(0) @db.Decimal(12, 2) // скидка на позицию, сомони
 
@@ -711,6 +717,7 @@ model PriceLog {
   productId    String
   price        Decimal  @db.Decimal(12, 2) // цена упаковки
   unitsPerPack Int
+  piecePrice   Decimal? @db.Decimal(12, 2) // своя цена штуки (пусто — своей нет), с 1.5.11
   at           DateTime @default(dbgenerated("(now() AT TIME ZONE 'UTC'::text)")) // с какого момента действует
 
   @@index([productId, at])

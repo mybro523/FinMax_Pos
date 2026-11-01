@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LuCalendarClock, LuTriangleAlert, LuCircleCheck, LuTrash2 } from 'react-icons/lu'
 import Layout from '../components/Layout'
+import StickyBar from '../components/StickyBar'
 import { useCan } from '../db/auth'
 import { Pagination, usePagination } from '../components/Pagination'
 import { useCollection, stockText } from '../db/store'
@@ -89,10 +90,12 @@ export default function Expiry() {
         </div>
       </div>
 
-      <div className="chips" data-tour="exp.chips" style={{ marginBottom: 16 }}>
-        <button className={'chip ' + (mode === 'warn' ? 'active' : '')} onClick={() => setMode('warn')}>{t('Требуют внимания')}</button>
-        <button className={'chip ' + (mode === 'all' ? 'active' : '')} onClick={() => setMode('all')}>{t('Все со сроком')}</button>
-      </div>
+      <StickyBar>
+        <div className="chips" data-tour="exp.chips">
+          <button className={'chip ' + (mode === 'warn' ? 'active' : '')} onClick={() => setMode('warn')}>{t('Требуют внимания')}</button>
+          <button className={'chip ' + (mode === 'all' ? 'active' : '')} onClick={() => setMode('all')}>{t('Все со сроком')}</button>
+        </div>
+      </StickyBar>
 
       <div className="panel" data-tour="exp.table" style={{ padding: 0 }}>
         <table>

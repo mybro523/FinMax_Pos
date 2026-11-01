@@ -8,6 +8,7 @@ import { bodyOf, checker, expiryOk, MAX_MONEY, sumOk, unitsOk } from '../check.m
 import { bad, inTx, newId, q } from '../db.mjs'
 import { enqueue, putDoc } from '../docs.mjs'
 import { D, fromCents, toCents } from '../money.mjs'
+import { pieceCentsIn } from '../piece.mjs'
 import { myOpenShift } from '../docs.mjs'
 import { move, productById } from '../stock.mjs'
 import { supplierRow } from '../suppliers.mjs'
@@ -37,6 +38,8 @@ export function createArrival(ctx, raw) {
     expiryDate: c.str(it?.expiryDate, `items.${n}.expiryDate`, { optional: true }),
     // Новая цена продажи, назначенная наценкой в приходе. Нет — цена прежняя
     price: it?.price === undefined || it?.price === null ? null : c.num(it.price, `items.${n}.price`, { max: MAX_MONEY }),
+    // Своя цена штуки (1.5.11): нет поля — не трогать; пусто — убрать; число — поставить
+    piecePrice: it?.piecePrice === undefined ? undefined : it.piecePrice === null || it.piecePrice === '' ? null : c.num(it.piecePrice, `items.${n}.piecePrice`, { max: MAX_MONEY }),
   }))
   c.done()
 
@@ -163,6 +166,10 @@ export function createArrival(ctx, raw) {
     const newPrice = new Map()
     items.forEach((it) => { if (it.price !== null && it.price !== undefined) newPrice.set(it.productId, toCents(D(it.price))) })
     for (const [pid, priceC] of newPrice) q(db, 'UPDATE products SET priceC = ? WHERE id = ?').run(priceC, pid)
+    // Своя цена штуки — тоже сразу в карточке (1.5.11). Решает последняя строка товара
+    const newPiece = new Map()
+    items.forEach((it) => { if (it.piecePrice !== undefined) newPiece.set(it.productId, pieceCentsIn(it.piecePrice)) })
+    for (const [pid, pieceC] of newPiece) q(db, 'UPDATE products SET pieceC = ? WHERE id = ?').run(pieceC, pid)
 
     putDoc(db, 'arrival', body, { sync: 'pending', deviceId: ctx.deviceId })
     enqueue(db, {
@@ -179,6 +186,7 @@ export function createArrival(ctx, raw) {
             ...it,
             cost: lines[n].cost.toNumber(),
             ...(items[n].price !== null && items[n].price !== undefined ? { price: items[n].price } : {}),
+            ...(items[n].piecePrice !== undefined ? { piecePrice: items[n].piecePrice } : {}),
           })),
         },
         // Срок годности в самом документе не хранится — он у партии. Серверу его

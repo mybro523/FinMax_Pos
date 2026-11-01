@@ -173,13 +173,13 @@ export default function Incomes() {
           <span className="h2-title"><span className="ic"><LuCoins size={17} /></span>{t('История доходов')}</span>
           <span className="tag-cat" data-tour="inc.total">{t('доходы за период')}: <b style={{ color: 'var(--green)' }}>{money(periodTotal)}</b></span>
         </h2>
-        <div style={{ padding: '12px 16px 0' }}>
-          <JournalFilter controls={journal.controls} placeholder={t('Поиск по статье или примечанию…')}>
-            <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} style={{ maxWidth: 220 }} aria-label={t('Статья дохода')}>
-              <option value="all">{t('Все статьи')}</option>
-              {filterCats.map((c) => <option key={c} value={c}>{t(c)}</option>)}
-            </select>
-          </JournalFilter>
+        <JournalFilter controls={journal.controls} placeholder={t('Поиск по статье или примечанию…')}>
+          <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} style={{ maxWidth: 220 }} aria-label={t('Статья дохода')}>
+            <option value="all">{t('Все статьи')}</option>
+            {filterCats.map((c) => <option key={c} value={c}>{t(c)}</option>)}
+          </select>
+        </JournalFilter>
+        <div style={{ padding: '0 16px' }}>
           <JournalCount rows={journalRows.length} loading={journal.loading} />
         </div>
         <div className="table-cards-wrap">

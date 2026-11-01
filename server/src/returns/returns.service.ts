@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
+import { grossOf, refundOf } from '../common/piece'
 import { D } from '../common/money'
 import { addUnits, enteredExpiry, lockProducts, returnExpiry, uppOf } from '../common/stock'
 import { TX } from '../common/tx'
@@ -105,10 +106,14 @@ export class ReturnsService {
           const price = line ? D(line.price) : D(product.price)
           const cost = line ? D(line.cost) : D(product.cost)
           const soldUnits = line ? line.qty * upp + line.pieces : units
-          const gross = price.dividedBy(upp).times(soldUnits)
+          // Упаковки — по цене упаковки, штуки — по цене штуки из чека (своя, если была)
+          const gross = line ? grossOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp }) : price.dividedBy(upp).times(soldUnits)
           const paid = line ? gross.minus(D(line.discount)) : gross
-          const perUnit = soldUnits > 0 ? paid.dividedBy(soldUnits) : D(0)
-          const amount = perUnit.times(units)
+          // По чеку — сначала отдельные штуки по своей цене штуки, сверх них — штуки из
+          // упаковок; без своей цены — как всегда, поровну на штуку (common/piece.ts)
+          const amount = line
+            ? refundOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, discount: line.discount }, units, returnedBefore.get(it.productId) || 0)
+            : (soldUnits > 0 ? paid.dividedBy(soldUnits) : D(0)).times(units)
           total = total.plus(amount)
 
           returnItems.push({

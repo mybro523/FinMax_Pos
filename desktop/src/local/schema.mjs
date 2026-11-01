@@ -419,6 +419,15 @@ export const PHARMACY_SCHEMA = [
   );
   DELETE FROM meta WHERE key IN ('cursor', 'wcursor', 'teamv');
   `,
+  // ── Своя цена за 1 шт (версия 1.5.11) ──
+  // pieceC — своя цена одной штуки в дирамах; NULL — своей нет, штука стоит цена упаковки /
+  // штук в упаковке (local/piece.mjs). Отметки обмена сбрасываются: прежняя касса этого поля
+  // не брала, а товары, которым цену штуки уже задали, по отметке «докуда получили» прошли.
+  // Один раз касса получит всё заново
+  `
+  ALTER TABLE products ADD COLUMN pieceC INTEGER;
+  DELETE FROM meta WHERE key IN ('cursor', 'wcursor');
+  `,
 ]
 
 // ── Общая база программы ──

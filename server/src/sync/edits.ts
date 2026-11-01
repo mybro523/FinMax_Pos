@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client'
+import { piecePriceIn } from '../common/piece'
 import { D } from '../common/money'
 import { setUnits, syncProduct, totalUnits, uppOf, lockProducts } from '../common/stock'
 import { firstCountAfter, lockInventories, markCounted } from '../common/counted'
@@ -247,6 +248,7 @@ async function productCreate(tx: Tx, p: ReturnType<typeof parseProductCreate>, c
     type: p.type,
     cost: D(p.cost).toDecimalPlaces(2),
     price: D(p.price).toDecimalPlaces(2),
+    piecePrice: piecePriceIn(p.piecePrice),
     minStock: p.minStock,
     unit: p.unit,
     unitsPerPack: p.unitsPerPack,
@@ -302,6 +304,7 @@ async function productUpdate(tx: Tx, p: ReturnType<typeof parseProductUpdate>, c
     const data: any = pick(p.set, out.apply)
     if ('cost' in data) data.cost = D(data.cost).toDecimalPlaces(2)
     if ('price' in data) data.price = D(data.price).toDecimalPlaces(2)
+    if ('piecePrice' in data) data.piecePrice = piecePriceIn(data.piecePrice)
     const repack = 'unitsPerPack' in data
     // Остаток живёт партиями в штуках, карточка лишь показывает его упаковками. У товара,
     // заведённого до партий, остаток лежит только в карточке — сначала он ложится партией
@@ -313,7 +316,7 @@ async function productUpdate(tx: Tx, p: ReturnType<typeof parseProductUpdate>, c
     if (repack) await syncProduct(tx, pid)
     // Новая цена действует с момента правки на кассе, а не с минуты, когда правка дошла:
     // чеки этой кассы между правкой и отправкой пробиты уже по ней (сверка цен в sync)
-    if ('price' in data || repack) await backdatePrice(tx, pid, p.at)
+    if ('price' in data || 'piecePrice' in data || repack) await backdatePrice(tx, pid, p.at)
     await stamp(tx, 'Product', pid, out.apply, p.at)
   }
   await stamp(tx, 'Product', pid, alreadySame(p.set, product as any, out), p.at)
@@ -370,8 +373,8 @@ async function unitsNow(tx: Tx, product: { id: string; stock: number; looseUnits
 async function backdatePrice(tx: Tx, productId: string, at: Date) {
   const iso = at.toISOString()
   await tx.$executeRaw(Prisma.sql`
-    INSERT INTO "PriceLog" ("productId", "price", "unitsPerPack", "at")
-    SELECT "productId", "price", "unitsPerPack", (${iso}::timestamptz AT TIME ZONE 'UTC')::timestamp(3) FROM "PriceLog"
+    INSERT INTO "PriceLog" ("productId", "price", "unitsPerPack", "piecePrice", "at")
+    SELECT "productId", "price", "unitsPerPack", "piecePrice", (${iso}::timestamptz AT TIME ZONE 'UTC')::timestamp(3) FROM "PriceLog"
     WHERE "seq" = (SELECT MAX("seq") FROM "PriceLog" WHERE "productId" = ${productId})
       AND "at" = (now() AT TIME ZONE 'UTC')::timestamp(3)
       AND "at" > (${iso}::timestamptz AT TIME ZONE 'UTC')`)

@@ -2,6 +2,7 @@ import { useState, useMemo, lazy, Suspense } from 'react'
 import { LuPlus, LuPencil, LuTrash2, LuTag, LuHistory } from 'react-icons/lu'
 import ProductHistory from '../components/ProductHistory'
 import Layout from '../components/Layout'
+import StickyBar from '../components/StickyBar'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { useCollection, money, db, stockText } from '../db/store'
@@ -110,6 +111,7 @@ export default function Products() {
     setEdit({
       ...p,
       cost: String(p.cost), price: String(p.price), minStock: String(p.minStock),
+      piecePrice: Number(p.piecePrice) > 0 ? String(p.piecePrice) : '',
       // Весовой товар правится в килограммах: 12 кг 350 г -> «12.35»
       stock: isVesovoy(p) ? String(stockUnits(p) / 1000) : String(p.stock),
       unit: p.unit || '',
@@ -167,14 +169,17 @@ export default function Products() {
       </>}
     >
       <PrintSheet zagolovok={t('Товары')} podzag={exPodzag} cols={exCols} rows={exRows} />
-      <div className="toolbar">
-        <input className="search" data-tour="prod.search" placeholder={t('Поиск по названию или штрихкоду…')} value={q} onChange={(e) => setQ(e.target.value)} />
-      </div>
-      <div className="chips" data-tour="prod.chips" style={{ marginBottom: 16 }}>
-        {categories.map((c) => (
-          <button key={c} className={'chip ' + (cat === c ? 'active' : '')} onClick={() => setCat(c)}>{c}</button>
-        ))}
-      </div>
+      {/* Поиск и категории закреплены вверху: при прокрутке списка не уезжают (1.5.11) */}
+      <StickyBar>
+        <div className="toolbar">
+          <input className="search" data-tour="prod.search" placeholder={t('Поиск по названию или штрихкоду…')} value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div className="chips" data-tour="prod.chips">
+          {categories.map((c) => (
+            <button key={c} className={'chip ' + (cat === c ? 'active' : '')} onClick={() => setCat(c)}>{c}</button>
+          ))}
+        </div>
+      </StickyBar>
 
       <div className="panel" style={{ padding: 0 }}>
         <table>

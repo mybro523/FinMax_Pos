@@ -43,7 +43,7 @@ import { priceFromMarkup, markupOf } from '../lib/pricing'
 // её назначить.
 
 export const emptyProduct = {
-  name: '', barcode: '', category: '', type: '', image: '', cost: '', price: '', stock: '', minStock: '',
+  name: '', barcode: '', category: '', type: '', image: '', cost: '', price: '', piecePrice: '', stock: '', minStock: '',
   unitsPerPack: '1', looseUnits: '0', dosage: '', expiryDate: '', analogIds: [], unit: '',
 }
 
@@ -73,17 +73,23 @@ export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
       looseUnits: parts % KG,
       unit: String(f.unit).trim().toLowerCase(),
       unitsPerPack: KG,
+      // У дробного «штука» — грамм: своей цены штуки у него не бывает
+      piecePrice: null,
     }
   }
   const unit = (f.unit || '').trim() || 'уп'
   // У штуки нет «штук внутри»: иначе одна штука продавалась бы частями
   const upp = unit === 'шт' && !(Number(f.unitsPerPack) > 1) ? 1 : Math.max(1, Number(f.unitsPerPack) || 1)
+  // Своя цена за 1 шт (1.5.11): только у делимой упаковки; пусто или ноль — своей нет,
+  // штука стоит цена упаковки / штук в упаковке
+  const piece = Number(String(f.piecePrice ?? '').replace(',', '.'))
   return {
     ...common,
     stock: Number(f.stock) || 0,
     unit,
     unitsPerPack: upp,
     looseUnits: upp > 1 ? Math.max(0, Number(f.looseUnits) || 0) : 0,
+    piecePrice: upp > 1 && Number.isFinite(piece) && piece > 0 ? Math.round(piece * 100) / 100 : null,
   }
 }
 
@@ -161,6 +167,10 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
   const showAnalogs = typeHasAnalogs(value.type, types) || analogIds.length > 0
   // У «штуки» нет штук внутри; у заведённого раньше товара с такими штуками поле остаётся
   const showUpp = !drob && (u !== 'шт' || Number(value.unitsPerPack) > 1)
+  // Цена штуки по расчёту — подсказкой в поле своей цены: «1,67»
+  const autoPiece = Number(value.unitsPerPack) > 1 && Number(value.price) > 0
+    ? String(Math.round((Number(value.price) / Number(value.unitsPerPack)) * 100) / 100).replace('.', ',')
+    : ''
   const unitKnown = EDINICY.some((x) => x.v === u)
 
   return (
@@ -344,6 +354,19 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
               title={t('Остаток штук во вскрытой упаковке')}
             />
           </div>}
+        </div>
+      )}
+
+      {/* Своя цена за 1 шт (1.5.11) — своей строкой: касса продаёт отдельные штуки по ней,
+          целые упаковки — по цене продажи. Пусто — цена упаковки / штук в упаковке */}
+      {showUpp && Number(value.unitsPerPack) > 1 && (
+        <div className="row">
+          <div className="field" style={{ flex: 1 }} data-tour="pf.piece">
+            <label htmlFor="pf-piece">{t('Своя цена за 1 шт')}</label>
+            <NumberInput id="pf-piece" value={value.piecePrice ?? ''} onChange={(e) => set('piecePrice', e.target.value)} placeholder={autoPiece || '—'} />
+            <span className="pf-hint">{t('пусто — по расчёту')}{autoPiece ? `: ${autoPiece}` : ''}</span>
+          </div>
+          <div className="field pf-spacer" style={{ flex: 1 }} aria-hidden="true" />
         </div>
       )}
 

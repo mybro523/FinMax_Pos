@@ -9,6 +9,7 @@ import { bodyOf, checker, enteredExpiry, packOk, sumOk } from '../check.mjs'
 import { bad, inTx, newId } from '../db.mjs'
 import { docByClientId, enqueue, getDoc, myOpenShift, putDoc, returnsOfSale } from '../docs.mjs'
 import { D, fixed2, fromCents, fromCentsD, toCents } from '../money.mjs'
+import { grossOf, refundOf } from '../piece.mjs'
 import { move, productById, returnExpiry } from '../stock.mjs'
 import { uppOf, wholeNonNeg } from '../units.mjs'
 
@@ -94,10 +95,14 @@ export function createReturn(ctx, raw) {
       const price = line ? D(line.price) : fromCentsD(product.priceC)
       const cost = line ? D(line.cost) : fromCentsD(product.costC)
       const soldUnits = line ? line.qty * upp + line.pieces : units
-      const gross = price.dividedBy(upp).times(soldUnits)
+      // Упаковки — по цене упаковки, штуки — по цене штуки из чека (своя, если была)
+      const gross = line ? grossOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, unit: line.unit }) : price.dividedBy(upp).times(soldUnits)
       const paid = line ? gross.minus(D(line.discount)) : gross
-      const perUnit = soldUnits > 0 ? paid.dividedBy(soldUnits) : D(0)
-      const amount = perUnit.times(units)
+      // По чеку — сначала отдельные штуки по своей цене штуки, сверх них — штуки из
+      // упаковок; без своей цены — как всегда, поровну на штуку (local/piece.mjs)
+      const amount = line
+        ? refundOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, unit: line.unit, discount: line.discount }, units, returnedBefore.get(it.productId) || 0)
+        : (soldUnits > 0 ? paid.dividedBy(soldUnits) : D(0)).times(units)
       total = total.plus(amount)
 
       returnItems.push({

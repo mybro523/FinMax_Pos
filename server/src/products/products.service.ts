@@ -10,13 +10,14 @@ import { markCounted } from '../common/counted'
 import { PeriodQuery } from '../common/period'
 import { changedFields, forgetStamps, stamp } from '../common/stamps'
 import { productHistory } from './history'
+import { DROBNYE, piecePriceIn } from '../common/piece'
 
 type Tx = Prisma.TransactionClient
 
 // Поля карточки, у которых сервер помнит время последней правки (common/stamps.ts):
 // по ним решается, чья правка новее, когда карточку поправили и на кассе без связи, и
 // на сайте. Остаток и срок годности сюда не входят — они живут партиями
-export const PRODUCT_CARD_FIELDS = ['name', 'barcode', 'category', 'type', 'cost', 'price', 'minStock', 'unit', 'unitsPerPack', 'dosage', 'analogIds', 'image'] as const
+export const PRODUCT_CARD_FIELDS = ['name', 'barcode', 'category', 'type', 'cost', 'price', 'piecePrice', 'minStock', 'unit', 'unitsPerPack', 'dosage', 'analogIds', 'image'] as const
 
 export const BARCODE_TAKEN = 'Товар с таким штрихкодом уже существует'
 
@@ -28,6 +29,10 @@ export function productData(dto: Record<string, any>) {
     data.expiryDate = d && !isNaN(d.getTime()) ? d : null
   }
   if ('analogIds' in data && !Array.isArray(data.analogIds)) data.analogIds = []
+  // Своя цена штуки: больше нуля — она, пусто или ноль — своей цены нет
+  if ('piecePrice' in data) data.piecePrice = piecePriceIn(data.piecePrice)
+  // У дробного товара (кг, л, м, м²) «штука» — грамм: своей цены штуки у него не бывает
+  if ('unit' in data && DROBNYE.includes(String(data.unit ?? '').trim().toLowerCase())) data.piecePrice = null
   return data
 }
 

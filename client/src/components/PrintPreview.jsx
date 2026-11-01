@@ -345,13 +345,14 @@ function PrintPreview({ req, onClose }) {
 }
 
 // Лента чекового принтера: строки ровно так, как их напечатает принтер (моноширинным
-// шрифтом, жирные и крупные — как на ленте, название и итог — белым по чёрному)
+// шрифтом, жирные и крупные — как на ленте, название и итог — белым по чёрному).
+// Крупная строка (big) — буквы вдвое выше и вдвое шире, знаков в ней вдвое меньше
 function TapeView({ tape, width }) {
   if (!tape) return <div className="pp-msg"><span className="pp-spin" aria-hidden="true" /> {tr('Готовим чек…')}</div>
   return (
     <div className="pp-tape" style={{ '--cols': width }} data-testid="pp-tape">
       {tape.lines.map((l, i) => (
-        <div key={i} className={'pp-tl' + (l.center ? ' c' : '') + (l.bold ? ' b' : '') + (l.tall ? ' t' : '') + (l.invert ? ' inv' : '')}>
+        <div key={i} className={'pp-tl' + (l.center ? ' c' : '') + (l.bold ? ' b' : '') + (l.big ? ' big' : '') + (l.invert ? ' inv' : '')}>
           <span>{l.text || ' '}</span>
         </div>
       ))}

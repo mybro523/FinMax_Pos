@@ -131,8 +131,11 @@ export function escpos({ codepage = 'cp866', width = 32 } = {}) {
     init: () => raw(0x1b, 0x40, 0x1c, 0x2e, 0x1b, 0x74, CODEPAGES[page].n),
     align: (how) => raw(0x1b, 0x61, how === 'center' ? 1 : how === 'right' ? 2 : 0),
     bold: (on) => raw(0x1b, 0x45, on ? 1 : 0),
-    // Двойная высота: строка заметнее, а в ширину помещается столько же
-    tall: (on) => raw(0x1d, 0x21, on ? 0x01 : 0x00),
+    // Крупные буквы: вдвое выше И вдвое шире (GS ! 0x11). Одна двойная высота (0x01)
+    // вытягивала буквы вверх — владелец: «растянуто на высоту, сделай нормально и
+    // красиво». Ровная крупная буква занимает два места, поэтому в строку их
+    // помещается вдвое меньше — это учитывает раскладка (layoutTicket)
+    big: (on) => raw(0x1d, 0x21, on ? 0x11 : 0x00),
     // Белым по чёрному (GS B): так на ленте печатаются название магазина и итог.
     // Принтер, который этого не умеет, напечатает обычным шрифтом — тоже читается
     invert: (on) => raw(0x1d, 0x42, on ? 1 : 0),
@@ -181,6 +184,18 @@ export function sanitizeTicket(raw) {
   }
 }
 
+// Итог крупными буквами в cols знаков: подпись и сумма в одну строку, если помещаются.
+// Не помещаются — подпись сверху (по словам), сумма под ней у правого края: крупных
+// букв в строке вдвое меньше, и «Текущий долг 11 сомони» на ленте 58 мм уже не влезает
+export function bigPair(label, value, cols) {
+  const l = printable(label).trim()
+  const v = printable(value).trim()
+  if (l.length + 1 + v.length <= cols) return [l + ' '.repeat(cols - l.length - v.length) + v]
+  const out = l ? wrap(l, cols).map((s) => s.padEnd(cols, ' ')) : []
+  for (const s of wrap(v, cols)) out.push(s.padStart(cols, ' '))
+  return out
+}
+
 // Строка по центру, дополненная пробелами до края: белым по чёрному печатается вся
 // ширина ленты, а не только буквы
 export function fullCenter(text, width) {
@@ -194,17 +209,20 @@ export function fullCenter(text, width) {
 // жирно, крупно, белым по чёрному). По этой же раскладке экран печати программы
 // показывает ленту — поэтому предпросмотр совпадает с бумагой строка в строку.
 // Фирменный вид — как на экране и в PDF, только чёрным: название магазина и итог на
-// чёрной полосе во всю ширину ленты, строка документа и название магазина внизу — жирные
+// чёрной полосе во всю ширину ленты, строка документа и название магазина внизу — жирные.
+// Название магазина и итог — крупными ровными буквами (big): у такой строки знаков вдвое
+// меньше (half), и каждый занимает два места ленты
 export function layoutTicket(ticket, { width = 32 } = {}) {
   const t = sanitizeTicket(ticket)
   const out = []
   const push = (text, how = {}) => out.push({ text, ...how })
   const rule = () => push('-'.repeat(width))
+  const half = Math.max(4, Math.floor(width / 2))
 
   t.head.forEach((line, n) => {
     if (n === 0) {
       // Полоса: по пробелу с каждой стороны, чтобы буквы не упирались в край чёрного
-      for (const l of wrap(line, width - 2)) push(fullCenter(l, width), { bold: true, tall: true, invert: true })
+      for (const l of wrap(line, half - 2)) push(fullCenter(l, half), { bold: true, big: true, invert: true })
     } else {
       for (const l of wrap(line, width)) push(l, { center: true, bold: n === t.docAt })
     }
@@ -223,7 +241,7 @@ export function layoutTicket(ticket, { width = 32 } = {}) {
     rule()
     for (const r of t.totals) {
       if (r.big) {
-        for (const l of twoColumns(r.label, r.value, width - 2)) push(' ' + l + ' ', { bold: true, tall: true, invert: true })
+        for (const l of bigPair(r.label, r.value, half - 2)) push(' ' + l + ' ', { bold: true, big: true, invert: true })
       } else {
         for (const l of twoColumns(r.label, r.value, width)) push(l)
       }
@@ -248,11 +266,11 @@ export function renderTicket(ticket, { width = 32, codepage = 'cp866', cut = tru
   for (const l of layoutTicket(ticket, { width })) {
     p.align(l.center ? 'center' : 'left')
     if (l.bold) p.bold(true)
-    if (l.tall) p.tall(true)
+    if (l.big) p.big(true)
     if (l.invert) p.invert(true)
     p.line(l.text)
     if (l.invert) p.invert(false)
-    if (l.tall) p.tall(false)
+    if (l.big) p.big(false)
     if (l.bold) p.bold(false)
   }
   p.align('left')

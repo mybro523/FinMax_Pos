@@ -141,6 +141,15 @@ function effectsOf(db, op) {
       if (row) prices.push([it.productId, row.priceC])
     }
     if (prices.length) out.prices = prices
+    // Своя цена штуки из прихода (1.5.11) — какой она стала в карточке (null — своей нет).
+    // Касса прежней версии этого поля не знает и просто его пропустит
+    const pieces = []
+    for (const it of p.arrival?.items || []) {
+      if (!it || it.piecePrice === undefined) continue
+      const row = q(db, 'SELECT pieceC FROM products WHERE id = ?').get(it.productId)
+      if (row) pieces.push([it.productId, row.pieceC ?? null])
+    }
+    if (pieces.length) out.pieces = pieces
   }
   return out
 }
@@ -427,6 +436,12 @@ function applyEffects(db, opId, type, fx, changed) {
   for (const pr of fx.prices || []) {
     if (Array.isArray(pr) && typeof pr[0] === 'string' && Number.isInteger(pr[1])) {
       q(db, 'UPDATE products SET priceC = ? WHERE id = ?').run(pr[1], pr[0])
+      changed.add('products')
+    }
+  }
+  for (const pr of fx.pieces || []) {
+    if (Array.isArray(pr) && typeof pr[0] === 'string' && (pr[1] === null || (Number.isInteger(pr[1]) && pr[1] > 0))) {
+      q(db, 'UPDATE products SET pieceC = ? WHERE id = ?').run(pr[1], pr[0])
       changed.add('products')
     }
   }

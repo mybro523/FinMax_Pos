@@ -192,6 +192,9 @@ export function parseSale(p: any, now?: number) {
         pieces,
         unitsPerPack,
         price: money(i.price, 'цена'),
+        // Своя цена штуки, по которой касса продала отдельные штуки (1.5.11). Прежние
+        // кассы её не шлют — штука у них шла от цены упаковки
+        piecePrice: i.piecePrice === undefined || i.piecePrice === null || i.piecePrice === '' ? null : money(i.piecePrice, 'цена штуки'),
         cost: money(i.cost, 'закупочная цена'),
         discount: money(i.discount ?? 0, 'скидка'),
       }
@@ -276,6 +279,9 @@ export function parseArrival(p: any, now?: number) {
       discount: i.discount === undefined || i.discount === null || i.discount === '' ? 0 : percent(i.discount, 'скидка поставщика'),
       // Новая цена продажи, назначенная в приходе наценкой. Нет — цена остаётся прежней
       price: i.price === undefined || i.price === null || i.price === '' ? null : money(i.price, 'цена продажи'),
+      // Своя цена штуки из прихода (1.5.11): нет поля — не трогать (прежние кассы); пусто —
+      // убрать; число — поставить
+      piecePrice: i.piecePrice === undefined ? undefined : i.piecePrice === null || i.piecePrice === '' ? null : money(i.piecePrice, 'цена штуки'),
     }
     if (row.qty <= 0 && row.pieces <= 0) throw new Reject('Пустая позиция прихода')
     return row
@@ -497,6 +503,8 @@ function productFields(src: any) {
   if (has(src, 'type')) out.type = text(src.type, 40).trim()
   if (has(src, 'cost')) out.cost = money(src.cost, 'закупочная цена')
   if (has(src, 'price')) out.price = money(src.price, 'цена')
+  // Своя цена штуки: пусто — своей нет (1.5.11)
+  if (has(src, 'piecePrice')) out.piecePrice = src.piecePrice === null || src.piecePrice === '' ? null : money(src.piecePrice, 'цена штуки')
   if (has(src, 'minStock')) out.minStock = int(src.minStock, 'минимальный остаток')
   if (has(src, 'unit')) out.unit = text(src.unit, 20).trim() || 'уп'
   if (has(src, 'unitsPerPack')) out.unitsPerPack = int(src.unitsPerPack, 'штук в упаковке', 1, 100_000)
@@ -512,7 +520,7 @@ function productFields(src: any) {
   }
   return out
 }
-export const PRODUCT_EDIT_FIELDS = ['name', 'barcode', 'category', 'type', 'cost', 'price', 'minStock', 'unit', 'unitsPerPack', 'dosage', 'analogIds', 'image']
+export const PRODUCT_EDIT_FIELDS = ['name', 'barcode', 'category', 'type', 'cost', 'price', 'piecePrice', 'minStock', 'unit', 'unitsPerPack', 'dosage', 'analogIds', 'image']
 
 export function parseProductCreate(p: any, now?: number) {
   const x = obj(obj(p, 'товар').product, 'товар')
@@ -531,6 +539,7 @@ export function parseProductCreate(p: any, now?: number) {
     type: (f.type as string) ?? '',
     cost: (f.cost as number) ?? 0,
     price: (f.price as number) ?? 0,
+    piecePrice: (f.piecePrice as number | null | undefined) ?? null,
     minStock: (f.minStock as number) ?? 5,
     unit: (f.unit as string) ?? 'уп',
     unitsPerPack: upp,

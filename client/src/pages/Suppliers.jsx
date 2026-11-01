@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { LuTruck, LuPlus, LuPencil, LuTrash2, LuBanknote, LuHandCoins, LuPackagePlus, LuCircleDollarSign, LuReceipt, LuWallet } from 'react-icons/lu'
 import Layout from '../components/Layout'
+import StickyBar from '../components/StickyBar'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import NumberInput from '../components/NumberInput'
@@ -238,14 +239,16 @@ export default function Suppliers() {
             {loadingOlder && <span className="tag-cat">{t('загружаем…')}</span>}
           </h2>
           <PeriodPicker value={period} onChange={setPeriod} tour="sup.period" />
-          <div className="toolbar" style={{ marginTop: 10 }}>
+        </div>
+        <StickyBar panel pad="10px 16px 14px">
+          <div className="toolbar">
             <input className="search" placeholder={t('Товар, штрихкод или поставщик…')} value={hq} onChange={(e) => setHq(e.target.value)} />
             <select value={supFilter} onChange={(e) => setSupFilter(e.target.value)} aria-label={t('Поставщик')} style={{ maxWidth: 260 }}>
               <option value="">{t('Все поставщики')}</option>
               {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
-        </div>
+        </StickyBar>
         <div className="table-cards-wrap">
           <table className="table-cards zak-table">
             <thead>
@@ -296,11 +299,13 @@ export default function Suppliers() {
 
       <div className="panel" data-tour="sup.list" style={{ padding: 0 }}>
         <div style={{ padding: '16px 16px 0' }}>
-          <h2 style={{ marginBottom: 12 }}><span className="h2-title"><span className="ic"><LuTruck size={17} /></span>{t('Список поставщиков')}</span></h2>
+          <h2 style={{ marginBottom: 2 }}><span className="h2-title"><span className="ic"><LuTruck size={17} /></span>{t('Список поставщиков')}</span></h2>
+        </div>
+        <StickyBar panel pad="10px 16px 14px">
           <div className="toolbar">
             <input className="search" placeholder={t('Поиск по названию или телефону…')} value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
-        </div>
+        </StickyBar>
         <div className="table-cards-wrap">
           <table className="table-cards">
             <thead>

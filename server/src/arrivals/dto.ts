@@ -18,6 +18,9 @@ export class ArrivalItemDto {
   // Новая цена продажи товара: владелец назначил её наценкой на закуп этого прихода.
   // Не прислана — цена товара остаётся прежней
   @IsOptional() @IsNumber() @Min(0) @Max(MAX_MONEY) price?: number
+  // Своя цена одной штуки (1.5.11): число — ставим товару; null или 0 — убираем (штука
+  // стоит цена упаковки / штук в упаковке). Не прислана — остаётся прежней
+  @IsOptional() @IsNumber() @Min(0) @Max(MAX_MONEY) piecePrice?: number | null
 }
 
 export class CreateArrivalDto {

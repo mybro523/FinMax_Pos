@@ -31,6 +31,8 @@ function productView(row, u) {
     type: row.type || '',
     cost: fromCents(row.costC),
     price: fromCents(row.priceC),
+    // Своя цена штуки (1.5.11): пусто — своей нет
+    piecePrice: row.pieceC === null || row.pieceC === undefined ? null : fromCents(row.pieceC),
     stock,
     minStock: row.minStock,
     unit: row.unit,

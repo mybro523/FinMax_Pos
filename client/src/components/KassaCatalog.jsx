@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { money } from '../db/store'
-import { isVesovoy, kgText, uppOf, isDivisible, sellableUnits, stockUnits, expiredUnits, hasExpired, edinica } from '../lib/units'
+import { isVesovoy, kgText, isDivisible, pricePerPiece, sellableUnits, stockUnits, expiredUnits, hasExpired, edinica } from '../lib/units'
 import { useT } from '../lib/i18n'
 
 // ── Каталог кассы ──
@@ -83,7 +83,7 @@ function KassaCatalog({ rows, total, hi, showHi, outside, loading, noProducts, o
                 <b className="kc-price">{money(p.price)}</b>
                 {isVesovoy(p)
                   ? <span className="tag-cat">{t('за 1')} {t(edinica(p))}</span>
-                  : isDivisible(p) && <span className="tag-cat">{money(p.price / uppOf(p))}/{t('шт')}</span>}
+                  : isDivisible(p) && <span className="tag-cat">{money(pricePerPiece(p))}/{t('шт')}</span>}
                 <span className={'badge ' + (net ? 'debt' : p.stock <= p.minStock ? 'low' : 'ok')}>
                   {net && stockUnits(p) <= 0 ? t('нет') : ostatok(p, t)}
                 </span>

@@ -2,6 +2,7 @@ import { useRef, useState, useMemo, useEffect } from 'react'
 import { LuWallet, LuTrendingUp, LuBoxes, LuReceipt, LuUndo2, LuHandCoins, LuPiggyBank, LuTruck, LuUsers, LuCalculator, LuCoins } from 'react-icons/lu'
 import { Link } from 'react-router-dom'
 import Layout from '../components/Layout'
+import StickyBar from '../components/StickyBar'
 import Metric from '../components/Metric'
 import { Modal, PayBadge } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
@@ -632,11 +633,13 @@ export default function Reports() {
       {tab === 'opu' && <Opu onExcelRef={opuExcelRef} />}
 
       {tab === 'detail' && <>
-      <div className="chips" data-tour="rep.period" style={{ marginBottom: 12 }}>
-        {PERIODS.map((p) => (
-          <button key={p.key} className={'chip ' + (period === p.key ? 'active' : '')} onClick={() => setPeriod(p.key)}>{t(p.label)}</button>
-        ))}
-      </div>
+      <StickyBar>
+        <div className="chips" data-tour="rep.period">
+          {PERIODS.map((p) => (
+            <button key={p.key} className={'chip ' + (period === p.key ? 'active' : '')} onClick={() => setPeriod(p.key)}>{t(p.label)}</button>
+          ))}
+        </div>
+      </StickyBar>
       <div className="row" data-tour="rep.period" style={{ maxWidth: 440, marginBottom: 16, gap: 10, alignItems: 'flex-end' }}>
         <div className="field" style={{ flex: 1, marginBottom: 0 }}>
           <label>{t('С даты')}</label>

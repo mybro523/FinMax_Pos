@@ -3,6 +3,7 @@ import { LuScale, LuReceipt, LuBanknote } from 'react-icons/lu'
 import { money } from '../../db/store'
 import { fmtDateTime } from '../../lib/time'
 import { useT } from '../../lib/i18n'
+import StickyBar from '../../components/StickyBar'
 import { poiskZapros, tovarPodhodit } from '../../lib/poisk'
 import { sverkaPostavshikov, zakupkiIOplaty } from '../../lib/otchety'
 import { Pagination, usePagination } from '../../components/Pagination'
@@ -92,9 +93,11 @@ export default function Reports({ rep, suppliers, loading, periodLabel }) {
           <h2><span className="h2-title"><span className="ic"><LuReceipt size={17} /></span>{t('Закупки и оплаты')}</span></h2>
           <span className="tag-cat">{periodLabel}</span>
         </div>
-        <div className="toolbar" style={{ padding: '0 16px 10px' }}>
-          <input className="search" placeholder={t('Товар, штрихкод или поставщик…')} value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
+        <StickyBar panel pad="8px 16px 14px">
+          <div className="toolbar">
+            <input className="search" placeholder={t('Товар, штрихкод или поставщик…')} value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+        </StickyBar>
         <div className="table-cards-wrap">
           <table className="table-cards zak-table">
             <thead>
