@@ -17,7 +17,9 @@ const n = (v) => Number(v) || 0
 // ── История движения товара ──
 // Тот же вид, что у сервера (server/src/products/history.ts): строки с датой, сколько штук
 // и остаток после каждой — от нынешнего назад
-export function productHistory(db, productId, query, now) {
+// complete — у этой кассы все документы за всё время (магазин без интернета, 1.6.0): история
+// полная, и пометка «данные компьютера» не нужна
+export function productHistory(db, productId, query, now, { complete = false } = {}) {
   const product = productById(db, productId)
   if (!product) return null
   const upp = uppOf(product)
@@ -76,13 +78,13 @@ export function productHistory(db, productId, query, now) {
     if (r.moves) units -= r.delta
   }
   // Журналы кассы короче запрошенного периода — часть истории есть только на сервере
-  const partial = !from || asked > WINDOW_DAYS.sale
-  return { productId, unitsNow, unitsPerPack: upp, rows, local: true, partial }
+  const partial = !complete && (!from || asked > WINDOW_DAYS.sale)
+  return { productId, unitsNow, unitsPerPack: upp, rows, local: !complete, partial }
 }
 
 // ── Карточка поставщика ──
 // Как у сервера (suppliers.service, findOne): долг и откуда он взялся — приходы в долг и оплаты
-export function supplierCard(db, id) {
+export function supplierCard(db, id, { complete = false } = {}) {
   if (!supplierRow(db, id)) return null
   const supplier = suppliersList(db, true).find((s) => s.id === id)
   const arrivals = listDocs(db, 'arrival')
@@ -92,5 +94,5 @@ export function supplierCard(db, id) {
   const payments = listDocs(db, 'supplierpayment')
     .filter((p) => p.supplierId === id)
     .slice(0, 500)
-  return { ...supplier, arrivals, payments, local: true }
+  return { ...supplier, arrivals, payments, local: !complete }
 }

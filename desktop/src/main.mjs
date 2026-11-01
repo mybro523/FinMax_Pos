@@ -23,7 +23,9 @@ import { fileURLToPath } from 'node:url'
 import { io } from 'socket.io-client'
 import { copyTime, createBackups, hostFolderOf, openOrRestore } from './backup.mjs'
 import { chooseDiskFolder, diskDue as diskDueOf, diskLabel, DISK_KEEP, DISK_ROOTS, writeDiskCopy } from './disk-backup.mjs'
-import { readBuildConfig, resolveApiUrl, resolveUpdateFeed, serverOrigin } from './config.mjs'
+import { readBuildConfig, resolveApiUrl, resolveLicenceKey, resolveUpdateFeed, serverOrigin } from './config.mjs'
+import { machineIdOf, readMachineGuid } from './machine.mjs'
+import { computerRawOf, formatComputer } from './local/licence-code.mjs'
 import { createGateway } from './gateway.mjs'
 import { createCustomerScreen } from './customer-window.mjs'
 import { safePdfName, safeXlsxName, xlsxBytes } from './files.mjs'
@@ -49,6 +51,9 @@ import { createWindowState, MIN_SIZE, settleSize, windowKey } from './window-sta
 import { applyRestore, describeCopy, findCopies, requestRestore, RESTORE_FILE, saveCopyTo } from './restore.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+// Магазин без интернета: копия на диск — каждый день, напоминание о флешке — раз в неделю
+const SOLO_DISK_EVERY_MS = 86400000
+const USB_EVERY_MS = 7 * 86400000
 
 // ── Ссылки компании FinMax ──
 // Для страницы «О компании» (client/src/lib/company.js). Окно называет только имя
@@ -283,6 +288,37 @@ async function start() {
     send: (type, payload) => gateway.serverEvent(type, payload),
   })
 
+  // ── Магазин без интернета (1.6.0): код этого компьютера и ключ кодов активации ──
+  // Код компьютера — из номера Windows (machine.mjs). Подменить номер окружением можно только
+  // при запуске из исходников: проверка запускает «два компьютера» на одном
+  // Запомненный номер (запасной, если реестр не ответил) хранится зашифрованным средствами
+  // Windows: общая база, унесённая на другой компьютер, своего номера туда не принесёт
+  const rememberedMachine = () => {
+    try {
+      const stored = getMeta(core, 'machineId') || ''
+      return stored ? sealer.open(stored) : ''
+    } catch {
+      return ''
+    }
+  }
+  const machineId = machineIdOf({
+    read: () => readMachineGuid({ log }),
+    remembered: rememberedMachine(),
+    remember: (id) => setMeta(core, 'machineId', sealer.seal(id) || ''),
+    override: DEV ? process.env.FINMAX_MACHINE_ID || '' : '',
+  })
+  const computerRaw = machineId ? computerRawOf(machineId) : null
+  const licenceKey = resolveLicenceKey({ packaged: app.isPackaged, env: process.env, built })
+  // Работает ли этот компьютер магазином без интернета: копия на диск тогда — каждый день, а
+  // раз в неделю напоминание сохранить копию на флешку (база больше нигде не лежит)
+  const soloHere = () => {
+    try {
+      return getMeta(core, 'appMode') === 'standalone' && !!core.prepare("SELECT 1 FROM accounts WHERE pharmacyCode = 'local' LIMIT 1").get()
+    } catch {
+      return false
+    }
+  }
+
   // ── Кто отвечает окну: локальная база или сервер ──
   // net.fetch идёт через сетевую часть Chromium: она знает про системный прокси
   // и сертификаты Windows. В магазине, где интернет раздаётся через прокси, обычный
@@ -303,8 +339,11 @@ async function start() {
     openFile: (file, name) => opening(name, PHARMACY_SCHEMA)(file),
     emit: (type, payload) => toWindow(type, type === 'status' ? fullStatus(payload) : payload),
     onSession: () => realtime.sessionChanged(),
+    standalone: { publicKey: licenceKey, computerRaw, computerCode: computerRaw ? formatComputer(computerRaw) : '' },
   })
   log.info(`касса ${gateway.deviceId}`)
+  if (!licenceKey) log.warn('ключа кодов активации нет — программа без интернета не активируется')
+  if (!computerRaw) log.warn('номер компьютера не прочитан — программа без интернета не активируется')
 
   // ── Обмен кассами по местной сети ──
   // Кассы одного магазина передают друг другу сделанное без интернета (lan.mjs).
@@ -431,7 +470,7 @@ async function start() {
     return diskRunning
   }
   const diskDue = () =>
-    diskDueOf({ lastAt: getMeta(core, 'diskCopyAt'), lastLic: getMeta(core, 'diskCopyLicAt'), now: appNow(), lic: clock.lic() })
+    diskDueOf({ lastAt: getMeta(core, 'diskCopyAt'), lastLic: getMeta(core, 'diskCopyLicAt'), now: appNow(), lic: clock.lic(), ...(soloHere() ? { every: SOLO_DISK_EVERY_MS } : {}) })
   // Пора копия на диск — она снимает и обычную; иначе — обычная, если пора
   const backupTick = () => (diskDue() && hasShopDb() ? diskCopyNow() : backupDue() && backupNow())
   const backupTimer = setInterval(backupTick, 60 * 60 * 1000)
@@ -505,8 +544,20 @@ async function start() {
           running: !!diskRunning,
           keep: DISK_KEEP,
         },
+        // Магазин без интернета: копия на флешке — когда сохраняли последний раз и пора ли снова
+        usb: soloHere() ? usbState() : null,
       },
     }
+  }
+  function usbState() {
+    const at = Number(getMeta(core, 'usbCopyAt')) || 0
+    const lic = Number(getMeta(core, 'usbCopyLicAt')) || 0
+    // На флешку ещё не сохраняли — неделя считается от заведения магазина: в первую же минуту
+    // напоминать не о чем
+    const since = at || Number(getMeta(core, 'soloSince')) || 0
+    // Пора — по времени программы или по времени срока (часы компьютера могут врать)
+    const due = !since || appNow() - since >= USB_EVERY_MS || (lic > 0 && clock.lic() - lic >= USB_EVERY_MS)
+    return { at: at ? new Date(at).toISOString() : null, due }
   }
   const pushStatus = () => toWindow('status', fullStatus())
 
@@ -573,6 +624,14 @@ async function start() {
   const denied = { status: 403, date: null, data: { message: 'Запрос отклонён программой' } }
 
   ipcMain.handle('api:request', (event, req) => (trusted(event) ? gateway.request(req) : denied))
+  // ── Магазин без интернета (1.6.0): до входа — способ работы, активация, магазин, сброс ──
+  // Код активации и код сброса подписаны поставщиком программы — ввести их может любой, кто за
+  // компьютером: без подписи они не пройдут. Магазин заводится один раз
+  ipcMain.handle('standalone:info', (event) => (trusted(event) ? gateway.standalone.info() : null))
+  ipcMain.handle('standalone:mode', (event, mode) => (trusted(event) ? gateway.standalone.chooseMode(String(mode ?? '')) : null))
+  ipcMain.handle('standalone:activate', (event, code) => (trusted(event) ? gateway.standalone.activate(String(code ?? '').slice(0, 200)) : null))
+  ipcMain.handle('standalone:setup', async (event, req) => (trusted(event) ? gateway.standalone.setupShop(req && typeof req === 'object' ? req : {}) : null))
+  ipcMain.handle('standalone:reset', async (event, req) => (trusted(event) ? gateway.standalone.resetPassword(req && typeof req === 'object' ? req : {}) : null))
   ipcMain.handle('session:clear', (event) => {
     if (!trusted(event)) return false
     gateway.logout()
@@ -718,6 +777,9 @@ async function start() {
         Database,
       })
       log.info('копия базы сохранена: ' + path)
+      // Магазин без интернета: напоминание «сохраните копию на флешку» снимается на неделю
+      setMeta(core, 'usbCopyAt', String(appNow()))
+      setMeta(core, 'usbCopyLicAt', String(clock.lic()))
       shell.showItemInFolder(path)
       return { ok: true, path }
     } catch (e) {

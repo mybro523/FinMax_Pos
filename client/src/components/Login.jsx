@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LuLogIn, LuTriangleAlert, LuScanLine, LuBoxes, LuTrendingUp, LuWifiOff, LuKeyboard } from 'react-icons/lu'
 import { login } from '../db/auth'
@@ -6,7 +6,8 @@ import { PasswordInput, BrandWord } from './ui'
 import WindowButtons from './WindowButtons'
 import VirtualKeyboard, { poleDlyaVvoda } from './VirtualKeyboard'
 import { useT, useLang, setLang, LANGS } from '../lib/i18n'
-import { isDesktop } from '../lib/desktop'
+import { bridge, isDesktop } from '../lib/desktop'
+import { ActivateCard, ModeChoice, ResetCard, SetupCard, SoloLine } from './BezInterneta'
 import { kassaFirst } from '../lib/permissions'
 import emblem from '../assets/brand/emblem-192.webp'
 import logoEmblem from '../assets/brand/logo-emblem.webp'
@@ -27,6 +28,26 @@ const poleVhoda = {
     return poleDlyaVvoda()
   },
 }
+// Русский / таджикский — на форме входа и под экранами до входа
+function LangSwitch({ lang, t }) {
+  return (
+    <div className="lang-switch" role="group" aria-label={t('Язык')}>
+      {LANGS.map((l) => (
+        <button
+          type="button"
+          key={l.key}
+          className={lang === l.key ? 'active' : ''}
+          aria-pressed={lang === l.key}
+          title={l.label}
+          onClick={() => setLang(l.key)}
+        >
+          {l.key === 'tg' ? 'TJ' : 'RU'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 const POINTS = [
   { Icon: LuScanLine, text: 'Продажи по сканеру и поштучно' },
   { Icon: LuBoxes, text: 'Партии, остатки и сроки годности' },
@@ -44,16 +65,72 @@ export default function Login() {
   const [kb, setKb] = useState(false)
   const navigate = useNavigate()
 
+  // ── Магазин без интернета (1.6.0) ──
+  // Программа спрашивает основную часть: выбран ли способ работы, активирована ли, заведён ли
+  // магазин. От этого зависит, что показать вместо формы входа
+  const [solo, setSolo] = useState(null)
+  const [soloView, setSoloView] = useState('')
+  const [note, setNote] = useState('')
+  const refreshSolo = useCallback(() => {
+    if (!bridge?.standalone) return Promise.resolve(null)
+    return bridge.standalone.info().then(
+      (i) => {
+        setSolo(i)
+        return i
+      },
+      // Основная часть не ответила — обычный вход (false: спрашивали, ответа нет)
+      () => {
+        setSolo(false)
+        return null
+      },
+    )
+  }, [])
+  useEffect(() => {
+    refreshSolo()
+  }, [refreshSolo])
+  const soloMode = solo?.mode === 'standalone'
+  // Пока программа не ответила, что показывать, — ничего: иначе при первом запуске на миг
+  // мелькала бы форма входа перед выбором способа работы
+  const panel = solo === null
+    ? bridge?.standalone ? '' : 'login'
+    : !solo
+      ? 'login'
+      : solo.mode === '' && !solo.cloudAccounts
+      ? 'mode'
+      : soloMode && (!solo.activation?.active || soloView === 'renew')
+        ? 'activate'
+        : soloMode && !solo.shop
+          ? 'setup'
+          : soloMode && soloView === 'reset'
+            ? 'reset'
+            : 'login'
+
+  // Магазин заведён — сразу вход владельца тем же паролем
+  async function enterAfterSetup(login, password) {
+    await refreshSolo()
+    setName(login)
+    try {
+      await login_(login, password)
+    } catch (e) {
+      setErr(e.message || t('Не удалось войти'))
+    }
+  }
+  async function login_(n, p) {
+    const user = await login(n, p)
+    if (kassaFirst(user)) navigate('/pos', { replace: true })
+    return user
+  }
+
   async function submit(e) {
     e.preventDefault()
     if (busy) return
     setErr('')
     setBusy(true)
+    setNote('')
     try {
-      const user = await login(name.trim(), pw)
       // Кассир — всегда в кассу: экран могли заблокировать в другом разделе (владелец
       // ушёл из «Настроек»), и после входа кассир оказался бы там
-      if (kassaFirst(user)) navigate('/pos', { replace: true })
+      await login_(name.trim(), pw)
     } catch (e) {
       setErr(e.message || t('Не удалось войти'))
     } finally {
@@ -94,8 +171,37 @@ export default function Login() {
             <WindowButtons />
           </div>
         )}
+        {panel === 'mode' && <ModeChoice onChosen={() => refreshSolo()} />}
+        {panel === 'activate' && (
+          <ActivateCard
+            info={solo}
+            onDone={() => {
+              setSoloView('')
+              // Прежняя ошибка входа закрыла бы это сообщение (оно показывается, когда ошибки нет)
+              setErr('')
+              setNote(t('Код принят — программа активирована.'))
+              refreshSolo()
+            }}
+            // Назад — к выбору способа работы (пока магазин не заведён) или к форме входа
+            onBack={soloView === 'renew' ? () => setSoloView('') : !solo?.shop ? () => bridge.standalone.mode('').then(() => refreshSolo()) : null}
+          />
+        )}
+        {panel === 'setup' && <SetupCard onDone={enterAfterSetup} />}
+        {panel === 'reset' && (
+          <ResetCard
+            info={solo}
+            onBack={() => setSoloView('')}
+            onDone={(login) => {
+              setSoloView('')
+              setName(login)
+              setPw('')
+              setErr('')
+              setNote(t('Пароль изменён — войдите с новым паролем.'))
+            }}
+          />
+        )}
         {/* data-vkb-lift: экранная клавиатура поднимает форму над собой — «Войти» и язык видны */}
-        <form className="auth-card" onSubmit={submit} data-vkb-lift>
+        {panel === 'login' && <form className="auth-card" onSubmit={submit} data-vkb-lift>
           <div className="auth-brandline">
             <img src={emblem} alt="" width="40" height="40" />
             <BrandWord />
@@ -112,6 +218,7 @@ export default function Login() {
             <PasswordInput id="lg-pw" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" />
           </div>
 
+          {note && !err && <div className="note ok auth-err" role="status" data-testid="solo-note"><span>{note}</span></div>}
           {err && (
             <div className="note err auth-err" role="alert">
               <LuTriangleAlert size={16} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{err}</span>
@@ -122,24 +229,32 @@ export default function Login() {
             <span className="ic"><LuLogIn size={17} /></span> {busy ? t('Вход…') : t('Войти')}
           </button>
 
+          {soloMode && <SoloLine info={solo} onReset={() => setSoloView('reset')} onRenew={() => setSoloView('renew')} />}
+
+          {/* «С интернетом» выбрали по ошибке, а войти ещё никто не успел — выбор можно поменять */}
+          {solo && solo.mode === 'cloud' && !solo.cloudAccounts && (
+            <button
+              type="button"
+              className="link solo-change-mode"
+              onClick={() => bridge.standalone.mode('').then(() => refreshSolo(), () => {})}
+              data-testid="solo-change-mode"
+            >
+              {t('Изменить способ работы')}
+            </button>
+          )}
+
           <div className="auth-foot">
             <span>{t('Логин и пароль выдаёт владелец')}</span>
-            <div className="lang-switch" role="group" aria-label={t('Язык')}>
-              {LANGS.map((l) => (
-                <button
-                  type="button"
-                  key={l.key}
-                  className={lang === l.key ? 'active' : ''}
-                  aria-pressed={lang === l.key}
-                  title={l.label}
-                  onClick={() => setLang(l.key)}
-                >
-                  {l.key === 'tg' ? 'TJ' : 'RU'}
-                </button>
-              ))}
-            </div>
+            <LangSwitch lang={lang} t={t} />
           </div>
-        </form>
+        </form>}
+
+        {/* Язык — и на экранах до входа: выбор способа работы, активация, магазин, сброс пароля */}
+        {panel && panel !== 'login' && (
+          <div className="auth-lang">
+            <LangSwitch lang={lang} t={t} />
+          </div>
+        )}
 
         {/* Клавиатура открыта — кнопки нет: она под клавишами, а закрыть можно «Закрыть» на самой клавиатуре */}
         {!kb && (
