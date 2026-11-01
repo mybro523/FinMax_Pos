@@ -7,7 +7,9 @@
 }
 
 vps-04688c58.vps.ovh.net {
-	handle /panel* {
+	# Portainer отвечает в корне (--base-url — только для его ссылок): /panel отрезается
+	redir /panel /panel/ 308
+	handle_path /panel/* {
 		reverse_proxy portainer:9000
 	}
 	handle {
