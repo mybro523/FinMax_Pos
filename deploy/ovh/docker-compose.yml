@@ -69,7 +69,8 @@ services:
       - '443:443'
       - '443:443/udp'
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Папкой, не файлом: файл, заменённый обновлением кода, Docker внутри контейнера не видит
+      - ./caddy:/etc/caddy:ro
       - /srv/finmax/caddy/data:/data
       - /srv/finmax/caddy/config:/config
     depends_on:
