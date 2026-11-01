@@ -8,6 +8,7 @@ import { printConfig } from '../lib/print'
 import { activeDoc, closePechat, onPechat, pdfName, pechatState, printTitle } from '../lib/pechat'
 import { useAuth } from '../db/auth'
 import { translate as tr, useT } from '../lib/i18n'
+import { cleanLogo } from '../lib/logoClean.js'
 
 // ── Экран печати программы для Windows ──
 //
@@ -351,11 +352,19 @@ function TapeView({ tape, width }) {
   if (!tape) return <div className="pp-msg"><span className="pp-spin" aria-hidden="true" /> {tr('Готовим чек…')}</div>
   return (
     <div className="pp-tape" style={{ '--cols': width }} data-testid="pp-tape">
-      {tape.lines.map((l, i) => (
-        <div key={i} className={'pp-tl' + (l.center ? ' c' : '') + (l.bold ? ' b' : '') + (l.big ? ' big' : '') + (l.invert ? ' inv' : '')}>
-          <span>{l.text || ' '}</span>
-        </div>
-      ))}
+      {tape.lines.map((l, i) =>
+        // Логотип магазина (1.6.4): программа присылает его уже чёрными точками во всю ширину
+        // ленты — ровно таким, каким его напечатает принтер
+        l.image ? (
+          <div key={i} className="pp-tl pp-img">
+            <img src={cleanLogo(l.image) || undefined} alt="" data-testid="pp-tape-logo" />
+          </div>
+        ) : (
+          <div key={i} className={'pp-tl' + (l.center ? ' c' : '') + (l.bold ? ' b' : '') + (l.big ? ' big' : '') + (l.invert ? ' inv' : '')}>
+            <span>{l.text || ' '}</span>
+          </div>
+        ),
+      )}
     </div>
   )
 }

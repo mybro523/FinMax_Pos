@@ -6,6 +6,8 @@
 // Здесь — что выбрать и что пропустить; модуль проверяется обычными тестами.
 
 // Где показывать: сам на втором экране, выключен или на выбранном экране
+import { cleanLogo } from './print/logo.mjs'
+
 export const SCREEN_MODES = ['auto', 'off', 'pick']
 
 // Настройка этого компьютера (settings.json). Экран — номер экрана Windows строкой
@@ -33,7 +35,11 @@ export function pickDisplay(cfg, displays, mainId) {
 
 // ── Что показать ──
 // Только строки и только с пределами: окно покупателя ничего не считает и ничего не
-// разбирает — оно показывает то, что собрало окно кассы
+// разбирает — оно показывает то, что собрало окно кассы.
+//
+// Логотип магазина (1.6.4) добавляет основная часть программы (customer-window.mjs) — из той
+// картинки, что хранит у себя: только data URL PNG или JPEG, иначе — без логотипа
+export const screenLogo = (v) => cleanLogo(v)
 const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '')
 export const SCREEN_VIEWS = ['idle', 'cart', 'thanks', 'test']
 const LABELS = ['welcome', 'total', 'discount', 'thanks', 'change', 'test']

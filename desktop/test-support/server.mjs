@@ -75,7 +75,11 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
             ? ((s.roles || []).find((r) => r.id === u.roleId)?.system ?? null)
             : 'cashier',
     ...(Array.isArray(u.permissions) ? { permissions: u.permissions } : {}),
-    pharmacy: u.role === 'superadmin' ? null : { code: s.pharmacy.code, name: s.pharmacy.name },
+    // logoAt — когда поставили логотип (1.6.4): есть в магазине — отдаём, как настоящий сервер
+    pharmacy:
+      u.role === 'superadmin'
+        ? null
+        : { code: s.pharmacy.code, name: s.pharmacy.name, ...('logoAt' in s.pharmacy ? { logoAt: s.pharmacy.logoAt } : {}) },
     subscription:
       u.role === 'superadmin'
         ? null
@@ -504,6 +508,8 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
     const forced = await s.override?.(method, route, body)
     if (forced) {
       if (forced.throw) throw new TypeError('net::ERR_CONNECTION_RESET')
+      // Ответил не наш сервер: страница входа в чужой Wi-Fi вместо данных
+      if (typeof forced.html === 'string') return { status: forced.status, ok: false, headers: { get: () => date }, text: async () => forced.html }
       return json(forced.status, forced.body, date)
     }
 
@@ -526,6 +532,14 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
     }
 
     if (route === '/auth/me') return json(200, { ...view(u), impersonatedBy: null }, date)
+    // Логотип магазина (1.6.4). logoRoute: false — сервер прежней версии, такого адреса нет.
+    // ?at=<отметка> совпала с нынешней — короткий ответ без картинки, как у настоящего сервера
+    if (route === '/shop/logo' && method === 'GET' && s.pharmacy.logoRoute !== false) {
+      const known = new URLSearchParams(path.split('?')[1] || '').get('at')
+      const at = s.pharmacy.logoAt ?? null
+      if (at && s.pharmacy.logo && known && known === at) return json(200, { at, same: true }, date)
+      return json(200, at ? { logo: s.pharmacy.logo || '', at } : { logo: '', at: null }, date)
+    }
 
     if (route === '/auth/change-password' && method === 'POST') {
       if (body?.oldPassword !== u.password) return json(400, { statusCode: 400, message: 'Текущий пароль неверный' }, date)

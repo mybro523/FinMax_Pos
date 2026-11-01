@@ -49,6 +49,11 @@ body {
   max-width: 90vw; font-size: clamp(32px, 10vh, 130px); font-weight: 700; letter-spacing: -0.02em; line-height: 1.22;
   overflow-wrap: anywhere; text-wrap: balance; max-height: 3.66em; overflow: hidden;
 }
+/* Логотип магазина (1.6.4) — на белой карточке: тёмный логотип на синем фоне пропал бы */
+.idle-logo {
+  display: block; max-width: min(60vw, 900px); max-height: 28vh; width: auto; height: auto; object-fit: contain;
+  background: #fff; border-radius: 18px; padding: 2vh 2.4vw; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+}
 .idle-welcome { font-size: clamp(20px, 5vh, 64px); font-weight: 500; color: var(--gold); }
 
 /* Корзина: свежая строка — внизу, список листается к ней сам */

@@ -9,6 +9,7 @@
 // Здесь — только составление байтов: что именно уйдёт в принтер. Как оно туда
 // попадёт (по сети или через очередь печати Windows), решается отдельно
 // (transport.mjs). Модуль ни от чего не зависит и проверяется обычными тестами.
+import { rasterBytes } from './logo.mjs'
 
 // ── Буквы ──
 // Принтер не знает Юникода: у него таблица на 256 знаков, и какая именно — выбирают
@@ -150,6 +151,13 @@ export function escpos({ codepage = 'cp866', width = 32 } = {}) {
     },
     rule: (ch = '-') => api.line(ch.repeat(width)),
     feed: (n = 1) => raw(0x1b, 0x64, Math.max(0, Math.min(10, n))),
+    // Подача на n точек (ESC J): маленький просвет — например, между логотипом и полосой
+    feedDots: (n) => raw(0x1b, 0x4a, Math.max(0, Math.min(255, Math.round(n)))),
+    // Картинка растром (GS v 0): логотип магазина, уже чёрно-белый (print/logo.mjs)
+    raster(mono) {
+      chunks.push(rasterBytes(mono))
+      return api
+    },
     // Отрезать ленту (с подачей до ножа)
     cut: () => raw(0x1d, 0x56, 0x42, 0x00),
     // Открыть денежный ящик, подключённый к принтеру
@@ -257,11 +265,19 @@ export function layoutTicket(ticket, { width = 32 } = {}) {
   return out
 }
 
-// Чек начинается сразу с названия магазина: эмблемы программы на ленте нет — чек
-// покупателя несёт имя магазина
-export function renderTicket(ticket, { width = 32, codepage = 'cp866', cut = true, drawer = false } = {}) {
+// Чек начинается с названия магазина: эмблемы программы на ленте нет — чек покупателя
+// несёт имя магазина. Если владелец сервиса поставил магазину логотип (1.6.4), над полосой с
+// названием — он: logo — чёрно-белая полоса во всю ширину ленты (print/logo.mjs, toMono),
+// по центру уже на месте
+export function renderTicket(ticket, { width = 32, codepage = 'cp866', cut = true, drawer = false, logo = null } = {}) {
   const p = escpos({ codepage, width }).init()
   if (drawer) p.drawer()
+  if (logo && logo.height > 0 && logo.bytesPerRow > 0 && logo.bits?.length === logo.bytesPerRow * logo.height) {
+    p.align('center')
+    p.raster(logo)
+    p.feedDots(16)
+    p.align('left')
+  }
 
   for (const l of layoutTicket(ticket, { width })) {
     p.align(l.center ? 'center' : 'left')

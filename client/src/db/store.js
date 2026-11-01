@@ -328,8 +328,25 @@ export function useConnection() {
 // присылает названия изменившихся разделов. Обратной зависимости нет: связь
 // знает про данные, данные про связь — только через эти две функции.
 let realtimeUp = false
+// Кому сказать «связь вернулась»: тем, кто держит своё вне общего кэша и мог пропустить
+// сигнал, пока связи не было (логотип магазина — lib/logo.js)
+const upListeners = new Set()
+export function onRealtimeUp(fn) {
+  upListeners.add(fn)
+  return () => upListeners.delete(fn)
+}
 export function setRealtimeConnected(up) {
+  const was = realtimeUp
   realtimeUp = !!up
+  if (realtimeUp && !was) {
+    for (const fn of [...upListeners]) {
+      try {
+        fn()
+      } catch {
+        /* один сломавшийся слушатель не должен мешать остальным */
+      }
+    }
+  }
 }
 
 // Сигнал «раздел изменился» для страниц, которые держат данные у себя, а не в

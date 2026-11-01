@@ -1,5 +1,5 @@
 import { getUser } from '../db/auth'
-import PrintDoc from './PrintDoc'
+import PrintDoc, { PrintLogo } from './PrintDoc'
 import { useT } from '../lib/i18n'
 import { opuSheet } from '../lib/opu'
 import { fmtDate, fmtDateTime } from '../lib/time'
@@ -34,6 +34,8 @@ export default function OpuSheet({ d, from, to }) {
     <PrintDoc prio={1} kind="opu" title={t('Отчёт о прибылях и убытках')}>
     <div className="opu-sheet" data-testid="opu-sheet">
       <div className="opu-sheet-page">
+        {/* Логотип магазина (1.6.4) — над тёмно-синей шапкой, по центру */}
+        <PrintLogo className="opu-logo" />
         <div className="opu-sheet-title">
           <div className="opu-sheet-h">{t('Отчёт о прибылях и убытках')}</div>
           <div className="opu-sheet-sub">

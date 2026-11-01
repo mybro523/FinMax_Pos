@@ -77,6 +77,7 @@ import {
   waitsForPeer,
 } from './local/lan.mjs'
 import { checkRequest, createRemote, DESKTOP_TOKEN, isLinkFailure } from './net.mjs'
+import { cleanLogo } from './print/logo.mjs'
 import { parseAddress } from './lan.mjs'
 import { createSync } from './sync.mjs'
 
@@ -161,6 +162,8 @@ export function createGateway({
   openFile = (file) => ({ db: openDb(file, PHARMACY_SCHEMA), restored: null }),
   log = { info() {}, warn() {}, error() {} },
   timers,
+  // Логотип магазина сменился (1.6.4) — экран покупателя показывает новый сразу
+  onLogo = () => {},
 }) {
   const deviceId = deviceIdOf(core)
   // Обмен называет серверу ключ кассы: под её номером сервер слушает только того,
@@ -1103,6 +1106,9 @@ export function createGateway({
       session.activate(user.id)
       onSession()
       if (acc) enter(acc)
+      // Логотип убрали, пока программа была закрыта или без связи: окно за ним не пойдёт
+      // (сервер сказал «логотипа нет») — стираем и копию кассы, иначе лента печатала бы прежний
+      if (ph) logoFromView(ph, user.pharmacy)
       // Настоящий ключ в окно не уходит — только пометка «вход выполнен»
       return { ...res, data: { ...res.data, token: DESKTOP_TOKEN } }
     }
@@ -1138,6 +1144,7 @@ export function createGateway({
       const res = await remote(req, token)
       if (res.status === 200 && res.data?.id) {
         remember(res.data)
+        if (pharmacy && pharmacy.code === acc.pharmacyCode) logoFromView(pharmacy, res.data.pharmacy)
         return res
       }
       if (res.status === 401 || res.status === 403) {
@@ -1180,6 +1187,92 @@ export function createGateway({
       return { ...res, data: { ...res.data, token: DESKTOP_TOKEN } }
     }
     return res
+  }
+
+  // ── Логотип магазина (1.6.4) ──
+  // Картинку ставит владелец сервиса; касса печатает её на чеках и ленте и показывает на
+  // экране покупателя — и без интернета. Поэтому последняя полученная картинка лежит в базе
+  // магазина (meta: shopLogo, shopLogoAt). Окно спрашивает GET /shop/logo: есть связь — ответ
+  // сервера (он же — в базу), нет связи или сервер прежней версии — то, что лежит.
+  const LOGO_KEY = 'shopLogo'
+  const LOGO_AT_KEY = 'shopLogoAt'
+  let logoMemo = { code: '', logo: '', at: null }
+  function storedLogo(ph) {
+    if (logoMemo.code !== ph.code) {
+      const logo = cleanLogo(getMeta(ph.db, LOGO_KEY) || '')
+      logoMemo = { code: ph.code, logo, at: logo ? getMeta(ph.db, LOGO_AT_KEY) || null : null }
+    }
+    return logoMemo
+  }
+  function keepLogo(ph, logo, at) {
+    const was = storedLogo(ph)
+    const clean = cleanLogo(logo)
+    const when = clean && typeof at === 'string' ? at : null
+    if (was.logo === clean && was.at === when) return
+    inTx(ph.db, () => {
+      setMeta(ph.db, LOGO_KEY, clean)
+      setMeta(ph.db, LOGO_AT_KEY, when || '')
+    })
+    logoMemo = { code: ph.code, logo: clean, at: when }
+    try {
+      onLogo()
+    } catch {
+      /* экран покупателя не важнее кассы */
+    }
+  }
+  // Сверка с сервером. Ответы могут прийти не по порядку (окно, «связь вернулась» и сигнал
+  // «магазин изменился» спрашивают почти разом, а картинка едет секунды) — записывается только
+  // ответ на последний вопрос. У сервера спрашиваем со своей отметкой: та же картинка — он
+  // ответит коротко ({ same: true }), без сотен килобайт. Отказ сервера (401/403) — возвращаем
+  let logoSeq = 0
+  async function fetchLogo(ph, acc, timeoutMs) {
+    const token = session.tokenOf(acc.id)
+    if (!token) return null
+    const my = ++logoSeq
+    const kept = storedLogo(ph)
+    const known = kept.logo && kept.at ? kept.at : ''
+    const res = await remote({ method: 'GET', path: '/shop/logo' + (known ? '?at=' + encodeURIComponent(known) : ''), timeoutMs }, token)
+    // Ответил не наш сервер (вход в чужой Wi-Fi) — как «нет связи»: сессию не трогаем
+    if (res.foreign) return null
+    if (res.status === 200 && res.data && typeof res.data === 'object') {
+      if (my === logoSeq && !(res.data.same === true && known && res.data.at === known)) keepLogo(ph, res.data.logo, res.data.at)
+      return null
+    }
+    if (res.status === 401 || res.status === 403) {
+      denied(acc, res)
+      return res
+    }
+    return null
+  }
+  // Сверка в фоне (связь вернулась, «кто я» сказал «логотипа нет»): сменился — окну сигнал
+  // «магазин изменился», оно заберёт картинку у кассы
+  async function refreshLogo() {
+    const acc = activeAccount()
+    if (!acc || !pharmacy || pharmacy.code !== acc.pharmacyCode) return
+    const ph = pharmacy
+    const before = storedLogo(ph)
+    await fetchLogo(ph, acc)
+    const after = storedLogo(ph)
+    if (after.logo !== before.logo || after.at !== before.at) send('changed', ['shop'])
+  }
+  // «Логотипа нет» в ответе «кто я» или входа (logoAt: null). У кассы картинки и нет — делать
+  // нечего. Есть — сверяемся с сервером, а не стираем сразу: «кто я» мог отстать от смены
+  // логотипа (сервер помнит сотрудника 10 секунд). Отметки нет вовсе (сервер прежней версии) —
+  // ничего не трогаем
+  function logoFromView(ph, view) {
+    if (view && view.logoAt === null && storedLogo(ph).logo) refreshLogo().catch(() => {})
+  }
+  // Окну отдаём картинку целиком (это не сеть). Связь есть — сначала сверка с сервером. Связи нет
+  // (или касса уже знает, что она плохая) — сразу то, что лежит у кассы, а сверка — в фоне:
+  // окно не ждёт пятнадцать секунд, чек печатается с логотипом
+  async function shopLogo(req, acc) {
+    const ph = openPharmacy(acc.pharmacyCode)
+    if (ph.sync.isOnline()) {
+      const denial = await fetchLogo(ph, acc, req.timeoutMs)
+      if (denial) return denial
+    } else refreshLogo().catch(() => {})
+    const now = storedLogo(ph)
+    return reply(200, { logo: now.logo, at: now.at })
   }
 
   // ── Готова ли локальная база ──
@@ -1372,6 +1465,7 @@ export function createGateway({
       if (!acc) return refuse(401, MESSAGES.needLogin)
 
       if (route === '/auth/me' && req.method === 'GET') return await me(req, acc)
+      if (route === '/shop/logo' && req.method === 'GET') return await shopLogo(req, acc)
       if (route === '/auth/change-password' && req.method === 'POST') return await changePassword(req, acc)
 
       const found = matchLocal(req.method, req.path)
@@ -1445,6 +1539,8 @@ export function createGateway({
       if (type === 'connect') {
         // Связь вернулась — отправляем накопленное и забираем изменившееся
         pharmacy.sync.run().catch(() => {})
+        // …и сверяем логотип магазина (1.6.4)
+        refreshLogo().catch(() => {})
       } else if (type === 'disconnect') {
         // Постоянное соединение оборвалось. Возможно, пропал интернет — выясняем это
         // сейчас, а не при очередной сверке через пять минут: кассир должен увидеть
@@ -1547,6 +1643,14 @@ export function createGateway({
     activeRole: () => activeAccount()?.role || '',
     // Название магазина вошедшего — как его задали в панели (пробный чек печатается с ним)
     activeShop: () => String(activeAccount()?.pharmacyName || '').trim(),
+    // Логотип магазина вошедшего (data URL или ''): печать на ленте и экран покупателя
+    // Логотип открытого магазина. За кассой никого (вышли) — всё равно его: экран покупателя
+    // после выхода остаётся с названием магазина, пусть и с логотипом. Печатать без входа нельзя
+    shopLogo() {
+      const acc = activeAccount()
+      if (!pharmacy || (acc && pharmacy.code !== acc.pharmacyCode)) return ''
+      return storedLogo(pharmacy).logo
+    },
     // Есть ли у вошедшего право (любое из перечисленных). Владелец может всё
     activeCan: (...keys) => hasPerm(activeAccount(), ...keys),
 
