@@ -1,0 +1,63 @@
+# ── FinMax POS: сервер программы и база на своём сервере (OVH, vps-04688c58.vps.ovh.net) ──
+#
+# Три части:
+#   db    — PostgreSQL. Наружу не открыт: к нему ходит только сервер программы.
+#   api   — сервер программы (server/Dockerfile, тот же, что был на Railway).
+#   caddy — вход снаружи: https (сертификат получает и продлевает сам), передаёт запросы
+#           серверу программы, в том числе постоянное соединение (WebSocket).
+#
+# Всё, что хранится, — на диске сервера в /srv/finmax (база, копии, сертификаты); секреты —
+# в /srv/finmax/db.env и /srv/finmax/finmax.env (их заводит setup.sh, в репозиторий не попадают).
+# Как ставить и обновлять — README.md рядом.
+name: finmax
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    env_file: /srv/finmax/db.env
+    environment:
+      POSTGRES_USER: finmax
+      POSTGRES_DB: finmax
+    volumes:
+      - /srv/finmax/pgdata:/var/lib/postgresql/data
+    shm_size: 256mb
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U finmax -d finmax']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build: ../../server
+    image: finmax-api
+    restart: unless-stopped
+    env_file:
+      - /srv/finmax/finmax.env
+      - /srv/finmax/commit.env
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      # Перед сервером — один Caddy (см. trust proxy в server/src/main.ts)
+      TRUST_PROXY_HOPS: '1'
+      # Автоматические копии магазинов, которые делает сам сервер (backup-schedule.service.ts)
+      BACKUP_DIR: /backups
+    volumes:
+      - /srv/finmax/backups/app:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /srv/finmax/caddy/data:/data
+      - /srv/finmax/caddy/config:/config
+    depends_on:
+      - api

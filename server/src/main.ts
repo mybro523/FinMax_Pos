@@ -108,7 +108,11 @@ async function bootstrap() {
   // Если Railway когда-нибудь добавит третий прокси, это снова сломается молча.
   // Поэтому есть раздел /admin/schema/client и сквозная проверка: они сверяют,
   // совпадает ли адрес, который видит сервер, с тем, что прислал прокси.
-  app.set('trust proxy', 2)
+  //
+  // Свой сервер (deploy/ovh): перед приложением один Caddy, и чужой X-Forwarded-For он не
+  // пропускает — там TRUST_PROXY_HOPS=1. Без переменной — как на Railway, два
+  const hops = Number(process.env.TRUST_PROXY_HOPS)
+  app.set('trust proxy', Number.isInteger(hops) && hops >= 0 && hops <= 5 ? hops : 2)
 
   // ── Заголовки безопасности ──
   // Своими руками, без библиотеки: нужны ровно четыре заголовка, а helmet тянет
