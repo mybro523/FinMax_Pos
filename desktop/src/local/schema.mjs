@@ -505,4 +505,21 @@ export const CORE_SCHEMA = [
   `
   ALTER TABLE accounts ADD COLUMN roleSystem TEXT NOT NULL DEFAULT '';
   `,
+  // ── Магазин без интернета (версия 1.6.0) ──
+  // activation — код активации, введённый на этом компьютере (одна строка). Хранится как
+  // введён: подпись проверяется при каждом ответе заново (local/activation.mjs).
+  // reset_used — какие коды сброса пароля владельца уже использованы: второй раз не пройдут
+  `
+  CREATE TABLE activation (
+    id INTEGER PRIMARY KEY,
+    code TEXT NOT NULL,
+    activatedAt TEXT NOT NULL
+  );
+  CREATE TABLE reset_used (
+    serial INTEGER NOT NULL,
+    until INTEGER NOT NULL,
+    usedAt TEXT NOT NULL,
+    PRIMARY KEY (serial, until)
+  );
+  `,
 ]

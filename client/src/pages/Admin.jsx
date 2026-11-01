@@ -6,6 +6,7 @@ import {
 } from 'react-icons/lu'
 import { Modal, useToast, useDialog } from '../components/ui'
 import NumberInput from '../components/NumberInput'
+import KodyAktivacii from '../components/KodyAktivacii'
 import { api, LONG_TIMEOUT_MS } from '../db/api'
 import { money } from '../db/store'
 import { logout, useAuth, enterPharmacy } from '../db/auth'
@@ -141,6 +142,8 @@ export default function Admin() {
   const [openId, setOpenId] = useState(null) // открытая карточка
   const [journal, setJournal] = useState(null) // журнал по всему сервису
   const [nastroyki, setNastroyki] = useState(false) // тема и язык панели
+  // Коды активации программы без интернета (1.6.0)
+  const [kody, setKody] = useState(false)
   // Магазины, которые прямо сейчас заводятся. Создание идёт около пятнадцати секунд —
   // это настоящая работа базы, двадцать таблиц с индексами, — и всё это время
   // владелец сервиса не должен сидеть перед замершим окном.
@@ -353,6 +356,9 @@ export default function Admin() {
           </div>
           <div className="topbar-actions">
             <button className="btn ghost icon" onClick={load} title={t('Обновить')}><LuRefreshCw size={16} /></button>
+            <button className="btn ghost" onClick={() => setKody(true)} title={t('Коды активации')} data-testid="admin-licences">
+              <span className="ic"><LuKeyRound size={16} /></span> <span className="btn-text">{t('Коды активации')}</span>
+            </button>
             <button className="btn ghost" onClick={openJournal} title={t('Журнал')}>
               <span className="ic"><LuScrollText size={16} /></span> <span className="btn-text">{t('Журнал')}</span>
             </button>
@@ -449,6 +455,7 @@ export default function Admin() {
       )}
 
       {nastroyki && <Nastroyki onClose={() => setNastroyki(false)} />}
+      {kody && <KodyAktivacii onClose={() => setKody(false)} />}
       {form && <NewPharmacy form={form} setForm={setForm} onStart={startCreate} toast={toast} t={t} />}
 
       {created && (

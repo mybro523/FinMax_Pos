@@ -1267,6 +1267,35 @@ input, select { transition: border 0.14s, box-shadow 0.14s, background 0.14s; }
 .lang-switch button { border: 0; background: var(--card); color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; padding: 5px 10px; cursor: pointer; transition: background 0.13s, color 0.13s; }
 .lang-switch button + button { border-left: 1px solid var(--border-strong); }
 .lang-switch button.active { background: var(--accent-soft); color: var(--accent-dark); }
+/* ── Магазин без интернета (1.6.0): выбор способа работы, активация, магазин, сброс пароля ── */
+/* Шире обычной карточки входа: код активации (50 знаков и 9 дефисов) виден целиком */
+.solo-card { max-width: 620px; }
+.solo-back { margin: -6px 0 6px -8px; padding: 6px 10px; }
+.solo-modes { display: grid; gap: 12px; margin-bottom: 4px; }
+.solo-mode { display: grid; grid-template-columns: 44px 1fr; grid-template-rows: auto auto; column-gap: 12px; row-gap: 2px; text-align: left; border: 1.5px solid var(--border-strong); background: var(--card); border-radius: 12px; padding: 14px 16px; cursor: pointer; font: inherit; color: var(--text); transition: border-color 0.13s, background 0.13s; }
+.solo-mode:hover, .solo-mode:focus-visible { border-color: var(--accent); background: var(--accent-soft); outline: none; }
+.solo-mode .ic { grid-row: 1 / span 2; width: 44px; height: 44px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-dark); }
+.solo-mode b { font-size: 16px; }
+.solo-mode span:last-child { font-size: 13px; color: var(--muted); line-height: 1.45; }
+.solo-pc { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; border: 1px dashed var(--border-strong); border-radius: 10px; padding: 10px 12px; margin: 0 0 14px; }
+.solo-pc-label { font-size: 12.5px; color: var(--muted); width: 100%; }
+.solo-pc-code { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 24px; font-weight: 700; letter-spacing: 0.08em; color: var(--text); flex: 1; min-width: 0; }
+.solo-code-wrap { display: grid; gap: 4px; }
+input.solo-code { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 15px; letter-spacing: 0.04em; text-transform: uppercase; }
+.solo-card input.solo-code { font-size: 14px; letter-spacing: 0.02em; }
+.solo-line { display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: space-between; align-items: center; font-size: 12.5px; color: var(--muted); margin-top: 14px; padding: 8px 10px; border-radius: 8px; background: var(--bg-soft, var(--accent-soft)); }
+.solo-line.warn { color: var(--warn, #b45309); }
+.solo-line-links { display: inline-flex; gap: 12px; }
+button.link { border: 0; background: none; padding: 0; font: inherit; color: var(--accent-dark); text-decoration: underline; cursor: pointer; }
+.solo-rows { display: grid; gap: 6px; margin-bottom: 10px; }
+.solo-rows > div { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.solo-rows > div span { color: var(--muted); }
+.solo-copy-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+.solo-move-hint { margin: 14px 0 0; line-height: 1.5; text-align: center; }
+.solo-change-mode { display: block; margin: 12px auto 0; font-size: 13px; }
+/* Язык на экранах до входа — в левом нижнем углу (справа — экранная клавиатура) */
+.auth-lang { position: absolute; left: 20px; bottom: 20px; }
+.licence-code { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 17px; font-weight: 700; letter-spacing: 0.05em; margin: 8px 0; word-break: break-all; user-select: all; }
 @media (max-width: 900px) {
   .auth { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .auth-brand { padding: 16px 20px; flex-direction: row; align-items: center; gap: 12px; }

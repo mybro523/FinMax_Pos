@@ -35,6 +35,7 @@ import { feedFromRepo, normalizeFeed } from '../src/updater.mjs'
 import { checkFeedFile, createReleases, legacyAssets, modernAssets } from './github-release.mjs'
 import { prepareLegacy } from './legacy.mjs'
 import { scanBuild } from './compat-scan.mjs'
+import { LICENCE_PUBLIC_KEY } from './licence-pin.mjs'
 
 const args = process.argv.slice(2)
 const dirOnly = args.includes('--dir')
@@ -79,6 +80,57 @@ if (publish && !env.GH_TOKEN) fail('Для выкладки нужен ключ 
 const version = String(env.APTEKA_VERSION || JSON.parse(readFileSync(join(DESKTOP, 'package.json'), 'utf8')).version)
 if (!/^\d+\.\d+\.\d+$/.test(version)) fail(`Версия не годится: «${version}». Нужна вида 1.2.3.`)
 
+// ── Ключ кодов активации (магазин без интернета, 1.6.0) ──
+// Открытая половина ключа, которым сервер подписывает коды активации. Без ключа программа без
+// интернета не активировалась бы вовсе, поэтому сборки без него не бывает.
+// Сборка для магазинов (с источником обновлений) берёт только ключ, закреплённый в исходниках
+// (scripts/licence-pin.mjs), и сверяет его с сервером, чей адрес зашивает: другой ключ на
+// сервере — сборка останавливается. FINMAX_LICENCE_KEY — только для проверочной сборки без
+// обновлений (с проверочным сервером): в сборку для магазинов он не попадёт
+async function licenceKeyOf() {
+  const given = String(env.FINMAX_LICENCE_KEY || '').trim().toLowerCase()
+  if (feed) {
+    if (!/^[0-9a-f]{64}$/.test(LICENCE_PUBLIC_KEY)) {
+      fail(`Ключ кодов активации не закреплён (desktop/scripts/licence-pin.mjs): сборку для магазинов без него не собрать.
+Возьмите его у сервера (GET ${apiUrl}/licence/key) и закрепите там и в server/src/common/licence-pin.ts.`)
+    }
+    if (given && given !== LICENCE_PUBLIC_KEY) {
+      fail(`FINMAX_LICENCE_KEY — только для проверочной сборки без обновлений: в сборку для магазинов чужой ключ не попадёт.
+Уберите его из окружения и из desktop/.env, desktop/.env.local.`)
+    }
+    const server = await serverLicenceKey()
+    if (server !== LICENCE_PUBLIC_KEY) {
+      fail(`Сервер ${apiUrl} отдаёт ключ кодов активации ${server.slice(0, 16)}…, а закреплён ${LICENCE_PUBLIC_KEY.slice(0, 16)}….
+Запись LicenceKey на сервере потеряна или подменена (или адрес сервера не тот). Сборка остановлена:
+программа с другим ключом не приняла бы выданные коды. Верните запись из копии базы сервиса.`)
+    }
+    return LICENCE_PUBLIC_KEY
+  }
+  if (given) {
+    if (!/^[0-9a-f]{64}$/.test(given)) fail('FINMAX_LICENCE_KEY не годится: нужен открытый ключ — 64 знака hex.')
+    if (given !== LICENCE_PUBLIC_KEY) console.log('ВНИМАНИЕ: проверочная сборка с ключом не сервиса — коды, выпущенные сервисом, она не примет.')
+    return given
+  }
+  return serverLicenceKey()
+}
+async function serverLicenceKey() {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(apiUrl + '/licence/key', { signal: AbortSignal.timeout(20000) })
+      const data = await res.json().catch(() => null)
+      const key = res.ok ? String(data?.key || '').toLowerCase() : ''
+      if (/^[0-9a-f]{64}$/.test(key)) return key
+      console.log(`ключ кодов активации: сервер ответил ${res.status}${data?.message ? ' — ' + data.message : ''} — пробую ещё раз`)
+    } catch (e) {
+      console.log(`ключ кодов активации: ${e?.message || e} — пробую ещё раз`)
+    }
+    await new Promise((r) => setTimeout(r, 3000))
+  }
+  fail(`Сервер ${apiUrl} не отдал ключ кодов активации (GET /licence/key).
+Сначала выложите сервер версии 1.6.0 и дождитесь, пока он запустится.`)
+}
+const licenceKey = await licenceKeyOf()
+
 // ── 1. Интерфейс ──
 const vite = clientBin('vite', 'bin', 'vite.js')
 if (!existsSync(vite)) fail('Не найден сборщик интерфейса. Выполните «npm install» в папке client.')
@@ -88,11 +140,12 @@ if (!existsSync(join(DESKTOP, 'renderer', 'index.html'))) fail('Интерфей
 // ── 2. Настройки сборки ──
 // У сборки для Windows 7 и 8 свой канал обновлений: она берёт legacy.yml, а не latest.yml.
 // Её настройки лежат в её папке (desktop/legacy) — настройки обычной сборки не трогаем
-const buildConfig = { apiUrl, version, builtAt: new Date().toISOString(), ...(feed ? { update: legacy ? { ...feed, channel: 'legacy' } : feed } : {}) }
+const buildConfig = { apiUrl, version, builtAt: new Date().toISOString(), licenceKey, ...(feed ? { update: legacy ? { ...feed, channel: 'legacy' } : feed } : {}) }
 if (!legacy) writeFileSync(join(DESKTOP, 'build-config.json'), JSON.stringify(buildConfig, null, 2) + '\n', 'utf8')
 console.log(`\nАдрес сервера в сборке: ${apiUrl}`)
 console.log(feed ? `Обновления: ${feed.provider === 'github' ? `репозиторий ${feed.owner}/${feed.repo}` : feed.url}` : 'Обновления: выключены (источник не задан)')
 console.log(`Версия: ${version}`)
+console.log(`Ключ кодов активации: ${licenceKey.slice(0, 8)}…`)
 if (legacy) console.log('Сборка: для Windows 7 и 8 (Electron 22, 32 и 64 бита), канал обновлений legacy')
 
 // ── 3. Упаковка ──

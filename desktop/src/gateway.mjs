@@ -13,6 +13,7 @@
 //
 // Модуль не знает про Electron: сеть, диск, шифрование и часы ему передают снаружи.
 // Поэтому он целиком проверяется обычными тестами.
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { BUSY_MESSAGE } from './backup.mjs'
 import {
@@ -34,8 +35,8 @@ import {
   permissionsOf,
 } from './local/accounts.mjs'
 import { matchFallback, matchLocal, pendingInPeriod } from './local/api.mjs'
-import { confirmLicence, licenceOf, touchLicence } from './local/licence.mjs'
-import { ApiError, getMeta, inTx, openDb, q, setMeta } from './local/db.mjs'
+import { confirmLicence, hasLicence, licenceOf, touchLicence } from './local/licence.mjs'
+import { ApiError, getMeta, inTx, newId, openDb, q, setMeta } from './local/db.mjs'
 import { getDoc, putDoc } from './local/docs.mjs'
 import { REJECTED_SALE } from './local/ops/return.mjs'
 import {
@@ -79,6 +80,11 @@ import {
 import { checkRequest, createRemote, DESKTOP_TOKEN, isLinkFailure } from './net.mjs'
 import { parseAddress } from './lan.mjs'
 import { createSync } from './sync.mjs'
+import { activate as activateCode, activationState, useResetCode } from './local/activation.mjs'
+import { validKey } from './local/licence-code.mjs'
+import { acceptAll, deleteCustomer, isStandaloneDb, mergeProducts, pruneAccepted, setupShopDb, STANDALONE_CODE } from './local/standalone.mjs'
+import { updateUser } from './local/ops/team.mjs'
+import { touchedBy as touchedByOp } from './local/outbox.mjs'
 
 // Объяснения для человека. Каждое есть в словаре интерфейса (client/src/lib/i18n.js)
 // и показывается на выбранном языке — их сверяет проверка.
@@ -97,6 +103,32 @@ export const MESSAGES = {
   // Файл базы испорчен, а убрать его и поднять копию не даёт другая программа
   dbBusy: BUSY_MESSAGE,
   rejectedSale: REJECTED_SALE,
+  // ── Магазин без интернета (версия 1.6.0) ──
+  soloUnavailable: 'В программе без интернета этот раздел не нужен: всё хранится на этом компьютере.',
+  soloNotFound: 'Запись не найдена',
+  wrongLogin: 'Неверное имя или пароль',
+  oldPassword: 'Текущий пароль неверный',
+  samePassword: 'Новый пароль совпадает со старым',
+  noPasswordChange: 'Менять пароль вам не разрешено. Пароль меняет владелец в разделе «Сотрудники».',
+  notActivated: 'Программа не активирована — введите код активации.',
+  soloTitle: 'Срок работы программы закончился',
+  notStandalone: 'Сначала выберите, как будет работать программа.',
+  shopExists: 'Магазин на этом компьютере уже заведён — войдите под своим именем.',
+  modeLocked: 'На этом компьютере уже работают — способ работы не меняется.',
+  noShopName: 'Укажите название магазина',
+  noLogin: 'Укажите имя для входа',
+  longLogin: 'Имя для входа — не длиннее 50 знаков',
+  loginBusy: 'Такое имя для входа на этом компьютере уже есть',
+  noOwner: 'Владелец магазина не найден',
+  whichOwner: 'Владельцев несколько — укажите имя того, кому сбросить пароль',
+  // Магазин переехал с другого компьютера: пароли сотрудников остались там
+  noPasswordHere: 'Пароль этого сотрудника на этом компьютере ещё не задан. Владелец задаёт его в разделе «Сотрудники».',
+  noOwnerPasswordHere:
+    'Пароль владельца на этом компьютере не задан. Войдите логином и паролем, которые задали здесь при заведении магазина, или нажмите «Забыли пароль?» — нужен код сброса от поставщика программы.',
+  // С подстановкой логинов — по словарю не переводятся
+  whichOwnerHere: (logins) =>
+    `В загруженной копии несколько владельцев: ${logins.map((l) => `«${l}»`).join(', ')}. Войдите логином своего владельца из этого списка и паролем этого компьютера.`,
+  loginMoved: (typed, now) => `Ваш логин на этом компьютере теперь «${now}»: логин «${typed}» в загруженной копии занят сотрудником. Войдите как «${now}» тем же паролем.`,
 }
 
 // Записи, у которых осталось действие «только на сервере»: удаление клиента. Если клиент
@@ -161,6 +193,9 @@ export function createGateway({
   openFile = (file) => ({ db: openDb(file, PHARMACY_SCHEMA), restored: null }),
   log = { info() {}, warn() {}, error() {} },
   timers,
+  // Магазин без интернета (1.6.0): открытый ключ кодов активации (из сборки) и код этого
+  // компьютера — 5 байт и как его видит человек («XXXXX-XXXXX»)
+  standalone = {},
 }) {
   const deviceId = deviceIdOf(core)
   // Обмен называет серверу ключ кассы: под её номером сервер слушает только того,
@@ -206,6 +241,18 @@ export function createGateway({
     }
     pharmacy = null
   }
+
+  // Обмен, которого нет: магазин без интернета. Тот же набор действий, что у настоящего
+  // (sync.mjs), — остальной код шлюза не различает, есть ли у магазина сервер
+  const idleSync = () => ({
+    start: async () => {},
+    stop() {},
+    kick() {},
+    run: async () => ({ ok: true, changed: [] }),
+    current: () => null,
+    state: () => ({ online: false, syncing: false }),
+    isOnline: () => false,
+  })
 
   // Большой обмен (первая загрузка всего магазина) идёт дольше обычного запроса
   const SYNC_TIMEOUT_MS = 120000
@@ -290,7 +337,9 @@ export function createGateway({
       return getMeta(db, 'cursor') || ''
     }
 
-    ph.sync = createSync({
+    // Магазин без интернета обмена не ведёт: сервера у него нет (см. ниже, «Магазин без интернета»).
+    // Только на компьютере, выбравшем работу без интернета (см. isSolo)
+    ph.sync = code === STANDALONE_CODE && getMeta(core, 'appMode') === 'standalone' ? idleSync() : createSync({
       timers,
       log,
       tokenFor,
@@ -437,6 +486,25 @@ export function createGateway({
   function status() {
     const acc = activeAccount()
     if (!pharmacy || !acc) return { online: false, syncing: false, pending: 0, rejected: 0, blocked: false, refused: '', syncedAt: null, licence: null }
+    // Магазин без интернета: обмена нет, ждать нечего — показывать есть только срок активации
+    if (isSolo(acc)) {
+      return {
+        online: false,
+        standalone: true,
+        checking: false,
+        syncing: false,
+        blocked: false,
+        refused: '',
+        pending: 0,
+        rejected: 0,
+        waiting: false,
+        fromPeers: 0,
+        syncedAt: null,
+        licence: null,
+        activation: activation(),
+        restored: restoredNote(pharmacy.db),
+      }
+    }
     const st = pharmacy.sync.state()
     const lic = licence(acc)
     return {
@@ -567,7 +635,11 @@ export function createGateway({
             // принял сервер, или он пропал из списка сервера (кто вошёл через сервер позже, чем
             // пришёл список, — остаётся)
             const failedCreation = !!row.localPw && ['rejected', 'unknown', 'noop'].includes(outcome(row.localPw))
-            if (x.del || failedCreation || (known && (!teamAt || row.seenAt < teamAt))) {
+            // Магазин без интернета: владелец, заведённый на этом компьютере, которого не удалось
+            // сопоставить с владельцем из загруженной копии (soloAdopt), — не «пропавший из списка»:
+            // иначе в магазин некому было бы войти. Удалённый в «Сотрудниках» (x.del) — уходит
+            const soloOwnerHere = code === STANDALONE_CODE && row.role === 'founder'
+            if (x.del || failedCreation || (known && (!teamAt || row.seenAt < teamAt) && !soloOwnerHere)) {
               // За кассой он сам — после выхода не войдёт, а запись уберётся следующим разом
               if (row.id === active) q(core, 'UPDATE accounts SET blocked = 1 WHERE id = ?').run(row.id)
               else {
@@ -682,7 +754,13 @@ export function createGateway({
         const holders = (login, id) => q(core, 'SELECT id FROM accounts WHERE login = ? AND id <> ?').all(login, id)
         for (const r of want) q(core, 'UPDATE accounts SET login = ? WHERE id = ?').run('\u0001' + r.id, r.id)
         for (const r of want) {
-          for (const other of holders(r.to, r.id)) if (!byId.has(other.id)) q(core, 'DELETE FROM accounts WHERE id = ?').run(other.id)
+          for (const other of holders(r.to, r.id)) {
+            if (byId.has(other.id)) continue
+            // Владельца магазина без интернета и того, кто сейчас за кассой, чужой логин не вытесняет
+            const o = accountById(core, other.id)
+            if ((code === STANDALONE_CODE && o?.role === 'founder') || other.id === active) continue
+            q(core, 'DELETE FROM accounts WHERE id = ?').run(other.id)
+          }
           if (!holders(r.to, r.id).length) q(core, 'UPDATE accounts SET login = ? WHERE id = ?').run(r.to, r.id)
         }
         for (const r of want) {
@@ -713,7 +791,9 @@ export function createGateway({
           // Заведённого соседней кассой сервер ещё не знает, а роль от неподтверждённой правки
           // соседа — не основание пускать без связи (пустят после подтверждения или входа с интернетом)
           if (x.peerMade || x.roleBy === 'peer' || (!founder && peerRoles.has(a.roleId))) continue
-          for (const other of q(core, 'SELECT id FROM accounts WHERE login = ? AND id <> ?').all(a.login, id)) {
+          for (const other of q(core, 'SELECT id, role FROM accounts WHERE login = ? AND id <> ?').all(a.login, id)) {
+            // Владельца магазина без интернета чужой логин из копии не вытесняет (см. шаг 1)
+            if (code === STANDALONE_CODE && other.role === 'founder') continue
             if (!byId.has(other.id)) q(core, 'DELETE FROM accounts WHERE id = ?').run(other.id)
           }
           if (q(core, 'SELECT 1 FROM accounts WHERE login = ?').get(a.login)) continue
@@ -908,6 +988,7 @@ export function createGateway({
   const licence = (acc) => licenceOf(core, acc.pharmacyCode, licNow(), sealing)
 
   function access(acc) {
+    if (isSolo(acc)) return soloAccess()
     const sub = subscriptionOf(acc, licNow())
     if (sub && !sub.canWrite) return sub
     if (!licence(acc).expired) return sub
@@ -921,6 +1002,15 @@ export function createGateway({
     const acc = activeAccount()
     if (!acc) {
       closedByLicence = false
+      return
+    }
+    // Магазин без интернета: срок — у кода активации. Вышел посреди смены — объявление сразу
+    if (isSolo(acc)) {
+      const sub = soloAccess()
+      const expired = !sub.canWrite
+      if (expired && !closedByLicence) send('suspended', { message: sub.message, title: MESSAGES.soloTitle, standalone: true, until: activation().untilHuman || '' })
+      if (!expired && closedByLicence) send('resumed')
+      closedByLicence = expired
       return
     }
     const sub = subscriptionOf(acc, licNow())
@@ -945,6 +1035,433 @@ export function createGateway({
     }
   }
   const sealing = { seal, open }
+
+  // ── Магазин без интернета (версия 1.6.0) ──
+  // Сервера у такого магазина нет вовсе: вход — по отпечатку пароля здесь, каждая операция
+  // принимается сразу после записи (local/standalone.mjs, acceptAll), а срок работы держит код
+  // активации (local/activation.mjs). Способ работы выбирают при первом запуске (appMode)
+  const solo = {
+    publicKey: typeof standalone?.publicKey === 'string' ? standalone.publicKey : '',
+    computerRaw: Buffer.isBuffer(standalone?.computerRaw) ? standalone.computerRaw : null,
+    computerCode: typeof standalone?.computerCode === 'string' ? standalone.computerCode : '',
+  }
+  const appMode = () => getMeta(core, 'appMode') || ''
+  // Магазин без интернета — и код магазина 'local', и способ работы этого компьютера: магазин
+  // сервера с таким кодом (сервер его больше не выдаёт, но мог выдать раньше) на компьютере,
+  // работающем с сервером, обменивается с ним как обычно
+  function isSolo(acc) {
+    return acc?.pharmacyCode === STANDALONE_CODE && appMode() === 'standalone'
+  }
+  const soloFile = () => join(dataDir, `pharmacy-${fileSafe(STANDALONE_CODE)}.db`)
+  const soloAccounts = () => q(core, 'SELECT * FROM accounts WHERE pharmacyCode = ?').all(STANDALONE_CODE)
+  // Список сотрудников магазина (база магазина) — в магазине без интернета он главный
+  const soloTeam = (ph) => q(ph.db, 'SELECT id, login, role, userId, active FROM team_accounts ORDER BY ord, createdAt, id').all()
+  // Магазин на этом компьютере заведён. Обычно это видно по входу (общая база). Общая база могла
+  // потеряться (испорчена, начата заново), а база магазина цела: магазин всё равно есть — войти
+  // можно через «Забыли пароль?» с кодом сброса (он заводит вход владельца заново)
+  function soloShop() {
+    if (q(core, 'SELECT 1 FROM accounts WHERE pharmacyCode = ? LIMIT 1').get(STANDALONE_CODE)) return true
+    if (appMode() !== 'standalone' || !existsSync(soloFile())) return false
+    try {
+      return !!q(openPharmacy(STANDALONE_CODE).db, 'SELECT 1 FROM team_accounts LIMIT 1').get()
+    } catch {
+      return false
+    }
+  }
+  // Время срока кода. Обычно — часы программы: назад они не идут (local/clock.mjs), опираясь на
+  // зашифрованную запись о прожитом времени. Записи нет (её стёрли, чтобы перевести часы назад и
+  // «вернуть» срок, или общая база начата заново) — время срока не раньше самого позднего
+  // документа магазина: стереть документы — значит потерять магазин. Пока запись есть, даты
+  // документов (их могли записать и сбитые вперёд часы) на срок не влияют
+  function soloNow() {
+    const now = licNow()
+    if (appMode() !== 'standalone' || hasLicence(core, STANDALONE_CODE, sealing)) return now
+    if (!existsSync(soloFile())) return now
+    let floor = 0
+    try {
+      const db = openPharmacy(STANDALONE_CODE).db
+      for (const sql of ['SELECT MAX(date) AS m FROM docs', 'SELECT MAX(createdAt) AS m FROM outbox']) {
+        const v = Date.parse(q(db, sql).get()?.m || '')
+        if (Number.isFinite(v) && v > floor) floor = v
+      }
+    } catch {
+      /* база магазина не открылась — только часы */
+    }
+    return Math.max(now, floor)
+  }
+  function activation() {
+    return activationState(core, { publicKey: solo.publicKey, computerRaw: solo.computerRaw, now: soloNow() })
+  }
+  // Подписка — словами сервера: окно показывает её так же, как подписку магазина с сервером
+  function soloAccess() {
+    const a = activation()
+    if (a.active) return { status: 'active', canWrite: true, warn: !!a.warn, daysLeft: a.daysLeft, paidUntil: a.endsAt, message: a.message || '', standalone: true }
+    return { status: 'expired', canWrite: false, warn: true, daysLeft: 0, paidUntil: a.endsAt ?? null, message: a.message || MESSAGES.notActivated, standalone: true }
+  }
+  const soloView = (acc) => ({ ...userView(acc, licNow()), subscription: soloAccess(), standalone: true })
+
+  async function soloLogin(name, password) {
+    const login = String(name ?? '').trim()
+    let ph = null
+    if (soloShop()) {
+      try {
+        ph = openPharmacy(STANDALONE_CODE)
+      } catch (e) {
+        log.error('магазин без интернета: база магазина не открылась при входе', e)
+      }
+    }
+    if (ph) {
+      // Загружена копия (с другого компьютера или своя прежняя): вход сверяется со списком
+      // сотрудников магазина — сначала вход владельца, заведённого здесь, потом лишние входы
+      try {
+        const moved = await soloAdopt(ph, login, String(password ?? ''))
+        if (moved?.refuse) return refuse(401, moved.refuse)
+        soloPrune(ph)
+      } catch (e) {
+        log.error('магазин без интернета: вход не сверен со списком сотрудников', e)
+      }
+    }
+    try {
+      const acc = await offlineLogin(core, { name, password }, { now: licNow(), open })
+      // На компьютере магазина без интернета входят только его сотрудники
+      if (!isSolo(acc)) return refuse(401, MESSAGES.wrongLogin)
+      session.activate(acc.id)
+      onSession()
+      enter(acc)
+      log.info(`вход (без интернета): ${acc.login}`)
+      return reply(201, { token: DESKTOP_TOKEN, user: soloView(acc) })
+    } catch (e) {
+      if (!(e instanceof ApiError)) throw e
+      if (e.status === 503) {
+        // Сотрудник магазина есть, а пароля для этого компьютера у него нет: магазин переехал
+        // сюда копией, а отпечатки паролей остались на старом компьютере (они зашифрованы
+        // средствами того Windows). Кому задать пароль и как — так и говорим
+        const need = ph ? soloNeedsPassword(ph, login) : ''
+        if (need) return refuse(401, need)
+        // Такого имени здесь нет — для человека это тот же «неверное имя или пароль»
+        return refuse(401, MESSAGES.wrongLogin)
+      }
+      return refuse(e.status, e.message)
+    }
+  }
+
+  // Сотрудник с этим логином в магазине есть и не заблокирован, а войти ему здесь не по чему:
+  // что ему сказать (пусто — сказать нечего, обычный отказ)
+  function soloNeedsPassword(ph, login) {
+    if (!login) return ''
+    try {
+      const member = q(ph.db, 'SELECT id, role, active FROM team_accounts WHERE login = ?').get(login)
+      if (!member || !member.active) return ''
+      const row = accountByLogin(core, login)
+      if (row && row.id === member.id && row.verifier && open(row.verifier)) return ''
+      return member.role === 'founder' ? MESSAGES.noOwnerPasswordHere : MESSAGES.noPasswordHere
+    } catch {
+      return ''
+    }
+  }
+
+  // ── Магазин переехал на этот компьютер (загружена копия с другого) ──
+  // Здесь завели магазин заново — с владельцем и паролем этого компьютера — и загрузили копию
+  // старого. Владелец, заведённый здесь, и владелец в копии — один человек: его вход (пароль
+  // этого компьютера) переходит к владельцу из копии — когда он сам входит этим паролем. Иначе их
+  // было бы двое: «Сотрудники» показывали бы одного, а входил бы другой. Кому из владельцев копии
+  // перейти: тому, чьим логином человек вошёл, или с тем же логином, что здесь, или единственному;
+  // владельцев несколько и не ясно, кто он, — просим войти логином своего владельца из копии.
+  // Пароли остальных сотрудников остались на старом компьютере — их задаёт владелец в «Сотрудниках».
+  // Ответ: null — переходить нечему; { adopted } — перешёл; { refuse } — что сказать вместо входа
+  async function soloAdopt(ph, login, password) {
+    const team = soloTeam(ph)
+    if (!team.length) return null
+    const inTeam = new Set(team.map((a) => a.id))
+    const strays = soloAccounts().filter((r) => r.role === 'founder' && !inTeam.has(r.id))
+    if (!strays.length) return null
+    // Владельцы из копии без своего входа здесь (или со входом, по которому здесь не войти:
+    // отпечаток пароля со старого компьютера не расшифровать)
+    const usable = new Set(soloAccounts().filter((r) => r.verifier && open(r.verifier)).map((r) => r.id))
+    const free = team.filter((a) => a.role === 'founder' && a.active && !usable.has(a.id))
+    if (!free.length) return null
+    for (const row of strays) {
+      // Без пароля этого владельца вход никому не переходит
+      const verifier = row.verifier ? open(row.verifier) : null
+      if (!verifier || !(await checkVerifier(password, verifier))) continue
+      const byTyped = login !== row.login ? free.find((a) => a.login === login) || null : null
+      const match = byTyped || free.find((a) => a.login === row.login) || (free.length === 1 ? free[0] : null)
+      if (!match) return { refuse: MESSAGES.whichOwnerHere(free.map((a) => a.login)) }
+      const shopName = String(getMeta(ph.db, 'shopName') || '') || row.pharmacyName
+      // Логин — тот, которым человек входит: логин владельца из копии, если вошёл им, иначе логин
+      // этого компьютера. Его занял сотрудник из копии — остаётся логин из копии, и человеку надо
+      // об этом сказать: тем логином, что он набрал, ему больше не войти
+      let finalLogin = match.login
+      let movedTo = ''
+      if (!byTyped && match.login !== row.login) {
+        try {
+          updateUser({ db: ph.db, now: clock.now(), user: { accountId: match.id, id: match.userId || 'acc:' + match.id, name: match.login, role: 'founder', permissions: [] }, deviceId }, match.id, { name: row.login })
+          acceptAll(ph.db, { now: clock.now() })
+          finalLogin = row.login
+        } catch (e) {
+          movedTo = match.login
+          log.warn(`магазин без интернета: логин владельца из копии (${match.login}) не заменён на ${row.login}: ${e?.message || e}`)
+        }
+      }
+      try {
+        inTx(core, () => {
+          q(core, 'DELETE FROM accounts WHERE id = ?').run(match.id)
+          q(core, 'UPDATE accounts SET id = ?, tenantUserId = ?, login = ?, pharmacyName = ?, blocked = 0, localPw = NULL, prevVerifier = NULL WHERE id = ?').run(
+            match.id, match.userId ?? null, finalLogin, shopName, row.id,
+          )
+        })
+      } catch (e) {
+        log.error(`магазин без интернета: вход владельца ${row.login} не перешёл к владельцу из копии`, e)
+        return null
+      }
+      session.drop(row.id)
+      ph.users.clear()
+      log.warn(`магазин переехал на этот компьютер: вход владельца ${row.login} теперь у владельца из копии (логин ${finalLogin})`)
+      return movedTo ? { refuse: MESSAGES.loginMoved(row.login, movedTo) } : { adopted: true }
+    }
+    return null
+  }
+
+  // Вход, которого нет в списке сотрудников магазина, убирается: после загрузки своей прежней
+  // копии это сотрудник, заведённый позже неё, — в магазине его больше нет. Не трогаем владельца,
+  // заведённого здесь, пока его вход может перейти к владельцу из копии (soloAdopt), и того, кто
+  // сейчас за кассой (уберётся после выхода)
+  function soloPrune(ph) {
+    const team = soloTeam(ph)
+    if (!team.length) return
+    const inTeam = new Set(team.map((a) => a.id))
+    const usable = new Set(soloAccounts().filter((r) => r.verifier && open(r.verifier)).map((r) => r.id))
+    const adoptable = team.some((a) => a.role === 'founder' && a.active && !usable.has(a.id))
+    for (const r of soloAccounts()) {
+      if (inTeam.has(r.id)) continue
+      if (r.role === 'founder' && adoptable) continue
+      if (r.id === session.activeId()) continue
+      q(core, 'DELETE FROM accounts WHERE id = ?').run(r.id)
+      session.drop(r.id)
+      log.warn(`магазин без интернета: вход ${r.login} убран — в базе магазина такого сотрудника нет`)
+    }
+    // Название магазина — из его базы (у загруженной копии оно своё)
+    const shopName = String(getMeta(ph.db, 'shopName') || '')
+    if (shopName) q(core, 'UPDATE accounts SET pharmacyName = ? WHERE pharmacyCode = ? AND pharmacyName <> ?').run(shopName, STANDALONE_CODE, shopName)
+  }
+
+  // Сделанное принять сразу — как принял бы сервер. Сотрудники: перенос во вход до приёма (свой
+  // пароль, заведение) и после (приём закрепляет пароль) — так же, как при обмене с сервером
+  function soloAccept(ph, { team = false } = {}) {
+    if (team) teamToCore(ph)
+    let done = []
+    try {
+      done = acceptAll(ph.db, { now: clock.now() })
+    } catch (e) {
+      // Не принялось — останется в очереди и примется со следующей записью
+      log.error('магазин без интернета: операции не приняты', e)
+    }
+    // Приняты правки сотрудников или ролей (в том числе ждавшие с прошлого раза) — вход по ним
+    // закрепляется сейчас: иначе отметка «пароль задан здесь» пережила бы свою операцию
+    if (team || done.some((op) => /^(user|role)\./.test(op.type || ''))) teamToCore(ph)
+    const keys = new Set(done.flatMap((op) => touchedByOp(op)))
+    // То, что сервер заводит сам: оплата прихода из кассы, списание недостачи по пересчёту
+    if (done.some((op) => op.type === 'arrival')) keys.add('supplierPayments')
+    if (done.some((op) => op.type === 'inventory.apply')) keys.add('writeoffs')
+    if (keys.size) send('changed', [...keys])
+    send('status', status())
+  }
+
+  // Действие, которое раньше умел только сервер: выполняется здесь, под теми же правами
+  async function soloWrite(acc, keys, fn, perms = []) {
+    const closed = closedBySubscription(access(acc))
+    if (closed) return closed
+    if (perms.length && !perms.every((k) => hasPerm(acc, k))) return refuse(403, 'Недостаточно прав')
+    const ph = openPharmacy(acc.pharmacyCode)
+    let data
+    try {
+      data = fn(ph)
+    } catch (e) {
+      if (e instanceof ApiError) return refuse(e.status, e.messages || e.message)
+      log.error('магазин без интернета: действие не выполнено', e)
+      return refuse(500, MESSAGES.broken)
+    }
+    send('changed', keys)
+    send('status', status())
+    return reply(200, data)
+  }
+
+  async function soloRequest(req, acc) {
+    const route = req.path.split('?')[0]
+    // Всё, что касса умеет сама, — как всегда; история товара и карточка поставщика — здесь же:
+    // у этой кассы все документы за всё время
+    const found = matchLocal(req.method, req.path) || matchFallback(req.method, req.path)
+    if (found) return local(found, req, acc)
+    let m
+    if (req.method === 'POST' && (m = /^\/products\/([^/]+)\/merge$/.exec(route))) {
+      const fromId = decodeURIComponent(m[1])
+      return soloWrite(acc, ['products'], (ph) => mergeProducts(ph.db, fromId, String(req.body?.into ?? ''), { now: clock.now() }), ['products.edit', 'products.delete'])
+    }
+    if (req.method === 'DELETE' && (m = /^\/customers\/([^/]+)$/.exec(route))) {
+      const id = decodeURIComponent(m[1])
+      return soloWrite(acc, ['customers', 'payments', 'shifts'], (ph) => deleteCustomer(ph.db, id), ['customers.delete'])
+    }
+    // Расхождения бывают только при обмене с сервером; кассы — одна, эта
+    if (req.method === 'GET' && route === '/discrepancies') return reply(200, [])
+    if (req.method === 'GET' && route === '/sync/devices') return reply(200, [])
+    return refuse(404, MESSAGES.soloUnavailable)
+  }
+
+  // Свой пароль — без сервера: проверяем прежний по отпечатку и записываем новый поправкой
+  // сотрудника (как владелец меняет пароль в «Сотрудниках»), принимая её сразу
+  const soloPwFails = new Map()
+  async function soloChangePassword(req, acc) {
+    if (!(acc.role === 'founder' || hasPerm(acc, 'profile.password'))) return refuse(403, MESSAGES.noPasswordChange)
+    const oldPw = String(req.body?.oldPassword ?? '')
+    const newPw = String(req.body?.newPassword ?? '')
+    const fails = soloPwFails.get(acc.id) || { n: 0, until: 0 }
+    if (fails.until > clock.now()) return refuse(429, 'Слишком много попыток. Попробуйте через минуту')
+    const verifier = acc.verifier ? open(acc.verifier) : null
+    if (!verifier || !(await checkVerifier(oldPw, verifier))) {
+      fails.n += 1
+      if (fails.n >= 5) Object.assign(fails, { n: 0, until: clock.now() + 60000 })
+      soloPwFails.set(acc.id, fails)
+      return refuse(400, MESSAGES.oldPassword)
+    }
+    soloPwFails.delete(acc.id)
+    const problem = passwordProblem(newPw)
+    if (problem) return refuse(400, problem)
+    if (newPw === oldPw) return refuse(400, MESSAGES.samePassword)
+    const sealed = seal(await makeVerifier(newPw))
+    if (!sealed) return refuse(400, MESSAGES.noSealing)
+    const ph = openPharmacy(acc.pharmacyCode)
+    try {
+      updateUser({ db: ph.db, now: clock.now(), user: { ...docUser(ph, acc), permissions: permissionsOf(acc) }, deviceId }, acc.id, { passwordSealed: sealed })
+    } catch (e) {
+      if (e instanceof ApiError) return refuse(e.status, e.messages || e.message)
+      throw e
+    }
+    soloAccept(ph, { team: true })
+    return reply(201, { token: DESKTOP_TOKEN })
+  }
+
+  // ── До входа: способ работы, активация, магазин, сброс пароля владельца ──
+  const soloApi = {
+    info() {
+      return {
+        mode: appMode(),
+        // На компьютере уже работали с сервером — выбор не показывается
+        cloudAccounts: q(core, 'SELECT COUNT(*) AS n FROM accounts WHERE pharmacyCode <> ?').get(STANDALONE_CODE).n,
+        shop: soloShop(),
+        computer: solo.computerCode,
+        ready: validKey(solo.publicKey) && !!solo.computerRaw,
+        activation: activation(),
+      }
+    },
+    // Выбор при первом запуске. Пока на компьютере никто не входил, его можно поменять
+    chooseMode(mode) {
+      if (!['cloud', 'standalone', ''].includes(mode)) return { error: MESSAGES.notStandalone }
+      if (q(core, 'SELECT 1 FROM accounts LIMIT 1').get()) return { error: MESSAGES.modeLocked }
+      setMeta(core, 'appMode', mode)
+      return { ok: true, mode }
+    },
+    activate(code) {
+      if (appMode() !== 'standalone') return { error: MESSAGES.notStandalone }
+      const now = soloNow()
+      const r = activateCode(core, { publicKey: solo.publicKey, computerRaw: solo.computerRaw, code: String(code ?? ''), now })
+      if (r.error) return r
+      // Записи о прожитом времени нет (общая база начата заново): заводим её снова — от того же
+      // времени, не раньше последнего документа магазина (soloNow)
+      if (soloShop() && !hasLicence(core, STANDALONE_CODE, sealing)) confirmLicence(core, STANDALONE_CODE, { now, days: 30 }, sealing)
+      log.info(`код активации принят: ${r.forever ? 'навсегда' : 'до ' + r.until}, касс — ${r.registers}`)
+      // Срок мог закончиться посреди работы — новый код открывает её сразу
+      watchLicence()
+      if (activeAccount()) send('status', status())
+      return { ok: true, activation: r }
+    },
+    async setupShop(raw) {
+      if (appMode() !== 'standalone') return { error: MESSAGES.notStandalone }
+      const a = activation()
+      if (!a.active) return { error: a.expired ? a.message : MESSAGES.notActivated }
+      if (soloShop()) return { error: MESSAGES.shopExists }
+      const shopName = String(raw?.shopName ?? '').trim().slice(0, 120)
+      const login = String(raw?.login ?? '').trim()
+      const password = String(raw?.password ?? '')
+      if (!shopName) return { error: MESSAGES.noShopName }
+      if (!login) return { error: MESSAGES.noLogin }
+      if (login.length > 50) return { error: MESSAGES.longLogin }
+      if (q(core, 'SELECT 1 FROM accounts WHERE login = ?').get(login)) return { error: MESSAGES.loginBusy }
+      const problem = passwordProblem(password)
+      if (problem) return { error: problem }
+      const sealed = seal(await makeVerifier(password))
+      if (!sealed) return { error: MESSAGES.noSealing }
+      const ownerId = newId()
+      const ownerUserId = newId()
+      const now = clock.now()
+      const ph = openPharmacy(STANDALONE_CODE)
+      try {
+        setupShopDb(ph.db, { shopName, ownerId, ownerUserId, login, now })
+      } catch (e) {
+        if (e instanceof ApiError) return { error: e.message }
+        throw e
+      }
+      q(
+        core,
+        `INSERT INTO accounts (id, login, role, pharmacyCode, pharmacyName, verifier, subStatus, paidUntil, tenantUserId, seenAt, permissions, roleName, roleSystem)
+         VALUES (?, ?, 'founder', ?, ?, ?, 'active', NULL, ?, ?, '', 'Владелец', 'owner')`,
+      ).run(ownerId, login, STANDALONE_CODE, shopName, sealed, ownerUserId, new Date(now).toISOString())
+      // Запись «до какого момента программа дожила» — та же, что у магазина с сервером: по ней
+      // часы программы после перезапуска не идут назад (clock.mjs, licence.mjs)
+      confirmLicence(core, STANDALONE_CODE, { now: licNow(), days: 30 }, sealing)
+      // С этой минуты отсчитывается неделя до первого напоминания «сохраните копию на флешку»
+      setMeta(core, 'soloSince', String(now))
+      log.info(`магазин без интернета заведён: «${shopName}», владелец ${login}`)
+      return { ok: true, login }
+    },
+    async resetPassword(raw) {
+      if (appMode() !== 'standalone') return { error: MESSAGES.notStandalone }
+      const r = useResetCode(core, { publicKey: solo.publicKey, computerRaw: solo.computerRaw, code: String(raw?.code ?? ''), now: soloNow() })
+      if (r.error) return r
+      if (!soloShop()) return { error: MESSAGES.noOwner }
+      const ph = openPharmacy(STANDALONE_CODE)
+      // Владельцы — по списку сотрудников магазина: он главный. Входа у владельца здесь может и не
+      // быть — магазин переехал сюда копией или общая база начата заново: код сброса заводит его
+      const owners = soloTeam(ph).filter((a) => a.role === 'founder' && a.active)
+      if (!owners.length) return { error: MESSAGES.noOwner }
+      const login = String(raw?.login ?? '').trim()
+      const target = login ? owners.find((o) => o.login === login) : owners.length === 1 ? owners[0] : null
+      if (!target) return { error: login ? MESSAGES.noOwner : MESSAGES.whichOwner }
+      const password = String(raw?.password ?? '')
+      const problem = passwordProblem(password)
+      if (problem) return { error: problem }
+      const sealed = seal(await makeVerifier(password))
+      if (!sealed) return { error: MESSAGES.noSealing }
+      try {
+        inTx(core, () => {
+          // С тем же логином — только он (владелец, заведённый здесь до загрузки копии, уходит)
+          for (const other of q(core, 'SELECT id FROM accounts WHERE login = ? AND id <> ?').all(target.login, target.id)) {
+            q(core, 'DELETE FROM accounts WHERE id = ?').run(other.id)
+            session.drop(other.id)
+          }
+          if (!accountById(core, target.id)) {
+            q(
+              core,
+              `INSERT INTO accounts (id, login, role, pharmacyCode, pharmacyName, verifier, subStatus, paidUntil, tenantUserId, seenAt, permissions, roleName, roleSystem)
+               VALUES (?, ?, 'founder', ?, ?, ?, 'active', NULL, ?, ?, '', 'Владелец', 'owner')`,
+            ).run(target.id, target.login, STANDALONE_CODE, String(getMeta(ph.db, 'shopName') || ''), sealed, target.userId ?? null, new Date(clock.now()).toISOString())
+          }
+        })
+        const acc = accountById(core, target.id)
+        updateUser({ db: ph.db, now: clock.now(), user: { ...docUser(ph, acc), permissions: [] }, deviceId }, target.id, { passwordSealed: sealed })
+      } catch (e) {
+        if (e instanceof ApiError) return { error: e.message }
+        log.error('магазин без интернета: пароль владельца не сброшен', e)
+        return { error: MESSAGES.broken }
+      }
+      soloAccept(ph, { team: true })
+      soloPrune(ph)
+      // Подбор пароля до сброса больше не держит вход
+      loginSucceeded(core, target.login)
+      r.mark()
+      log.warn(`пароль владельца ${target.login} сброшен кодом сброса`)
+      return { ok: true, login: target.login }
+    },
+  }
 
   // ── Обмен кассами по местной сети: что знает база магазина ──
   // Общий ключ магазина выдаёт сервер при обмене. Хранится зашифрованным средствами
@@ -1045,6 +1562,8 @@ export function createGateway({
   async function login(req) {
     const name = String(req.body?.name ?? '')
     const password = String(req.body?.password ?? '')
+    // Компьютер магазина без интернета: сервера нет — проверяем здесь, к серверу не ходим
+    if (appMode() === 'standalone' || isSolo(accountByLogin(core, name.trim()))) return soloLogin(name, password)
     const res = await remote(req)
 
     // Сервер не ответил или ответил бедой по дороге — проверяем пароль сами
@@ -1133,6 +1652,10 @@ export function createGateway({
   // считается только слово самого сервера: 401 и 403. Сервер недоступен или отвечает
   // ошибкой — отвечаем по сохранённому, и человек продолжает работать.
   async function me(req, acc) {
+    if (isSolo(acc)) {
+      const view = soloView(accountById(core, acc.id))
+      return closedBySubscription(view.subscription) || reply(200, view)
+    }
     const token = session.tokenOf(acc.id)
     if (token) {
       const res = await remote(req, token)
@@ -1161,6 +1684,7 @@ export function createGateway({
   // Только через сервер. Новый ключ прячем, отпечаток для входа без интернета
   // пересчитываем: иначе без связи действовал бы старый пароль.
   async function changePassword(req, acc) {
+    if (isSolo(acc)) return soloChangePassword(req, acc)
     const token = session.tokenOf(acc.id)
     if (!token) return offline(MESSAGES.onlineOnly)
     const res = await remote(req, token)
@@ -1229,8 +1753,10 @@ export function createGateway({
 
     const ph = openPharmacy(acc.pharmacyCode)
     if (!(await ready(ph))) return { status: 0, date: null, data: null, timedOut: false }
+    // Магазин без интернета: все чеки — здесь, за давними ходить некуда
+    const standaloneShop = isSolo(acc)
 
-    if (req.method === 'POST' && req.path.split('?')[0] === '/returns') {
+    if (!standaloneShop && req.method === 'POST' && req.path.split('?')[0] === '/returns') {
       const saleId = req.body?.saleId
       if (typeof saleId === 'string' && saleId && !q(ph.db, "SELECT 1 FROM docs WHERE kind = 'sale' AND id = ?").get(saleId)) {
         const failed = await fetchOldSale(ph, acc, saleId)
@@ -1264,11 +1790,19 @@ export function createGateway({
         query: found.query,
         params: found.params,
         body,
+        standalone: standaloneShop,
       })
     } catch (e) {
       if (e instanceof ApiError) return refuse(e.status, e.messages || e.message)
       log.error(`локальный запрос ${req.method} ${req.path.split('?')[0]} не выполнен`, e)
       return refuse(500, MESSAGES.broken)
+    }
+
+    if (standaloneShop) {
+      // Сервера нет: чего нет здесь, нет нигде
+      if (data && (data.__remote || data.__deep)) return refuse(404, MESSAGES.soloNotFound)
+      if (req.method !== 'GET') soloAccept(ph, { team: TEAM_ROUTE.test(route) })
+      return reply(req.method === 'POST' ? 201 : 200, data)
     }
 
     // Период глубже того, что хранится на компьютере, — за ним идём на сервер,
@@ -1373,6 +1907,7 @@ export function createGateway({
 
       if (route === '/auth/me' && req.method === 'GET') return await me(req, acc)
       if (route === '/auth/change-password' && req.method === 'POST') return await changePassword(req, acc)
+      if (isSolo(acc)) return await soloRequest(req, acc)
 
       const found = matchLocal(req.method, req.path)
       if (found) return await local(found, req, acc)
@@ -1396,6 +1931,8 @@ export function createGateway({
   return {
     request,
     deviceId,
+    // Магазин без интернета: что показать до входа и что сделать (main.mjs, окно входа)
+    standalone: soloApi,
 
     // Программа запущена: если кто-то был за кассой — открываем его магазин
     // и начинаем обмен с сервером
@@ -1407,7 +1944,15 @@ export function createGateway({
         return false
       }
       try {
-        openPharmacy(acc.pharmacyCode).sync.start().catch(() => {})
+        const ph = openPharmacy(acc.pharmacyCode)
+        // Магазин без интернета: загруженная копия могла сменить список сотрудников (программа
+        // перезапускается после загрузки, но могла и упасть до выхода) — без входа дальше нельзя:
+        // при входе вход сверится со списком (soloAdopt, soloPrune)
+        if (isSolo(acc) && !q(ph.db, 'SELECT 1 FROM team_accounts WHERE id = ?').get(acc.id)) {
+          session.deactivate()
+          return false
+        }
+        ph.sync.start().catch(() => {})
       } catch (e) {
         // База магазина не открылась: файл занят, диск недоступен, база от более новой
         // версии. Программа всё равно должна запуститься — человек увидит экран входа,
@@ -1568,6 +2113,13 @@ export function createGateway({
           if (lanPrune(pharmacy.db, clock.now())) send('changed', ['products', 'customers', 'sales', 'returns', 'shifts', 'arrivals'])
         } catch (e) {
           log.warn('обмен по сети: журнал не убран', e)
+        }
+        // Магазин без интернета: служебные журналы приёма старше полутора месяцев не нужны
+        // (документы остаются все)
+        try {
+          if (isStandaloneDb(pharmacy.db)) pruneAccepted(pharmacy.db, clock.now())
+        } catch (e) {
+          log.warn('магазин без интернета: журналы приёма не убраны', e)
         }
       }
       if (pharmacy && activeAccount()) send('status', status())

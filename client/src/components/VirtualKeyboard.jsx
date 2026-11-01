@@ -269,13 +269,17 @@ export default function VirtualKeyboard({ fallbackRef, onClose }) {
     return null
   }
 
+  // Поле, которое само правит свой текст и ставит курсор (поле кода активации расставляет
+  // дефисы), помечено data-vkb-caret="self": курсор ему не возвращаем — наш был бы мимо
+  const svoyKursor = (el) => el.dataset?.vkbCaret === 'self'
+
   const vstavit = (ch) => {
     const el = pole()
     if (!el) return
     const [a, b] = kursor(el)
     const v = el.value
     postavit(el, v.slice(0, a) + ch + v.slice(b))
-    vernutKursor(el, a + ch.length)
+    if (!svoyKursor(el)) vernutKursor(el, a + ch.length)
     if (shift) setShift(false)
   }
 
@@ -286,12 +290,12 @@ export default function VirtualKeyboard({ fallbackRef, onClose }) {
     const v = el.value
     if (a !== b) {
       postavit(el, v.slice(0, a) + v.slice(b))
-      vernutKursor(el, a)
+      if (!svoyKursor(el)) vernutKursor(el, a)
     } else if (a > 0) {
       // Стираем целый знак, а не половину суррогатной пары
       const prev = [...v.slice(0, a)].pop() || ''
       postavit(el, v.slice(0, a - prev.length) + v.slice(a))
-      vernutKursor(el, a - prev.length)
+      if (!svoyKursor(el)) vernutKursor(el, a - prev.length)
     }
   }
 

@@ -9,6 +9,7 @@ import { useT } from '../lib/i18n'
 import { badgeOf, leftText, opTitle, updateBadgeOf, updateText, versionBadgeOf } from '../lib/syncStatus'
 import { rejectedDetail } from '../lib/rejected'
 import { lanBadgeOf } from '../lib/lanStatus'
+import { soloMessage } from '../lib/aktivaciya'
 import { Modal, useToast } from './ui'
 import LanPanel from './LanPanel'
 
@@ -114,7 +115,7 @@ function problemText(code, t) {
 }
 
 // Почему не вышло загрузить или сохранить копию
-function copyErrorText(r, t) {
+export function copyErrorText(r, t) {
   const detail = r?.detail ? `: ${r.detail}` : ''
   if (r?.error === 'rights') return t('Нет прав на резервные копии')
   if (r?.error === 'gone') return t('Копия не найдена. Откройте список заново.')
@@ -130,9 +131,12 @@ function copyErrorText(r, t) {
 // ── Загрузить копию базы ──
 // Список копий этой кассы (основная и вторая папка) и копии из папки, которую выберет
 // владелец, — например, с флешки сломавшегося компьютера. Что будет и что пропадёт, окно
-// говорит до загрузки. Загрузка — с перезапуском программы (desktop/src/restore.mjs)
-function RestoreView({ st, onBack }) {
+// говорит до загрузки. Загрузка — с перезапуском программы (desktop/src/restore.mjs).
+// Магазин без интернета (1.6.0) — те же шаги, но без слов о сервере: копия с другого
+// компьютера здесь значит «магазин переезжает сюда»
+export function RestoreView({ st, onBack }) {
   const t = useT()
+  const solo = !!st?.standalone
   const toast = useToast()
   const [list, setList] = useState(null)
   const [picked, setPicked] = useState([])
@@ -162,7 +166,7 @@ function RestoreView({ st, onBack }) {
     setOkForeign(false)
   }
   const whereText = (c) =>
-    c.where === 'main' ? t('Эта касса')
+    c.where === 'main' ? (solo ? t('Этот компьютер') : t('Эта касса'))
       : c.where === 'extra' ? t('Вторая папка')
         : c.where === 'disk' ? `${t('Копия на диске')}: ${c.place || ''}`.trim()
           : c.place || t('Из выбранной папки')
@@ -190,7 +194,9 @@ function RestoreView({ st, onBack }) {
   return (
     <div data-testid="restore-view">
       <div className="tag-cat" style={{ marginBottom: 10 }}>
-        {t('Выберите копию. Программа снимет копию нынешнего состояния, загрузит выбранную и перезапустится — войдите снова. Всё, что уже на сервере, останется там: магазин на прошлую дату так не вернуть.')}
+        {solo
+          ? t('Выберите копию — копия с флешки находится кнопкой «Выбрать папку…». Программа снимет копию нынешнего состояния, загрузит выбранную и перезапустится — войдите снова.')
+          : t('Выберите копию. Программа снимет копию нынешнего состояния, загрузит выбранную и перезапустится — войдите снова. Всё, что уже на сервере, останется там: магазин на прошлую дату так не вернуть.')}
       </div>
       {list === null ? (
         <div className="tag-cat">{t('Загружаем список копий…')}</div>
@@ -207,7 +213,7 @@ function RestoreView({ st, onBack }) {
                 </span>
                 {c.problem ? (
                   <span className="tag-cat sync-bad">{problemText(c.problem, t)}</span>
-                ) : (
+                ) : solo ? null : (
                   <span className="tag-cat">{c.pending > 0 ? `${t('Не ушло на сервер')}: ${c.pending}` : t('Всё было отправлено на сервер')}</span>
                 )}
               </span>
@@ -228,10 +234,12 @@ function RestoreView({ st, onBack }) {
         <div className="restore-confirm">
           {chosen.foreign && (
             <div className="note warn">
-              {t('Это копия другой кассы. Загружайте её, только если тот компьютер больше не работает: эта касса станет той кассой — с её номером, сменой и чеками, которые не ушли на сервер.')}
+              {solo
+                ? t('Это копия с другого компьютера. Загружайте её, если магазин переезжает сюда: всё, что сейчас в программе на этом компьютере, заменится копией. Владелец входит своим логином и паролем этого компьютера. Пароли остальных сотрудников остались на старом компьютере — задайте их заново в «Сотрудниках».')
+                : t('Это копия другой кассы. Загружайте её, только если тот компьютер больше не работает: эта касса станет той кассой — с её номером, сменой и чеками, которые не ушли на сервер.')}
               <label className="restore-check">
                 <input type="checkbox" checked={okForeign} onChange={(e) => setOkForeign(e.target.checked)} data-testid="restore-ok-foreign" />
-                {t('Тот компьютер больше не работает')}
+                {solo ? t('Магазин переезжает на этот компьютер') : t('Тот компьютер больше не работает')}
               </label>
             </div>
           )}
@@ -245,7 +253,7 @@ function RestoreView({ st, onBack }) {
               </label>
             </div>
           )}
-          {!st?.online && (
+          {!st?.online && !solo && (
             <div className="note info">{t('Связи с сервером сейчас нет. Копия загрузится, а смену, остатки и журналы программа сверит с сервером, как только появится интернет.')}</div>
           )}
         </div>
@@ -303,6 +311,9 @@ function StatusModal({ st, onClose }) {
   const backup = st?.backup || {}
   const update = st?.update || {}
   const pending = st?.pending || 0
+  // Магазин без интернета (1.6.0): обмена с сервером нет — его строки не показываем
+  const solo = !!st?.standalone
+  const act = st?.activation || {}
 
   // Копия на диск D (раз в 2 дня сама) — сейчас же; и открыть её папку
   const disk = backup.disk || {}
@@ -341,14 +352,26 @@ function StatusModal({ st, onClose }) {
   return (
     <Modal wide title={t('Состояние программы')} onClose={onClose}>
       <div data-testid="status-modal">
+        {/* ── Магазин без интернета: срок кода и где база ── */}
+        {solo && (
+          <>
+            <div className={'note ' + (act.active ? (act.warn ? 'warn' : 'info') : 'err')} style={{ marginBottom: 12 }} data-testid="solo-status">
+              {t('Программа без интернета: база магазина хранится на этом компьютере, всё сделанное сохраняется сразу.')}
+              {soloMessage(act, t) ? <div style={{ marginTop: 6 }}><b>{soloMessage(act, t)}</b></div> : null}
+            </div>
+            <Row label={t('Программа работает')} tone={!act.active ? 'bad' : act.warn ? 'warn' : undefined}>{act.forever ? t('без срока') : act.untilHuman ? `${t('до')} ${act.untilHuman}` : '—'}</Row>
+            <Row label={t('Касс можно подключить')}>{act.registers || '—'}</Row>
+            <div className="tag-cat" style={{ margin: '6px 0 12px' }}>{t('Новый код активации вводится в «Настройках» → «Профиль».')}</div>
+          </>
+        )}
         {/* ── Главное: сохранено ли сделанное ── */}
-        <div className={'note ' + (st?.online ? 'info' : 'warn')} style={{ marginBottom: 12 }}>
+        {!solo && <div className={'note ' + (st?.online ? 'info' : 'warn')} style={{ marginBottom: 12 }}>
           {st?.online
             ? pending > 0
               ? t('Связь с сервером есть. Сделанное на этой кассе отправляется.')
               : t('Связь с сервером есть. Всё, что сделано на этой кассе, отправлено.')
             : t('Связи с сервером нет. Касса работает: чеки сохраняются на этом компьютере и уйдут на сервер сами, когда появится интернет.')}
-        </div>
+        </div>}
         {/* Часам компьютера верить нельзя, а сервер ещё не ответил: время в чеках неточное */}
         {st?.clockDoubt && (
           <div className="note warn" style={{ marginBottom: 12 }} data-testid="clock-doubt">
@@ -364,6 +387,7 @@ function StatusModal({ st, onClose }) {
           </div>
         )}
 
+        {!solo && <>
         <Row label={t('Ждут отправки')} tone={pending > 0 ? 'warn' : 'ok'}>{pending > 0 ? pending : t('ничего')}</Row>
         <Row label={t('Последний обмен с сервером')}>{st?.syncedAt ? fmtShort(st.syncedAt) : '—'}</Row>
         {st?.waiting && pending > 0 && (
@@ -387,9 +411,10 @@ function StatusModal({ st, onClose }) {
             {busy === 'sync' ? t('Обмен…') : t('Обменяться сейчас')}
           </button>
         </div>
+        </>}
 
         {/* ── Не принято сервером ── */}
-        {rejectedCount > 0 && (
+        {!solo && rejectedCount > 0 && (
           <div className="sync-section">
             <h4>{t('Не принято сервером')} <span className="badge low">{rejectedCount}</span></h4>
             {!isFounder && <div className="note err">{t('Сервер не принял часть операций этой кассы. Сообщите владельцу — он увидит подробности.')}</div>}
@@ -430,14 +455,14 @@ function StatusModal({ st, onClose }) {
         )}
 
         {/* ── Соседние кассы в местной сети ── */}
-        {st?.lan?.enabled && (
+        {!solo && st?.lan?.enabled && (
           <div className="sync-section lan-section">
             <LanPanel />
           </div>
         )}
 
         {/* ── Сколько можно работать без связи ── */}
-        {lic && (
+        {!solo && lic && (
           <div className="sync-section">
             <h4>{t('Работа без связи')}</h4>
             <Row label={t('Без связи программа работает')}>{lic.offlineDays} {t('дн.')}</Row>
@@ -462,10 +487,19 @@ function StatusModal({ st, onClose }) {
         {/* ── Копия базы ── */}
         <div className="sync-section">
           <h4>{t('Копия базы')}</h4>
+          {/* Магазин без интернета: база только здесь — раз в неделю копию на флешку */}
+          {solo && backup.usb?.due && (
+            <div className="note warn" style={{ marginBottom: 8 }} data-testid="usb-due">
+              {t('База магазина хранится только на этом компьютере. Сохраните копию на флешку — нажмите «Сохранить копию в…» и выберите флешку.')}
+              {backup.usb.at ? ` ${t('Последний раз')}: ${fmtShort(backup.usb.at)}.` : ''}
+            </div>
+          )}
           {st?.restored?.manual && (
             <div className="note info" style={{ marginBottom: 8 }} data-testid="restored-manual">
               {st.restored.from ? `${t('Загружена копия базы от')} ${fmtShort(st.restored.from)}.` : t('Загружена копия базы.')}{' '}
-              {st.restored.foreign ? `${t('Эта касса теперь работает под номером кассы со старого компьютера.')} ` : ''}
+              {st.restored.foreign
+                ? `${solo ? t('Магазин переехал сюда с другого компьютера. Пароли сотрудников остались там — задайте их заново в «Сотрудниках».') : t('Эта касса теперь работает под номером кассы со старого компьютера.')} `
+                : ''}
               {t('Перед загрузкой программа сохранила копию прежнего состояния — её можно загрузить обратно.')}
             </div>
           )}
@@ -494,7 +528,11 @@ function StatusModal({ st, onClose }) {
               {disk.running ? t('сохраняется…') : disk.at ? fmtShort(disk.at) : t('ещё не снималась')}
             </Row>
             {disk.dir && <div className="tag-cat" data-testid="disk-dir">{t('Папка')}: {disk.dir}</div>}
-            <div className="tag-cat">{t('Раз в 2 дня программа сама кладёт копию на диск D (нет диска D — на диск C) и хранит 15 последних. Интернет не нужен.')}</div>
+            <div className="tag-cat">
+              {solo
+                ? t('Каждый день программа сама кладёт копию на диск D (нет диска D — на диск C) и хранит 15 последних.')
+                : t('Раз в 2 дня программа сама кладёт копию на диск D (нет диска D — на диск C) и хранит 15 последних. Интернет не нужен.')}
+            </div>
             {disk.error && <div className="note err" style={{ marginTop: 6 }} data-testid="disk-error">{t('Копию на диск записать не удалось')}: {disk.error}</div>}
           </div>
           {backup.error && <div className="note err" style={{ marginTop: 6 }}>{t('Копию снять не удалось')}: {backup.error}</div>}
@@ -555,7 +593,7 @@ function StatusModal({ st, onClose }) {
         </div>
 
         {/* ── Для поддержки ── */}
-        {isFounder && (
+        {isFounder && !solo && (
           <div className="sync-section">
             <h4>{t('Если данные на кассе выглядят неверно')}</h4>
             <div className="tag-cat">{t('Программа заново загрузит с сервера товары, остатки и журналы. Сделанное на этой кассе не потеряется: оно сначала уйдёт на сервер.')}</div>

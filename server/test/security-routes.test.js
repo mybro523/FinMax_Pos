@@ -32,8 +32,9 @@ test('контроллеры вообще нашлись (иначе прове�
 })
 
 test('@Public() только у белого списка', () => {
-  // Открытые без входа: корень/health и сам вход. Всё.
-  const ALLOWED = new Set(['app.controller.ts', 'auth/auth.controller.ts'])
+  // Открытые без входа: корень/health, сам вход и открытый ключ кодов активации (1.6.0): его
+  // берёт сборка программы, секрета в нём нет — по нему коды только проверяют. Всё.
+  const ALLOWED = new Set(['app.controller.ts', 'auth/auth.controller.ts', 'licence/licence-key.controller.ts'])
   const offenders = controllers.filter((p) => read(p).includes('@Public(') && !ALLOWED.has(rel(p)))
   assert.deepEqual(offenders.map(rel), [], 'новый @Public() маршрут — осознанное решение: добавьте его в белый список этого теста')
 })

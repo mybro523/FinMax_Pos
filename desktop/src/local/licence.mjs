@@ -106,6 +106,9 @@ export function touchLicence(db, code, now, cipher, floor = now) {
   write(db, { ...r, seenAt: Math.max(r.seenAt, now), floorAt: Math.max(r.floorAt, floor) }, cipher)
 }
 
+// Есть ли у магазина целая запись о сроке (её не стёрли и не подменили)
+export const hasLicence = (db, code, cipher) => !!readLicence(db, code, cipher)
+
 // Самый поздний момент, до которого дожил срок работы без связи, — по всем магазинам
 // этого компьютера. С него время срока продолжается после запуска
 export function lastSeen(db, cipher) {

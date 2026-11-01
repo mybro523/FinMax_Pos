@@ -203,3 +203,34 @@ model Role {
   @@unique([pharmacyId, name])
   @@index([pharmacyId])
 }
+
+// ── Коды активации программы без интернета (версия 1.6.0) ──
+// Магазин без интернета сервер не видит — его оплату держит код активации, подписанный
+// секретным ключом сервиса (src/common/licence-code.ts). Ключ один на весь сервис,
+// заводится сам при первом обращении и переезжает вместе с базой. Открытая половина
+// уходит в программу при сборке (GET /api/licence/key).
+model LicenceKey {
+  id         String   @id
+  privateKey String
+  publicKey  String
+  createdAt  DateTime @default(now())
+}
+
+// Выпущенные коды — запись для владельца сервиса: кому, до какого дня, сколько касс.
+// kind: activate — активация магазина; reset — сброс пароля владельца
+model LicenceCode {
+  id          String    @id @default(cuid())
+  kind        String
+  computer    String
+  until       DateTime?
+  registers   Int       @default(0)
+  serial      Int
+  note        String    @default("")
+  code        String
+  byAccountId String?
+  byName      String    @default("")
+  createdAt   DateTime  @default(now())
+
+  @@index([computer])
+  @@index([createdAt])
+}
