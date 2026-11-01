@@ -4,7 +4,9 @@
 Сайт остаётся на Vercel.
 
 - Сервер: VPS-2 (4 ядра, 8 ГБ, 75 ГБ), Франция (Гравлин), Ubuntu 26.04, оплачен до 31.10.2027.
-- Адрес: `https://vps-04688c58.vps.ovh.net/api` (IPv4 159.173.136.216).
+- Адрес: **`https://api.finmaxpos.tj/api`** (домен finmaxpos.tj — у Navju Cloud, запись `api` → A 159.173.136.216);
+  прежний `https://vps-04688c58.vps.ovh.net/api` тоже работает (программа 1.6.2).
+- Сайт: `https://www.finmaxpos.tj` (Vercel; `finmaxpos.tj` перекидывает на www).
 - Вход на сервер: пользователь `ubuntu`, по SSH-ключу; запасной вход — KVM в панели OVH.
 - **Панель сервера (как на Railway): `https://vps-04688c58.vps.ovh.net/panel`** — Portainer:
   части проекта (база, сервер программы, вход https), их состояние, нагрузка, журналы,

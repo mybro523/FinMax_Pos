@@ -6,7 +6,9 @@
 	email finmaxtj@gmail.com
 }
 
-vps-04688c58.vps.ovh.net {
+# Постоянный адрес — api.finmaxpos.tj (домен клиента у Navju Cloud); адрес OVH остаётся для
+# программ, собранных с ним (1.6.2)
+api.finmaxpos.tj, vps-04688c58.vps.ovh.net {
 	# Portainer отвечает в корне (--base-url — только для его ссылок): /panel отрезается
 	redir /panel /panel/ 308
 	handle_path /panel/* {
