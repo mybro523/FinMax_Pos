@@ -18,7 +18,13 @@
 // Ключ магазина выдаёт сервер (при обмене). Пока ключа нет — касса ни разу не была в
 // сети — обмена нет. Сам обмен идёт и при интернете: продажа соседа так появляется
 // у владельца за секунду, а не после обмена обеих касс с сервером.
-import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } from 'node:crypto'
+//
+// Магазин без интернета (1.7.0): сервера нет, ключ заводит главный компьютер и отдаёт кассе
+// при подключении (см. «Подключение кассы» ниже). Кассы говорят только с главным, главный —
+// только со своими кассами (hub.allow): так у всех один порядок операций.
+import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes, scryptSync } from 'node:crypto'
+import { gunzipSync, gzipSync } from 'node:zlib'
+import { constants as bufferConstants } from 'node:buffer'
 import nodeHttp from 'node:http'
 import nodeDgram from 'node:dgram'
 import nodeOs from 'node:os'
@@ -50,20 +56,232 @@ export function lanKeys(key) {
   return { enc, tag }
 }
 
-export function seal(enc, obj) {
+// Байты — в шифр и обратно (база магазина при подключении кассы); сообщения — JSON поверх них
+export function sealRaw(enc, bytes) {
   const iv = randomBytes(12)
   const c = createCipheriv('aes-256-gcm', enc, iv)
   c.setAAD(AAD)
-  const data = Buffer.concat([c.update(JSON.stringify(obj), 'utf8'), c.final()])
+  const data = Buffer.concat([c.update(bytes), c.final()])
   return Buffer.concat([iv, c.getAuthTag(), data])
 }
 
-export function unseal(enc, buf) {
-  if (!Buffer.isBuffer(buf) || buf.length < 29) throw new Error('сообщение повреждено')
+export function unsealRaw(enc, buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 28) throw new Error('сообщение повреждено')
   const d = createDecipheriv('aes-256-gcm', enc, buf.subarray(0, 12))
   d.setAAD(AAD)
   d.setAuthTag(buf.subarray(12, 28))
-  return JSON.parse(Buffer.concat([d.update(buf.subarray(28)), d.final()]).toString('utf8'))
+  return Buffer.concat([d.update(buf.subarray(28)), d.final()])
+}
+
+export const seal = (enc, obj) => sealRaw(enc, Buffer.from(JSON.stringify(obj), 'utf8'))
+
+export function unseal(enc, buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 29) throw new Error('сообщение повреждено')
+  return JSON.parse(unsealRaw(enc, buf).toString('utf8'))
+}
+
+// ── Подключение кассы к главному компьютеру (магазин без интернета, 1.7.0) ──
+// Главный показывает код из 8 знаков на 10 минут. Касса по коду находит главного в сети и
+// забирает у него базу магазина. Сам код по сети не ходит: поиск — по отпечатку ключа из кода,
+// а запрос и ответ зашифрованы этим ключом (scrypt — подбирать код по подслушанному долго).
+// Знаки — без похожих (I, L, O, U); набранные похожие и русские буквы-двойники принимаются
+export const PAIR_LEN = 8
+const PAIR_ABC = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
+const PAIR_LOOKALIKE = { O: '0', I: '1', L: '1', А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: '0', Р: 'P', С: 'C', Т: 'T', Х: 'X' }
+const PAIR_PATH = '/lan/v1/pair'
+// Запрос кассы — её неотправленные операции (подключение заново); ответ — вся база магазина
+const PAIR_MAX_REQ = 64 * 1024 * 1024
+export const PAIR_MAX_RES = 512 * 1024 * 1024
+const PAIR_MAGIC = Buffer.from('FMXP1')
+// Пока главный собирает базу, касса ждёт без единого байта — дольше обычного обмена
+const PAIR_TIMEOUT_MS = 180000
+
+export function newPairCode() {
+  let s = ''
+  for (const b of randomBytes(PAIR_LEN)) s += PAIR_ABC[b & 31]
+  return s
+}
+export function normalizePairCode(raw) {
+  let out = ''
+  for (const ch of String(raw ?? '').toUpperCase()) {
+    const c = PAIR_LOOKALIKE[ch] || ch
+    if (PAIR_ABC.includes(c)) out += c
+  }
+  return out.slice(0, PAIR_LEN)
+}
+export function formatPairCode(raw) {
+  const c = normalizePairCode(raw)
+  return c.length > 4 ? c.slice(0, 4) + '-' + c.slice(4) : c
+}
+export function pairKeys(code) {
+  const enc = scryptSync(normalizePairCode(code), 'finmax-pair-v1', 32, { N: 16384, r: 8, p: 1 })
+  const tag = createHmac('sha256', enc).update('finmax-pair-tag-v1').digest('hex').slice(0, 24)
+  return { enc, tag }
+}
+// Ответ главного: сведения о магазине и база — двумя шифрованными частями
+function pairFrame(meta, db) {
+  const len = Buffer.alloc(4)
+  len.writeUInt32BE(meta.length)
+  return Buffer.concat([PAIR_MAGIC, len, meta, db])
+}
+
+// HTTP-запрос к соседу: тело — уже зашифрованное сообщение
+function httpPost(http, host, port, path, body, { max = MAX_BODY, timeoutMs = REQ_TIMEOUT_MS } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host,
+        port,
+        path,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': body.length, Connection: 'close' },
+        timeout: timeoutMs,
+      },
+      (res) => {
+        const chunks = []
+        let size = 0
+        res.on('data', (c) => {
+          size += c.length
+          if (size > max) req.destroy(Object.assign(new Error('ответ слишком большой'), { status: 413 }))
+          else chunks.push(c)
+        })
+        res.on('end', () => {
+          if (res.statusCode === 200) resolve(Buffer.concat(chunks))
+          else reject(Object.assign(new Error('ответ ' + res.statusCode), { status: res.statusCode }))
+        })
+        res.on('error', reject)
+      },
+    )
+    req.on('timeout', () => req.destroy(Object.assign(new Error('сосед не ответил'), { code: 'TIMEOUT' })))
+    req.on('error', reject)
+    req.end(body)
+  })
+}
+
+// Касса ищет главного: кричит в сеть отпечатком кода, главный с этим кодом отвечает своим портом
+function findMain({ tag, deviceId, dgram, os, udpPort, ms }) {
+  return new Promise((resolve) => {
+    let sock = null
+    let every = null
+    let done = false
+    const finish = (v) => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      if (every) clearInterval(every)
+      try {
+        sock?.close()
+      } catch {
+        /* уже закрыт */
+      }
+      resolve(v)
+    }
+    const timer = setTimeout(() => finish(null), ms)
+    try {
+      sock = dgram.createSocket({ type: 'udp4', reuseAddr: true })
+    } catch {
+      finish(null)
+      return
+    }
+    sock.on('error', () => finish(null))
+    sock.on('message', (buf, rinfo) => {
+      if (!buf || buf.length > 2048) return
+      let m
+      try {
+        m = JSON.parse(buf.toString('utf8'))
+      } catch {
+        return
+      }
+      if (m?.a !== 'finmax-pair' || m.v !== 1 || m.t !== 'here' || m.s !== tag || !Number.isInteger(m.p) || m.p <= 0 || m.p > 65535) return
+      finish({ host: cleanAddr(rinfo.address), port: m.p })
+    })
+    const msg = Buffer.from(JSON.stringify({ a: 'finmax-pair', v: 1, t: 'find', s: tag, d: deviceId }))
+    const shout = () => {
+      // И на этот же компьютер: проверка запускает «главного» и «кассу» рядом
+      for (const addr of [...broadcastAddrs(os), '127.0.0.1']) {
+        try {
+          sock.send(msg, udpPort, addr, () => {})
+        } catch {
+          /* сеть пропала — следующая попытка через секунду */
+        }
+      }
+    }
+    try {
+      sock.bind(0, () => {
+        try {
+          sock.setBroadcast(true)
+        } catch {
+          /* без широковещания найдёт только этот же компьютер */
+        }
+        shout()
+        every = setInterval(shout, 1000)
+      })
+    } catch {
+      finish(null)
+    }
+  })
+}
+
+// ── Касса: подключиться к главному по коду ──
+// address — адрес главного, вписанный вручную (поиск в сети закрыт брандмауэром); иначе ищем.
+// entries — свои операции, которые главный ещё не принял (касса подключается заново).
+// Ответ: { meta, db, address, port } или { error: 'format' | 'address' | 'notfound' | 'code' |
+// 'nocode' | 'connect' | 'big' | 'broken' | слово главного ('limit', 'licence', …) }
+export async function pairRequest({
+  code,
+  address = '',
+  deviceId,
+  name = '',
+  host = '',
+  shopId = '',
+  entries = [],
+  http = nodeHttp,
+  dgram = nodeDgram,
+  os = nodeOs,
+  udpPort = LAN_UDP_PORT,
+  findMs = 6000,
+  timeoutMs = PAIR_TIMEOUT_MS,
+  now = () => Date.now(),
+}) {
+  const norm = normalizePairCode(code)
+  if (norm.length !== PAIR_LEN) return { error: 'format' }
+  const k = pairKeys(norm)
+  let target = null
+  if (String(address || '').trim()) {
+    const a = parseAddress(address)
+    if (!a) return { error: 'address' }
+    target = { host: a.host, port: a.port }
+  } else {
+    target = await findMain({ tag: k.tag, deviceId, dgram, os, udpPort, ms: findMs })
+    if (!target) return { error: 'notfound' }
+  }
+  const body = seal(k.enc, { v: 1, t: 'pair', from: deviceId, name, host, shopId, ts: now(), entries })
+  if (body.length > PAIR_MAX_REQ) return { error: 'big' }
+  let raw
+  try {
+    raw = await httpPost(http, target.host, target.port, PAIR_PATH, body, { max: PAIR_MAX_RES, timeoutMs })
+  } catch (e) {
+    if (e?.status === 403) return { error: 'code' }
+    if (e?.status === 404) return { error: 'nocode' }
+    if (e?.status === 413) return { error: 'big' }
+    return { error: 'connect' }
+  }
+  if (raw.length < 9 || !raw.subarray(0, 5).equals(PAIR_MAGIC)) return { error: 'broken' }
+  const n = raw.readUInt32BE(5)
+  let meta
+  try {
+    meta = unseal(k.enc, raw.subarray(9, 9 + n))
+  } catch {
+    return { error: 'code' }
+  }
+  if (!meta?.ok) return { error: typeof meta?.error === 'string' ? meta.error.slice(0, 40) : 'broken' }
+  let db
+  try {
+    db = gunzipSync(unsealRaw(k.enc, raw.subarray(9 + n)), { maxOutputLength: Math.min(bufferConstants.MAX_LENGTH, 2 * 1024 * 1024 * 1024) })
+  } catch {
+    return { error: 'broken' }
+  }
+  return { meta, db, address: target.host, port: Number.isInteger(meta.port) && meta.port > 0 ? meta.port : target.port }
 }
 
 // ── Широковещательные адреса сетей этого компьютера ──
@@ -124,17 +342,23 @@ function validMsg(msg, s, nowMs) {
     msg.upTo >= 0 &&
     (msg.port === undefined || (Number.isInteger(msg.port) && msg.port >= 0 && msg.port < 65536)) &&
     Number.isFinite(Number(msg.ts)) &&
-    Math.abs(nowMs - Number(msg.ts)) < TS_SLACK_MS &&
+    // Магазин без интернета: часы кассы с сервером не сверены и могут уйти на дни — по ним не судим
+    (s?.anyTime === true || Math.abs(nowMs - Number(msg.ts)) < TS_SLACK_MS) &&
     !!s
   )
 }
 
 // hub — то, что знает база магазина (gateway.mjs, lanHub):
-//   state() → { enabled, deviceId, name, key, wide } или null (магазин не открыт)
+//   state() → { enabled, deviceId, name, key, wide, epoch?, anyTime? } или null (магазин не открыт)
 //   entriesFor(since, wide) → { entries, upTo, more }
 //   receive(peerId, entries)
 //   progress(peerId, { sentUpTo, gotUpTo })
 //   peers(), peer(id), peerSeen({ … }), manual(), forgetAddress(deviceId)
+// Магазин без интернета (1.7.0), всё — по желанию:
+//   allow(deviceId) — с этой кассой можно говорить (звезда: касса — только с главным)
+//   epochOk(epoch) — сосед из того же «поколения» магазина (главный не загружал копию)
+//   pairInfo() → { enc, tag } — у главного открыт код подключения; pairFailed() — неверный код
+//   pairServe({ from, name, host, shopId, entries, address }) → { meta, db } или { error }
 export function createLan({
   hub,
   log = { info() {}, warn() {} },
@@ -199,20 +423,59 @@ export function createLan({
     if (!validMsg(msg, s, t)) return { code: 400 }
     // Звоним сами себе (вписали свой же адрес)
     if (msg.from === s.deviceId) return { code: 409 }
+    // Магазин без интернета: не своя касса (её отключили на главном) и касса прежнего «поколения»
+    if (typeof hub.allow === 'function' && !hub.allow(msg.from)) return { code: 423 }
+    if (typeof hub.epochOk === 'function' && !hub.epochOk(msg.e)) return { code: 412 }
     hub.peerSeen({ deviceId: msg.from, name: msg.name, address: remote, port: msg.port || 0, wide: !!msg.wide, ok: true, now: t })
     hub.receive(msg.from, msg.entries)
     hub.progress(msg.from, { sentUpTo: msg.ack, gotUpTo: msg.upTo })
     const out = hub.entriesFor(msg.ack, !!msg.wide)
-    const reply = { v: 1, t: 'x', from: s.deviceId, name: s.name, wide: !!s.wide, port, ts: t, ack: msg.upTo, entries: out.entries, upTo: out.upTo, more: !!out.more }
+    const reply = { v: 1, t: 'x', from: s.deviceId, name: s.name, wide: !!s.wide, port, ts: t, ack: msg.upTo, entries: out.entries, upTo: out.upTo, more: !!out.more, e: s.epoch || undefined }
     return { code: 200, body: seal(k.enc, reply) }
   }
 
+  // ── Касса подключается по коду (магазин без интернета) ──
+  function handlePair(buf, remote) {
+    const p = typeof hub.pairInfo === 'function' ? hub.pairInfo() : null
+    if (!p) return { code: 404 }
+    let msg
+    try {
+      msg = unseal(p.enc, buf)
+    } catch {
+      // Код не тот: считаем — подбирать его по сети не дадут
+      hub.pairFailed?.()
+      return { code: 403 }
+    }
+    const t = now()
+    if (!msg || msg.v !== 1 || msg.t !== 'pair' || typeof msg.from !== 'string' || !ID.test(msg.from) || !Number.isFinite(Number(msg.ts))) return { code: 400 }
+    const text = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '')
+    let r
+    try {
+      r = hub.pairServe({
+        from: msg.from,
+        name: text(msg.name, 60),
+        host: text(msg.host, 60),
+        shopId: text(msg.shopId, 64),
+        entries: Array.isArray(msg.entries) ? msg.entries : [],
+        address: remote,
+        at: t,
+      })
+    } catch (e) {
+      log.warn('обмен по сети: касса не подключилась', e)
+      r = { error: 'broken' }
+    }
+    if (!r || r.error) return { code: 200, body: pairFrame(seal(p.enc, { ok: false, error: String(r?.error || 'broken') }), Buffer.alloc(0)) }
+    return { code: 200, body: pairFrame(seal(p.enc, { ok: true, ...r.meta, port }), sealRaw(p.enc, gzipSync(r.db))) }
+  }
+
   function onRequest(req, res) {
-    if (req.method !== 'POST' || req.url !== PATH) {
+    if (req.method !== 'POST' || (req.url !== PATH && req.url !== PAIR_PATH)) {
       res.writeHead(404, { Connection: 'close' })
       res.end()
       return
     }
+    const pairing = req.url === PAIR_PATH
+    const limit = pairing ? PAIR_MAX_REQ : MAX_BODY
     const chunks = []
     let size = 0
     let tooBig = false
@@ -220,7 +483,7 @@ export function createLan({
     req.on('data', (c) => {
       if (tooBig) return
       size += c.length
-      if (size > MAX_BODY) {
+      if (size > limit) {
         tooBig = true
         res.writeHead(413, { Connection: 'close' })
         res.end()
@@ -231,7 +494,7 @@ export function createLan({
       if (tooBig) return
       let r
       try {
-        r = handleBody(Buffer.concat(chunks), cleanAddr(req.socket?.remoteAddress))
+        r = (pairing ? handlePair : handleBody)(Buffer.concat(chunks), cleanAddr(req.socket?.remoteAddress))
       } catch (e) {
         log.warn('обмен по сети: запрос соседа не обработан', e)
         r = { code: 500 }
@@ -271,41 +534,14 @@ export function createLan({
   }
 
   // ── Звоним соседу ──
-  function post(host, p, body) {
-    return new Promise((resolve, reject) => {
-      const req = http.request(
-        {
-          host,
-          port: p,
-          path: PATH,
-          method: 'POST',
-          headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': body.length, Connection: 'close' },
-          timeout: REQ_TIMEOUT_MS,
-        },
-        (res) => {
-          const chunks = []
-          let size = 0
-          res.on('data', (c) => {
-            size += c.length
-            if (size > MAX_BODY) req.destroy(new Error('ответ слишком большой'))
-            else chunks.push(c)
-          })
-          res.on('end', () => {
-            if (res.statusCode === 200) resolve(Buffer.concat(chunks))
-            else reject(Object.assign(new Error('ответ ' + res.statusCode), { status: res.statusCode }))
-          })
-          res.on('error', reject)
-        },
-      )
-      req.on('timeout', () => req.destroy(Object.assign(new Error('сосед не ответил'), { code: 'TIMEOUT' })))
-      req.on('error', reject)
-      req.end(body)
-    })
-  }
+  const post = (host, p, body) => httpPost(http, host, p, PATH, body)
 
   const errorText = (e) => {
     if (e?.status === 403) return 'key'
     if (e?.status === 409) return 'self'
+    // Магазин без интернета: главный эту кассу не знает (отключил) или загрузил копию базы
+    if (e?.status === 423) return 'star'
+    if (e?.status === 412) return 'epoch'
     if (e?.status === 503) return 'off'
     if (e?.code === 'ECONNREFUSED') return 'refused'
     if (e?.code === 'ENOTFOUND' || e?.code === 'EAI_AGAIN') return 'notfound'
@@ -329,12 +565,14 @@ export function createLan({
         const out = peer ? hub.entriesFor(peer.sentUpTo, !!peer.wide) : { entries: [], upTo: 0, more: false }
         const req = {
           v: 1, t: 'x', from: s.deviceId, name: s.name, wide: !!s.wide, port, ts: now(),
-          ack: peer ? peer.gotUpTo : 0, entries: out.entries, upTo: peer ? out.upTo : 0,
+          ack: peer ? peer.gotUpTo : 0, entries: out.entries, upTo: peer ? out.upTo : 0, e: s.epoch || undefined,
         }
         const msg = unseal(k.enc, await post(target.host, target.port, seal(k.enc, req)))
         const t = now()
         if (!validMsg(msg, s, t)) throw new Error('сосед ответил непонятно')
         if (msg.from === s.deviceId) throw Object.assign(new Error('это этот же компьютер'), { status: 409 })
+        if (typeof hub.allow === 'function' && !hub.allow(msg.from)) throw Object.assign(new Error('не главный компьютер этой кассы'), { status: 423 })
+        if (typeof hub.epochOk === 'function' && !hub.epochOk(msg.e)) throw Object.assign(new Error('главный компьютер загрузил копию базы'), { status: 412 })
         // По этому адресу теперь другая касса (компьютер переустановили) — прежней
         // записи адрес больше не принадлежит
         if (target.deviceId && target.deviceId !== msg.from) hub.forgetAddress(target.deviceId)
@@ -421,11 +659,26 @@ export function createLan({
     } catch {
       return
     }
+    // Новая касса ищет главного по коду подключения: отвечаем, где нас слушать
+    if (m?.a === 'finmax-pair') {
+      const p = typeof hub.pairInfo === 'function' ? hub.pairInfo() : null
+      if (!p || !udp || !port || m.v !== 1 || m.t !== 'find' || m.s !== p.tag) return
+      const s = st()
+      const reply = Buffer.from(JSON.stringify({ a: 'finmax-pair', v: 1, t: 'here', s: p.tag, p: port, n: s?.name || '' }))
+      try {
+        udp.send(reply, rinfo.port, rinfo.address, () => {})
+      } catch {
+        /* касса спросит ещё раз через секунду */
+      }
+      return
+    }
     const s = st()
     if (!s?.enabled || !s.key) return
     const k = ensureKeys(s)
     if (m?.a !== 'finmax-lan' || m.v !== 1 || m.s !== k.tag || typeof m.d !== 'string' || !ID.test(m.d) || m.d === s.deviceId) return
     if (!Number.isInteger(m.p) || m.p <= 0 || m.p > 65535) return
+    // Магазин без интернета: другая касса того же магазина — не наш собеседник (звезда)
+    if (typeof hub.allow === 'function' && !hub.allow(m.d)) return
     const address = cleanAddr(rinfo.address)
     hub.peerSeen({ deviceId: m.d, name: typeof m.n === 'string' ? m.n : '', address, port: m.p, now: now() })
     if (m.t === 'hi') hello('re', { address: rinfo.address, port: rinfo.port })
@@ -543,5 +796,13 @@ export function createLan({
     },
     stop,
     port: () => port,
+    // Порт поиска — проверки запускают «главного» и «кассу» на свободных портах
+    udpPort: () => {
+      try {
+        return udp?.address()?.port || 0
+      } catch {
+        return 0
+      }
+    },
   }
 }

@@ -110,7 +110,9 @@ export function setupShopDb(db, { shopName, ownerId, ownerUserId, login, now }) 
 // ── Принять операции вместо сервера ──
 // Всё, что ждёт отправки, — принято: поправки становятся основой. Вызывается сразу после
 // каждой записи. Возвращает принятые операции
-export function acceptAll(db, { now }) {
+// extras — сюда кладутся документы, которые завёл «сервер» (оплата прихода, списание недостачи):
+// кассы по сети (1.7.0) получают их от главного компьютера вместе с основой
+export function acceptAll(db, { now, extras = null }) {
   const done = []
   inTx(db, () => {
     // Долг поставщика, заведённого кассиром (ему деньги магазина не видны), сервер всё равно
@@ -120,7 +122,7 @@ export function acceptAll(db, { now }) {
       const ops = pendingOps(db, 500)
       if (!ops.length) break
       for (const op of ops) {
-        serverExtras(db, op, now)
+        serverExtras(db, op, now, extras)
         ackOp(db, op, { status: 'ok' })
         done.push(op)
       }
@@ -149,7 +151,8 @@ export function foldBase(db) {
 }
 
 // ── Что сервер делает сам при приёме операции ──
-function serverExtras(db, op, now) {
+// extras — массив, куда кладутся заведённые документы ({ kind, body }), или null
+export function serverExtras(db, op, now, extras = null) {
   const p = op.payload || {}
   // Приход, оплаченный из ящика кассы: сервер записывает оплату поставщику (sync.service,
   // applyArrival). В смене эти деньги уже учтены (edits.mjs, docKnown) — здесь только запись
@@ -158,25 +161,22 @@ function serverExtras(db, op, now) {
     if (Number(a.paidCash) > 0 && a.supplierId && !q(db, "SELECT 1 FROM docs WHERE kind = 'supplierpayment' AND clientId = ?").get(op.id + ':pay')) {
       const sup = q(db, 'SELECT id, name FROM suppliers WHERE id = ?').get(a.supplierId)
       const date = a.date || iso(now)
-      putDoc(
-        db,
-        'supplierpayment',
-        {
-          id: newId(),
-          clientId: op.id + ':pay',
-          supplierId: a.supplierId,
-          amount: fromCents(toCents(D(a.paidCash))),
-          date,
-          note: 'Оплата прихода',
-          fromCash: true,
-          shiftId: a.shiftId ?? null,
-          userId: a.userId ?? a.user?.id ?? null,
-          createdAt: date,
-          user: a.user ?? null,
-          supplier: { id: a.supplierId, name: sup?.name || a.supplier || '' },
-        },
-        { sync: 'synced' },
-      )
+      const body = {
+        id: newId(),
+        clientId: op.id + ':pay',
+        supplierId: a.supplierId,
+        amount: fromCents(toCents(D(a.paidCash))),
+        date,
+        note: 'Оплата прихода',
+        fromCash: true,
+        shiftId: a.shiftId ?? null,
+        userId: a.userId ?? a.user?.id ?? null,
+        createdAt: date,
+        user: a.user ?? null,
+        supplier: { id: a.supplierId, name: sup?.name || a.supplier || '' },
+      }
+      putDoc(db, 'supplierpayment', body, { sync: 'synced' })
+      extras?.push({ kind: 'supplierpayment', body })
     }
   }
   // Пересчёт применён: недостача — списанием с причиной «недостача» (inventory.service,
@@ -199,22 +199,19 @@ function serverExtras(db, op, now) {
     }
     if (!items.length) return
     const date = typeof p.at === 'string' ? p.at : iso(now)
-    putDoc(
-      db,
-      'writeoff',
-      {
-        id,
-        date,
-        userId: user?.userId ?? sheet?.userId ?? null,
-        reason: 'lost',
-        note: 'Недостача по итогам пересчёта',
-        totalCost: fromCents(toCents(total)),
-        source: 'inventory',
-        items,
-        user: user ? { id: user.userId, name: user.login } : sheet?.user ?? null,
-      },
-      { sync: 'synced' },
-    )
+    const body = {
+      id,
+      date,
+      userId: user?.userId ?? sheet?.userId ?? null,
+      reason: 'lost',
+      note: 'Недостача по итогам пересчёта',
+      totalCost: fromCents(toCents(total)),
+      source: 'inventory',
+      items,
+      user: user ? { id: user.userId, name: user.login } : sheet?.user ?? null,
+    }
+    putDoc(db, 'writeoff', body, { sync: 'synced' })
+    extras?.push({ kind: 'writeoff', body })
   }
 }
 

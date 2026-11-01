@@ -96,7 +96,9 @@ export function lanWideHere(core, pharmacyCode) {
 // ── Своя операция → в журнал ──
 // Что операция сделала в этой базе: документы в их нынешнем виде, движения остатка и
 // долга, новый клиент, отложенный штрихкод, новая цена продажи
-function effectsOf(db, op) {
+// pwOut — магазин без интернета (1.7.0): отпечаток пароля уходит главному компьютеру, зашифрованный
+// ключом магазина (pwLan), — иначе пароль, заданный на кассе, главный и другие кассы не узнали бы
+function effectsOf(db, op, pwOut = null) {
   const docs = []
   // Правка документа идёт поправкой (ниже), а не документом: у соседа он уже есть
   for (const [kind, id] of DOC_EDIT_OPS.has(op.type) ? [] : docsOf(op)) {
@@ -128,8 +130,9 @@ function effectsOf(db, op) {
       ...edits,
       rows: edits.rows.map((r) => {
         if (r.tbl !== 'team_accounts' || !r.data || r.data.pw === undefined) return r
-        const { pw: _pw, ...rest } = r.data
-        return { ...r, data: { ...rest, pwChanged: true } }
+        const { pw, ...rest } = r.data
+        const lan = pwOut && typeof pw === 'string' && pw ? pwOut(pw) : null
+        return { ...r, data: { ...rest, pwChanged: true, ...(lan ? { pwLan: lan } : {}) } }
       }),
     }
   }
@@ -166,9 +169,9 @@ function effectsOf(db, op) {
   return out
 }
 
-function logOwn(db, op, deviceId) {
+function logOwn(db, op, deviceId, pwOut = null) {
   if (q(db, 'SELECT 1 FROM lan_log WHERE id = ?').get(op.id)) return
-  const effects = effectsOf(db, op)
+  const effects = effectsOf(db, op, pwOut)
   const wide =
     WIDE_ONLY_TYPES.has(op.type) ||
     op.type === 'writeoff' ||
@@ -187,17 +190,20 @@ function logOwn(db, op, deviceId) {
 // записи операции и после обмена с сервером. Попадают только ещё не отправленные:
 // принятое сервером соседи получат от сервера сами. Здесь же — судьба своих операций,
 // которую уже знает очередь (сервер принял или отверг), для соседей
-export function lanCatchUp(db, { deviceId, now }) {
+// Магазин без интернета (1.7.0): отметок о судьбе нет (fates: false) — принятое кассы узнают из
+// основы главного компьютера (local/solonet.mjs); pwOut — см. effectsOf
+export function lanCatchUp(db, { deviceId, now, fates = true, pwOut = null }) {
   let logged = 0
   inTx(db, () => {
     const last = Number(getMeta(db, 'lanOutboxSeq') || 0)
     const rows = q(db, 'SELECT * FROM outbox WHERE seq > ? ORDER BY seq').all(last)
     for (const r of rows) {
       if (r.state !== 'pending') continue
-      logOwn(db, { ...r, payload: parse(r.payload) || {} }, deviceId)
+      logOwn(db, { ...r, payload: parse(r.payload) || {} }, deviceId, pwOut)
       logged++
     }
     if (rows.length) setMeta(db, 'lanOutboxSeq', String(rows[rows.length - 1].seq))
+    if (!fates) return
     const fates = q(
       db,
       `SELECT l.id, o.state, o.error FROM lan_log l JOIN outbox o ON o.id = l.id
@@ -266,6 +272,7 @@ function plainRow(e) {
 }
 
 export function redact(e) {
+  if (e.kind === 'base') return e.wide ? redactBase(e) : e
   if (e.kind !== 'op' || !e.wide) return e
   if (WIDE_ONLY_TYPES.has(e.type)) return null
   const b = parse(e.body)
@@ -282,6 +289,16 @@ export function redact(e) {
   }
   if (!docs.length && !(fx.moves || []).length && !(fx.debts || []).length && !(rest.edits?.rows || []).length) return null
   return { ...e, body: JSON.stringify({ effects: rest }), redacted: 1, wide: 0 }
+}
+
+// Основа от главного компьютера магазина без интернета (local/solonet.mjs) — кассе без прав на деньги:
+// без долгов поставщикам и без документов, которые видит не каждый
+function redactBase(e) {
+  const b = parse(e.body)
+  if (!b || typeof b !== 'object') return null
+  const { suppliers: _suppliers, ...rest } = b
+  rest.docs = (Array.isArray(b.docs) ? b.docs : []).filter((d) => !WIDE_KINDS.has(d?.kind))
+  return { ...e, body: JSON.stringify(rest), redacted: 1, wide: 0 }
 }
 
 // Самая большая запись, которую обмен передаёт (сообщение по сети — до 8 МБ, lan.mjs в
@@ -326,7 +343,7 @@ function validEntry(e) {
     typeof e === 'object' &&
     typeof e.id === 'string' &&
     ID.test(e.id) &&
-    (e.kind === 'op' || e.kind === 'fate') &&
+    (e.kind === 'op' || e.kind === 'fate' || e.kind === 'base') &&
     typeof e.origin === 'string' &&
     e.origin.length <= 100 &&
     typeof e.body === 'string' &&
@@ -478,7 +495,7 @@ function applyEffects(db, opId, type, fx, changed) {
 // ── Сервер принял чужую операцию: поправку снимаем ──
 // Её движения больше не «наши неотправленные» — они в данных сервера. Документы
 // становятся обычными серверными (сервер пришлёт свою копию — она их заменит)
-function confirmOp(db, opId) {
+export function confirmOp(db, opId) {
   const row = q(db, "SELECT body FROM lan_log WHERE id = ? AND kind = 'op' AND state = 'applied'").get(opId)
   if (!row) return false
   q(db, 'UPDATE stock_moves SET synced = 1 WHERE opId = ?').run(opId)
@@ -544,6 +561,8 @@ export function lanReceive(db, entries, { now, gen }) {
     let needRebuild = false
     for (const e of entries) {
       if (!validEntry(e)) continue
+      // Основа от главного компьютера — её кладёт сама программа (local/solonet.mjs)
+      if (e.kind === 'base') continue
       if (e.kind === 'op') {
         // Своя операция вернулась от соседа — у нас она и так есть
         if (q(db, 'SELECT 1 FROM outbox WHERE id = ?').get(e.id)) continue
@@ -727,17 +746,21 @@ function expireOld(db, now) {
 // ── Уборка журнала ──
 // Раз в сутки: старое и уже ненужное соседям уходит; чужое, что так и не дошло до
 // сервера за две недели, снимается (и без связи — остаток должен прийти в порядок)
-export function lanPrune(db, now) {
+// Магазин без интернета (1.7.0): срока у чужой операции нет (expire: false) — её примет главный
+// компьютер, когда его включат; и записи, которые ещё не получил кто-то из своих (keepAbove —
+// меньшая отметка «докуда получили» у касс), не убираются, сколько бы та касса ни была выключена
+export function lanPrune(db, now, { expire = true, keepAbove = null } = {}) {
   const last = Number(getMeta(db, 'lanPrunedAt') || 0)
   if (now - last < DAY_MS) return false
   let rebuilt = false
   inTx(db, () => {
-    if (expireOld(db, now)) {
+    if (expire && expireOld(db, now)) {
       rebuild(db)
       rebuilt = true
     }
     const before = new Date(now - LOG_KEEP_DAYS * DAY_MS).toISOString()
-    q(db, "DELETE FROM lan_log WHERE createdAt < ? AND state <> 'applied'").run(before)
+    if (Number.isInteger(keepAbove)) q(db, "DELETE FROM lan_log WHERE createdAt < ? AND state <> 'applied' AND seq <= ?").run(before, keepAbove)
+    else q(db, "DELETE FROM lan_log WHERE createdAt < ? AND state <> 'applied'").run(before)
     setMeta(db, 'lanPrunedAt', String(now))
   })
   return rebuilt
