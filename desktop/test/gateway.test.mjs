@@ -1302,7 +1302,6 @@ test('у каждого объяснения программы есть тад�
   const dict = fs.readFileSync(join(here, '..', '..', 'client', 'src', 'lib', 'i18n.js'), 'utf8')
   for (const [key, text] of Object.entries(MESSAGES)) {
     if (key === 'needLogin' || key === 'suspended') continue // тексты самого сервера, окно их не переводит
-    if (typeof text !== 'string') continue // с подстановкой (логины) — по словарю не переводятся
     assert.ok(dict.includes(`'${text}':`), `нет перевода для «${text}»`)
   }
 })

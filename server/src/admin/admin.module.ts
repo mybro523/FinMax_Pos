@@ -11,9 +11,6 @@ import { SubscriptionWatchService } from './subscription-watch.service'
 import { AccountCache } from './account-cache.service'
 import { DbProbe } from './db-probe.service'
 import { SummaryService } from './summary.service'
-import { LicencesService } from './licences.service'
-import { LicencesController } from './licences.controller'
-import { LicenceKeyController } from '../licence/licence-key.controller'
 import { SeedModule } from '../seed/seed.module'
 import { CategoriesModule } from '../categories/categories.module'
 import { UsersModule } from '../users/users.module'
@@ -30,7 +27,7 @@ import { AuthModule } from '../auth/auth.module'
 @Global()
 @Module({
   imports: [SeedModule, CategoriesModule, UsersModule, AuthModule],
-  controllers: [AdminController, AuditController, MaintenanceController, LicencesController, LicenceKeyController],
+  controllers: [AdminController, AuditController, MaintenanceController],
   providers: [
     AdminDbService,
     TenantSchemaService,
@@ -41,7 +38,6 @@ import { AuthModule } from '../auth/auth.module'
     AccountCache,
     DbProbe,
     SummaryService,
-    LicencesService,
   ],
   exports: [AdminDbService, TenantSchemaService, PharmaciesService, AccountsService, SchemaUpdaterService, AccountCache, DbProbe, SummaryService],
 })

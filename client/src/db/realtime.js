@@ -98,12 +98,6 @@ async function whenSuspended(e) {
   const { suspendNow } = await import('./auth')
   // Заголовок приходит только от программы для Windows: она закрывает работу и по
   // своей причине — слишком долго не было связи с сервером
-  // Магазин без интернета (1.6.0): срок кода активации вышел. Текст с датой собираем из
-  // переводимых частей — иначе на таджикском он остался бы русским
-  if (e?.standalone && e?.until) {
-    const { translate } = await import('../lib/i18n')
-    return suspendNow(`${translate('Срок работы программы закончился')} ${e.until}. ${translate('Данные магазина сохранены — введите новый код активации.')}`, e?.title)
-  }
   suspendNow(e?.message, e?.title)
 }
 

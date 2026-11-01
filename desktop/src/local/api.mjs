@@ -78,8 +78,6 @@ export function periodOf(kind, query, now) {
 // Журнал за период. Если период глубже локального — отдаём пометку вместо данных
 const journal = (kind) => (ctx) => {
   const period = periodOf(kind, ctx.query, ctx.now)
-  // Магазин без интернета (1.6.0): все документы за всё время — здесь, на сервер ходить некуда
-  if (ctx.standalone) return listDocs(ctx.db, kind, { from: period.from, to: period.to })
   if (period.deep) return { __deep: { kind, from: period.from, to: period.to } }
   return listDocs(ctx.db, kind, { from: period.from })
 }
@@ -242,8 +240,8 @@ const ROUTES = [
 // за последние месяцы. Поэтому на связи отвечает сервер, а без связи — касса, по своим
 // журналам, с пометкой local (окно покажет, что это данные компьютера)
 const FALLBACK = [
-  ['GET', /^\/products\/([^/]+)\/history$/, perm(['products.history'], (ctx) => productHistory(ctx.db, ctx.params[0], ctx.query, ctx.now, { complete: !!ctx.standalone }) || notThere('Товар не найден'))],
-  ['GET', /^\/suppliers\/([^/]+)$/, perm(['suppliers.view'], (ctx) => supplierCard(ctx.db, ctx.params[0], { complete: !!ctx.standalone }) || notThere('Поставщик не найден'))],
+  ['GET', /^\/products\/([^/]+)\/history$/, perm(['products.history'], (ctx) => productHistory(ctx.db, ctx.params[0], ctx.query, ctx.now) || notThere('Товар не найден'))],
+  ['GET', /^\/suppliers\/([^/]+)$/, perm(['suppliers.view'], (ctx) => supplierCard(ctx.db, ctx.params[0]) || notThere('Поставщик не найден'))],
 ]
 const notThere = (text) => {
   throw notFound(text)

@@ -62,7 +62,6 @@ const DEFAULT_TRIAL_DAYS = 14
 // и в разговоры по телефону. Поэтому — латиница, цифры и дефис: набрать такое можно
 // с любой клавиатуры и продиктовать без ошибок.
 const CODE_RE = /^[a-z0-9][a-z0-9-]{1,30}$/
-export const RESERVED_CODES = new Set(['local'])
 
 @Injectable()
 export class PharmaciesService {
@@ -142,9 +141,6 @@ export class PharmaciesService {
         'Код магазина: латинские буквы, цифры и дефис, от 2 до 31 символа. Например: shifo или apteka-2',
       )
     }
-    // «local» — код магазина без интернета в программе для Windows (1.6.0): магазин сервера с
-    // таким кодом программа приняла бы за магазин без сервера
-    if (RESERVED_CODES.has(code)) throw new BadRequestException(`Код «${code}» занят программой — выберите другой`)
     if (!name) throw new BadRequestException('Укажите название магазина')
 
     const schemaName = schemaNameFor(code)

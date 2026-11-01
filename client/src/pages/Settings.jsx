@@ -7,8 +7,6 @@ import {
 } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { useToast, useDialog, PasswordInput, Modal } from '../components/ui'
-import { ActivationPanel } from '../components/BezInterneta'
-import { SoloKopiya } from '../components/SoloKopiya'
 import { useCollection, refresh, db, resetStore } from '../db/store'
 import { api, LONG_TIMEOUT_MS } from '../db/api'
 import { dayKey, fmtDate, serverNow, tjMoment } from '../lib/time'
@@ -218,16 +216,11 @@ export default function Settings() {
                 <div className="panel set-status" data-tour="set.status" style={{ maxWidth: 640, marginBottom: 16 }}>
                   <h2><span className="h2-title"><span className="ic"><LuMonitorSmartphone size={17} /></span>{t('Программа')}</span></h2>
                   <div className="set-status-row"><SyncBadge /></div>
-                  <p className="tag-cat" style={{ marginTop: 10 }}>
-                    {user?.standalone
-                      ? t('Нажмите значок — откроются подробности: срок работы программы, копии базы и обновление программы.')
-                      : t('Нажмите значок — откроются подробности: что ушло на сервер, что ждёт отправки, обновление программы и кассы в сети.')}
-                  </p>
+                  <p className="tag-cat" style={{ marginTop: 10 }}>{t('Нажмите значок — откроются подробности: что ушло на сервер, что ждёт отправки, обновление программы и кассы в сети.')}</p>
                 </div>
               )}
 
-              {/* Магазин без интернета (1.6.0): вместо подписки — код активации */}
-              {user?.standalone ? <ActivationPanel /> : <Podpiska t={t} />}
+              <Podpiska t={t} />
 
               {/* Оформление: язык + тема */}
               <div className="panel mt" style={{ maxWidth: 640 }}>
@@ -282,7 +275,7 @@ export default function Settings() {
               <div className="panel mt" style={{ maxWidth: 640 }}>
                 <h2><span className="h2-title"><span className="ic"><LuServer size={17} /></span>{t('О системе')}</span></h2>
                 <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7 }}>
-                  {user?.standalone ? t('Данные магазина хранятся на этом компьютере — интернет не нужен.') : t('Данные хранятся на сервере — все устройства видят одну общую базу.')} {t('Время — таджикское (UTC+5).')}{' '}
+                  {t('Данные хранятся на сервере — все устройства видят одну общую базу.')} {t('Время — таджикское (UTC+5).')}{' '}
                   {t('Сейчас в базе')}: <b>{products.length}</b> {t('товаров')}, <b>{sales.length}</b> {t('продаж')}.
                 </p>
                 <ul style={{ listStyle: 'none', marginTop: 14, display: 'flex', flexDirection: 'column', gap: 11 }}>
@@ -335,10 +328,9 @@ export default function Settings() {
 
           {active === 'ustroystva' && can('settings.devices') && (
             <>
-              {/* Магазин без интернета: кассы и обмен по сети — следующим этапом; сейчас касса одна */}
-              {!user?.standalone && <DevicesPanel />}
+              <DevicesPanel />
               {/* Кассы в одной сети передают друг другу сделанное без интернета — только в программе */}
-              {isDesktop && !user?.standalone && <LanPanel manage />}
+              {isDesktop && <LanPanel manage />}
               {/* Этикетки весов разбирает касса на этом устройстве — настройка здесь же */}
               <VesyPanel />
               {/* Облегчённый вид для слабого компьютера — только в программе */}
@@ -346,9 +338,7 @@ export default function Settings() {
             </>
           )}
 
-          {/* Магазин без интернета (1.6.0): копии — на этом компьютере и на флешке, сервера нет */}
-          {active === 'kopiya' && can('settings.backup') && isDesktop && user?.standalone && <SoloKopiya />}
-          {active === 'kopiya' && can('settings.backup') && !(isDesktop && user?.standalone) && (
+          {active === 'kopiya' && can('settings.backup') && (
             <div className="panel mt" data-tour="set.backup" style={{ maxWidth: 640 }}>
               <h2><span className="h2-title"><span className="ic"><LuDatabaseBackup size={17} /></span>{t('Резервная копия')}</span></h2>
               <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7, marginBottom: 12 }}>

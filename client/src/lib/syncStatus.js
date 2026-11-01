@@ -31,14 +31,6 @@ export function leftText(leftMs, t) {
 // того, что интернет сейчас есть.
 export function badgeOf(st, t) {
   if (!st) return null
-  // Магазин без интернета (1.6.0): связи и отправки нет вовсе — важен срок кода и копия на флешке
-  if (st.standalone) {
-    const a = st.activation || {}
-    if (!a.active) return { tone: 'bad', label: t('Срок работы закончился') }
-    if (a.warn) return { tone: 'warn', label: `${t('Без интернета')} · ${t('код до')} ${a.untilHuman}` }
-    if (st.backup?.usb?.due) return { tone: 'warn', label: t('Сохраните копию на флешку') }
-    return { tone: 'ok', label: t('Без интернета · всё сохранено') }
-  }
   const pending = st.pending || 0
   if (st.licence?.expired) return { tone: 'bad', label: t('Нужна связь с сервером') }
   if (st.rejected > 0) return { tone: 'bad', label: `${t('Не принято сервером')}: ${st.rejected}` }

@@ -17,16 +17,6 @@ contextBridge.exposeInMainWorld('apteka', {
   // основная часть; ключ входа подставляет тоже она
   request: (req) => ipcRenderer.invoke('api:request', req),
 
-  // Магазин без интернета (1.6.0): до входа — способ работы, код активации, заведение
-  // магазина и сброс пароля владельца кодом от поставщика программы
-  standalone: {
-    info: () => ipcRenderer.invoke('standalone:info'),
-    mode: (mode) => ipcRenderer.invoke('standalone:mode', mode),
-    activate: (code) => ipcRenderer.invoke('standalone:activate', code),
-    setup: (req) => ipcRenderer.invoke('standalone:setup', req),
-    reset: (req) => ipcRenderer.invoke('standalone:reset', req),
-  },
-
   app: {
     // «Закрыть программу» и «Свернуть»: программа открыта на весь экран, системных
     // кнопок окна не видно — эти стоят в полосе внизу и на экране входа
