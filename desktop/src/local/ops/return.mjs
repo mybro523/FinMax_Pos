@@ -9,7 +9,7 @@ import { bodyOf, checker, enteredExpiry, packOk, sumOk } from '../check.mjs'
 import { bad, inTx, newId } from '../db.mjs'
 import { docByClientId, enqueue, getDoc, myOpenShift, putDoc, returnsOfSale } from '../docs.mjs'
 import { D, fixed2, fromCents, fromCentsD, toCents } from '../money.mjs'
-import { grossOf, refundOf } from '../piece.mjs'
+import { grossOf, isDrob, KG, refundOf } from '../piece.mjs'
 import { move, productById, returnExpiry } from '../stock.mjs'
 import { uppOf, wholeNonNeg } from '../units.mjs'
 
@@ -84,7 +84,10 @@ export function createReturn(ctx, raw) {
         const sold = line.qty * lineUpp + line.pieces
         const already = returnedBefore.get(it.productId) || 0
         if (already + units > sold) {
-          throw bad(`По «${product.name}» уже возвращено ${already} из ${sold} шт`)
+          // Дробному — в его единице, как у сервера
+          const ed = line.unit || product.unit
+          const skolko = (n) => (isDrob(ed) ? `${n / KG}` : `${n}`)
+          throw bad(`По «${product.name}» уже возвращено ${skolko(already)} из ${skolko(sold)} ${isDrob(ed) ? String(ed).trim() : 'шт'}`)
         }
       }
 
@@ -95,13 +98,16 @@ export function createReturn(ctx, raw) {
       const price = line ? D(line.price) : fromCentsD(product.priceC)
       const cost = line ? D(line.cost) : fromCentsD(product.costC)
       const soldUnits = line ? line.qty * upp + line.pieces : units
+      // Единица строки — снимком чека; у строк прежних версий снимка нет — из карточки.
+      // Своя цена дробного товара — за килограмм (1.5.12): без единицы её не прочесть
+      const unit = line?.unit || product.unit
       // Упаковки — по цене упаковки, штуки — по цене штуки из чека (своя, если была)
-      const gross = line ? grossOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, unit: line.unit }) : price.dividedBy(upp).times(soldUnits)
+      const gross = line ? grossOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, unit }) : price.dividedBy(upp).times(soldUnits)
       const paid = line ? gross.minus(D(line.discount)) : gross
       // По чеку — сначала отдельные штуки по своей цене штуки, сверх них — штуки из
       // упаковок; без своей цены — как всегда, поровну на штуку (local/piece.mjs)
       const amount = line
-        ? refundOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, unit: line.unit, discount: line.discount }, units, returnedBefore.get(it.productId) || 0)
+        ? refundOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, unit, discount: line.discount }, units, returnedBefore.get(it.productId) || 0)
         : (soldUnits > 0 ? paid.dividedBy(soldUnits) : D(0)).times(units)
       total = total.plus(amount)
 

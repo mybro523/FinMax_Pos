@@ -8,23 +8,25 @@
 // во всех четырёх местах разом.
 //
 // Перевод, вид денег и дат передаются снаружи — модуль проверяется без браузера.
-import { uppOf, lineNet, lineUnits, isVesovoy, kgText, edinica, ownPiecePrice } from './units.js'
+import { uppOf, lineNet, lineUnits, isVesovoy, kgText, edinica, ownPiecePrice, isDivisible, packLabel, pieceLabel, pieceAmount, pieceUnits } from './units.js'
 
 // Сколько и почём: целые упаковки — по цене упаковки, всё остальное — в штуках по
-// цене штуки. То же, что видит кассир в чеке на экране
+// цене штуки (у весового в мешке — в килограммах по цене килограмма). То же, что видит
+// кассир в чеке на экране
 export function qtyPriceText(i, t, money) {
   const upp = uppOf(i)
-  // Дробный товар: количество в своей единице и цена за единицу — «1,5 л × 30»
-  if (isVesovoy(i)) return `${kgText(lineUnits(i))} ${t(edinica(i))} × ${money(i.price)}`
-  if (!i.pieces && i.qty) return `${i.qty} ${t(edinica(i))} × ${money(i.price)}`
-  // Своя цена штуки (1.5.11): упаковки и штуки — каждые по своей цене
+  // Дробный товар без мешка: количество в своей единице и цена за единицу — «1,5 л × 30»
+  if (isVesovoy(i) && !isDivisible(i)) return `${kgText(lineUnits(i))} ${t(edinica(i))} × ${money(i.price)}`
+  if (!i.pieces && i.qty) return `${i.qty} ${t(packLabel(i))} × ${money(i.price)}`
+  // Своя цена штуки (1.5.11) или килограмма (1.5.12): упаковки и отдельные — каждые по
+  // своей цене: «1 уп × 190 + 2 кг × 4»
   const own = ownPiecePrice(i)
   if (own !== null) {
-    const shtuki = `${i.pieces} ${t('шт')} × ${money(own)}`
-    return i.qty ? `${i.qty} ${t(edinica(i))} × ${money(i.price)} + ${shtuki}` : shtuki
+    const shtuki = `${pieceAmount(i.pieces, i)} ${t(pieceLabel(i))} × ${money(own)}`
+    return i.qty ? `${i.qty} ${t(packLabel(i))} × ${money(i.price)} + ${shtuki}` : shtuki
   }
   const units = (i.qty || 0) * upp + (i.pieces || 0)
-  return `${units} ${t('шт')} × ${money(i.price / upp)}`
+  return `${pieceAmount(units, i)} ${t(pieceLabel(i))} × ${money((i.price / upp) * pieceUnits(i))}`
 }
 
 function payLabel(payment, t) {

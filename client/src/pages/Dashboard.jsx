@@ -14,7 +14,7 @@ import { Modal, PayBadge, PAYMENTS } from '../components/ui'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
 import { useCollection, money, stockText } from '../db/store'
-import { isDivisible, stockUnits, stockValue, stockCost as stockCostOf, pricePerPiece, lineUnits, lineGross } from '../lib/units'
+import { isDivisible, stockUnits, stockValue, stockCost as stockCostOf, pricePerPiece, lineUnits, lineGross, pieceLabel } from '../lib/units'
 import { dayKey, lastNDayKeys, fmtShort, fmtDayMonth, startOfDay } from '../lib/time'
 import { expiringProducts } from '../lib/expiry'
 import { periodFinance } from '../lib/finance'
@@ -319,7 +319,7 @@ export default function Dashboard() {
           </div>
           {prod && (
             <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8 }}>
-              {t('Цена')} {money(prod.price)}{isDivisible(prod) ? ` · ${money(pricePerPiece(prod))}/${t('шт')}` : ''} · {t('закуп.')} {money(prod.cost)}
+              {t('Цена')} {money(prod.price)}{isDivisible(prod) ? ` · ${money(pricePerPiece(prod))}/${t(pieceLabel(prod))}` : ''} · {t('закуп.')} {money(prod.cost)}
             </p>
           )}
         </Modal>

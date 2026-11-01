@@ -1,4 +1,5 @@
-import { Matches, MaxLength, IsArray, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator'
+import { Matches, MaxLength, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator'
+import { MAX_UPP } from '../common/piece'
 
 export class CreateProductDto {
   @IsString() name: string
@@ -15,14 +16,19 @@ export class CreateProductDto {
   @IsOptional() @IsInt() @Min(0) minStock?: number
   @IsOptional() @IsString() unit?: string
   // Сверху — столько же, сколько принимает обмен с кассами (sync/payload.ts): чек с
-  // товаром, у которого штук в упаковке больше, касса прислала бы — и получила бы отказ
-  @IsOptional() @IsInt() @Min(1) @Max(100_000) unitsPerPack?: number // штук в упаковке
+  // товаром, у которого штук в упаковке больше, касса прислала бы — и получила бы отказ.
+  // У дробного товара — граммов: бочка 200 л — это 200 000 (1.5.12)
+  @IsOptional() @IsInt() @Min(1) @Max(MAX_UPP) unitsPerPack?: number // штук в упаковке
   @IsOptional() @IsInt() @Min(0) looseUnits?: number // штук во вскрытой упаковке
   @IsOptional() @IsString() dosage?: string // дозировка
   @IsOptional() @IsString() expiryDate?: string // срок годности (ISO-дата или пусто)
   @IsOptional() @IsArray() @IsString({ each: true }) analogIds?: string[] // аналоги (id товаров)
   // Тип товара названием (медицинский, продукты…). Пусто — не выбран
   @IsOptional() @IsString() @MaxLength(40) type?: string
+  // Окно знает упаковку дробного товара (мешок 50 кг, 1.5.12). Прежние окна её не знали и у
+  // весового товара всегда присылали «1 кг в упаковке» и остаток килограммами — по такой
+  // правке сервер сохраняет мешок, а остаток пересчитывает (products.service, productData)
+  @IsOptional() @IsBoolean() drobPack?: boolean
   // Фото: сжатый кадр data:image/…;base64 или пустая строка «фото убрали».
   // Предел длины согласован с клиентом (lib/foto.js) — крупнее сюда не присылают
   @IsOptional() @IsString() @MaxLength(200_000) @Matches(/^$|^data:image\/(jpeg|png|webp);base64,/) image?: string
@@ -40,12 +46,20 @@ export class UpdateProductDto {
   @IsOptional() @IsInt() @Min(0) stock?: number
   @IsOptional() @IsInt() @Min(0) minStock?: number
   @IsOptional() @IsString() unit?: string
-  @IsOptional() @IsInt() @Min(1) @Max(100_000) unitsPerPack?: number
+  @IsOptional() @IsInt() @Min(1) @Max(MAX_UPP) unitsPerPack?: number
   @IsOptional() @IsInt() @Min(0) looseUnits?: number
   @IsOptional() @IsString() dosage?: string
   @IsOptional() @IsString() expiryDate?: string
   @IsOptional() @IsArray() @IsString({ each: true }) analogIds?: string[]
   @IsOptional() @IsString() @MaxLength(40) type?: string
+  // Окно знает упаковку дробного товара (мешок 50 кг, 1.5.12). Прежние окна её не знали и у
+  // весового товара всегда присылали «1 кг в упаковке» и остаток килограммами — по такой
+  // правке сервер сохраняет мешок, а остаток пересчитывает (products.service, productData)
+  @IsOptional() @IsBoolean() drobPack?: boolean
+  // Сменили упаковку дробного товара (килограмм → мешок 50 кг), а прежние цены были за прежнюю
+  // упаковку: карточка уже пересчитала свои цены, сервер так же переводит цены партий
+  // (scale). keep — цены уже были за новую упаковку, числа остаются (products.service)
+  @IsOptional() @IsIn(['scale', 'keep']) repack?: 'scale' | 'keep'
   // Фото: как при создании. Поле, забытое здесь, сервер выбрасывает МОЛЧА
   // (whitelist) — «товар обновлён», а фото пропало. Паритет полей создания и
   // правки прибит тестом products/dto.spec.ts

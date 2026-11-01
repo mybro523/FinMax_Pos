@@ -11,7 +11,7 @@
 //
 // Расширение в путях указано намеренно: файл загружается и проверками, без сборщика.
 import { barcodeModel, modulesOf, moduleFor } from './barcode.js'
-import { isDrobnyy, uppOf } from './units.js'
+import { isDrobnyy, isDivisible, uppOf } from './units.js'
 
 // Ходовые размеры рулонов: ширина × высота, мм (ширина — поперёк принтера)
 export const NAKLEYKA_SIZES = [
@@ -256,13 +256,16 @@ export function copiesOf(v) {
 }
 
 // Наклейки на строку прихода: сколько пришло упаковок, неполная упаковка — тоже наклейка
-// («2 уп + 5 шт» — 3). Весовой и дробный товар (кг, л, м) — одна, на ящик или полку
+// («2 уп + 5 шт» — 3). Весовой и дробный товар (кг, л, м) — одна, на ящик или полку; в
+// мешках (1.5.12) — как упаковки: по наклейке на мешок
 export function nakleekNaStroku(item, product) {
   if (!product) return 0
-  if (isDrobnyy(product)) return 1
+  // Упаковка строки — снимком (1.5.12): прежний приход «100 кг» мешка не стал 100 мешками
+  const upp = Math.max(1, Number(item?.unitsPerPack) || uppOf(product))
+  if (isDrobnyy(product) && (upp <= 1000 || !isDivisible(product))) return 1
   const qty = Math.max(0, Math.trunc(Number(item?.qty) || 0))
   const pieces = Math.max(0, Number(item?.pieces) || 0)
-  const packs = qty + (pieces > 0 && uppOf(product) > 1 ? Math.ceil(pieces / uppOf(product)) : 0)
+  const packs = qty + (pieces > 0 && upp > 1 ? Math.ceil(pieces / upp) : 0)
   return copiesOf(packs)
 }
 

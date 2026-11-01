@@ -15,38 +15,42 @@ const num = (v) => Number(v) || 0
 // Штук в упаковке. Ноль, пусто и мусор означают «упаковка неделимая».
 export const uppOf = (x) => Math.max(1, num(x?.unitsPerPack))
 
-// Делится ли товар на штуки
-export const isDivisible = (x) => uppOf(x) > 1
+// Делится ли товар на штуки: упаковку вскрывают и продают отдельно — штуки из пачки или
+// килограммы из мешка (1.5.12). У дробного товара без мешка «штука» — грамм: он не делится,
+// он и так продаётся на вес
+export const isDivisible = (x) => opensPack(x)
 
 // Цена и себестоимость ОДНОЙ ШТУКИ из цены упаковки (в карточке они хранятся за упаковку)
 export const unitPrice = (x) => num(x?.price) / uppOf(x)
 export const unitCost = (x) => num(x?.cost) / uppOf(x)
 
-// ── Своя цена за 1 шт (версия 1.5.11) ──
+// ── Своя цена за 1 шт (версия 1.5.11) и за 1 кг (версия 1.5.12) ──
 // Владелец задаёт цену одной штуки сам — в приходе или в карточке товара. Целые упаковки
 // продаются по цене упаковки, отдельные штуки — по своей цене: «1 уп + 5 шт» при упаковке
 // 150 и своей цене 2 — это 150 + 10. Своей цены нет — штука стоит цена упаковки / штук.
-// Своя цена бывает только у товара, который делится на штуки и продаётся целыми: у
-// дробного (кг, л, м, м²) «штука» — это грамм. Та же формула у сервера
-// (server/src/common/piece.ts) и у программы без связи (desktop/src/local/piece.mjs).
-// У позиции чека piecePrice — снимок: по какой цене штуки её продали
+// У весового товара в мешке своя цена — за 1 кг: «1 уп + 2 кг» при мешке 190 и цене 4 за кг —
+// это 190 + 8. Своя цена бывает только у товара, упаковку которого вскрывают (opensPack).
+// Та же формула у сервера (server/src/common/piece.ts) и у программы без связи
+// (desktop/src/local/piece.mjs). У позиции чека piecePrice — снимок: по какой цене штуки
+// (килограмма) её продали
 export const ownPiecePrice = (x) => {
-  if (uppOf(x) <= 1 || isVesovoy(x)) return null
+  if (!opensPack(x)) return null
   if (x?.piecePrice === null || x?.piecePrice === undefined || x?.piecePrice === '') return null
   const v = Number(x.piecePrice)
   return Number.isFinite(v) && v > 0 ? v : null
 }
-// Цена одной штуки: своя или цена упаковки / штук в упаковке
-export const pricePerPiece = (x) => ownPiecePrice(x) ?? unitPrice(x)
+// Цена одной штуки (у весового — одного килограмма): своя или цена упаковки / штук в упаковке
+export const pricePerPiece = (x) => ownPiecePrice(x) ?? unitPrice(x) * pieceUnits(x)
 
 // ── Позиция чека ──
 // Всего штук: целые упаковки × штук в упаковке + отдельные штуки
 export const lineUnits = (i) => num(i?.qty) * uppOf(i) + num(i?.pieces)
 // Сумма позиции до скидки: упаковки — по цене упаковки, отдельные штуки — по цене штуки.
 // Своей цены штуки нет — то же, что (цена / штук) × все штуки, как было всегда
+// У весового своя цена — за килограмм, а в строке граммы: делим на 1000 (pieceUnits)
 export const lineGross = (i) => {
   const own = ownPiecePrice(i)
-  return own === null ? unitPrice(i) * lineUnits(i) : num(i?.qty) * num(i?.price) + num(i?.pieces) * own
+  return own === null ? unitPrice(i) * lineUnits(i) : num(i?.qty) * num(i?.price) + (num(i?.pieces) * own) / pieceUnits(i)
 }
 // Скидка не может быть отрицательной и больше суммы позиции
 export const lineDiscount = (i) => Math.min(Math.max(0, num(i?.discount)), lineGross(i))
@@ -71,7 +75,7 @@ export function vozvratSumma(i, units, already = 0) {
   if (own === null) return (paid / sold) * u
   const piecesLeft = Math.max(0, num(i?.pieces) - Math.max(0, num(already)))
   const asPieces = Math.min(u, piecesLeft)
-  const grossRet = asPieces * own + (u - asPieces) * unitPrice(i)
+  const grossRet = (asPieces * own) / pieceUnits(i) + (u - asPieces) * unitPrice(i)
   return gross > 0 ? (grossRet * paid) / gross : 0
 }
 
@@ -82,7 +86,7 @@ export const stockUnits = (p) => num(p?.stock) * uppOf(p) + num(p?.looseUnits)
 // вскрытая — по цене штуки (своей, если задана)
 export const stockValue = (p) => {
   const own = ownPiecePrice(p)
-  return own === null ? unitPrice(p) * stockUnits(p) : num(p?.stock) * num(p?.price) + num(p?.looseUnits) * own
+  return own === null ? unitPrice(p) * stockUnits(p) : num(p?.stock) * num(p?.price) + (num(p?.looseUnits) * own) / pieceUnits(p)
 }
 export const stockCost = (p) => unitCost(p) * stockUnits(p)
 
@@ -115,6 +119,42 @@ export const isVesovoy = (x) => DROBNYE.includes(unitKey(x))
 export const isDrobnyy = isVesovoy
 // Весы печатают этикетки только в килограммах — штрихкод весов ищем среди них
 export const isKg = (x) => unitKey(x) === 'кг'
+
+// ── Весовой товар в упаковке (версия 1.5.12) ──
+// Мешок муки 50 кг, канистра 20 л, бухта кабеля 100 м: у дробного товара бывает настоящая
+// упаковка. Внутри — та же механика упаковок и штук: unitsPerPack — тысячных (граммов) в
+// упаковке, мешок 50 кг — 50 000. Без мешка — 1000: «упаковка» — одна единица, как всегда.
+// Цены продажи и закупки — за упаковку (за мешок), своя цена — за 1 кг, отдельные
+// килограммы продаются по ней или по цене мешка / 50.
+//
+// Сколько внутренних единиц в одной «штуке» своей цены: у штучного одна, у дробного 1000
+export const pieceUnits = (x) => (isVesovoy(x) ? KG : 1)
+// Упаковку вскрывают и продают отдельно: штуки из пачки, килограммы из мешка
+export const opensPack = (x) => uppOf(x) > pieceUnits(x)
+// Весовой товар в мешке (а не просто на вес)
+export const vesUpak = (x) => isVesovoy(x) && opensPack(x)
+// Сколько в упаковке — в штуках или килограммах: 20, 50, 2,5
+export const packPieces = (x) => uppOf(x) / pieceUnits(x)
+// Подписи: упаковка — «уп» (у весового — тоже «уп»: «кг» — это уже его штука), отдельные —
+// «шт» или единица весового («кг», «л», «м»)
+export const packLabel = (x) => (isVesovoy(x) ? 'уп' : edinica(x))
+export const pieceLabel = (x) => (isVesovoy(x) ? edinica(x) : 'шт')
+// Число отдельных: штук — целым, у весового — килограммами с дробью («2,5»)
+export const pieceAmount = (n, x) => (isVesovoy(x) ? kgText(n) : String(Math.max(0, Math.trunc(num(n)))))
+
+// ── Количество словами ──
+// «2 уп + 5 шт», «2 уп + 10,5 кг», «3 уп», «10,5 кг» (весовой без мешка), «7 шт». Целых
+// упаковок нет — показывается и ноль: «0 уп + 10 кг», как остаток в «Товарах».
+// t — перевод подписей
+export function unitsText(units, x, t = (s) => s) {
+  const u = Math.max(0, Math.trunc(num(units)))
+  if (isVesovoy(x) && !opensPack(x)) return `${kgText(u)} ${t(edinica(x))}`
+  const upp = uppOf(x)
+  const packs = Math.floor(u / upp)
+  if (!opensPack(x)) return `${packs} ${t(packLabel(x))}`
+  const loose = u % upp
+  return loose > 0 ? `${packs} ${t(packLabel(x))} + ${pieceAmount(loose, x)} ${t(pieceLabel(x))}` : `${packs} ${t(packLabel(x))}`
+}
 
 // Подпись единицы рядом с числом: «кг», «л», «уп», «рулон». Пусто — «уп»,
 // как у товаров, заведённых до появления выбора единицы

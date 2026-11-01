@@ -10,7 +10,7 @@ import { SALES_CACHE_DAYS } from '../db/store'
 import { Pagination, usePagination } from '../components/Pagination'
 import { useCollection, money } from '../db/store'
 import { fmtDateTime } from '../lib/time'
-import { lineUnits, lineGross, lineDiscount, isDivisible } from '../lib/units'
+import { lineUnits, lineGross, lineDiscount, isDivisible, isVesovoy, kgText, edinica } from '../lib/units'
 import { useT } from '../lib/i18n'
 
 export default function Discounts() {
@@ -37,6 +37,8 @@ export default function Discounts() {
             pieces: i.pieces || 0,
             units: lineUnits(i),
             divisible: isDivisible(i),
+            // Весовой в мешке (1.5.12) — всего килограммов, а не граммов «штуками»
+            unitsText: isVesovoy(i) ? `${kgText(lineUnits(i))} ${edinica(i)}` : '',
             gross,
             discount,
             net: gross - discount,
@@ -101,7 +103,7 @@ export default function Discounts() {
                   {r.qty > 0 && `${r.qty} ${t('уп')}`}
                   {r.qty > 0 && r.pieces > 0 && ' + '}
                   {r.pieces > 0 && `${r.pieces} ${t('шт')}`}
-                  {r.divisible && <div className="tag-cat">{r.units} {t('шт')}</div>}
+                  {r.divisible && <div className="tag-cat">{r.unitsText || `${r.units} ${t('шт')}`}</div>}
                 </td>
                 <td className="num tag-cat" style={{ textDecoration: 'line-through' }}>{money(r.gross)}</td>
                 <td className="num" style={{ color: 'var(--danger)' }}>−{money(r.discount)}</td>

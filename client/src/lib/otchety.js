@@ -6,7 +6,7 @@
 //
 // Деньги считаем до дирама: копейки, расползшиеся по строкам, в итоге должны
 // сходиться ровно с суммой документа.
-import { uppOf, lineNet, lineCost, lineUnits, isVesovoy, kgText, edinica, KG } from './units.js'
+import { uppOf, lineNet, lineCost, lineUnits, isVesovoy, kgText, edinica, KG, opensPack, packLabel, pieceLabel, pieceAmount } from './units.js'
 import { isOtmena } from './otmena.js'
 import { tovarPodhodit } from './poisk.js'
 
@@ -25,17 +25,22 @@ export const vPeriode = (date, from, to) => {
 }
 
 // Сколько единиц товара в штуках (у дробного — в тысячных) — текстом в его единице:
-// «12 уп + 3 шт», «2,5 л», «40 рулон»
+// «12 уп + 3 шт», «2,5 л», «40 рулон», у весового в мешке — «2 уп + 10 кг» (1.5.12)
 export function qtyText(units, product, t = (s) => s) {
   const u = Math.max(0, Math.round(num(units)))
   const p = product || {}
-  if (isVesovoy(p)) return `${kgText(u)} ${t(edinica(p))}`
+  if (isVesovoy(p) && !opensPack(p)) return `${kgText(u)} ${t(edinica(p))}`
   const upp = uppOf(p)
   if (upp <= 1) return `${u} ${t(edinica(p))}`
   const packs = Math.floor(u / upp)
   const loose = u % upp
-  return [packs ? `${packs} ${t(edinica(p))}` : '', loose ? `${loose} ${t('шт')}` : ''].filter(Boolean).join(' + ') || `0 ${t(edinica(p))}`
+  return [packs ? `${packs} ${t(packLabel(p))}` : '', loose ? `${pieceAmount(loose, p)} ${t(pieceLabel(p))}` : ''].filter(Boolean).join(' + ') || `0 ${t(packLabel(p))}`
 }
+
+// Упаковка строки прихода или возврата поставщику: снимком строки (1.5.12) — упаковку
+// товара могли сменить позже; у прежних строк — по карточке, а у удалённого товара — по
+// граммам видно, что он был весовым
+const lineUpp = (it, product) => num(it.unitsPerPack) || (product ? uppOf(product) : num(it.pieces) > 0 ? KG : 1)
 
 // ── Продажи по товарам ──
 // Сколько продано каждого товара, выручка (после скидок), себестоимость и прибыль.
@@ -88,7 +93,8 @@ export function vseProdazhi({ sales, products, from, to, t = (s) => s }) {
   for (const s of sales || []) {
     if (!vPeriode(s.date, from, to)) continue
     for (const i of s.items || []) {
-      const p = byId.get(i.productId) || { unitsPerPack: uppOf(i), unit: uppOf(i) === KG ? 'кг' : 'уп' }
+      // Удалённый товар: единица — снимком строки чека (1.5.12), у прежних строк — догадкой
+      const p = byId.get(i.productId) || { unitsPerPack: uppOf(i), unit: String(i.unit || '').trim() || (uppOf(i) === KG ? 'кг' : 'уп') }
       rows.push({
         saleId: s.id,
         productId: i.productId || null,
@@ -168,8 +174,7 @@ export const oplataPrihoda = (p) => typeof p?.clientId === 'string' && p.clientI
 
 // Сумма строки прихода: цена за упаковку (за килограмм) × сколько пришло
 function arrivalLineSum(it, product) {
-  const upp = product ? uppOf(product) : num(it.pieces) > 0 ? KG : 1
-  return num(it.cost) * (num(it.qty) + num(it.pieces) / upp)
+  return num(it.cost) * (num(it.qty) + num(it.pieces) / lineUpp(it, product))
 }
 
 // ── Закупки и оплаты поставщикам — одной таблицей по датам ──
@@ -193,7 +198,7 @@ export function zakupkiIOplaty({ arrivals, supplierPayments, supplierReturns = [
       const debt = last ? kop(debtLeft) : total > 0 ? kop((debtAll * sums[n]) / total) : 0
       debtLeft = kop(debtLeft - debt)
       const p = byId.get(it.productId)
-      const units = num(it.qty) * (p ? uppOf(p) : num(it.pieces) > 0 ? KG : 1) + num(it.pieces)
+      const units = num(it.qty) * lineUpp(it, p) + num(it.pieces)
       rows.push({
         kind: 'buy',
         id: `${a.id}:${n}`,
@@ -222,8 +227,8 @@ export function zakupkiIOplaty({ arrivals, supplierPayments, supplierReturns = [
     ;(r.items || []).forEach((it, n) => {
       const p = byId.get(it.productId)
       const like = p || { unitsPerPack: num(it.pieces) > 0 ? KG : 1, unit: num(it.pieces) > 0 ? 'кг' : 'уп' }
-      const units = num(it.qty) * uppOf(like) + num(it.pieces)
-      const sum = kop(num(it.price) * (units / uppOf(like)))
+      const units = num(it.qty) * lineUpp(it, p) + num(it.pieces)
+      const sum = kop(num(it.price) * (units / lineUpp(it, p)))
       rows.push({
         kind: 'ret',
         id: `ret:${r.id}:${n}`,

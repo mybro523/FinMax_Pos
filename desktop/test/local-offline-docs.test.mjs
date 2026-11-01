@@ -284,7 +284,8 @@ test('приход: окно правки знает проданное; пра�
   assert.deepEqual([v.total, v.debt, v.items[0].qty], [120, 60, 2])
   const op = lastOp(db)
   assert.equal(op.type, 'arrival.update')
-  assert.deepEqual(op.payload.arrival.items, [{ id: a.items[0].id, qty: 2, pieces: 0, cost: 60 }])
+  // Строка правки несёт упаковку, в которой её считали (1.5.12)
+  assert.deepEqual(op.payload.arrival.items, [{ id: a.items[0].id, qty: 2, pieces: 0, unitsPerPack: 1, cost: 60 }])
 
   deleteArrival(ctx(db), a.id)
   assert.equal(prod(db, 'nur').stock, 0)

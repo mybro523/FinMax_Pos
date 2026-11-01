@@ -1,14 +1,23 @@
 import { Type } from 'class-transformer'
-import { ArrayMinSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator'
+import { ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator'
+import { MAX_UPP } from '../common/piece'
 
 const MAX_MONEY = 9_999_999_999.99
 
 export class ArrivalItemDto {
   @IsString() productId: string
-  // Целые упаковки (у весового товара — килограммы). Ноль допустим, когда есть pieces
+  // Целые упаковки (у весового товара без мешка — килограммы). Ноль допустим, когда есть pieces
   @IsInt() @Min(0) qty: number
   // Штуки (граммы) сверх целых упаковок
-  @IsOptional() @IsInt() @Min(0) @Max(99_999) pieces?: number
+  @IsOptional() @IsInt() @Min(0) @Max(MAX_UPP) pieces?: number
+  // Сколько штук (граммов) в упаковке строки — так окно считало qty и pieces (1.5.12).
+  // Прежние окна не шлют: тогда как в карточке, а у весового — килограммами (common/piece, lineUpp)
+  @IsOptional() @IsInt() @Min(1) @Max(MAX_UPP) unitsPerPack?: number
+  // Упаковку товара поменяли прямо в приходе: карточка получит unitsPerPack строки
+  @IsOptional() @IsBoolean() packChanged?: boolean
+  // Прежние цены товара были за прежнюю упаковку (за 1 кг) — перевести их на новую (мешок).
+  // Нет — цены уже за новую упаковку, числа остаются (arrivals.service, applyPackChanges)
+  @IsOptional() @IsBoolean() packScale?: boolean
   // Закупочная цена за упаковку (килограмм) — уже со скидкой поставщика
   @IsNumber() @Min(0) cost: number
   // Скидка поставщика на строку, %. Только для истории: cost уже со скидкой
@@ -51,9 +60,11 @@ export class CreateArrivalDto {
 export class UpdateArrivalItemDto {
   @IsString() id: string
   @IsInt() @Min(0) qty: number
-  @IsOptional() @IsInt() @Min(0) @Max(99_999) pieces?: number
+  @IsOptional() @IsInt() @Min(0) @Max(MAX_UPP) pieces?: number
   @IsNumber() @Min(0) cost: number
   @IsOptional() @IsString() expiryDate?: string
+  // Упаковка, по которой окно считало строку (1.5.12); нет — прежнее окно (lineUpp)
+  @IsOptional() @IsInt() @Min(1) @Max(MAX_UPP) unitsPerPack?: number
 }
 
 export class UpdateArrivalDto {

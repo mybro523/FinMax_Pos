@@ -63,3 +63,13 @@ export function costFromBatches(
   if (units.lte(0)) return D(fallback)
   return value.dividedBy(units).times(upp)
 }
+
+// ── Цена за упаковку строки → цена за упаковку товара (1.5.12) ──
+// Строка прихода считается в своей упаковке: прежняя касса у весового — килограммами, хотя
+// в карточке уже мешок 50 кг. Партия же хранит цену за упаковку ТОВАРА (по ней считают
+// себестоимость). 185 за килограмм при мешке 50 кг — это 9250 за мешок
+export function costInPack(cost: Prisma.Decimal | number | string, fromUpp: number, toUpp: number): Prisma.Decimal {
+  const from = Math.max(1, fromUpp || 1)
+  const to = Math.max(1, toUpp || 1)
+  return from === to ? D(cost) : D(cost).times(to).dividedBy(from).toDecimalPlaces(2)
+}

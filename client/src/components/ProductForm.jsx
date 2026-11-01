@@ -5,12 +5,13 @@ import { AddCategoryBtn } from './CategorySelect'
 import { AddTypeBtn } from './TypeSelect'
 import { szhatFoto } from '../lib/foto'
 import { useDialog, useToast } from './ui'
-import { useCollection } from '../db/store'
+import { useCollection, money } from '../db/store'
 import { useT } from '../lib/i18n'
 import { useCategories, categoryNames, categoryOptions } from '../lib/categories'
 import { useProductTypes, typeNames, typeOptions, typeHasAnalogs } from '../lib/productTypes'
 import { generateEan13, isInternalBarcode } from '../lib/barcode'
-import { KG, gramsOfKg, isVesovoy, edinica, EDINICY } from '../lib/units'
+import { KG, gramsOfKg, isVesovoy, edinica, EDINICY, kgText } from '../lib/units'
+import { repackAsk, repackNeeded, r2, vesUpp } from '../lib/vesUpak'
 import { priceFromMarkup, markupOf } from '../lib/pricing'
 
 // ── Карточка товара: одна форма на всю программу ──
@@ -45,7 +46,12 @@ import { priceFromMarkup, markupOf } from '../lib/pricing'
 export const emptyProduct = {
   name: '', barcode: '', category: '', type: '', image: '', cost: '', price: '', piecePrice: '', stock: '', minStock: '',
   unitsPerPack: '1', looseUnits: '0', dosage: '', expiryDate: '', analogIds: [], unit: '',
+  // Сколько кг (л, м) в упаковке у дробного товара: мешок муки — 50 (1.5.12). Пусто — на вес
+  vesUp: '',
 }
+
+// Помощники мешка — в lib/vesUpak.js (проверяются без окна); карточка отдаёт их дальше
+export { MAX_UPP, repackAsk, repackNeeded, vesUpp, vesUpText } from '../lib/vesUpak'
 
 // Из формы — в то, что уходит на сервер. Одна воронка на все страницы: раньше
 // каждая приводила числа по-своему, и «пусто» превращалось то в 0, то в NaN.
@@ -62,19 +68,28 @@ export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
     dosage: (f.dosage || '').trim(),
     expiryDate: f.expiryDate || '', // пусто — сервер сохранит «без срока»
     analogIds: Array.isArray(f.analogIds) ? f.analogIds : [],
+    // Окно знает упаковку дробного товара (1.5.12): правку мешка сервер примет. Прежние окна
+    // этого не знали — их правка мешок у товара не снимает (server/products, oldWindowPack)
+    drobPack: true,
   }
   // Дробный товар (кг, л, м, м²): в форме остаток набран дробным числом, а хранится
-  // он как «целые единицы + тысячные» — та же пара, что упаковки и вскрытые штуки
+  // он как «целые упаковки + тысячные» — та же пара, что упаковки и вскрытые штуки. Упаковка —
+  // мешок (50 кг — 50 000 граммов) или, без мешка, одна единица (1000 граммов)
   if (isVesovoy(f)) {
     const parts = gramsOfKg(f.stock)
+    const upp = vesUpp(f.vesUp)
+    // Своя цена за 1 кг — только у товара в мешке: без мешка цена продажи и так за 1 кг
+    const piece = Number(String(f.piecePrice ?? '').replace(',', '.'))
     return {
       ...common,
-      stock: Math.floor(parts / KG),
-      looseUnits: parts % KG,
+      stock: Math.floor(parts / upp),
+      looseUnits: parts % upp,
       unit: String(f.unit).trim().toLowerCase(),
-      unitsPerPack: KG,
-      // У дробного «штука» — грамм: своей цены штуки у него не бывает
-      piecePrice: null,
+      unitsPerPack: upp,
+      piecePrice: upp > KG && Number.isFinite(piece) && piece > 0 ? Math.round(piece * 100) / 100 : null,
+      // Мешок сменили: прежние цены переведены на новую упаковку (scale) или оставлены (keep) —
+      // сервер так же поступит с ценами партий
+      ...(repackAsk(f) && (f.repack === 'scale' || f.repack === 'keep') ? { repack: f.repack } : {}),
     }
   }
   const unit = (f.unit || '').trim() || 'уп'
@@ -128,6 +143,16 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
   }, [autoFocus])
 
   const set = (k, v) => onChange({ ...value, [k]: v })
+  // Мешок поменяли ещё раз — прежний ответ «за что были цены» уже не про него: цены — как были
+  const setVesUp = (v) =>
+    onChange({ ...value, vesUp: v, repack: undefined, ...(value.repack === 'scale' ? { cost: value.cost0 ?? value.cost, price: value.price0 ?? value.price } : {}) })
+  // Ответ: прежние цены были за прежнюю упаковку — перевести; уже за новую — оставить как были
+  function chooseRepack(kind) {
+    const ask = repackAsk(value)
+    if (!ask) return
+    if (kind === 'scale') onChange({ ...value, repack: 'scale', cost: String(r2(Number(value.cost0) * ask.ratio)), price: String(r2(Number(value.price0) * ask.ratio)) })
+    else onChange({ ...value, repack: 'keep', cost: String(value.cost0 ?? value.cost), price: String(value.price0 ?? value.price) })
+  }
   const drob = isVesovoy(value)
   const u = edinica(value)
   const analogIds = Array.isArray(value.analogIds) ? value.analogIds : []
@@ -138,7 +163,7 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
   function pickUnit(next) {
     const nextDrob = isVesovoy({ unit: next })
     if (nextDrob !== drob) {
-      return onChange({ ...value, unit: next, unitsPerPack: nextDrob ? String(KG) : '1', looseUnits: '0', stock: '' })
+      return onChange({ ...value, unit: next, unitsPerPack: nextDrob ? String(KG) : '1', looseUnits: '0', stock: '', vesUp: '', piecePrice: '' })
     }
     if (next === 'шт' && !(Number(value.unitsPerPack) > 1)) return onChange({ ...value, unit: next, unitsPerPack: '1', looseUnits: '0' })
     onChange({ ...value, unit: next })
@@ -167,9 +192,19 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
   const showAnalogs = typeHasAnalogs(value.type, types) || analogIds.length > 0
   // У «штуки» нет штук внутри; у заведённого раньше товара с такими штуками поле остаётся
   const showUpp = !drob && (u !== 'шт' || Number(value.unitsPerPack) > 1)
-  // Цена штуки по расчёту — подсказкой в поле своей цены: «1,67»
-  const autoPiece = Number(value.unitsPerPack) > 1 && Number(value.price) > 0
-    ? String(Math.round((Number(value.price) / Number(value.unitsPerPack)) * 100) / 100).replace('.', ',')
+  // Весовой в мешке (1.5.12): сколько кг в мешке и цены — за мешок
+  const vesKg = drob && vesUpp(value.vesUp) > KG ? vesUpp(value.vesUp) / KG : 0
+  // Цена штуки (у мешка — килограмма) по расчёту — подсказкой в поле своей цены: «1,67»
+  const perPiece = drob ? vesKg : Number(value.unitsPerPack)
+  const autoPiece = perPiece > 1 && Number(value.price) > 0
+    ? String(Math.round((Number(value.price) / perPiece) * 100) / 100).replace('.', ',')
+    : ''
+  // За что цены в карточке: «за 1 уп», «за 1 кг», у мешка — «за 1 уп (50 кг)»
+  const zaChto = vesKg ? `${t('за 1')} ${t('уп')} (${String(vesKg).replace('.', ',')} ${t(u)})` : `${t('за 1')} ${t(u)}`
+  // Остаток весового в мешках — подсказкой под полем: «= 2 уп + 10 кг»
+  const ostatokGr = drob ? gramsOfKg(value.stock) : 0
+  const ostatokUp = vesKg && ostatokGr > 0
+    ? `= ${Math.floor(ostatokGr / vesUpp(value.vesUp))} ${t('уп')}${ostatokGr % vesUpp(value.vesUp) ? ` + ${kgText(ostatokGr % vesUpp(value.vesUp))} ${t(u)}` : ''}`
     : ''
   const unitKnown = EDINICY.some((x) => x.v === u)
 
@@ -257,8 +292,8 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
           {drob && (
             <div className="tag-cat">
               {u === 'кг'
-                ? t('Цена за 1 кг, вес с точностью до грамма. Код на весах впишите в поле штрихкода.')
-                : t('Цена за 1 единицу, продаётся дробно — например 1,5 или 2,25.')}
+                ? t('Вес с точностью до грамма. Код на весах впишите в поле штрихкода.')
+                : t('Продаётся дробно — например 1,5 или 2,25.')}
             </div>
           )}
         </div>
@@ -295,7 +330,7 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
         <div className="field" style={{ flex: 1 }} data-tour="pf.prices">
           <label htmlFor="pf-cost">{t('Закупочная цена')}</label>
           <NumberInput id="pf-cost" value={value.cost} onChange={(e) => set('cost', e.target.value)} />
-          <span className="pf-hint">{t('за 1')} {t(u)}</span>
+          <span className="pf-hint">{zaChto}</span>
         </div>
         <div className="field pf-markup" data-tour="pf.markup">
           <label htmlFor="pf-markup">{t('Наценка, %')}</label>
@@ -313,7 +348,7 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
         <div className="field" style={{ flex: 1 }} data-tour="pf.prices">
           <label htmlFor="pf-price">{t('Цена продажи')}</label>
           <NumberInput id="pf-price" value={value.price} onChange={(e) => { setMkDraft(null); set('price', e.target.value) }} />
-          <span className="pf-hint">{t('за 1')} {t(u)}</span>
+          <span className="pf-hint">{zaChto}</span>
         </div>
       </div>
 
@@ -324,10 +359,11 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
           <label>{t('Остаток')} ({t(u)})</label>
           <NumberInput integer={!drob} value={value.stock} onChange={(e) => set('stock', e.target.value)} placeholder={drob ? '12.5' : ''} />
           {/* Подсказка под полем, а не в подписи: поля «Остаток» и «Мин. остаток» на одной линии */}
-          {arrival && <span className="pf-hint">{t('встанет в строку прихода')}</span>}
+          {arrival ? <span className="pf-hint">{t('встанет в строку прихода')}</span> : ostatokUp && <span className="pf-hint">{ostatokUp}</span>}
         </div>
         <div className="field" style={{ flex: 1 }} data-tour="pf.stock">
-          <label>{t('Мин. остаток')} ({t(u)})</label>
+          {/* У мешков минимум считается мешками, как упаковки штучного */}
+          <label>{t('Мин. остаток')} ({vesKg ? t('уп') : t(u)})</label>
           <NumberInput integer value={value.minStock} onChange={(e) => set('minStock', e.target.value)} />
         </div>
       </div>
@@ -369,6 +405,49 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
           <div className="field pf-spacer" style={{ flex: 1 }} aria-hidden="true" />
         </div>
       )}
+
+      {/* Весовой в упаковке (1.5.12): мешок муки 50 кг, канистра 20 л. Пусто — продаётся
+          только на вес, цена — за 1 кг. Задали — цены за мешок, а отдельные килограммы касса
+          продаёт по своей цене за 1 кг или по цене мешка / кг в мешке */}
+      {drob && (
+        <div className="row">
+          <div className="field" style={{ flex: 1 }} data-tour="pf.vesup">
+            <label htmlFor="pf-vesup">{t('В упаковке')}, {t(u)} <span className="tag-cat">· {t('мешок, канистра')}</span></label>
+            <NumberInput id="pf-vesup" value={value.vesUp ?? ''} onChange={(e) => setVesUp(e.target.value)} placeholder="—" />
+            <span className="pf-hint">{vesKg ? t('цены — за упаковку') : t('пусто — продаётся только на вес')}</span>
+          </div>
+          {vesKg ? (
+            <div className="field" style={{ flex: 1 }} data-tour="pf.piece">
+              <label htmlFor="pf-piece">{t('Своя цена за 1')} {t(u)}</label>
+              <NumberInput id="pf-piece" value={value.piecePrice ?? ''} onChange={(e) => set('piecePrice', e.target.value)} placeholder={autoPiece || '—'} />
+              <span className="pf-hint">{t('пусто — по расчёту')}{autoPiece ? `: ${autoPiece}` : ''}</span>
+            </div>
+          ) : (
+            <div className="field pf-spacer" style={{ flex: 1 }} aria-hidden="true" />
+          )}
+        </div>
+      )}
+
+      {/* Мешок сменили у товара с ценами или остатком: за что были прежние цены (1.5.12) */}
+      {repackAsk(value) && (() => {
+        const ask = repackAsk(value)
+        const pack = (g) => (g > KG ? `${t('уп')} ${kgText(g)} ${t(u)}` : `1 ${t(u)}`)
+        return (
+          <div className={'note pf-repack' + (repackNeeded(value) ? ' warn' : ' info')} data-tour="pf.repack" role="radiogroup" aria-label={t('Прежние цены')}>
+            <div>
+              {t('Упаковка меняется')}: {pack(ask.was)} → {pack(ask.now)}. {t('Прежние цены товара')} ({t('закупочная')} {money(value.cost0)}, {t('продажи')} {money(value.price0)}) {t('были')}:
+            </div>
+            <label className="pf-repack-ch">
+              <input type="radio" name="pf-repack" checked={value.repack === 'scale'} onChange={() => chooseRepack('scale')} />
+              <span>{t('за прежнюю упаковку')} ({pack(ask.was)}) — {t('пересчитать')}: {t('закупочная')} {money(r2(Number(value.cost0) * ask.ratio))}, {t('продажи')} {money(r2(Number(value.price0) * ask.ratio))}</span>
+            </label>
+            <label className="pf-repack-ch">
+              <input type="radio" name="pf-repack" checked={value.repack === 'keep'} onChange={() => chooseRepack('keep')} />
+              <span>{t('уже за новую упаковку')} ({pack(ask.now)}) — {t('оставить')}: {t('закупочная')} {money(value.cost0)}, {t('продажи')} {money(value.price0)}</span>
+            </label>
+          </div>
+        )
+      })()}
 
       {/* Аналоги: чем заменить, если этого не осталось. Только у типов «с аналогами» */}
       {showAnalogs && (

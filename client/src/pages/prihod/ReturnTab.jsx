@@ -249,13 +249,21 @@ function NewReturn({ products, suppliers, sup, arrivals }) {
           <label>{t('Количество')}</label>
           <div className="prh-qty">
             <label className="prh-unit">
-              <NumberInput ref={qtyRef} integer={!draft?.ves} value={form.qty} onChange={numField('qty')} onKeyDown={onEnter} disabled={!draft} aria-label={t('Количество')} />
-              <span>{draft ? t(draft.unit) : t('уп')}</span>
+              <NumberInput ref={qtyRef} integer={!(draft?.ves && !draft?.div)} value={form.qty} onChange={numField('qty')} onKeyDown={onEnter} disabled={!draft} aria-label={t('Количество')} />
+              <span>{draft ? t(draft.ves && draft.div ? 'уп' : draft.unit) : t('уп')}</span>
             </label>
+            {/* Делимая упаковка — штуки сверх упаковок, весовой в мешке — килограммы (1.5.12) */}
             {draft?.div && (
               <label className="prh-unit">
-                <NumberInput integer value={form.pieces} placeholder="0" onChange={numField('pieces')} onKeyDown={onEnter} aria-label={t('Штук сверх упаковок')} />
-                <span>{t('шт')}</span>
+                <NumberInput
+                  integer={!draft.ves}
+                  value={form.pieces}
+                  placeholder="0"
+                  onChange={numField('pieces')}
+                  onKeyDown={onEnter}
+                  aria-label={draft.ves ? `${t('Сверх упаковок')}, ${t(draft.unit)}` : t('Штук сверх упаковок')}
+                />
+                <span>{draft.ves ? t(draft.unit) : t('шт')}</span>
               </label>
             )}
           </div>
@@ -418,14 +426,16 @@ function ReturnDetails({ r, products, canDelete, onClose }) {
           <thead><tr><th>{t('Товар')}</th><th className="num">{t('Кол-во')}</th><th className="num">{t('Цена')}</th><th className="num">{t('Сумма')}</th></tr></thead>
           <tbody>
             {(r.items || []).map((i, n) => {
-              const p = products.find((x) => x.id === i.productId) || { unitsPerPack: num(i.pieces) > 0 ? 1000 : 1, unit: num(i.pieces) > 0 ? 'кг' : 'уп' }
-              const units = num(i.qty) * uppOf(p) + num(i.pieces)
+              const p = products.find((x) => x.id === i.productId) || { unitsPerPack: num(i.unitsPerPack) || (num(i.pieces) > 0 ? 1000 : 1), unit: num(i.pieces) > 0 ? 'кг' : 'уп' }
+              // Упаковка строки — снимком (1.5.12): товару могли сменить её после возврата
+              const upp = num(i.unitsPerPack) || uppOf(p)
+              const units = num(i.qty) * upp + num(i.pieces)
               return (
                 <tr key={i.id || n}>
                   <td>{i.name}</td>
                   <td className="num">{unitsText(units, p, t)}</td>
                   <td className="num">{money(i.price)}</td>
-                  <td className="num">{money(num(i.price) * (units / uppOf(p)))}</td>
+                  <td className="num">{money(num(i.price) * (units / upp))}</td>
                 </tr>
               )
             })}

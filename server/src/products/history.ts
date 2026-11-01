@@ -85,9 +85,9 @@ async function rowsOf(db: Db, productId: string, upp: number, range: Range): Pro
     out.push({
       kind: 'arrival',
       date: a.arrival.date,
-      // Приход хранит упаковки и штуки сверх них (у весового — граммы) — в штуки
-      // переводим по нынешней упаковке товара
-      delta: a.qty * upp + (a.pieces || 0),
+      // Приход хранит упаковки и штуки сверх них (у весового — граммы) — в штуки переводим по
+      // упаковке строки (1.5.12): товару могли сменить её позже; у прежних строк — по нынешней
+      delta: a.qty * (a.unitsPerPack || upp) + (a.pieces || 0),
       moves: true,
       docId: a.arrival.id,
       who: who(a.arrival.user),
@@ -157,7 +157,7 @@ async function rowsOf(db: Db, productId: string, upp: number, range: Range): Pro
     out.push({
       kind: 'supreturn',
       date: r.ret.date,
-      delta: -(r.qty * upp + (r.pieces || 0)),
+      delta: -(r.qty * (r.unitsPerPack || upp) + (r.pieces || 0)),
       moves: true,
       docId: r.ret.id,
       who: who(r.ret.user),

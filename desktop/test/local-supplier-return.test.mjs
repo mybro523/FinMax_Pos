@@ -61,6 +61,8 @@ test('возврат в счёт долга: товар ушёл со склад
         name: 'Нурофен',
         qty: 4,
         pieces: 0,
+        // Упаковка строки — снимком, как у сервера (1.5.12)
+        unitsPerPack: 1,
         price: 90,
         // Закупочная из карточки — снимок, как у сервера
         cost: 100,
@@ -84,7 +86,7 @@ test('возврат в счёт долга: товар ушёл со склад
   assert.deepEqual(listDocs(db, 'supplierreturn'), [r])
   const op = opOf(db, 'supplier.return')
   assert.deepEqual(op.payload, {
-    ret: { id: r.id, date: r.date, supplierId: 'sup-1', supplier: 'Опт-Маркет', refund: 'debt', shiftId: null, note: 'просрочка', total: 360, items: [{ id: r.items[0].id, productId: 'nur', name: 'Нурофен', qty: 4, pieces: 0, price: 90 }] },
+    ret: { id: r.id, date: r.date, supplierId: 'sup-1', supplier: 'Опт-Маркет', refund: 'debt', shiftId: null, note: 'просрочка', total: 360, items: [{ id: r.items[0].id, productId: 'nur', name: 'Нурофен', qty: 4, pieces: 0, unitsPerPack: 1, price: 90 }] },
     deviceId: 'kassa-1',
   })
   // Закупочная цена в карточке не меняется

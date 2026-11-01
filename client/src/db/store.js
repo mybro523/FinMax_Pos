@@ -8,7 +8,7 @@ import { useEffect, useSyncExternalStore } from 'react'
 import { api } from './api.js'
 import { dayKey } from '../lib/time.js'
 import { blockUpdate } from '../lib/version.js'
-import { isDivisible, isVesovoy, kgText, stockUnits, edinica } from '../lib/units.js'
+import { isDivisible, isVesovoy, stockUnits, unitsText } from '../lib/units.js'
 
 const EMPTY = []
 // «returns» и «writeoffs» — журналы возвратов и списаний. Они нужны, чтобы деньги
@@ -518,9 +518,9 @@ export const money = (n) => {
 export { uppOf as unitsPerPack, isDivisible, stockUnits as totalUnits, unitPrice } from '../lib/units.js'
 // Человекочитаемый остаток: «N уп» или «N уп + M шт» (для делимых)
 export function stockText(p) {
-  // Весовой товар: один вес в килограммах, без «упаковок и штук»
-  // Дробный товар: одно число в своей единице — «12,35 кг», «4,5 л»
-  if (isVesovoy(p)) return `${kgText(stockUnits(p))} ${edinica(p)}`
+  // Дробный товар без мешка: одно число в своей единице — «12,35 кг», «4,5 л». В мешках
+  // (1.5.12) — как штучный: «2 уп + 10 кг»
+  if (isVesovoy(p)) return unitsText(stockUnits(p), p)
   const unit = p?.unit || 'уп'
   const packs = Number(p?.stock) || 0
   if (!isDivisible(p)) return `${packs} ${unit}`

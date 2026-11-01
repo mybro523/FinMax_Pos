@@ -17,7 +17,7 @@ import { enqueue } from '../docs.mjs'
 import { productByBarcode, productView1 } from '../catalog.mjs'
 import { recordEdit } from '../edits.mjs'
 import { fromCents, toCents } from '../money.mjs'
-import { pieceCentsIn } from '../piece.mjs'
+import { isDrob, opensPack, packFor, pieceCentsIn } from '../piece.mjs'
 import { move, productById, unitsOf } from '../stock.mjs'
 import { isoOrNull } from '../time.mjs'
 import { uppOf } from '../units.mjs'
@@ -116,8 +116,11 @@ export function createProduct(ctx, raw) {
   const { fields: f, stock = 0, looseUnits = 0, expiryDate = null } = readFields(raw)
   if (!f.name) throw bad('Укажите название товара')
   if (!f.barcode) throw bad('Укажите штрихкод')
-  const upp = f.unitsPerPack ?? 1
-  const units = stock * upp + looseUnits
+  // Остаток — в штуках по упаковке из формы. Упаковка дробного товара — не меньше 1000
+  // граммов, своя цена — только у товара, упаковку которого вскрывают (как у сервера)
+  const units = stock * (f.unitsPerPack ?? 1) + looseUnits
+  const upp = packFor(f.unit ?? 'уп', f.unitsPerPack ?? 1)
+  if (!opensPack({ unit: f.unit ?? 'уп', unitsPerPack: upp })) f.piecePrice = null
   unitsOk(units)
 
   return inTx(db, () => {
@@ -171,8 +174,8 @@ export function createProduct(ctx, raw) {
           dosage: row.dosage,
           analogIds: f.analogIds ?? [],
           image: row.image,
-          stock,
-          looseUnits,
+          stock: Math.floor(units / upp),
+          looseUnits: units % upp,
           expiryDate,
           createdAt: at,
         },
@@ -189,6 +192,10 @@ export function createProduct(ctx, raw) {
 export function updateProduct(ctx, id, raw) {
   const { db, now } = ctx
   const { fields: f, stock, looseUnits, expiryDate } = readFields(raw)
+  // Сменили мешок, а прежние цены были за прежнюю упаковку: карточка уже перевела свои цены,
+  // цены партий переведёт сервер (products.service, repack)
+  const repackAsked = bodyOf(raw)?.repack
+  const repack = repackAsked === 'scale' || repackAsked === 'keep' ? repackAsked : undefined
 
   return inTx(db, () => {
     const row = productById(db, id)
@@ -207,6 +214,27 @@ export function updateProduct(ctx, id, raw) {
       const other = productByBarcode(db, set.barcode)
       if (other && other.id !== id) throw new ApiError(409, BARCODE_TAKEN)
     }
+    // Упаковка и своя цена — как у сервера (normalizePack): у дробного товара в упаковке не
+    // меньше 1000 граммов (мешок 50 кг — 50 000), своя цена — только у товара, упаковку
+    // которого вскрывают: убрали мешок — уходит и цена за 1 кг
+    const unitNow = set.unit ?? row.unit
+    if ('unitsPerPack' in set) {
+      set.unitsPerPack = packFor(unitNow, set.unitsPerPack)
+      if (set.unitsPerPack === row.unitsPerPack) {
+        delete set.unitsPerPack
+        delete base.unitsPerPack
+      }
+    }
+    const ownNow = 'piecePrice' in set ? set.piecePrice : valueOf(row, 'piecePrice')
+    if (ownNow !== null && ownNow !== undefined && !opensPack({ unit: unitNow, unitsPerPack: set.unitsPerPack ?? row.unitsPerPack })) {
+      if (valueOf(row, 'piecePrice') === null) {
+        delete set.piecePrice
+        delete base.piecePrice
+      } else {
+        set.piecePrice = null
+        base.piecePrice = valueOf(row, 'piecePrice')
+      }
+    }
 
     // Остаток: вписали число руками — или поменяли штук в упаковке, а упаковок столько же
     // (так считает и сервер: упаковки × новые штуки в упаковке + вскрытые)
@@ -218,7 +246,11 @@ export function updateProduct(ctx, id, raw) {
     // Сервер по этому решает, ставить ли остаток, если упаковку оставили чужую (edits.ts)
     const explicit = (stock !== undefined && stock !== view.stock) || (looseUnits !== undefined && looseUnits !== view.looseUnits)
     let target = null
-    if (explicit || newUpp !== oldUpp) {
+    // Дробный товар: смена мешка (килограмм → 50 кг, 1.5.12) остатка не меняет — граммы те
+    // же, карточка лишь заново делит их на упаковки. Остаток считается, только если его
+    // вписали (как у сервера, products.service, repackOnly)
+    const drobRepack = isDrob(set.unit ?? row.unit) && isDrob(row.unit) && stock === undefined && looseUnits === undefined
+    if (explicit || (newUpp !== oldUpp && !drobRepack)) {
       const packs = stock ?? view.stock
       const loose = looseUnits ?? view.looseUnits
       const t = packs * newUpp + loose
@@ -266,6 +298,10 @@ export function updateProduct(ctx, id, raw) {
         base,
         stock: target === null ? null : { units: target, explicit },
         ...(expiryChanged ? { expiryDate } : {}),
+        // Касса знает упаковку дробного товара (1.5.12): сервер примет её правку упаковки и
+        // своей цены и у товара с мешком (у прежних касс — нет, server/products, oldWindowPack)
+        drobPack: true,
+        ...(repack && 'unitsPerPack' in set ? { repack } : {}),
       },
       now,
     })

@@ -13,7 +13,7 @@ import { useCan } from '../../db/auth'
 import { useT, translate as tr } from '../../lib/i18n'
 import { normalizeScan, canonBarcode } from '../../lib/scan'
 import { beepOk, beepError } from '../../lib/sound'
-import { isVesovoy, KG, EDINICY, uppOf } from '../../lib/units'
+import { isVesovoy, EDINICY, uppOf, gramsOfKg } from '../../lib/units'
 import { AddCategoryBtn } from '../../components/CategorySelect'
 import { generateEan13 } from '../../lib/barcode'
 import { useCategories, categoryOptions, categoryNames } from '../../lib/categories'
@@ -21,7 +21,7 @@ import { priceFromMarkup, markupOf } from '../../lib/pricing'
 import { retyped } from '../../lib/pick'
 import {
   lineFromProduct, lineCost, lineTotal, lineRetail, lineUnits, summary, qtyText, packText, lineProblem, toItem,
-  piecePrice, ownPiece, pieceChanged, discCost, n2, pct, num,
+  piecePrice, ownPiece, pieceChanged, discCost, n2, pct, num, packFromField, packField, withPack, packChanged, packAsk, kop,
 } from '../../lib/prihod'
 import { usePrihod, setPrihod, setForm, setPay, resetDraft, blankForm } from './store'
 import { SupplierPick } from './SupplierPick'
@@ -82,9 +82,10 @@ export default function NewArrival({ products, suppliers, onSaved }) {
   const chosen = form.productId ? products.find((p) => p.id === form.productId) || null : null
   const editing = form.editKey ? lines.find((l) => l.key === form.editKey) || null : null
   // Новый товар — его ещё нет в базе: строку собираем из того, что вписано в форме.
-  // Штук в упаковке у дробного (кг, л…) — тысячные, у штуки — одна
+  // Штук в упаковке — из поля «Кол-во в упаковке»: у штуки одна, у дробного (кг, л…) —
+  // граммов: пусто — на вес (1000), мешок 50 кг — 50 000 (1.5.12)
   const novUnit = form.novUnit || 'уп'
-  const novUpp = isVesovoy({ unit: novUnit }) ? KG : novUnit === 'шт' ? 1 : Math.max(1, Math.trunc(Number(form.novUpp) || 1))
+  const novUpp = novUnit === 'шт' ? 1 : packFromField(form.pack, isVesovoy({ unit: novUnit }))
   const nov = !!form.nov && !editing && !chosen
   const novLine = nov
     ? {
@@ -93,14 +94,17 @@ export default function NewArrival({ products, suppliers, onSaved }) {
       }
     : null
   const baseLine = editing || (chosen ? lineFromProduct(chosen) : novLine)
-  const draft = baseLine
-    ? { ...baseLine, qty: form.qty, pieces: form.pieces, base: form.base, disc: form.disc, price: form.price, piece: form.piece, expiryDate: form.expiryDate }
+  // Упаковку можно поменять прямо в приходе (1.5.12): поле трогали — строка уже с ней. При
+  // проведении прихода карточка получит её (lib/prihod, toItem → packChanged)
+  const packedLine = baseLine && !nov && form.pack !== null && form.pack !== undefined ? withPack(baseLine, packFromField(form.pack, baseLine.ves)) : baseLine
+  const draft = packedLine
+    ? { ...packedLine, qty: form.qty, pieces: form.pieces, base: form.base, disc: form.disc, price: form.price, piece: form.piece, expiryDate: form.expiryDate, packScale: form.packScale }
     : null
 
   function editLine(l) {
     setPrihod({
       sub: 'add',
-      form: { ...blankForm(), productId: l.productId, code: l.barcode || '', q: l.name, qty: l.qty, pieces: l.pieces, base: l.base, disc: l.disc, price: l.price, price0: l.price0, piece: l.piece ?? '', piece0: l.piece0 ?? null, mk: null, expiryDate: l.expiryDate, editKey: l.key },
+      form: { ...blankForm(), productId: l.productId, code: l.barcode || '', q: l.name, qty: l.qty, pieces: l.pieces, base: l.base, disc: l.disc, price: l.price, price0: l.price0, piece: l.piece ?? '', piece0: l.piece0 ?? null, mk: null, expiryDate: l.expiryDate, editKey: l.key, pack: packField(uppOf(l), l.ves), qtyTouched: true, packScale: l.packScale ?? null },
     })
     setFocusQty((n) => n + 1)
   }
@@ -116,7 +120,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
     }
     const disc = st.discAll ? form.disc : ''
     const l = lineFromProduct(p, { disc })
-    setForm({ productId: p.id, code: p.barcode || '', q: p.name, qty: l.qty, pieces: '', base: l.base, disc, price: l.price, price0: l.price0, piece: l.piece, piece0: l.piece0, mk: null, expiryDate: '', editKey: '', nov: false })
+    setForm({ productId: p.id, code: p.barcode || '', q: p.name, qty: l.qty, pieces: '', base: l.base, disc, price: l.price, price0: l.price0, piece: l.piece, piece0: l.piece0, mk: null, expiryDate: '', editKey: '', nov: false, pack: null, qtyTouched: false, packScale: null })
     beepOk()
     setFocusQty((n) => n + 1)
   }
@@ -152,7 +156,62 @@ export default function NewArrival({ products, suppliers, onSaved }) {
       toast(tr('Это похоже на штрихкод — сканируйте ещё раз'), 'err')
       return focusScan()
     }
-    setForm({ [key]: v })
+    // Упаковку набирают заново — прежний ответ «за что были цены» уже не про неё
+    if (key === 'pack' && form.packScale) return setForm({ pack: v, ...unscaled(), packScale: null })
+    setForm({ [key]: v, ...(key === 'qty' || key === 'pieces' ? { qtyTouched: true } : {}) })
+  }
+
+  // ── За что были прежние цены (1.5.12) ──
+  // Упаковку сменили у товара с ценами или остатком. «За прежнюю упаковку» — цены переводятся
+  // на новую (×новая/прежняя): в форме — цена поставщика и продажи, если их не меняли руками;
+  // сервер так же переведёт цены карточки и партий. «Уже за новую» — числа остаются
+  const scaleBy = (v, k) => String(kop(num(v) * k))
+  function unscaled() {
+    if (form.packScale !== 'scale' || !draft) return {}
+    const ask = { ratio: uppOf(draft) / draft.upp0 }
+    const out = {}
+    if (form.base === scaleBy(draft.cost0, ask.ratio)) out.base = String(draft.cost0 || '')
+    if (form.price === scaleBy(draft.price0, ask.ratio)) out.price = String(draft.price0 || '')
+    return out
+  }
+  function chooseScale(kind) {
+    const ask = draft && packAsk(draft)
+    if (!ask) return
+    if (kind === 'scale') {
+      const out = { packScale: 'scale', mk: null }
+      if (num(form.base) === num(draft.cost0)) out.base = scaleBy(draft.cost0, ask.ratio)
+      if (num(form.price) === num(draft.price0)) out.price = scaleBy(draft.price0, ask.ratio)
+      return setForm(out)
+    }
+    setForm({ ...unscaled(), packScale: 'keep', mk: null })
+  }
+
+  // ── Поле «Кол-во в упаковке» (1.5.12) ──
+  // Пусто у весового — на вес, число — мешок (кг в мешке); у штучного — штук в упаковке.
+  // Весовой переходит «на вес» ↔ «в мешке»: набранное количество переводится, когда поле
+  // покидают (посреди набора «5» → «50» оно бы прыгало), — из килограммов в мешки и обратно.
+  // Не набирали количества — встаёт «1» в новом виде: 1 мешок или 1 кг. У штучного
+  // упаковок остаётся столько же: «пришло 10 пачек, теперь по 24»
+  const packAt = useRef(null)
+  const packValue = form.pack ?? (draft ? packField(uppOf(draft), draft.ves) : '')
+  function packFocus() {
+    if (draft) packAt.current = { upp: uppOf(draft), div: draft.div, qty: form.qty, pieces: form.pieces }
+  }
+  function packBlur() {
+    const was = packAt.current
+    packAt.current = null
+    if (!was || !draft || !draft.ves || was.div === draft.div) return
+    if (!form.qtyTouched) return setForm({ qty: '1', pieces: '' })
+    const grams = was.div ? Math.max(0, Math.trunc(num(was.qty))) * was.upp + gramsOfKg(was.pieces) : gramsOfKg(was.qty)
+    const upp = uppOf(draft)
+    if (draft.div) setForm({ qty: String(Math.floor(grams / upp)), pieces: grams % upp ? String((grams % upp) / 1000) : '' })
+    else setForm({ qty: String(grams / 1000), pieces: '' })
+  }
+  // Enter в поле упаковки — к количеству: сначала перевод (уход из поля), потом «Добавить»
+  const packEnter = (e) => {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    setFocusQty((n) => n + 1)
   }
 
   // Скидка «на все товары»: та же скидка у всех строк, и у новых тоже
@@ -172,8 +231,9 @@ export default function NewArrival({ products, suppliers, onSaved }) {
   // Наценка в подписи «Розничная цена 40%» — зелёным, как в привычных программах приёмки
   const mkRaw = form.mk ?? markupOf(cost, form.price)
   const mkShown = draft && cost > 0 && String(form.price).trim() !== '' && mkRaw !== '' && mkRaw !== null && mkRaw !== undefined ? String(mkRaw).replace('.', ',') : ''
-  // «Штук в упаковке» есть у упаковки и рулона; у штуки и дробных единиц (кг, л…) — нет
-  const novUppEditable = nov && !isVesovoy({ unit: novUnit }) && novUnit !== 'шт'
+  // «Штук в упаковке» есть у упаковки и рулона, у дробных единиц (кг, л…) — кг в мешке
+  // (1.5.12); у штуки — нет
+  const novUppEditable = nov && novUnit !== 'шт'
   function setMarkup(v) {
     const p = priceFromMarkup(cost, v)
     setForm({ mk: v, ...(p !== null ? { price: String(p) } : {}) })
@@ -237,6 +297,8 @@ export default function NewArrival({ products, suppliers, onSaved }) {
       category: form.novCat || '',
       unit: novUnit,
       unitsPerPack: String(novUpp),
+      // У дробного — кг в мешке (1.5.12): карточка считает упаковку по нему
+      vesUp: isVesovoy({ unit: novUnit }) ? packField(novUpp, true) : '',
       cost: String(lineCost(draft)),
       price: String(form.price ?? ''),
       piecePrice: String(form.piece ?? ''),
@@ -324,7 +386,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                     <td className="num muted">{n}</td>
                     <td className="prh-c-name" title={l.name}>{l.name}</td>
                     <td className="muted prh-c-code">{l.barcode || '—'}</td>
-                    <td className="muted">{packText(l, t)}</td>
+                    <td className={'muted' + (packChanged(l) ? ' prh-changed' : '')}>{packText(l, t)}</td>
                     <td className="muted">{l.expiryDate ? l.expiryDate.split('-').reverse().join('.') : '—'}</td>
                     <td className="num"><b>{qtyText(l, t)}</b></td>
                     <td className="num">{n2(num(l.base))}</td>
@@ -333,7 +395,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                     <td className={'num' + (num(l.price) !== l.price0 ? ' prh-changed' : '')} title={num(l.price) !== l.price0 ? `${t('Было')}: ${money(l.price0)}` : undefined}>
                       {n2(num(l.price))}
                       {/* Своя цена за 1 шт (1.5.11) — второй строкой */}
-                      {ownPiece(l) !== null && <div className={'tag-cat' + (pieceChanged(l) ? ' prh-changed' : '')}>{n2(ownPiece(l))}/{t('шт')}</div>}
+                      {ownPiece(l) !== null && <div className={'tag-cat' + (pieceChanged(l) ? ' prh-changed' : '')}>{n2(ownPiece(l))}/{t(l.ves ? l.unit : 'шт')}</div>}
                     </td>
                     <td className="num"><b>{n2(lineTotal(l))}</b></td>
                     <td className="num">{n2(lineRetail(l))}</td>
@@ -436,13 +498,20 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                   <label className={draft && lineUnits(draft) <= 0 ? 'req' : ''}>{t('Количество')}<span className="prh-star" aria-hidden="true">*</span></label>
                   <div className="prh-ctl prh-qty">
                     <label className="prh-unit">
-                      <NumberInput ref={qtyRef} integer={!draft?.ves} value={form.qty} onChange={numField('qty')} onKeyDown={onEnter} disabled={!draft} aria-label={t('Количество')} />
-                      <span>{draft ? t(draft.unit) : t('уп')}</span>
+                      <NumberInput ref={qtyRef} integer={!(draft?.ves && !draft?.div)} value={form.qty} onChange={numField('qty')} onKeyDown={onEnter} disabled={!draft} aria-label={t('Количество')} />
+                      <span>{draft ? t(draft.ves && draft.div ? 'уп' : draft.unit) : t('уп')}</span>
                     </label>
                     {draft?.div && (
                       <label className="prh-unit">
-                        <NumberInput integer value={form.pieces} placeholder="0" onChange={numField('pieces')} onKeyDown={onEnter} aria-label={t('Штук сверх упаковок')} />
-                        <span>{t('шт')}</span>
+                        <NumberInput
+                          integer={!draft.ves}
+                          value={form.pieces}
+                          placeholder="0"
+                          onChange={numField('pieces')}
+                          onKeyDown={onEnter}
+                          aria-label={draft.ves ? `${t('Сверх упаковок')}, ${t(draft.unit)}` : t('Штук сверх упаковок')}
+                        />
+                        <span>{draft.ves ? t(draft.unit) : t('шт')}</span>
                       </label>
                     )}
                   </div>
@@ -481,27 +550,30 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                 {/* У товара из базы упаковка и категория — из карточки, менять их здесь нельзя;
                     у нового товара — задаются тут же */}
                 <div className="prh-f" data-tour="af.pack">
-                  <label htmlFor={nov ? 'prh-nov-upp' : undefined}>{t('Кол-во в упаковке')}</label>
+                  <label htmlFor={nov ? 'prh-nov-upp' : 'prh-pack'}>{t('Кол-во в упаковке')}</label>
                   <div className="prh-ctl">
                     {nov ? (
                       <>
                         <NumberInput
                           id="prh-nov-upp"
-                          integer
+                          integer={!isVesovoy({ unit: novUnit })}
                           className="prh-num-s"
-                          value={novUppEditable ? form.novUpp : ''}
-                          placeholder={novUppEditable ? '1' : '—'}
+                          value={novUppEditable ? form.pack ?? '' : ''}
+                          placeholder={novUppEditable && !isVesovoy({ unit: novUnit }) ? '1' : '—'}
                           disabled={!novUppEditable}
-                          onChange={numField('novUpp')}
-                          onKeyDown={onEnter}
-                          aria-label={t('Штук в упаковке')}
+                          onChange={numField('pack')}
+                          onFocus={packFocus}
+                          onBlur={packBlur}
+                          onKeyDown={packEnter}
+                          aria-label={isVesovoy({ unit: novUnit }) ? `${t('В упаковке')}, ${t(novUnit)}` : t('Штук в упаковке')}
                         />
                         <select
                           id="prh-nov-unit"
                           value={novUnit}
                           aria-label={t('Единица измерения')}
-                          // Дробная единица и штука — без «штук в упаковке»: штуки сверх упаковок обнуляем
-                          onChange={(e) => setForm({ novUnit: e.target.value, ...(isVesovoy({ unit: e.target.value }) || e.target.value === 'шт' ? { novUpp: '1', pieces: '' } : {}) })}
+                          // Смена единицы — упаковка заново: у штуки её нет, у дробного она в кг,
+                          // у упаковки — в штуках. Штуки сверх упаковок обнуляем
+                          onChange={(e) => setForm({ novUnit: e.target.value, pack: null, pieces: '' })}
                         >
                           {EDINICY.map((x) => (
                             <option key={x.v} value={x.v}>{t(x.v) === t(x.name) ? t(x.v) : `${t(x.v)} — ${t(x.name)}`}</option>
@@ -509,13 +581,54 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                         </select>
                       </>
                     ) : (
-                      <label className="prh-unit prh-ro">
-                        <input readOnly tabIndex={-1} value={draft ? (draft.ves ? '—' : String(uppOf(draft))) : ''} placeholder="—" aria-label={t('Кол-во в упаковке')} />
-                        <span>{draft?.ves ? t(draft.unit) : t('шт')}</span>
-                      </label>
+                      <>
+                        {/* Упаковку товара из базы тоже можно поменять (1.5.12): мешок муки 50 кг,
+                            пачка по 24 вместо 20. Карточка получит её при проведении прихода. У
+                            единицы «шт» штук внутри нет */}
+                        <label className="prh-unit">
+                          <NumberInput
+                            id="prh-pack"
+                            className={'prh-num-s' + (draft && packChanged(draft) ? ' changed' : '')}
+                            integer={!draft?.ves}
+                            value={packValue}
+                            placeholder="—"
+                            disabled={!draft || (draft.unit === 'шт' && !draft.ves && uppOf(draft) <= 1)}
+                            onChange={numField('pack')}
+                            onFocus={packFocus}
+                            onBlur={packBlur}
+                            onKeyDown={packEnter}
+                            aria-label={draft?.ves ? `${t('В упаковке')}, ${t(draft.unit)}` : t('Штук в упаковке')}
+                            title={draft?.ves ? t('Мешок, канистра: сколько в упаковке. Пусто — продаётся только на вес') : t('Штук в упаковке')}
+                          />
+                          <span>{draft?.ves ? t(draft.unit) : t('шт')}</span>
+                        </label>
+                        {draft && packChanged(draft) && (
+                          <span className="prh-was">{t('Было')}: {packField(draft.upp0, draft.ves) || (draft.ves ? t('на вес') : '1')}</span>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
+                {/* Упаковку сменили у товара с ценами: за что были прежние цены (1.5.12) */}
+                {draft && packAsk(draft) && (() => {
+                  const ask = packAsk(draft)
+                  const pack = (u) => (draft.ves ? (u > 1000 ? `${t('уп')} ${packField(u, true).replace('.', ',')} ${t(draft.unit)}` : `1 ${t(draft.unit)}`) : `${t('уп')} ${u} ${t('шт')}`)
+                  return (
+                    <div className={'prh-f prh-repack' + (draft.packScale ? '' : ' req')} data-tour="af.repack" role="radiogroup" aria-label={t('Прежние цены')}>
+                      <label>{t('Прежние цены')}</label>
+                      <div className="prh-ctl prh-repack-ch">
+                        <label>
+                          <input type="radio" name="prh-repack" checked={form.packScale === 'scale'} onChange={() => chooseScale('scale')} />
+                          {t('были за')} {pack(ask.was)} — {t('пересчитать')} ×{String(kop(ask.ratio)).replace('.', ',')}
+                        </label>
+                        <label>
+                          <input type="radio" name="prh-repack" checked={form.packScale === 'keep'} onChange={() => chooseScale('keep')} />
+                          {t('уже за')} {pack(ask.now)} — {t('оставить')}
+                        </label>
+                      </div>
+                    </div>
+                  )
+                })()}
                 <div className="prh-f">
                   <label htmlFor={nov ? 'prh-nov-cat' : undefined}>{t('Категория')}</label>
                   <div className="prh-ctl">
@@ -564,7 +677,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                 </div>
                 {draft?.div && (
                   <div className="prh-f prh-f-info" data-tour="af.piece">
-                    <label>{t('Цена за 1 шт')}</label>
+                    <label>{draft.ves ? `${t('Цена за 1')} ${t(draft.unit)}` : t('Цена за 1 шт')}</label>
                     {/* Слева — по расчёту (цена / штук в упаковке), справа — своя (1.5.11):
                         вписали — касса продаёт отдельные штуки по ней, пусто — по расчёту */}
                     <div className="prh-ctl prh-piece">
@@ -576,8 +689,8 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                           onChange={(e) => setForm({ piece: e.target.value })}
                           onKeyDown={onEnter}
                           placeholder={t('своя')}
-                          aria-label={t('Своя цена за 1 шт')}
-                          title={t('Своя цена за 1 шт: по ней касса продаёт отдельные штуки. Пусто — по расчёту')}
+                          aria-label={draft.ves ? `${t('Своя цена за 1')} ${t(draft.unit)}` : t('Своя цена за 1 шт')}
+                          title={draft.ves ? t('Своя цена за 1 кг: по ней касса продаёт отдельные килограммы. Пусто — по расчёту') : t('Своя цена за 1 шт: по ней касса продаёт отдельные штуки. Пусто — по расчёту')}
                         />
                         <span>{t('сомони')}</span>
                       </label>

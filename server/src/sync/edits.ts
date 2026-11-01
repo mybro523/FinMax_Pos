@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client'
-import { piecePriceIn } from '../common/piece'
+import { isDrob, OLD_WINDOW_SACK, opensPack, packFor, piecePriceIn } from '../common/piece'
 import { D } from '../common/money'
-import { setUnits, syncProduct, totalUnits, uppOf, lockProducts } from '../common/stock'
+import { ensureBatch, setUnits, syncProduct, totalUnits, uppOf, lockProducts } from '../common/stock'
 import { firstCountAfter, lockInventories, markCounted } from '../common/counted'
 import { freeInternalBarcode } from '../common/barcode'
 import { alreadySame, conflictNote, EditOutcome, forgetStamps, lastEditOf, resolveEdit, stamp, StampTable, stampsOf, stampsOfRows } from '../common/stamps'
@@ -240,6 +240,11 @@ async function productCreate(tx: Tx, p: ReturnType<typeof parseProductCreate>, c
   // по нему уже могли продавать, — но с внутренним кодом; владелец объединит карточки
   const clash = await tx.product.findUnique({ where: { barcode: p.barcode }, select: { id: true, name: true } })
   const barcode = clash ? await freeInternalBarcode(tx) : p.barcode
+  // Упаковка — как у сайта (products.service, normalizePack): у дробного товара не меньше
+  // 1000 граммов, своя цена — только у товара, упаковку которого вскрывают. Остаток касса
+  // разложила по своей упаковке — сохраняем его в штуках
+  const upp = packFor(p.unit, p.unitsPerPack)
+  const units = p.stock * Math.max(1, p.unitsPerPack || 1) + p.looseUnits
   await createProductIn(tx, {
     id: p.id,
     name: p.name,
@@ -248,15 +253,15 @@ async function productCreate(tx: Tx, p: ReturnType<typeof parseProductCreate>, c
     type: p.type,
     cost: D(p.cost).toDecimalPlaces(2),
     price: D(p.price).toDecimalPlaces(2),
-    piecePrice: piecePriceIn(p.piecePrice),
+    piecePrice: opensPack({ unit: p.unit, unitsPerPack: upp }) ? piecePriceIn(p.piecePrice) : null,
     minStock: p.minStock,
     unit: p.unit,
-    unitsPerPack: p.unitsPerPack,
+    unitsPerPack: upp,
     dosage: p.dosage,
     analogIds: analogsVia(ctx, p.analogIds, p.id),
     image: p.image,
-    stock: p.stock,
-    looseUnits: p.looseUnits,
+    stock: Math.floor(units / upp),
+    looseUnits: units % upp,
     expiryDate: p.expiryDate,
     createdAt: p.createdAt,
   })
@@ -289,6 +294,20 @@ async function productUpdate(tx: Tx, p: ReturnType<typeof parseProductUpdate>, c
     p.set.analogIds = analogsVia(ctx, p.set.analogIds, pid)
     if ('analogIds' in p.base) p.base.analogIds = analogsVia(ctx, p.base.analogIds, pid)
   }
+  // Касса прежней версии не знает мешка у дробного товара: в её карточке у весового всегда
+  // «1 кг в упаковке» без своей цены (products.service, oldWindowPack). Остаток она шлёт в
+  // граммах — он верен; а упаковку и свою цену товара с мешком её правка не трогает
+  if (!p.drobPack && isDrob(p.set.unit ?? product.unit) && isDrob(product.unit) && opensPack(product)) {
+    // Цену её карточка подписывает «за 1 кг», а показывает цену мешка — что значит новое
+    // число, не понять: пусть правят обновлённой программой
+    if ('price' in p.set || 'cost' in p.set) throw new Reject(OLD_WINDOW_SACK(product.name))
+    delete p.set.unitsPerPack
+    delete p.set.piecePrice
+    delete p.base.unitsPerPack
+    delete p.base.piecePrice
+  }
+  // Упаковка дробного — не меньше 1000 граммов (как у сайта, normalizePack)
+  if ('unitsPerPack' in p.set) p.set.unitsPerPack = packFor(p.set.unit ?? product.unit, p.set.unitsPerPack)
   const out = resolveEdit(p.set, p.base, product as any, await stampsOf(tx, 'Product', pid), p.at)
   // Штрихкод, который за это время занял другой товар, не ставим: у этого остаётся прежний
   let taken: { id: string; name: string } | null = null
@@ -305,11 +324,20 @@ async function productUpdate(tx: Tx, p: ReturnType<typeof parseProductUpdate>, c
     if ('cost' in data) data.cost = D(data.cost).toDecimalPlaces(2)
     if ('price' in data) data.price = D(data.price).toDecimalPlaces(2)
     if ('piecePrice' in data) data.piecePrice = piecePriceIn(data.piecePrice)
+    // Своя цена — только у товара, упаковку которого вскрывают: убрали мешок — уходит и она
+    const unitNow = 'unit' in data ? data.unit : product.unit
+    const uppNow = 'unitsPerPack' in data ? data.unitsPerPack : product.unitsPerPack
+    const ownNow = 'piecePrice' in data ? data.piecePrice : product.piecePrice
+    if (ownNow !== null && ownNow !== undefined && !opensPack({ unit: unitNow, unitsPerPack: uppNow })) data.piecePrice = null
     const repack = 'unitsPerPack' in data
     // Остаток живёт партиями в штуках, карточка лишь показывает его упаковками. У товара,
     // заведённого до партий, остаток лежит только в карточке — сначала он ложится партией
     // по прежней упаковке: иначе новые «штук в упаковке» пересчитали бы его
     if (repack) await ensureBatch(tx, product)
+    // Сменили мешок, а прежние цены были за прежнюю упаковку: цены партий — тоже (как у сайта)
+    if (repack && p.repack === 'scale' && isDrob(product.unit) && isDrob(data.unit ?? product.unit) && data.unitsPerPack !== product.unitsPerPack) {
+      await tx.$executeRaw(Prisma.sql`UPDATE "Batch" SET "cost" = ROUND("cost" * ${data.unitsPerPack}::numeric / ${Math.max(1, product.unitsPerPack || 1)}::numeric, 2) WHERE "productId" = ${pid}`)
+    }
     await tx.product.update({ where: { id: pid }, data })
     // Упаковки и вскрытая — заново по партиям: до этого карточка показывала бы прежние
     // упаковки уже по новому числу штук
@@ -345,13 +373,6 @@ async function productUpdate(tx: Tx, p: ReturnType<typeof parseProductUpdate>, c
   // Срок с лишней карточки — тоже не про основную: на ней партии обеих
   if (p.expiryTouched && pid === p.id) await setCardExpiry(tx, pid, p.expiryDate)
   return keptAny(out, !!taken) ? null : pid
-}
-
-// Товар, заведённый до партий, держит остаток только в карточке — кладём его партией
-async function ensureBatch(tx: Tx, product: { id: string; cost: Prisma.Decimal; expiryDate: Date | null; stock: number; looseUnits: number | null; unitsPerPack: number | null }) {
-  if (await tx.batch.count({ where: { productId: product.id } })) return
-  const units = totalUnits(product)
-  if (units > 0) await tx.batch.create({ data: { productId: product.id, units, cost: product.cost, expiryDate: product.expiryDate, note: 'Начальный остаток' } })
 }
 
 // Сколько штук товара на полке — по партиям, как считает пересчёт (setUnits). У товара без
@@ -416,16 +437,17 @@ export async function unitsMovedAfter(tx: Tx, product: { id: string; unitsPerPac
   const [sales, rets, arrs, wos, srs] = await Promise.all([
     tx.saleItem.findMany({ where: { productId: product.id, sale: { date: later } }, select: { qty: true, pieces: true, unitsPerPack: true } }),
     tx.saleReturnItem.findMany({ where: { productId: product.id, restock: true, ret: { date: later } }, select: { units: true } }),
-    tx.arrivalItem.findMany({ where: { productId: product.id, arrival: { date: later } }, select: { qty: true, pieces: true } }),
+    tx.arrivalItem.findMany({ where: { productId: product.id, arrival: { date: later } }, select: { qty: true, pieces: true, unitsPerPack: true } }),
     tx.writeOffItem.findMany({ where: { productId: product.id, writeOff: { date: later, source: 'manual' } }, select: { units: true } }),
-    tx.supplierReturnItem.findMany({ where: { productId: product.id, ret: { date: later } }, select: { qty: true, pieces: true } }),
+    tx.supplierReturnItem.findMany({ where: { productId: product.id, ret: { date: later } }, select: { qty: true, pieces: true, unitsPerPack: true } }),
   ])
   let d = 0
   for (const s of sales) d -= s.qty * Math.max(1, s.unitsPerPack || 1) + (s.pieces || 0)
   for (const r of rets) d += r.units
-  for (const a of arrs) d += a.qty * upp + (a.pieces || 0)
+  // Приход и возврат поставщику помнят свою упаковку (1.5.12); у прежних строк — та, что была
+  for (const a of arrs) d += a.qty * (a.unitsPerPack || upp) + (a.pieces || 0)
   for (const w of wos) d -= w.units
-  for (const r of srs) d -= r.qty * upp + (r.pieces || 0)
+  for (const r of srs) d -= r.qty * (r.unitsPerPack || upp) + (r.pieces || 0)
   return d
 }
 

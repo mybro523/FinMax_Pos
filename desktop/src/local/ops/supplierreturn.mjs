@@ -9,13 +9,13 @@
 //
 // Закупочная цена в карточке не меняется — как при списании и продаже: уходят штуки,
 // средняя цена оставшегося считается той же.
-import { bodyOf, checker, MAX_MONEY, sumOk, unitsOk } from '../check.mjs'
+import { bodyOf, checker, MAX_MONEY, MAX_UPP, sumOk, unitsOk } from '../check.mjs'
 import { bad, inTx, newId } from '../db.mjs'
 import { docsOfShift, enqueue, myOpenShift, putDoc } from '../docs.mjs'
 import { D, fixed2, fromCents, fromCentsD, toCents } from '../money.mjs'
+import { lineUpp } from '../piece.mjs'
 import { move, productById } from '../stock.mjs'
 import { pendingDebtOf, supplierRow } from '../suppliers.mjs'
-import { uppOf } from '../units.mjs'
 
 export const REFUNDS = ['debt', 'cash', 'own', 'card']
 
@@ -38,12 +38,14 @@ export function createSupplierReturn(ctx, raw) {
   c.str(dto.shiftId, 'shiftId', { optional: true })
   const items = c.list(dto.items, 'items').map((it, n) => ({
     productId: c.str(it?.productId, `items.${n}.productId`),
-    // Целые упаковки (у весового товара — килограммы); ноль допустим при pieces > 0
+    // Целые упаковки (у весового товара без мешка — килограммы); ноль допустим при pieces > 0
     qty: c.int(it?.qty, `items.${n}.qty`, { min: 0 }),
     // Штуки (граммы) сверх целых упаковок
-    pieces: it?.pieces === undefined || it?.pieces === null ? 0 : c.int(it.pieces, `items.${n}.pieces`, { min: 0, max: 99999 }),
+    pieces: it?.pieces === undefined || it?.pieces === null ? 0 : c.int(it.pieces, `items.${n}.pieces`, { min: 0, max: MAX_UPP }),
     // Цена возврата за упаковку (килограмм) — как договорились с поставщиком
     price: c.num(it?.price, `items.${n}.price`, { max: MAX_MONEY }),
+    // Сколько штук (граммов) в упаковке строки — так окно считало qty и pieces (1.5.12)
+    unitsPerPack: it?.unitsPerPack === undefined || it?.unitsPerPack === null ? undefined : c.int(it.unitsPerPack, `items.${n}.unitsPerPack`, { min: 1, max: MAX_UPP }),
   }))
   c.done()
   if ((note || '').length > 500) throw bad('Примечание: не длиннее 500 символов')
@@ -55,13 +57,14 @@ export function createSupplierReturn(ctx, raw) {
       if (!byId.has(it.productId)) byId.set(it.productId, productById(db, it.productId))
       const p = byId.get(it.productId)
       if (!p) throw bad('Товар не найден')
-      const upp = uppOf(p)
+      // Упаковка строки — как её считало окно (1.5.12, lineUpp)
+      const upp = lineUpp(it, p)
       const units = it.qty * upp + it.pieces
       if (units <= 0) throw bad(`Укажите количество: ${p.name}`)
       unitsOk(units)
-      // Цена — за упаковку (за килограмм): штуки и граммы оплачиваются долей
+      // Цена — за упаковку строки (за мешок, за килограмм): штуки и граммы оплачиваются долей
       total = total.plus(D(it.price).times(D(units).div(upp)))
-      return { p, units, qty: it.qty, pieces: it.pieces, price: D(it.price) }
+      return { p, units, upp, qty: it.qty, pieces: it.pieces, price: D(it.price) }
     })
     sumOk(total)
     const totalC = toCents(total)
@@ -98,6 +101,7 @@ export function createSupplierReturn(ctx, raw) {
         name: l.p.name,
         qty: l.qty,
         pieces: l.pieces,
+        unitsPerPack: l.upp,
         price: fromCents(toCents(l.price)),
         cost: fromCents(l.p.costC),
         batches: taken.map((t) => ({ units: t.units, cost: String(fromCents(t.costC)), expiryDate: t.expiryDate ?? null })),
@@ -135,7 +139,7 @@ export function createSupplierReturn(ctx, raw) {
           shiftId,
           note: body.note,
           total: body.total,
-          items: rows.map((r, n) => ({ id: r.id, productId: r.productId, name: r.name, qty: r.qty, pieces: r.pieces, price: lines[n].price.toNumber() })),
+          items: rows.map((r, n) => ({ id: r.id, productId: r.productId, name: r.name, qty: r.qty, pieces: r.pieces, unitsPerPack: r.unitsPerPack, price: lines[n].price.toNumber() })),
         },
         deviceId: ctx.deviceId,
       },

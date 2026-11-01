@@ -24,21 +24,30 @@ export async function unitsMovedAfterMany(tx: Tx, products: { id: string; unitsP
       FROM "SaleReturnItem" ri JOIN "SaleReturn" r ON r."id" = ri."returnId"
       WHERE ri."productId" IN (${part}) AND ri."restock" = true AND r."date" > ${t} GROUP BY ri."productId"`)
     for (const r of rets) add(r.id, Number(r.u))
-    const arrs = await tx.$queryRaw<{ id: string; q: bigint; p: bigint }[]>(Prisma.sql`
-      SELECT ai."productId" AS id, SUM(ai."qty")::bigint AS q, SUM(ai."pieces")::bigint AS p
+    // Строки прихода и возврата поставщику — по своей упаковке (1.5.12): товару могли сменить
+    // её позже (килограмм → мешок), и «100 кг» прежнего прихода — всё те же 100 кг. У строки без
+    // снимка (удалённый товар) — по нынешней карточке
+    const arrs = await tx.$queryRaw<{ id: string; q: bigint; u: bigint; p: bigint }[]>(Prisma.sql`
+      SELECT ai."productId" AS id,
+        SUM(CASE WHEN ai."unitsPerPack" IS NULL THEN ai."qty" ELSE 0 END)::bigint AS q,
+        SUM(CASE WHEN ai."unitsPerPack" IS NULL THEN 0 ELSE ai."qty"::bigint * ai."unitsPerPack" END)::bigint AS u,
+        SUM(ai."pieces")::bigint AS p
       FROM "ArrivalItem" ai JOIN "Arrival" a ON a."id" = ai."arrivalId"
       WHERE ai."productId" IN (${part}) AND a."date" > ${t} GROUP BY ai."productId"`)
-    for (const r of arrs) add(r.id, Number(r.q) * (upp.get(r.id) || 1) + Number(r.p))
+    for (const r of arrs) add(r.id, Number(r.q) * (upp.get(r.id) || 1) + Number(r.u) + Number(r.p))
     const wos = await tx.$queryRaw<{ id: string; u: bigint }[]>(Prisma.sql`
       SELECT wi."productId" AS id, SUM(wi."units")::bigint AS u
       FROM "WriteOffItem" wi JOIN "WriteOff" w ON w."id" = wi."writeOffId"
       WHERE wi."productId" IN (${part}) AND w."source" = 'manual' AND w."date" > ${t} GROUP BY wi."productId"`)
     for (const r of wos) add(r.id, -Number(r.u))
-    const srs = await tx.$queryRaw<{ id: string; q: bigint; p: bigint }[]>(Prisma.sql`
-      SELECT sri."productId" AS id, SUM(sri."qty")::bigint AS q, SUM(sri."pieces")::bigint AS p
+    const srs = await tx.$queryRaw<{ id: string; q: bigint; u: bigint; p: bigint }[]>(Prisma.sql`
+      SELECT sri."productId" AS id,
+        SUM(CASE WHEN sri."unitsPerPack" IS NULL THEN sri."qty" ELSE 0 END)::bigint AS q,
+        SUM(CASE WHEN sri."unitsPerPack" IS NULL THEN 0 ELSE sri."qty"::bigint * sri."unitsPerPack" END)::bigint AS u,
+        SUM(sri."pieces")::bigint AS p
       FROM "SupplierReturnItem" sri JOIN "SupplierReturn" sr ON sr."id" = sri."returnId"
       WHERE sri."productId" IN (${part}) AND sr."date" > ${t} GROUP BY sri."productId"`)
-    for (const r of srs) add(r.id, -(Number(r.q) * (upp.get(r.id) || 1) + Number(r.p)))
+    for (const r of srs) add(r.id, -(Number(r.q) * (upp.get(r.id) || 1) + Number(r.u) + Number(r.p)))
   }
   return out
 }

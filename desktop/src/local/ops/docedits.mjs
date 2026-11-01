@@ -214,7 +214,8 @@ export function deleteSupplierReturn(ctx, id) {
           }
         }
       } else {
-        const units = (it.qty || 0) * uppOf(p) + (it.pieces || 0)
+        // Упаковка — снимком строки (1.5.12), как у сервера
+        const units = (it.qty || 0) * (it.unitsPerPack || uppOf(p)) + (it.pieces || 0)
         if (units > 0) move(db, { opId, productId: p.id, kind: 'supreturn-undo', units, costC: toCents(it.cost ?? 0), expiryDate: null, note: 'возврат поставщику отменён' }, { now })
       }
     }

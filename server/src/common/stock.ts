@@ -155,6 +155,15 @@ async function writeTotals(tx: Tx, product: { id: string; unitsPerPack: number |
   })
 }
 
+// Товар, заведённый до партий, держит остаток только в карточке — кладём его партией по
+// нынешней упаковке. Нужно перед сменой упаковки: иначе новые «штук в упаковке» пересчитали
+// бы остаток карточки (упаковки × новое число), а пересчёт по партиям обнулил бы его
+export async function ensureBatch(tx: Tx, product: { id: string; cost: Prisma.Decimal; expiryDate: Date | null; stock: number; looseUnits: number | null; unitsPerPack: number | null }) {
+  if (await tx.batch.count({ where: { productId: product.id } })) return
+  const units = totalUnits(product)
+  if (units > 0) await tx.batch.create({ data: { productId: product.id, units, cost: product.cost, expiryDate: product.expiryDate, note: 'Начальный остаток' } })
+}
+
 // Пересчёт карточки по партиям — для мест, где партии меняли напрямую
 // (например, ручная правка остатка в карточке товара). Два запроса вместо трёх.
 export async function syncProduct(tx: Tx, productId: string) {

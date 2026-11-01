@@ -36,6 +36,7 @@ import { DOC_KEYS, recountDebts, reorderCategories, reorderProducts } from './sn
 import { ackEdits, applyPeerEdits, completePeerEdits, docKnown, EDITABLE_DOC_KINDS, editsOf, peerDocWaiting, undoEdits } from './edits.mjs'
 import { hasPerm } from './accounts.mjs'
 import { SHEET_TBL, sheetShut } from './sheet.mjs'
+import { MAX_UPP } from './check.mjs'
 
 // Сколько дней чужая операция может ждать сервера. Касса без связи работает не
 // больше недели (срок подписки без проверки), две недели — с запасом
@@ -150,6 +151,17 @@ function effectsOf(db, op) {
       if (row) pieces.push([it.productId, row.pieceC ?? null])
     }
     if (pieces.length) out.pieces = pieces
+    // Упаковку поменяли прямо в приходе (1.5.12) — какой она стала в карточке. Сосед кладёт
+    // её раньше движений: средняя цена у него считается уже по новой упаковке. Касса прежней
+    // версии этого поля не знает и пропустит его — упаковку ей принесёт сервер
+    // С переводом цен (packScale) — ещё и закупочная с ценой продажи, какими они стали
+    const packs = []
+    for (const it of p.arrival?.items || []) {
+      if (!it?.packChanged) continue
+      const row = q(db, 'SELECT unitsPerPack, priceC, costC, sCostC FROM products WHERE id = ?').get(it.productId)
+      if (row) packs.push(it.packScale ? [it.productId, row.unitsPerPack, { priceC: row.priceC, costC: row.costC, sCostC: row.sCostC }] : [it.productId, row.unitsPerPack])
+    }
+    if (packs.length) out.packs = packs
   }
   return out
 }
@@ -372,6 +384,20 @@ function applyEffects(db, opId, type, fx, changed) {
     for (const t of touched) {
       if (TBL_KEY[t]) changed.add(TBL_KEY[t])
       else if (t.startsWith('doc:') && KIND_KEY[t.slice(4)]) changed.add(KIND_KEY[t.slice(4)])
+    }
+  }
+
+  // Упаковка из прихода соседа (1.5.12) — до движений: средняя цена прихода считается по ней
+  for (const pk of fx.packs || []) {
+    if (Array.isArray(pk) && typeof pk[0] === 'string' && Number.isInteger(pk[1]) && pk[1] >= 1 && pk[1] <= MAX_UPP) {
+      q(db, 'UPDATE products SET unitsPerPack = ? WHERE id = ?').run(pk[1], pk[0])
+      // Цены, переведённые на новую упаковку, — какими они стали у соседа
+      const c = pk[2]
+      const cents = (v) => (Number.isInteger(v) && v >= 0 ? v : null)
+      if (c && typeof c === 'object' && cents(c.priceC) !== null && cents(c.costC) !== null) {
+        q(db, 'UPDATE products SET priceC = ?, costC = ?, sCostC = COALESCE(?, sCostC) WHERE id = ?').run(c.priceC, c.costC, cents(c.sCostC), pk[0])
+      }
+      changed.add('products')
     }
   }
 

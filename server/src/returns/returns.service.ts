@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
-import { grossOf, refundOf } from '../common/piece'
+import { grossOf, isDrob, KG, refundOf } from '../common/piece'
 import { D } from '../common/money'
 import { addUnits, enteredExpiry, lockProducts, returnExpiry, uppOf } from '../common/stock'
 import { TX } from '../common/tx'
@@ -96,7 +96,10 @@ export class ReturnsService {
             const sold = line.qty * upp + line.pieces
             const already = returnedBefore.get(it.productId) || 0
             if (already + units > sold) {
-              throw new BadRequestException(`По «${product.name}» уже возвращено ${already} из ${sold} шт`)
+              // Дробному — в его единице: граммы «штуками» владелец не прочтёт
+              const ed = line.unit ?? product.unit
+              const skolko = (n: number) => (isDrob(ed) ? `${n / KG}` : `${n}`)
+              throw new BadRequestException(`По «${product.name}» уже возвращено ${skolko(already)} из ${skolko(sold)} ${isDrob(ed) ? String(ed).trim() : 'шт'}`)
             }
           }
 
@@ -106,13 +109,16 @@ export class ReturnsService {
           const price = line ? D(line.price) : D(product.price)
           const cost = line ? D(line.cost) : D(product.cost)
           const soldUnits = line ? line.qty * upp + line.pieces : units
+          // Единица строки — снимком чека (1.5.12): своя цена дробного в нём — за килограмм.
+          // У строк прежних версий снимка нет — единица из карточки
+          const unit = line?.unit ?? product.unit
           // Упаковки — по цене упаковки, штуки — по цене штуки из чека (своя, если была)
-          const gross = line ? grossOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp }) : price.dividedBy(upp).times(soldUnits)
+          const gross = line ? grossOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, unit }) : price.dividedBy(upp).times(soldUnits)
           const paid = line ? gross.minus(D(line.discount)) : gross
           // По чеку — сначала отдельные штуки по своей цене штуки, сверх них — штуки из
           // упаковок; без своей цены — как всегда, поровну на штуку (common/piece.ts)
           const amount = line
-            ? refundOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, discount: line.discount }, units, returnedBefore.get(it.productId) || 0)
+            ? refundOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, unit, discount: line.discount }, units, returnedBefore.get(it.productId) || 0)
             : (soldUnits > 0 ? paid.dividedBy(soldUnits) : D(0)).times(units)
           total = total.plus(amount)
 

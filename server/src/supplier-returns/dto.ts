@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer'
 import { ArrayMinSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator'
+import { MAX_UPP } from '../common/piece'
 
 const MAX_MONEY = 9_999_999_999.99
 
@@ -9,10 +10,13 @@ export const REFUNDS = ['debt', 'cash', 'own', 'card'] as const
 
 export class SupplierReturnItemDto {
   @IsString() @MaxLength(64) productId: string
-  // Целые упаковки (у весового — килограммы). Ноль допустим, когда есть pieces
+  // Целые упаковки (у весового без мешка — килограммы). Ноль допустим, когда есть pieces
   @IsInt() @Min(0) qty: number
   // Штуки (граммы) сверх целых упаковок
-  @IsOptional() @IsInt() @Min(0) @Max(99_999) pieces?: number
+  @IsOptional() @IsInt() @Min(0) @Max(MAX_UPP) pieces?: number
+  // Сколько штук (граммов) в упаковке строки — так окно считало qty и pieces (1.5.12).
+  // Прежние окна не шлют: тогда как в карточке, а у весового — килограммами (common/piece, lineUpp)
+  @IsOptional() @IsInt() @Min(1) @Max(MAX_UPP) unitsPerPack?: number
   // Цена возврата за упаковку (килограмм) — сколько засчитывает поставщик
   @IsNumber() @Min(0) @Max(MAX_MONEY) price: number
 }

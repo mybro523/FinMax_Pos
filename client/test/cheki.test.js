@@ -173,7 +173,8 @@ test('товара осталось меньше, чем в чеке, — кол
   assert.equal(r.changed, true)
   assert.equal(r.cart[0].qty, 1)
   assert.equal(r.cart[0].pieces, 0)
-  assert.deepEqual(r.notes, [{ kind: 'stock', name: 'Парацетамол', avail: 25 }])
+  // Единица заметки — чтобы весовому писать килограммы, а не граммы «штуками» (1.5.12)
+  assert.deepEqual(r.notes, [{ kind: 'stock', name: 'Парацетамол', avail: 25, unit: 'шт' }])
 })
 
 test('товар закончился совсем — строка уходит из чека', () => {

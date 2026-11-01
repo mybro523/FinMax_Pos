@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { money } from '../db/store'
-import { isVesovoy, kgText, isDivisible, pricePerPiece, sellableUnits, stockUnits, expiredUnits, hasExpired, edinica } from '../lib/units'
+import { isVesovoy, kgText, isDivisible, pricePerPiece, sellableUnits, stockUnits, expiredUnits, hasExpired, edinica, pieceLabel, unitsText } from '../lib/units'
 import { useT } from '../lib/i18n'
 
 // ── Каталог кассы ──
@@ -19,16 +19,9 @@ import { useT } from '../lib/i18n'
 
 export const LIMIT = 100
 
-// Остаток словами: «12 уп» или «12 уп + 3 шт». Собирается здесь, а не берётся
-// готовым из общего помощника: тот пишет единицы по-русски, а каталог открыт
-// и на таджикском
-function ostatok(p, t) {
-  if (isVesovoy(p)) return `${kgText(stockUnits(p))} ${t(edinica(p))}`
-  const packs = Number(p.stock) || 0
-  const loose = Number(p.looseUnits) || 0
-  const unit = t(p.unit || 'уп')
-  return isDivisible(p) && loose > 0 ? `${packs} ${unit} + ${loose} ${t('шт')}` : `${packs} ${unit}`
-}
+// Остаток словами: «12 уп», «12 уп + 3 шт», у весового — «12,35 кг» или в мешках «2 уп +
+// 10 кг» (1.5.12). С переводом подписей: каталог открыт и на таджикском
+const ostatok = (p, t) => unitsText(stockUnits(p), p, t)
 
 function KassaCatalog({ rows, total, hi, showHi, outside, loading, noProducts, onPick, onFoto }) {
   const t = useT()
@@ -81,15 +74,17 @@ function KassaCatalog({ rows, total, hi, showHi, outside, loading, noProducts, o
                   узкая, и поставленные в ряд они не оставили бы места названию */}
               <span className="kc-right">
                 <b className="kc-price">{money(p.price)}</b>
-                {isVesovoy(p)
+                {/* Весовой без мешка — «за 1 кг»; в мешке и делимая упаковка — цена мешка и
+                    цена килограмма (штуки) под ней */}
+                {isVesovoy(p) && !isDivisible(p)
                   ? <span className="tag-cat">{t('за 1')} {t(edinica(p))}</span>
-                  : isDivisible(p) && <span className="tag-cat">{money(pricePerPiece(p))}/{t('шт')}</span>}
+                  : isDivisible(p) && <span className="tag-cat">{money(pricePerPiece(p))}/{t(pieceLabel(p))}</span>}
                 <span className={'badge ' + (net ? 'debt' : p.stock <= p.minStock ? 'low' : 'ok')}>
                   {net && stockUnits(p) <= 0 ? t('нет') : ostatok(p, t)}
                 </span>
                 {hasExpired(p) && (
                   <span className="tag-cat kc-exp">
-                    {t('просрочено')} {expiredUnits(p)} {t('шт')}
+                    {t('просрочено')} {isVesovoy(p) ? `${kgText(expiredUnits(p))} ${t(edinica(p))}` : `${expiredUnits(p)} ${t('шт')}`}
                   </span>
                 )}
               </span>

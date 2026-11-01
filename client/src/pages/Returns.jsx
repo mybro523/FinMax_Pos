@@ -127,7 +127,9 @@ export default function Returns() {
       lines.reduce((s, l) => {
         const item = sale?.items.find((i) => i.productId === l.productId)
         if (!item || !l.units) return s
-        return s + vozvratSumma(item, l.units, l.already)
+        // Единица строки — снимком чека (1.5.12); у прежних строк — из карточки: своя цена
+        // весового в мешке — за килограмм, и без единицы её не прочесть
+        return s + vozvratSumma({ ...item, unit: item.unit || l.unit }, l.units, l.already)
       }, 0),
     [lines, sale],
   )
@@ -150,7 +152,7 @@ export default function Returns() {
   function amountOf(l) {
     const item = sale?.items.find((i) => i.productId === l.productId)
     if (!item || !l.units) return 0
-    return vozvratSumma(item, l.units, l.already)
+    return vozvratSumma({ ...item, unit: item.unit || l.unit }, l.units, l.already)
   }
 
   function submit() {

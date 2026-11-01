@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { D } from '../common/money'
 import { addUnits, consumeUnits, lockProducts, uppOf } from '../common/stock'
+import { lineUpp, oldLineOnSack, OLD_WINDOW_SACK } from '../common/piece'
 import { openShiftFor } from '../shifts/till'
 import { setSupplierRefund } from '../shifts/totals'
 import { TX } from '../common/tx'
@@ -51,12 +52,15 @@ export class SupplierReturnsService {
       const lines = dto.items.map((it) => {
         const p = byId.get(it.productId)
         if (!p) throw new BadRequestException('Товар не найден')
-        const upp = uppOf(p)
+        if (oldLineOnSack(it, p)) throw new BadRequestException(OLD_WINDOW_SACK(p.name))
+        // Упаковка строки — как её считало окно (1.5.12); прежнее окно у весового считало
+        // килограммами (common/piece, lineUpp)
+        const upp = lineUpp(it, p)
         const pieces = Math.max(0, Math.trunc(it.pieces || 0))
         const units = it.qty * upp + pieces
         if (units <= 0) throw new BadRequestException(`Укажите количество: ${p.name}`)
         total = total.plus(D(it.price).times(D(units).div(upp)))
-        return { p, units, qty: it.qty, pieces, price: D(it.price).toDecimalPlaces(2) }
+        return { p, units, upp, qty: it.qty, pieces, price: D(it.price).toDecimalPlaces(2) }
       })
       total = total.toDecimalPlaces(2)
 
@@ -75,7 +79,7 @@ export class SupplierReturnsService {
       const items: Prisma.SupplierReturnItemUncheckedCreateWithoutRetInput[] = []
       for (const l of lines) {
         const taken = await consumeUnits(tx, l.p.id, l.units, l.p.name)
-        items.push({ productId: l.p.id, name: l.p.name, qty: l.qty, pieces: l.pieces, price: l.price, cost: l.p.cost, batches: batchesOf(taken) })
+        items.push({ productId: l.p.id, name: l.p.name, qty: l.qty, pieces: l.pieces, unitsPerPack: l.upp, price: l.price, cost: l.p.cost, batches: batchesOf(taken) })
       }
 
       const ret = await tx.supplierReturn.create({
@@ -136,7 +140,7 @@ export async function removeSupplierReturnIn(tx: Tx, id: string): Promise<boolea
 // партией без срока по закупочной цене
 export async function restoreItems(
   tx: Tx,
-  items: { productId: string | null; qty: number; pieces: number; cost: Prisma.Decimal; batches: Prisma.JsonValue | null }[],
+  items: { productId: string | null; qty: number; pieces: number; unitsPerPack?: number | null; cost: Prisma.Decimal; batches: Prisma.JsonValue | null }[],
 ) {
   const ids = [...new Set(items.map((i) => i.productId).filter(Boolean) as string[])]
   await lockProducts(tx, ids)
@@ -151,7 +155,8 @@ export async function restoreItems(
       }
     } else {
       const p = await tx.product.findUnique({ where: { id: it.productId } })
-      const units = it.qty * uppOf(p || {}) + (it.pieces || 0)
+      // Упаковка — снимком строки (1.5.12): товару могли сменить её после возврата
+      const units = it.qty * (it.unitsPerPack || uppOf(p || {})) + (it.pieces || 0)
       await addUnits(tx, it.productId, units, it.cost, null, null, 'возврат поставщику отменён')
     }
   }

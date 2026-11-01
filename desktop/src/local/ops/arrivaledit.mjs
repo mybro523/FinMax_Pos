@@ -11,11 +11,12 @@
 // всё, что от прихода осталось.
 //
 // Ниже проданного количество опускать нельзя: этих упаковок физически нет на полке.
-import { bodyOf, checker, expiryOk, MAX_MONEY, sumOk } from '../check.mjs'
+import { bodyOf, checker, expiryOk, MAX_MONEY, MAX_UPP, sumOk } from '../check.mjs'
 import { bad, inTx, newId, q } from '../db.mjs'
 import { enqueue, liveDoc } from '../docs.mjs'
 import { ADJ, adjMove, recordDocEdit, serverKnows } from '../edits.mjs'
 import { D, fromCents, toCents } from '../money.mjs'
+import { costCInPack, isDrob, KG, lineUpp } from '../piece.mjs'
 import { move, productById } from '../stock.mjs'
 import { supplierRow } from '../suppliers.mjs'
 import { isoOrNull } from '../time.mjs'
@@ -48,14 +49,16 @@ export function arrivalView(db, id) {
   for (const it of a.items || []) {
     if (!it.productId) continue
     const p = productById(db, it.productId)
-    brought.set(it.productId, (brought.get(it.productId) || 0) + unitsOfLine(it, uppOf(p || {})))
+    // Упаковка — снимком строки (1.5.12): товару могли сменить её после прихода. У строки без
+    // снимка (её записала касса прежней версии) — как у сервера: весовой — килограммами
+    brought.set(it.productId, (brought.get(it.productId) || 0) + unitsOfLine(it, it.unitsPerPack || lineUpp({}, p || {})))
     lines.set(it.productId, (lines.get(it.productId) || 0) + 1)
   }
   return {
     ...a,
     items: (a.items || []).map((it) => {
       const p = it.productId ? productById(db, it.productId) : null
-      const upp = uppOf(p || {})
+      const upp = it.unitsPerPack || lineUpp({}, p || {})
       const soldUnits = it.productId ? Math.max(0, (brought.get(it.productId) || 0) - (left.get(it.productId) || 0)) : 0
       const exp = it.productId ? expiry.get(it.productId) : null
       return {
@@ -80,9 +83,11 @@ export function updateArrival(ctx, id, raw) {
   const items = c.list(dto.items, 'items').map((it, n) => ({
     id: c.str(it?.id, `items.${n}.id`),
     qty: c.int(it?.qty, `items.${n}.qty`, { min: 0 }),
-    pieces: it?.pieces === undefined || it?.pieces === null ? 0 : c.int(it.pieces, `items.${n}.pieces`, { min: 0, max: 99999 }),
+    pieces: it?.pieces === undefined || it?.pieces === null ? 0 : c.int(it.pieces, `items.${n}.pieces`, { min: 0, max: MAX_UPP }),
     cost: c.num(it?.cost, `items.${n}.cost`, { max: MAX_MONEY }),
     expiryDate: c.str(it?.expiryDate, `items.${n}.expiryDate`, { optional: true }),
+    // Упаковка, по которой окно считало строку (1.5.12) — снимок строки прихода
+    unitsPerPack: it?.unitsPerPack === undefined || it?.unitsPerPack === null ? undefined : c.int(it.unitsPerPack, `items.${n}.unitsPerPack`, { min: 1, max: MAX_UPP }),
   }))
   c.done()
 
@@ -101,6 +106,12 @@ export function updateArrival(ctx, id, raw) {
       expiryOk(iso)
       return iso
     })
+    // Упаковка каждой строки правки — как окно её считало (снимок строки), у строки без
+    // снимка — как у сервера (lineUpp): дробный — килограммами, остальные — по карточке
+    const inUpp = new Map(lines.map((l) => {
+      const it = byLineId.get(l.id)
+      return [l.id, l.unitsPerPack || it.unitsPerPack || lineUpp({}, it.productId ? productById(db, it.productId) || {} : {})]
+    }))
     const wanted = new Map(lines.map((l, n) => [l.id, { ...l, expiry: expiryOf[n] }]))
     const opId = newId()
     const ids = [...new Set((a.items || []).map((i) => i.productId).filter(Boolean))]
@@ -110,21 +121,23 @@ export function updateArrival(ctx, id, raw) {
       if (!p) continue
       const upp = uppOf(p)
       const mine = a.items.filter((i) => i.productId === pid)
-      const brought = mine.reduce((s, i) => s + unitsOfLine(i, upp), 0)
+      // Было — по упаковке, с которой строку записали (1.5.12); без снимка — как у сервера
+      const brought = mine.reduce((s, i) => s + unitsOfLine(i, i.unitsPerPack || lineUpp({}, p)), 0)
       const mineBatches = batches.filter((b) => b.productId === pid)
       const left = mineBatches.reduce((s, b) => s + b.units, 0)
       const sold = Math.max(0, brought - left)
       const newLines = mine.map((i) => wanted.get(i.id)).filter(Boolean)
-      const want = newLines.reduce((s, l) => s + unitsOfLine(l, upp), 0)
+      const want = newLines.reduce((s, l) => s + unitsOfLine(l, inUpp.get(l.id)), 0)
       if (want < sold) {
-        const skolko = p.unit === 'кг' ? `${sold / 1000} кг` : `${sold} шт (${Math.ceil(sold / upp)} уп)`
+        const skolko = isDrob(p.unit) ? `${sold / KG} ${String(p.unit).trim()}` : `${sold} шт (${Math.ceil(sold / upp)} уп)`
         throw bad(`«${p.name}»: из этого прихода уже продано ${skolko}. Меньше проданного поставить нельзя — этого товара на полке уже нет.`)
       }
       // Пустой срок в правке — «оставить как было»: стереть срок случайно нельзя
       let prevExpiry
       for (const b of mineBatches) if (prevExpiry === undefined || (b.expiryDate && prevExpiry && b.expiryDate < prevExpiry)) prevExpiry = b.expiryDate
       // Сколько было в приходе (b) и строки, какими он стал: штуки, цена упаковки, срок
-      const spec = { b: brought, l: newLines.map((l) => [unitsOfLine(l, upp), toCents(l.cost), l.expiry ?? prevExpiry ?? null]) }
+      // Цена — за упаковку ТОВАРА: строка, посчитанная в другой упаковке, переводится
+      const spec = { b: brought, l: newLines.map((l) => [unitsOfLine(l, inUpp.get(l.id)), costCInPack(toCents(l.cost), inUpp.get(l.id), upp), l.expiry ?? prevExpiry ?? null]) }
       move(db, { opId, productId: pid, kind: 'arrival-edit', units: want, arrivalId: id, note: JSON.stringify(spec) }, { now })
     }
 
@@ -132,14 +145,12 @@ export function updateArrival(ctx, id, raw) {
     const nextItems = []
     for (const it of a.items || []) {
       const l = wanted.get(it.id)
-      const p = it.productId ? productById(db, it.productId) : null
-      if (!l || unitsOfLine(l, uppOf(p || {})) <= 0) continue
-      nextItems.push({ ...it, qty: l.qty, pieces: l.pieces, cost: fromCents(toCents(l.cost)) })
+      if (!l || unitsOfLine(l, inUpp.get(l.id)) <= 0) continue
+      nextItems.push({ ...it, qty: l.qty, pieces: l.pieces, unitsPerPack: inUpp.get(l.id), cost: fromCents(toCents(l.cost)) })
     }
     let total = D(0)
     for (const l of lines) {
-      const it = byLineId.get(l.id)
-      const upp = uppOf(productById(db, it.productId) || {})
+      const upp = inUpp.get(l.id)
       const units = unitsOfLine(l, upp)
       if (units > 0) total = total.plus(D(l.cost).times(D(units).div(upp)))
     }
@@ -176,7 +187,7 @@ export function updateArrival(ctx, id, raw) {
           id,
           ...(supplier !== undefined ? { supplier } : {}),
           ...(supplierIdAsked !== undefined ? { supplierId: supplierIdAsked, debt: debtAsked ?? 0 } : debtAsked !== undefined ? { debt: debtAsked } : {}),
-          items: lines.map((l, n) => ({ id: l.id, qty: l.qty, pieces: l.pieces, cost: l.cost, ...(expiryOf[n] ? { expiryDate: expiryOf[n] } : {}) })),
+          items: lines.map((l, n) => ({ id: l.id, qty: l.qty, pieces: l.pieces, unitsPerPack: inUpp.get(l.id), cost: l.cost, ...(expiryOf[n] ? { expiryDate: expiryOf[n] } : {}) })),
         },
         ref: { kind: 'arrival', id },
       },

@@ -95,7 +95,8 @@ export class SalesService {
         const units = l.qty * upp + l.pieces
         const own = ownPiece(p)
         const unitCost = D(p.cost).dividedBy(upp)
-        const gross = grossOf({ qty: l.qty, pieces: l.pieces, price: p.price, piecePrice: own, unitsPerPack: upp })
+        // Единица — обязательно: своя цена дробного товара — за килограмм (common/piece.ts)
+        const gross = grossOf({ qty: l.qty, pieces: l.pieces, price: p.price, piecePrice: own, unitsPerPack: upp, unit: p.unit })
         const discount = Prisma.Decimal.min(Prisma.Decimal.max(0, D(l.discount)), gross)
         total = total.plus(gross.minus(discount))
         cost = cost.plus(unitCost.times(units))
@@ -108,6 +109,8 @@ export class SalesService {
           price: p.price,
           // Цена штуки, по которой продали, — снимком: возврат и отчёты считают по ней
           piecePrice: own,
+          // И единица — снимком: по ней читается своя цена (у дробного она за килограмм)
+          unit: p.unit,
           cost: p.cost,
           discount,
         }

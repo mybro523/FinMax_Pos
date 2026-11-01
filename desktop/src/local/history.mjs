@@ -41,7 +41,8 @@ export function productHistory(db, productId, query, now) {
   for (const a of listDocs(db, 'arrival')) {
     for (const i of a.items || []) {
       if (i.productId !== productId || !inPeriod(a.date)) continue
-      rows.push({ kind: 'arrival', date: a.date, delta: (i.qty || 0) * upp + (i.pieces || 0), moves: true, docId: a.id, who: who(a.user), cost: n(i.cost), supplier: a.supplier })
+      // Упаковка строки — снимком (1.5.12): товару могли сменить её позже
+      rows.push({ kind: 'arrival', date: a.date, delta: (i.qty || 0) * (i.unitsPerPack || upp) + (i.pieces || 0), moves: true, docId: a.id, who: who(a.user), cost: n(i.cost), supplier: a.supplier })
     }
   }
   for (const w of listDocs(db, 'writeoff')) {
@@ -54,7 +55,7 @@ export function productHistory(db, productId, query, now) {
   for (const r of listDocs(db, 'supplierreturn')) {
     for (const i of r.items || []) {
       if (i.productId !== productId || !inPeriod(r.date)) continue
-      rows.push({ kind: 'supreturn', date: r.date, delta: -((i.qty || 0) * upp + (i.pieces || 0)), moves: true, docId: r.id, who: who(r.user), price: n(i.price), supplier: r.supplier, note: r.note || '' })
+      rows.push({ kind: 'supreturn', date: r.date, delta: -((i.qty || 0) * (i.unitsPerPack || upp) + (i.pieces || 0)), moves: true, docId: r.id, who: who(r.user), price: n(i.price), supplier: r.supplier, note: r.note || '' })
     }
   }
   // Правки остатка в карточке, сделанные на этой кассе

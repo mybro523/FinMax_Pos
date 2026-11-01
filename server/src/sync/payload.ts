@@ -14,6 +14,7 @@
 // Модуль не знает ни про базу, ни про Nest — только разбор. Проверяется отдельно.
 
 import { storableDate } from '../common/time'
+import { MAX_UPP } from '../common/piece'
 
 // Отказ по существу: повторять операцию бессмысленно, касса покажет её владельцу
 export class Reject extends Error {}
@@ -181,7 +182,7 @@ export function parseSale(p: any, now?: number) {
       const qty = int(i.qty, 'упаковки')
       const pieces = int(i.pieces ?? 0, 'штуки')
       if (qty + pieces <= 0) throw new Reject('В чеке позиция без количества')
-      const unitsPerPack = int(i.unitsPerPack ?? 1, 'штук в упаковке', 1, 100_000)
+      const unitsPerPack = int(i.unitsPerPack ?? 1, 'штук в упаковке', 1, MAX_UPP)
       // Штуки база хранит целым числом: больше в него не помещается
       if (qty * unitsPerPack + pieces > MAX_UNITS) throw new Reject('Недопустимое количество: слишком много')
       return {
@@ -195,6 +196,9 @@ export function parseSale(p: any, now?: number) {
         // Своя цена штуки, по которой касса продала отдельные штуки (1.5.11). Прежние
         // кассы её не шлют — штука у них шла от цены упаковки
         piecePrice: i.piecePrice === undefined || i.piecePrice === null || i.piecePrice === '' ? null : money(i.piecePrice, 'цена штуки'),
+        // Единица товара, по которой касса прочла свою цену: у дробного она за килограмм
+        // (1.5.12). Прежние кассы её не шлют — тогда единица из карточки
+        unit: i.unit === undefined || i.unit === null ? null : text(i.unit, 20).trim() || null,
         cost: money(i.cost, 'закупочная цена'),
         discount: money(i.discount ?? 0, 'скидка'),
       }
@@ -222,7 +226,7 @@ export function parseReturn(p: any, now?: number) {
       productId: id(i.productId, 'товар'),
       name: text(i.name, 300),
       units: int(i.units, 'штуки', 1),
-      unitsPerPack: int(i.unitsPerPack ?? 1, 'штук в упаковке', 1, 100_000),
+      unitsPerPack: int(i.unitsPerPack ?? 1, 'штук в упаковке', 1, MAX_UPP),
       price: money(i.price, 'цена'),
       cost: money(i.cost ?? 0, 'закупочная цена'),
       amount: money(i.amount, 'сумма позиции'),
@@ -272,7 +276,7 @@ export function parseArrival(p: any, now?: number) {
       name: text(i.name, 300),
       qty: int(i.qty, 'упаковки', 0),
       // Штуки (у весового товара — граммы) сверх целых упаковок
-      pieces: i.pieces === undefined || i.pieces === null ? 0 : int(i.pieces, 'штуки', 0),
+      pieces: i.pieces === undefined || i.pieces === null ? 0 : int(i.pieces, 'штуки', 0, MAX_UPP),
       // Закупочная цена — уже со скидкой поставщика
       cost: money(i.cost, 'закупочная цена'),
       // Скидка поставщика на строку, % — для истории. Прежние кассы её не шлют
@@ -282,6 +286,13 @@ export function parseArrival(p: any, now?: number) {
       // Своя цена штуки из прихода (1.5.11): нет поля — не трогать (прежние кассы); пусто —
       // убрать; число — поставить
       piecePrice: i.piecePrice === undefined ? undefined : i.piecePrice === null || i.piecePrice === '' ? null : money(i.piecePrice, 'цена штуки'),
+      // Сколько штук (граммов) в упаковке строки — так касса считала qty и pieces (1.5.12).
+      // Прежние кассы не шлют: тогда по карточке, а у дробного — килограммами (common/piece, lineUpp)
+      ...(i.unitsPerPack === undefined || i.unitsPerPack === null ? {} : { unitsPerPack: int(i.unitsPerPack, 'штук в упаковке', 1, MAX_UPP) }),
+      // Упаковку товара поменяли в этом приходе: карточка получит unitsPerPack строки
+      packChanged: i.packChanged === true,
+      // Прежние цены были за прежнюю упаковку — перевести на новую (applyPackChanges)
+      packScale: i.packScale === true,
     }
     if (row.qty <= 0 && row.pieces <= 0) throw new Reject('Пустая позиция прихода')
     return row
@@ -321,8 +332,10 @@ export function parseSupplierReturn(p: any, now?: number) {
       name: text(i.name, 300),
       qty: int(i.qty, 'упаковки', 0),
       // Штуки (у весового — граммы) сверх целых упаковок
-      pieces: i.pieces === undefined || i.pieces === null ? 0 : int(i.pieces, 'штуки', 0),
+      pieces: i.pieces === undefined || i.pieces === null ? 0 : int(i.pieces, 'штуки', 0, MAX_UPP),
       price: money(i.price, 'цена возврата'),
+      // Упаковка строки, как её считала касса (1.5.12); нет — как у прихода (lineUpp)
+      ...(i.unitsPerPack === undefined || i.unitsPerPack === null ? {} : { unitsPerPack: int(i.unitsPerPack, 'штук в упаковке', 1, MAX_UPP) }),
     }
     if (row.qty <= 0 && row.pieces <= 0) throw new Reject('Пустая позиция возврата')
     return row
@@ -507,7 +520,7 @@ function productFields(src: any) {
   if (has(src, 'piecePrice')) out.piecePrice = src.piecePrice === null || src.piecePrice === '' ? null : money(src.piecePrice, 'цена штуки')
   if (has(src, 'minStock')) out.minStock = int(src.minStock, 'минимальный остаток')
   if (has(src, 'unit')) out.unit = text(src.unit, 20).trim() || 'уп'
-  if (has(src, 'unitsPerPack')) out.unitsPerPack = int(src.unitsPerPack, 'штук в упаковке', 1, 100_000)
+  if (has(src, 'unitsPerPack')) out.unitsPerPack = int(src.unitsPerPack, 'штук в упаковке', 1, MAX_UPP)
   if (has(src, 'dosage')) out.dosage = text(src.dosage, 200)
   if (has(src, 'analogIds')) {
     if (!Array.isArray(src.analogIds)) throw new Reject('Аналоги: ожидался список')
@@ -572,6 +585,10 @@ export function parseProductUpdate(p: any, now?: number) {
     stock,
     expiryTouched,
     expiryDate: expiryTouched ? dateOrNull(root.expiryDate, 'срок годности') : null,
+    // Касса знает упаковку дробного товара (1.5.12) — см. products.service, oldWindowPack
+    drobPack: root.drobPack === true,
+    // Сменили упаковку дробного товара, а прежние цены были за прежнюю: цены партий — тоже
+    repack: root.repack === 'scale' ? ('scale' as const) : root.repack === 'keep' ? ('keep' as const) : null,
   }
 }
 
@@ -706,9 +723,11 @@ export function parseArrivalUpdate(p: any, now?: number) {
     return {
       id: id(i.id, 'строка прихода'),
       qty: int(i.qty, 'упаковки', 0),
-      pieces: i.pieces === undefined || i.pieces === null ? 0 : int(i.pieces, 'штуки', 0, 99_999),
+      pieces: i.pieces === undefined || i.pieces === null ? 0 : int(i.pieces, 'штуки', 0, MAX_UPP),
       cost: money(i.cost, 'закупочная цена'),
       expiryDate: exp ? exp.toISOString() : undefined,
+      // Упаковка, по которой касса считала строку (1.5.12); нет — прежняя касса (lineUpp)
+      ...(i.unitsPerPack === undefined || i.unitsPerPack === null ? {} : { unitsPerPack: int(i.unitsPerPack, 'штук в упаковке', 1, MAX_UPP) }),
     }
   })
   return {

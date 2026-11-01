@@ -13,7 +13,7 @@
 // Товар открытые чеки НЕ бронируют: пока чек лежит, другая касса может продать
 // последнюю пачку, а владелец — сменить цену. Поэтому чек перед показом и перед
 // оплатой сверяется с базой (osvezhit) и говорит, что изменилось.
-import { uppOf, lineUnits, lineGross, sellableUnits, fitLine, pricePerPiece } from './units.js'
+import { uppOf, lineUnits, lineGross, sellableUnits, fitLine, pricePerPiece, isVesovoy, edinica } from './units.js'
 
 // Больше пяти одновременно отложенных чеков у прилавка не бывает, а без предела
 // вкладки молча копились бы неделями
@@ -165,7 +165,8 @@ export function osvezhit(cart, products, mapId = (id) => id) {
         changed = true
         continue
       }
-      notes.push({ kind: 'stock', name: p.name, avail })
+      // Весовому — в его единице: граммы «штуками» кассир не прочтёт
+      notes.push({ kind: 'stock', name: p.name, avail, unit: isVesovoy(p) ? edinica(p) : 'шт' })
     }
     if (num(p.price) !== num(line.price)) {
       notes.push({ kind: 'price', name: p.name, was: num(line.price), now: num(p.price) })
@@ -188,7 +189,8 @@ export function osvezhit(cart, products, mapId = (id) => id) {
     if (num(p.price) === num(line.price) && num(fresh.pieces) > 0) {
       const was = pricePerPiece(line)
       const now = pricePerPiece(fresh)
-      if (Math.round(was * 100) !== Math.round(now * 100)) notes.push({ kind: 'piece', name: p.name, was, now })
+      // За что цена: за штуку, у весового в мешке — за килограмм (1.5.12)
+      if (Math.round(was * 100) !== Math.round(now * 100)) notes.push({ kind: 'piece', name: p.name, was, now, unit: isVesovoy(fresh) ? edinica(fresh) : 'шт' })
     }
     // Скидка не больше суммы позиции — сумма могла уменьшиться
     fresh.discount = Math.min(Math.max(0, num(line.discount)), lineGross(fresh))

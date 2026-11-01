@@ -76,7 +76,8 @@ export function discrepancyTitle(kind, t) {
   if (kind === 'sale') return t('Продано больше, чем было на складе')
   if (kind === 'writeoff') return t('Списано больше, чем было на складе')
   if (kind === 'price') return t('Цена в чеке не та, что была в базе')
-  if (kind === 'piece') return t('Цена за 1 шт в чеке не та, что была в базе')
+  // У весового в мешке (1.5.12) — цена за килограмм
+  if (kind === 'piece') return t('Цена за 1 шт (1 кг) в чеке не та, что была в базе')
   if (kind === 'return') return t('По чеку вернули больше, чем продали')
   if (kind === 'counted') return t('Операция кассы пришла после пересчёта остатка')
   if (kind === 'debt') return t('Сумма больше долга клиента')

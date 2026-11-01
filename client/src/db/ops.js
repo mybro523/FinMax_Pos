@@ -9,7 +9,7 @@ import { api } from './api.js'
 import { db, setCollection, refresh, uid, beginMutate, endMutate, realId } from './store.js'
 import { normalizeScan, canonBarcode } from '../lib/scan.js'
 import { serverNow } from '../lib/time.js'
-import { uppOf, unitCost, sellableUnits, expiredUnits, stockUnits, splitUnits, lineGross, ownPiecePrice } from '../lib/units.js'
+import { uppOf, unitCost, sellableUnits, expiredUnits, stockUnits, splitUnits, lineGross, ownPiecePrice, isVesovoy, kgText, edinica, isDivisible, KG } from '../lib/units.js'
 
 // Короткие перебои связи (Wi-Fi моргнул) не должны беспокоить кассира: тихо пробуем ещё раз.
 // Повторяем только сетевые сбои — отказ сервера («нет на складе») повторять бессмысленно.
@@ -73,10 +73,12 @@ export function checkout({ items, payment, payVia, customer }) {
     const avail = sellableUnits(p)
     if (need > avail) {
       const bad = expiredUnits(p)
+      // Весовому — в его единице: граммы «штуками» кассир не прочтёт
+      const skolko = (n) => (isVesovoy(p) ? `${kgText(n)} ${edinica(p)}` : `${n} шт`)
       throw new Error(
         bad > 0
-          ? `«${p.name}»: годных ${avail} шт, просрочено ${bad} шт. Просроченное продавать нельзя — уберите с полки и спишите.`
-          : `Недостаточно «${p.name}» на складе (есть ${avail} шт)`,
+          ? `«${p.name}»: годных ${skolko(avail)}, просрочено ${skolko(bad)}. Просроченное продавать нельзя — уберите с полки и спишите.`
+          : `Недостаточно «${p.name}» на складе (есть ${skolko(avail)})`,
       )
     }
   }
@@ -175,8 +177,15 @@ export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash
   if (!items.length) throw new Error('Добавьте хотя бы один товар')
 
   const prevP = db.get('products')
+  const uppById = new Map(prevP.map((p) => [p.id, uppOf(p)]))
   const arrItems = items.map((i) => ({
     productId: i.productId, name: i.name, qty: Number(i.qty), pieces: Math.max(0, Number(i.pieces) || 0),
+    // Упаковка строки — так считали qty и pieces (1.5.12): мешок 50 кг — 50 000 граммов.
+    // Сервер прочтёт строку по ней, даже если упаковку товара за это время сменили
+    unitsPerPack: Math.max(1, Number(i.unitsPerPack) || uppById.get(i.productId) || 1),
+    // Упаковку поменяли прямо в этом приходе — карточка получит её; прежние цены были за
+    // прежнюю упаковку — их переведут на новую
+    ...(i.packChanged ? { packChanged: true, ...(i.packScale ? { packScale: true } : {}) } : {}),
     // Закупочная цена — уже со скидкой поставщика; сам процент — для истории прихода
     cost: Number(i.cost),
     discount: Math.min(100, Math.max(0, Number(i.discount) || 0)),
@@ -186,13 +195,9 @@ export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash
     // Своя цена за 1 шт (1.5.11): прислана — ставим (null — своей больше нет); нет поля — не трогаем
     ...(i.piecePrice !== undefined ? { piecePrice: Number(i.piecePrice) > 0 ? Math.round(Number(i.piecePrice) * 100) / 100 : null } : {}),
   }))
-  // Цена за упаковку (за килограмм): штуки сверх целых упаковок (граммы весового)
-  // оплачиваются долей — как считает сервер
-  const uppById = new Map(prevP.map((p) => [p.id, uppOf(p)]))
-  const total = arrItems.reduce((s, i) => {
-    const upp = uppById.get(i.productId) || (i.pieces > 0 ? 1000 : 1)
-    return s + i.cost * (i.qty + i.pieces / upp)
-  }, 0)
+  // Цена за упаковку строки (за мешок, за килограмм): штуки сверх целых упаковок (граммы
+  // весового) оплачиваются долей — как считает сервер
+  const total = arrItems.reduce((s, i) => s + i.cost * (i.qty + i.pieces / i.unitsPerPack), 0)
 
   const prevA = db.get('arrivals')
 
@@ -210,10 +215,19 @@ export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash
   setCollection('products', prevP.map((p) => {
     const it = arrItems.find((i) => i.productId === p.id)
     if (!it) return p
+    // Упаковку поменяли в приходе (1.5.12) — карточка сразу с ней; у дробного не меньше
+    // одной единицы (1000 граммов), как у сервера
+    const changed = arrItems.filter((i) => i.productId === p.id && i.packChanged).pop()
+    const upp = changed ? (isVesovoy(p) ? Math.max(KG, changed.unitsPerPack) : changed.unitsPerPack) : uppOf(p)
+    // Прежние цены были за прежнюю упаковку — сразу переведённые (сервер сделает так же)
+    const k = changed?.packScale ? upp / uppOf(p) : 1
+    const card = { ...p, unitsPerPack: upp, ...(k !== 1 ? { cost: Math.round(Number(p.cost) * k * 100) / 100, price: Math.round(Number(p.price) * k * 100) / 100 } : {}) }
     // Граммы сверх целых килограммов складываются со вскрытым остатком и
     // перекладываются в целые — иначе «350 + 800 г» показывались бы как 1150 г
-    const vsego = stockUnits(p) + it.qty * uppOf(p) + it.pieces
-    return { ...p, ...splitUnits(vsego, p), ...(it.price ? { price: it.price } : {}), ...('piecePrice' in it ? { piecePrice: it.piecePrice } : {}) }
+    const vsego = stockUnits(p) + arrItems.filter((i) => i.productId === p.id).reduce((s, i) => s + i.qty * i.unitsPerPack + i.pieces, 0)
+    const next = { ...card, ...splitUnits(vsego, card), ...(it.price ? { price: it.price } : {}), ...('piecePrice' in it ? { piecePrice: it.piecePrice } : {}) }
+    // Своя цена — только у товара, упаковку которого вскрывают: убрали мешок — уходит и она
+    return isDivisible(next) ? next : { ...next, piecePrice: null }
   }))
   setCollection('arrivals', [tempArrival, ...prevA])
 
@@ -229,6 +243,8 @@ export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash
         productId: i.productId,
         qty: i.qty,
         ...(i.pieces > 0 ? { pieces: i.pieces } : {}),
+        unitsPerPack: i.unitsPerPack,
+        ...(i.packChanged ? { packChanged: true, ...(i.packScale ? { packScale: true } : {}) } : {}),
         cost: i.cost,
         ...(i.discount > 0 ? { discount: i.discount } : {}),
         // Пустую строку не шлём: у категорий без срока сервер ждёт именно её отсутствия
@@ -309,8 +325,10 @@ export function createSupplierReturn({ supplierId, supplier, refund, shiftId, no
   const prevP = db.get('products')
   const prevR = db.get('supplierReturns')
   const byId = new Map(prevP.map((p) => [p.id, p]))
-  const unitsOf = (i) => i.qty * uppOf(byId.get(i.productId) || {}) + (i.pieces || 0)
-  const total = Math.round(items.reduce((s, i) => s + i.price * (unitsOf(i) / uppOf(byId.get(i.productId) || {})), 0) * 100) / 100
+  // Упаковка строки — как её считало окно (1.5.12); нет — как в карточке
+  const uppLine = (i) => Math.max(1, Number(i.unitsPerPack) || uppOf(byId.get(i.productId) || {}))
+  const unitsOf = (i) => i.qty * uppLine(i) + (i.pieces || 0)
+  const total = Math.round(items.reduce((s, i) => s + i.price * (unitsOf(i) / uppLine(i)), 0) * 100) / 100
   const temp = { id: 'tmp_' + uid(), date: serverNow().toISOString(), supplierId, supplier: supplier || '—', refund, note: note || '', total, items }
 
   setCollection('products', prevP.map((p) => {
@@ -327,7 +345,7 @@ export function createSupplierReturn({ supplierId, supplier, refund, shiftId, no
       refund,
       ...(refund === 'cash' && shiftId ? { shiftId } : {}),
       ...(note ? { note } : {}),
-      items: items.map((i) => ({ productId: i.productId, qty: i.qty, ...(i.pieces > 0 ? { pieces: i.pieces } : {}), price: i.price })),
+      items: items.map((i) => ({ productId: i.productId, qty: i.qty, ...(i.pieces > 0 ? { pieces: i.pieces } : {}), unitsPerPack: uppLine(i), price: i.price })),
     })
     .then((ret) => {
       setCollection('supplierReturns', db.get('supplierReturns').map((r) => (r.id === temp.id ? ret : r)))

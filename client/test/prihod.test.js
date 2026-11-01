@@ -89,12 +89,13 @@ test('проверка строки: количество, цена постав
 
 test('строка для отправки: цена со скидкой, процент, штуки переложены в упаковки, цена продажи — только изменённая', () => {
   const l = line(par, { qty: '1', pieces: '25', disc: '15', expiryDate: '2028-01-31' })
-  assert.deepEqual(toItem(l), { productId: 'par', name: 'Парацетамол', qty: 2, pieces: 5, cost: 102, discount: 15, expiryDate: '2028-01-31' })
+  // Упаковка строки уходит всегда (1.5.12): так сервер прочтёт qty и pieces
+  assert.deepEqual(toItem(l), { productId: 'par', name: 'Парацетамол', qty: 2, pieces: 5, unitsPerPack: 20, cost: 102, discount: 15, expiryDate: '2028-01-31' })
   assert.equal(toItem({ ...l, price: '160' }).price, 160)
   assert.equal(toItem({ ...l, price: '150' }).price, undefined, 'цену не меняли — не шлём')
   assert.deepEqual(
     toItem(line(sahar, { qty: '12,35', base: '8' })),
-    { productId: 'sahar', name: 'Сахар', qty: 12, pieces: 350, cost: 8, discount: 0, expiryDate: '' },
+    { productId: 'sahar', name: 'Сахар', qty: 12, pieces: 350, unitsPerPack: 1000, cost: 8, discount: 0, expiryDate: '' },
   )
 })
 
@@ -126,10 +127,10 @@ test('возврат: «2 уп + 5 шт» × цена, больше остатк
   assert.equal(retProblem({ ...l, qty: '0', pieces: '' }), 'укажите количество')
   assert.equal(retProblem({ ...l, price: '' }), 'укажите цену возврата')
   assert.equal(retProblem({ ...l, price: '0' }), '', 'поставщик может и не засчитать денег — это его решение')
-  assert.deepEqual(toRetItem({ ...l, qty: '1', pieces: '25' }), { productId: 'par', name: 'Парацетамол', qty: 2, pieces: 5, price: 102 })
+  assert.deepEqual(toRetItem({ ...l, qty: '1', pieces: '25' }), { productId: 'par', name: 'Парацетамол', qty: 2, pieces: 5, unitsPerPack: 20, price: 102 })
   const kg = { ...retLineFromProduct({ ...sahar, stock: 20, looseUnits: 0 }), qty: '1,5', price: '8' }
   assert.equal(retLineSum(kg), 12)
   assert.equal(retProblem({ ...kg, qty: '0' }), 'укажите вес')
-  assert.deepEqual(toRetItem(kg), { productId: 'sahar', name: 'Сахар', qty: 1, pieces: 500, price: 8 })
+  assert.deepEqual(toRetItem(kg), { productId: 'sahar', name: 'Сахар', qty: 1, pieces: 500, unitsPerPack: 1000, price: 8 })
   assert.deepEqual(retSummary([l, kg]), { count: 2, packs: 3.75, total: 241.5 })
 })

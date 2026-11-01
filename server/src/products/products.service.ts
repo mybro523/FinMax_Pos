@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
-import { expiryFrom, lockProducts, setUnits, syncProduct, totalUnits, uppOf } from '../common/stock'
+import { ensureBatch, expiryFrom, lockProducts, setUnits, syncProduct, totalUnits, uppOf } from '../common/stock'
 import { lockInventories } from '../common/counted'
 import { costFromBatches } from '../common/cost'
 import { TX } from '../common/tx'
@@ -10,7 +10,7 @@ import { markCounted } from '../common/counted'
 import { PeriodQuery } from '../common/period'
 import { changedFields, forgetStamps, stamp } from '../common/stamps'
 import { productHistory } from './history'
-import { DROBNYE, piecePriceIn } from '../common/piece'
+import { isDrob, KG, OLD_WINDOW_SACK, opensPack, packFor, piecePriceIn } from '../common/piece'
 
 type Tx = Prisma.TransactionClient
 
@@ -21,9 +21,12 @@ export const PRODUCT_CARD_FIELDS = ['name', 'barcode', 'category', 'type', 'cost
 
 export const BARCODE_TAKEN = 'Товар с таким штрихкодом уже существует'
 
-// Приводим срок годности к Date|null (пустое/битое -> null), нормализуем аналоги
-export function productData(dto: Record<string, any>) {
-  const data: any = { ...dto }
+// Приводим срок годности к Date|null (пустое/битое -> null), нормализуем аналоги.
+// was — карточка до правки (при заведении её нет)
+type Was = { unit: string; unitsPerPack: number; piecePrice: Prisma.Decimal | null } | null | undefined
+export function productData(dto: Record<string, any>, was?: Was) {
+  const { drobPack, repack: _repack, ...rest } = dto
+  const data: any = { ...rest }
   if ('expiryDate' in data) {
     const d = data.expiryDate ? expiryFrom(data.expiryDate) : null
     data.expiryDate = d && !isNaN(d.getTime()) ? d : null
@@ -31,9 +34,46 @@ export function productData(dto: Record<string, any>) {
   if ('analogIds' in data && !Array.isArray(data.analogIds)) data.analogIds = []
   // Своя цена штуки: больше нуля — она, пусто или ноль — своей цены нет
   if ('piecePrice' in data) data.piecePrice = piecePriceIn(data.piecePrice)
-  // У дробного товара (кг, л, м, м²) «штука» — грамм: своей цены штуки у него не бывает
-  if ('unit' in data && DROBNYE.includes(String(data.unit ?? '').trim().toLowerCase())) data.piecePrice = null
+  oldWindowPack(data, drobPack === true, was)
+  normalizePack(data, was)
   return data
+}
+
+// ── Окно прежней версии и мешок (1.5.12) ──
+// Прежнее окно (сайт до перезагрузки, программа до обновления) не знает, что у дробного
+// товара бывает упаковка: в его карточке у весового всегда «1 кг в упаковке», своей цены
+// нет, а остаток — килограммами по 1000 граммов. Пусти такую правку как есть — и мешок
+// муки молча превратился бы в килограмм, цена мешка стала бы ценой килограмма, а остаток
+// «0 мешков + 10 кг» — 10 мешками. Поэтому у товара с мешком правка прежнего окна мешок не
+// трогает: упаковка и своя цена остаются, остаток переводится из килограммов в граммы
+export function oldWindowPack(data: any, knowsPack: boolean, was: Was) {
+  if (knowsPack || !was) return
+  const unit = 'unit' in data ? data.unit : was.unit
+  if (!isDrob(unit) || !isDrob(was.unit) || !opensPack(was)) return
+  delete data.unitsPerPack
+  delete data.piecePrice
+  if ('stock' in data || 'looseUnits' in data) {
+    const grams = Math.max(0, Math.trunc(Number(data.stock) || 0)) * KG + Math.max(0, Math.trunc(Number(data.looseUnits) || 0))
+    const upp = Math.max(1, was.unitsPerPack || 1)
+    data.stock = Math.floor(grams / upp)
+    data.looseUnits = grams % upp
+  }
+}
+
+// ── Упаковка и своя цена — по единице товара ──
+// У дробного товара в упаковке не меньше 1000 граммов (одной единицы). Своя цена бывает
+// только у товара, упаковку которого вскрывают (common/piece.ts): у дробного без мешка
+// «штука» — грамм, у штучного без «штук внутри» — сама упаковка
+export function normalizePack(data: any, was: Was) {
+  if (!('unit' in data) && !('unitsPerPack' in data) && !('piecePrice' in data)) return
+  const unit = 'unit' in data ? data.unit : was?.unit
+  if ('unitsPerPack' in data || ('unit' in data && isDrob(unit))) {
+    const upp = packFor(unit, 'unitsPerPack' in data ? data.unitsPerPack : was?.unitsPerPack)
+    if (upp !== was?.unitsPerPack || 'unitsPerPack' in data) data.unitsPerPack = upp
+  }
+  const upp = 'unitsPerPack' in data ? data.unitsPerPack : was?.unitsPerPack
+  const own = 'piecePrice' in data ? data.piecePrice : was?.piecePrice ?? null
+  if (own !== null && own !== undefined && !opensPack({ unit, unitsPerPack: upp })) data.piecePrice = null
 }
 
 // ── Завести товар ──
@@ -112,7 +152,6 @@ export class ProductsService {
 
   async update(id: string, dto: UpdateProductDto, userId?: string) {
     await this.ensure(id)
-    const data = productData(dto)
     try {
       return await this.prisma.$transaction(async (tx) => {
         // Карточка под замком ещё до чтения: продажа, идущая в ту же секунду, иначе
@@ -120,6 +159,29 @@ export class ProductsService {
         // как правка остатка
         await lockProducts(tx, [id])
         const was = await tx.product.findUnique({ where: { id } })
+        // Прежнее окно правит цену товара в мешке: его карточка подписывает цену «за 1 кг», а
+        // показывает цену мешка — что значит новое число, не понять. Пусть правят обновлённым
+        if (was && dto.drobPack !== true && isDrob(was.unit) && opensPack(was)) {
+          const moved = (k: 'price' | 'cost') => dto[k] !== undefined && dto[k] !== null && Number(dto[k]) !== Number(was[k])
+          if (moved('price') || moved('cost')) throw new BadRequestException(OLD_WINDOW_SACK(was.name))
+        }
+        // Упаковка и своя цена — по тому, что было: правка прежнего окна не должна снять мешок
+        const data = productData(dto, was)
+        // Дробный товар: смена упаковки (килограмм → мешок 50 кг, 1.5.12) остатка не меняет —
+        // граммы те же, карточка лишь заново делит их на упаковки. Окно присылает остаток,
+        // только если его правили; не прислало — остаток из партий (у товара без партий он
+        // сначала ложится партией по прежней упаковке). У штучного иначе: там «упаковок
+        // столько же, штук в упаковке больше» — это правка остатка
+        const repackOnly =
+          !!was && 'unitsPerPack' in data && data.unitsPerPack !== was.unitsPerPack &&
+          isDrob(data.unit ?? was.unit) && isDrob(was.unit) && !('stock' in data) && !('looseUnits' in data)
+        if (repackOnly) await ensureBatch(tx, was)
+        // Прежние цены были за прежнюю упаковку (185 за кг) — карточка уже перевела свои на мешок,
+        // партии переводим здесь: цена каждой × новая / прежняя упаковка (стоимость остатка та же)
+        if (was && dto.repack === 'scale' && 'unitsPerPack' in data && data.unitsPerPack !== was.unitsPerPack && isDrob(was.unit) && isDrob(data.unit ?? was.unit)) {
+          if (!repackOnly) await ensureBatch(tx, was)
+          await tx.$executeRaw(Prisma.sql`UPDATE "Batch" SET "cost" = ROUND("cost" * ${data.unitsPerPack}::numeric / ${Math.max(1, was.unitsPerPack || 1)}::numeric, 2) WHERE "productId" = ${id}`)
+        }
         const product = await tx.product.update({ where: { id }, data })
         // Когда правили поля карточки: касса без связи сверит по этому свою правку
         if (was) await stamp(tx, 'Product', id, changedFields(was, data, PRODUCT_CARD_FIELDS))
@@ -127,7 +189,10 @@ export class ProductsService {
         // Остаток и срок, исправленные вручную в карточке, обязательно доводим
         // до партий — иначе касса продолжит видеть старое количество.
         const touchesStock = ['stock', 'looseUnits', 'unitsPerPack', 'expiryDate'].some((k) => k in data)
-        if (touchesStock) {
+        if (repackOnly) {
+          await syncProduct(tx, id)
+          if ('expiryDate' in data) await setCardExpiry(tx, id, product.expiryDate)
+        } else if (touchesStock) {
           // Число на полке поправили руками — это тот же пересчёт, только одного товара:
           // всё, что случилось раньше, этим числом уже учтено (см. common/counted.ts)
           const asked = ['stock', 'looseUnits', 'unitsPerPack'].some((k) => k in data)

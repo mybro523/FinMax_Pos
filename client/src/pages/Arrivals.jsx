@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { LuTrash2, LuPencil, LuList, LuPackagePlus, LuWallet, LuChartColumn, LuSearch, LuRotateCcw, LuUndo2, LuTag } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import StickyBar from '../components/StickyBar'
-import { isVesovoy, uppOf, gramsOfKg, kgText, edinica } from '../lib/units'
+import { isVesovoy, uppOf, gramsOfKg, kgText, edinica, isDivisible } from '../lib/units'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { presetPeriod, periodRange, periodText, useDeepPeriod } from '../components/Period'
@@ -58,10 +58,14 @@ function productOf(i, products) {
   const p = products.find((x) => x.id === i.productId)
   if (p) return p
   const upp = num(i.unitsPerPack) || (num(i.pieces) > 0 ? 1000 : 1)
-  return { unitsPerPack: upp, unit: upp === 1000 ? 'кг' : 'уп' }
+  // Граммы кратны тысяче — весовой (мешок 50 кг — 50 000, 1.5.12)
+  return { unitsPerPack: upp, unit: upp >= 1000 && upp % 1000 === 0 ? 'кг' : 'уп' }
 }
-const itemUnits = (i, p) => num(i.qty) * uppOf(p) + num(i.pieces)
-const itemSum = (i, p) => num(i.cost) * (itemUnits(i, p) / uppOf(p))
+// Упаковка строки — снимком (1.5.12): с какой товар пришёл. Упаковку товара могли сменить
+// позже (килограмм → мешок 50 кг), а «100 кг» прежнего прихода — всё те же 100 кг
+const lineUpp = (i, p) => num(i.unitsPerPack) || uppOf(p)
+const itemUnits = (i, p) => num(i.qty) * lineUpp(i, p) + num(i.pieces)
+const itemSum = (i, p) => num(i.cost) * (itemUnits(i, p) / lineUpp(i, p))
 // Цена поставщика до скидки: закупочная хранится уже со скидкой
 const itemBase = (i) => (num(i.discount) > 0 && num(i.discount) < 100 ? Math.round((num(i.cost) / (1 - num(i.discount) / 100)) * 100) / 100 : num(i.cost))
 
@@ -550,10 +554,11 @@ function ArrivalDetails({ a, products, sposob, busy, canEdit, canLabels, onClose
 // забрать покупатель. Ниже проданного количество не опустить — упаковок нет
 // физически. Поэтому у каждой строки написано, сколько от неё уже ушло.
 //
-// Количество — как при оформлении: «упаковки + штуки» у делимой упаковки,
-// килограммы с дробью у весового. Единицу берём из справочника товаров: сервер
-// присылает строку без неё, и весовая строка раньше правилась целыми килограммами —
-// граммы при сохранении терялись.
+// Количество — как при оформлении: «упаковки + штуки» у делимой упаковки, у весового —
+// килограммы с дробью, а в мешке — «мешки + кг» (1.5.12). Единицу берём из справочника
+// товаров: сервер присылает строку без неё, и весовая строка раньше правилась целыми
+// килограммами — граммы при сохранении терялись. Упаковка — та, с которой строку
+// записали (снимок строки): с ней строка и правится, и уходит на сервер
 function EditArrival({ arrival, suppliers, products, canAddSupplier, onClose, onSave }) {
   const t = useT()
   const dialog = useDialog()
@@ -564,19 +569,22 @@ function EditArrival({ arrival, suppliers, products, canAddSupplier, onClose, on
   const [lines, setLines] = useState(() =>
     arrival.items.map((i) => {
       const p = products.find((x) => x.id === i.productId)
-      const upp = p ? uppOf(p) : Math.max(1, num(i.unitsPerPack))
+      // Упаковка — снимком строки (подробный приход присылает её всегда), иначе — карточки
+      const upp = num(i.unitsPerPack) >= 1 ? Math.trunc(num(i.unitsPerPack)) : p ? uppOf(p) : 1
       const ves = p ? isVesovoy(p) : upp === 1000
-      const div = !ves && upp > 1
+      const unit = p ? edinica(p) : ves ? 'кг' : 'уп'
+      const div = isDivisible({ unit, unitsPerPack: upp })
       return {
         id: i.id,
         name: i.name,
-        unit: p ? edinica(p) : ves ? 'кг' : 'уп',
+        unit,
         upp,
         ves,
         div,
-        // Весовая строка правится в килограммах одним числом; делимая — упаковки и штуки
-        qty: ves ? String((num(i.qty) * 1000 + num(i.pieces)) / 1000) : String(num(i.qty)),
-        pieces: div ? String(num(i.pieces) || '') : '',
+        // Весовая строка без мешка правится в килограммах одним числом; в мешке — мешки и
+        // килограммы (1.5.12); делимая — упаковки и штуки
+        qty: ves && !div ? String((num(i.qty) * upp + num(i.pieces)) / 1000) : String(num(i.qty)),
+        pieces: div ? (ves ? (num(i.pieces) ? String(num(i.pieces) / 1000) : '') : String(num(i.pieces) || '')) : '',
         cost: String(i.cost),
         discount: num(i.discount),
         expiryDate: i.expiryDate || '',
@@ -589,8 +597,11 @@ function EditArrival({ arrival, suppliers, products, canAddSupplier, onClose, on
   const [saving, setSaving] = useState(false)
 
   const set = (n, k, v) => setLines(lines.map((l, i) => (i === n ? { ...l, [k]: v } : l)))
-  const unitsOf = (l) => (l.ves ? gramsOfKg(l.qty) : Math.max(0, Math.trunc(num(l.qty))) * l.upp + (l.div ? Math.max(0, Math.trunc(num(l.pieces))) : 0))
-  const total = lines.reduce((s, l) => s + num(l.cost) * (unitsOf(l) / (l.ves ? 1000 : l.upp)), 0)
+  const unitsOf = (l) =>
+    l.ves && !l.div
+      ? gramsOfKg(l.qty)
+      : Math.max(0, Math.trunc(num(l.qty))) * l.upp + (l.div ? (l.ves ? gramsOfKg(l.pieces) : Math.max(0, Math.trunc(num(l.pieces)))) : 0)
+  const total = lines.reduce((s, l) => s + num(l.cost) * (unitsOf(l) / l.upp), 0)
   const soldText = (l) => (l.ves ? `${kgText(l.soldUnits)} ${t(l.unit)}` : `${l.soldUnits} ${t('шт')}`)
 
   // Проданное вернуть нельзя — эту строку сервер отвергнет, поэтому
@@ -612,11 +623,13 @@ function EditArrival({ arrival, suppliers, products, canAddSupplier, onClose, on
         debt: credit ? Math.max(0, total - Math.max(0, num(paid))) : 0,
         items: lines.map((l) => {
           const units = unitsOf(l)
-          const upp = l.ves ? 1000 : l.upp
+          const upp = l.upp
           return {
             id: l.id,
             qty: Math.floor(units / upp),
             ...(l.ves || l.div ? { pieces: units % upp } : {}),
+            // Упаковка строки — с ней сервер прочтёт qty и pieces (1.5.12)
+            unitsPerPack: upp,
             cost: num(l.cost),
             ...(l.expiryDate ? { expiryDate: l.expiryDate } : {}),
           }
@@ -657,12 +670,19 @@ function EditArrival({ arrival, suppliers, products, canAddSupplier, onClose, on
                 </td>
                 <td className="num" style={{ whiteSpace: 'nowrap' }}>
                   <span className="prh-edit-qty">
-                    <NumberInput integer={!l.ves} className="disc-input" value={l.qty} onChange={(e) => set(n, 'qty', e.target.value)} aria-label={t('Количество')} />
-                    <span className="tag-cat">{t(l.unit)}</span>
+                    <NumberInput integer={!(l.ves && !l.div)} className="disc-input" value={l.qty} onChange={(e) => set(n, 'qty', e.target.value)} aria-label={t('Количество')} />
+                    <span className="tag-cat">{t(l.ves && l.div ? 'уп' : l.unit)}</span>
                     {l.div && (
                       <>
-                        <NumberInput integer className="disc-input" value={l.pieces} placeholder="0" onChange={(e) => set(n, 'pieces', e.target.value)} aria-label={t('Штук сверх упаковок')} />
-                        <span className="tag-cat">{t('шт')}</span>
+                        <NumberInput
+                          integer={!l.ves}
+                          className="disc-input"
+                          value={l.pieces}
+                          placeholder="0"
+                          onChange={(e) => set(n, 'pieces', e.target.value)}
+                          aria-label={l.ves ? `${t('Сверх упаковок')}, ${t(l.unit)}` : t('Штук сверх упаковок')}
+                        />
+                        <span className="tag-cat">{t(l.ves ? l.unit : 'шт')}</span>
                       </>
                     )}
                   </span>

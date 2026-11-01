@@ -14,7 +14,7 @@ import { poiskZapros, tovarPodhodit } from '../lib/poisk'
 import { getUser, useCan } from '../db/auth'
 import { useCategories, categoryNames } from '../lib/categories'
 import { sellsBelowCost } from '../lib/pricing'
-import ProductForm, { emptyProduct, productPayload } from '../components/ProductForm'
+import ProductForm, { emptyProduct, productPayload, vesUpText, repackNeeded } from '../components/ProductForm'
 import Lightbox from '../components/Lightbox'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
@@ -68,6 +68,8 @@ export default function Products() {
   async function save() {
     const f = edit
     if (!f.name || !f.barcode) return toast(t('Укажите название и штрихкод'), 'err')
+    // Сменили мешок — сначала ответ, за что были прежние цены (ProductForm, repackAsk)
+    if (repackNeeded(f)) return toast(t('Укажите, за что были прежние цены: за прежнюю упаковку или уже за новую'), 'err')
     // DataMatrix -> GTIN(EAN-13); обычный штрихкод как есть
     const data = productPayload(f, { normalizeBarcode: normalizeScan })
     const dup = products.find((p) => canonBarcode(p.barcode) === canonBarcode(data.barcode) && p.id !== f.id)
@@ -117,6 +119,10 @@ export default function Products() {
       unit: p.unit || '',
       type: p.type || '',
       unitsPerPack: String(p.unitsPerPack ?? 1), looseUnits: isVesovoy(p) ? '0' : String(p.looseUnits ?? 0),
+      // Сколько кг (л, м) в мешке у дробного товара (1.5.12); без мешка — пусто. Какими были
+      // упаковка, цены и остаток при открытии — по ним спросим, за что были цены, если мешок сменят
+      vesUp: isVesovoy(p) ? vesUpText(p.unitsPerPack) : '',
+      upp0: Number(p.unitsPerPack) || 1, cost0: String(p.cost), price0: String(p.price), stock0: stockUnits(p),
       dosage: p.dosage || '',
       expiryDate: p.expiryDate ? String(p.expiryDate).slice(0, 10) : '',
       analogIds: Array.isArray(p.analogIds) ? p.analogIds : [],

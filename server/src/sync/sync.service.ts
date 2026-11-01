@@ -5,9 +5,10 @@ import { PrismaService } from '../prisma/prisma.service'
 import { AccountCache } from '../admin/account-cache.service'
 import { AuthService } from '../auth/auth.service'
 import { EventsGateway } from '../events/events.gateway'
-import { grossOf, ownPiece, pieceOf, piecePriceIn, refundCeiling } from '../common/piece'
+import { grossOf, lineUpp, oldLineOnSack, OLD_WINDOW_SACK, ownPiece, pieceUnits, piecePriceShown, refundCeiling } from '../common/piece'
 import { D, discountOf } from '../common/money'
-import { weightedPackCost } from '../common/cost'
+import { costInPack, weightedPackCost } from '../common/cost'
+import { applyOwnPiece, applyPackChanges } from '../arrivals/arrivals.service'
 import { addUnits, consumeUnitsTolerant, lockProducts, returnExpiry, shortageWorth, uppOf } from '../common/stock'
 import { Count, firstCountAfter, forgetShortageDoc, lockInventories, pruneCounted, rememberShortageDoc, shortageDocOf } from '../common/counted'
 import { TX, TX_LONG, TX_SNAPSHOT } from '../common/tx'
@@ -120,7 +121,8 @@ type Flag = {
 }
 
 // Строка документа, цену которой надо сверить с историей цен
-type PricedLine = { productId: string; name: string; price: number; unitsPerPack: number; units: number; pieces?: number; piecePrice?: number | null; unit?: string | null }
+// unit — единица из карточки; lineUnit — по которой касса прочла свою цену (у дробного она за кг)
+type PricedLine = { productId: string; name: string; price: number; unitsPerPack: number; units: number; pieces?: number; piecePrice?: number | null; unit?: string | null; lineUnit?: string | null }
 
 export interface OpResult {
   id: string
@@ -648,13 +650,17 @@ export class SyncService {
       // Перемножением, а не делением — чтобы не упереться в округление
       const packOk = (h: (typeof history)[number]) => D(l.price).times(h.unitsPerPack).equals(D(h.price).times(l.unitsPerPack))
       // Отдельные штуки по своей цене (1.5.11): своя цена штуки в чеке и в истории должна
-      // совпасть. Своей нет ни там, ни там — штука шла от цены упаковки, её сверили выше
-      // Единица — нынешняя, из карточки: у дробного товара (кг, л…) «штука» — грамм, и своя
-      // цена штуки, даже если осталась в истории, не действует
-      const mine = ownPiece({ price: l.price, piecePrice: l.piecePrice ?? null, unitsPerPack: l.unitsPerPack, unit: l.unit })
+      // совпасть. Своей нет ни там, ни там — штука шла от цены упаковки, её сверили выше.
+      // Сравниваем цену ОДНОЙ внутренней единицы: у дробного товара своя цена — за килограмм,
+      // а в чеке лежат граммы (1.5.12). Касса прочла свою цену по своей единице (lineUnit),
+      // история — по единице карточки
+      const mineUnit = l.lineUnit ?? l.unit
+      const own = ownPiece({ price: l.price, piecePrice: l.piecePrice ?? null, unitsPerPack: l.unitsPerPack, unit: mineUnit })
+      const mine = own === null ? null : own.dividedBy(pieceUnits({ unit: mineUnit }))
       const pieceOk = (h: (typeof history)[number]) => {
         if (!((l.pieces || 0) > 0)) return true
-        const then = ownPiece({ price: h.price, piecePrice: h.piecePrice, unitsPerPack: h.unitsPerPack, unit: l.unit })
+        const was = ownPiece({ price: h.price, piecePrice: h.piecePrice, unitsPerPack: h.unitsPerPack, unit: l.unit })
+        const then = was === null ? null : was.dividedBy(pieceUnits({ unit: l.unit }))
         return mine === null ? then === null : then !== null && mine.equals(then)
       }
       if (valid.some((h) => packOk(h) && pieceOk(h))) continue
@@ -667,8 +673,9 @@ export class SyncService {
           productId: l.productId,
           name: l.name,
           units: l.pieces || 0,
-          checkPrice: cents(pieceOf({ price: l.price, piecePrice: l.piecePrice ?? null, unitsPerPack: l.unitsPerPack, unit: l.unit })),
-          basePrice: cents(pieceOf({ price: at.price, piecePrice: at.piecePrice, unitsPerPack: at.unitsPerPack, unit: l.unit })),
+          // Цена штуки (у дробного — килограмма), как её видит владелец
+          checkPrice: cents(piecePriceShown({ price: l.price, piecePrice: l.piecePrice ?? null, unitsPerPack: l.unitsPerPack, unit: mineUnit })),
+          basePrice: cents(piecePriceShown({ price: at.price, piecePrice: at.piecePrice, unitsPerPack: at.unitsPerPack, unit: l.unit })),
         })
         continue
       }
@@ -709,18 +716,25 @@ export class SyncService {
     })
     if (already) return already.id
 
+    // Единица товара: какую прислала касса (по ней она прочла свою цену — у дробного за кг,
+    // 1.5.12), прежние кассы не шлют — тогда из карточки
+    const ids = [...new Set(p.items.map((l) => l.productId))]
+    await lockProducts(tx, ids)
+    const known = new Map((await tx.product.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, unit: true } })).map((x) => [x.id, x]))
+
     // Суммы пересчитываем по позициям чека — той же формулой, что и при продаже
     // на сайте. Не сошлось с тем, что прислала касса, — чек испорчен или подделан
     let total = D(0)
     let cost = D(0)
     const lines = p.items.map((i) => {
       const units = i.qty * i.unitsPerPack + i.pieces
+      const unit = i.unit ?? known.get(i.productId)?.unit ?? null
       // Упаковки — по цене упаковки, штуки — по цене штуки из чека (своя, если была)
-      const gross = grossOf(i)
+      const gross = grossOf({ ...i, unit })
       const discount = Prisma.Decimal.min(Prisma.Decimal.max(0, D(i.discount)), gross)
       total = total.plus(gross.minus(discount))
       cost = cost.plus(D(i.cost).dividedBy(i.unitsPerPack).times(units))
-      return { ...i, units, discount }
+      return { ...i, unit, units, discount }
     })
     // Скидку, срезанную до суммы позиции, касса считает точно, а присылает уже
     // округлённой — и итог расходится на дирам с позиции. Это не порча и не подделка.
@@ -732,16 +746,12 @@ export class SyncService {
     total = D(p.total)
     cost = D(p.cost)
 
-    const ids = [...new Set(lines.map((l) => l.productId))]
-    await lockProducts(tx, ids)
-    const known = new Map((await tx.product.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, unit: true } })).map((x) => [x.id, x]))
-
     await this.checkPrices(
       tx,
       ctx,
       p,
-      // Единица — из карточки: у дробного товара (кг, л…) своей цены штуки не бывает
-      lines.filter((l) => known.has(l.productId)).map((l) => ({ ...l, name: known.get(l.productId)!.name, unit: known.get(l.productId)!.unit })),
+      // Единица истории — из карточки, единица чека — какой касса читала свою цену
+      lines.filter((l) => known.has(l.productId)).map((l) => ({ ...l, name: known.get(l.productId)!.name, unit: known.get(l.productId)!.unit, lineUnit: l.unit })),
     )
 
     const unitsById = new Map<string, number>()
@@ -798,6 +808,8 @@ export class SyncService {
             unitsPerPack: l.unitsPerPack,
             price: D(l.price),
             piecePrice: ownPiece(l),
+            // Единица — снимком: по ней читается своя цена строки (у дробного — за кг)
+            unit: l.unit,
             cost: D(l.cost),
             discount: l.discount,
           })),
@@ -857,17 +869,19 @@ export class SyncService {
       const upp = line ? uppOf(line) : it.unitsPerPack
       const price = line ? D(line.price) : D(it.price)
       const cost = line ? D(line.cost) : D(it.cost)
+      // Единица строки — снимком чека (1.5.12), у прежних строк — из карточки
+      const unit = line?.unit ?? product?.unit ?? null
 
       // Вернуть больше, чем за товар заплатили, нельзя — такое число не от кассы.
       // Заплачено за штуку — с учётом скидки на позицию, как считает и сайт
       const soldUnits = line ? line.qty * upp + line.pieces : it.units
       // Упаковки — по цене упаковки, штуки — по цене штуки из чека (своя, если была)
-      const gross = line ? grossOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp }) : price.dividedBy(upp).times(soldUnits)
+      const gross = line ? grossOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, unit }) : price.dividedBy(upp).times(soldUnits)
       const paid = line ? gross.minus(D(line.discount)) : gross
       // Со своей ценой штуки (1.5.11) сумма зависит от того, сколько штук касса считала
       // «уже вернули» — предел берётся с запасом на обе крайности (common/piece.ts)
       const ceiling = line
-        ? refundCeiling({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, discount: line.discount }, it.units)
+        ? refundCeiling({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, unit, discount: line.discount }, it.units)
         : soldUnits > 0 ? paid.dividedBy(soldUnits).times(it.units) : D(0)
       if (D(it.amount).gt(ceiling.plus(0.01))) throw new Reject('Сумма возврата больше цены товара')
       sum = sum.plus(it.amount)
@@ -1046,15 +1060,22 @@ export class SyncService {
     for (const it of p.items) {
       // Принять товар, которого нет в справочнике, некуда: карточку успели удалить
       if (!byId.has(it.productId)) throw new Reject(`Товар не найден: ${it.name}`)
+      // Касса прежней версии и товар в мешке: что значат деньги строки, не понять (piece.ts)
+      if (oldLineOnSack(it, byId.get(it.productId)!)) throw new Reject(OLD_WINDOW_SACK(byId.get(it.productId)!.name))
     }
+
+    // Упаковка каждой строки — как её считала касса (1.5.12): касса без связи могла не знать,
+    // что упаковку товара за это время сменили, а прежняя касса у весового считала килограммами
+    // (common/piece, lineUpp). Сумма прихода сверяется с ней же — до смены упаковки
+    const lineUpps = p.items.map((it) => lineUpp(it, byId.get(it.productId)!))
 
     // Средневзвешенная цена — один раз на товар, от остатка ДО прихода.
     // Всё в штуках (у весового товара — в граммах): граммы оплачиваются долей цены
     const unitsOf = (it: { qty: number; pieces?: number }, upp: number) => it.qty * upp + Math.max(0, it.pieces || 0)
     const agg = new Map<string, { units: number; value: Prisma.Decimal }>()
     let total = D(0)
-    for (const it of p.items) {
-      const upp = uppOf(byId.get(it.productId)!)
+    for (const [n, it] of p.items.entries()) {
+      const upp = lineUpps[n]
       const dolya = D(unitsOf(it, upp)).div(upp)
       const a = agg.get(it.productId) || { units: 0, value: D(0) }
       a.units += unitsOf(it, upp)
@@ -1067,8 +1088,8 @@ export class SyncService {
     if (cents(total).minus(p.total).abs().gt(D(0.01).times(p.items.length))) throw new Reject('Сумма прихода не сходится с его позициями')
     total = D(p.total)
 
-    for (const it of p.items) {
-      if (unitsOf(it, uppOf(byId.get(it.productId)!)) > MAX_UNITS) throw new Reject('В приходе слишком большое количество')
+    for (const [n, it] of p.items.entries()) {
+      if (unitsOf(it, lineUpps[n]) > MAX_UNITS) throw new Reject('В приходе слишком большое количество')
     }
     // Остаток этих товаров пересчитали уже после прихода: привезённое лежало на полке
     // и в пересчёт попало. Документ остаётся, а класть товар второй раз нельзя
@@ -1079,6 +1100,14 @@ export class SyncService {
       const product = byId.get(productId)!
       await this.absorb(tx, ctx, p, count, product, a.units)
     }
+
+    // Упаковку поменяли в этом приходе на кассе — карточка получает её до средней цены
+    // (как у сайта, arrivals.service). Позже поменяли и на сайте — остаётся та, что новее
+    const packIds = [...new Set(p.items.filter((it) => it.packChanged).map((it) => it.productId))]
+    const packStamps = await stampsOfRows(tx, 'Product', packIds, 'unitsPerPack')
+    const packAsked = p.items.filter((it) => it.packChanged && !((packStamps.get(it.productId)?.getTime() ?? 0) > p.date.getTime()))
+    const { moved: packMoved, scaled: packScaled } = await applyPackChanges(tx, packAsked, byId)
+    for (const pid of packMoved) await stamp(tx, 'Product', pid, ['unitsPerPack', ...(packScaled.has(pid) ? ['cost', 'price'] : [])], p.date)
 
     for (const [productId, a] of agg) {
       if (counted.has(productId)) continue
@@ -1098,24 +1127,22 @@ export class SyncService {
     }
 
     // Новая цена продажи, назначенная в приходе наценкой (решает последняя строка товара)
+    // Цена — за упаковку строки; товару она ставится за его упаковку (упаковку могли сменить
+    // на сайте позже, и смену кассы тогда не берём — 1.5.12)
     const newPrice = new Map<string, Prisma.Decimal>()
-    for (const it of p.items) if (it.price !== null && it.price !== undefined) newPrice.set(it.productId, D(it.price).toDecimalPlaces(2))
+    p.items.forEach((it, n) => {
+      if (it.price === null || it.price === undefined) return
+      newPrice.set(it.productId, costInPack(D(it.price).toDecimalPlaces(2), lineUpps[n], uppOf(byId.get(it.productId)!)).toDecimalPlaces(2))
+    })
     for (const [productId, price] of newPrice) {
       if (!D(byId.get(productId)!.price).equals(price)) {
         await tx.product.update({ where: { id: productId }, data: { price } })
         await stamp(tx, 'Product', productId, ['price'], p.date)
       }
     }
-    // Своя цена штуки из прихода (1.5.11): прислана — ставим или убираем (пусто); прежние
-    // кассы её не шлют — тогда не трогаем
-    const newPiece = new Map<string, Prisma.Decimal | null>()
-    for (const it of p.items) if (it.piecePrice !== undefined) newPiece.set(it.productId, piecePriceIn(it.piecePrice))
-    for (const [productId, piecePrice] of newPiece) {
-      if (!same(byId.get(productId)!.piecePrice, piecePrice)) {
-        await tx.product.update({ where: { id: productId }, data: { piecePrice } })
-        await stamp(tx, 'Product', productId, ['piecePrice'], p.date)
-      }
-    }
+    // Своя цена штуки (у весового — килограмма) из прихода: прислана — ставим или убираем
+    // (пусто); прежние кассы её не шлют — тогда не трогаем. Убрали мешок — уходит и она
+    for (const pid of await applyOwnPiece(tx, p.items, byId)) await stamp(tx, 'Product', pid, ['piecePrice'], p.date)
 
     // Поставщик и неоплаченная часть. Поставщика могли удалить, пока касса была без
     // связи: приход остаётся (товар принят), а долг записать некому — владелец увидит
@@ -1144,7 +1171,7 @@ export class SyncService {
         userId: ctx.tenantUserId,
         total,
         items: {
-          create: p.items.map((i) => ({ id: i.id, productId: i.productId, name: i.name, qty: i.qty, pieces: i.pieces || 0, cost: D(i.cost), discount: discountOf(i.discount) })),
+          create: p.items.map((i, n) => ({ id: i.id, productId: i.productId, name: i.name, qty: i.qty, pieces: i.pieces || 0, unitsPerPack: lineUpps[n], cost: D(i.cost), discount: discountOf(i.discount) })),
         },
       },
     })
@@ -1172,9 +1199,10 @@ export class SyncService {
       if (p.shiftId) await setSupplierCash(tx, p.shiftId)
       ctx.extra.add('supplierPayments')
     }
-    for (const it of p.items) {
+    for (const [n, it] of p.items.entries()) {
       if (counted.has(it.productId)) continue
-      await addUnits(tx, it.productId, unitsOf(it, uppOf(byId.get(it.productId)!)), D(it.cost), it.expiryDate, p.id)
+      // Партия — с ценой за упаковку товара (после смены упаковки — за новую)
+      await addUnits(tx, it.productId, unitsOf(it, lineUpps[n]), costInPack(it.cost, lineUpps[n], uppOf(byId.get(it.productId)!)), it.expiryDate, p.id)
     }
     return p.id
   }
@@ -1292,9 +1320,16 @@ export class SyncService {
     await lockProducts(tx, ids)
     const byId = new Map((await tx.product.findMany({ where: { id: { in: ids } } })).map((x) => [x.id, x]))
     // Цену касса присылает как ввели — сумма сходится до дирама (допуск — на строку)
-    let total = D(0)
+    // Упаковка строки — как её считала касса (1.5.12, lineUpp). Касса прежней версии и товар в
+    // мешке — что значат деньги строки, не понять (piece.ts, oldLineOnSack)
     for (const it of p.items) {
-      const upp = uppOf(byId.get(it.productId) || {})
+      const prod = byId.get(it.productId)
+      if (prod && oldLineOnSack(it, prod)) throw new Reject(OLD_WINDOW_SACK(prod.name))
+    }
+    const upps = p.items.map((it) => lineUpp(it, byId.get(it.productId) || {}))
+    let total = D(0)
+    for (const [n, it] of p.items.entries()) {
+      const upp = upps[n]
       total = total.plus(D(it.price).times(D(it.qty * upp + it.pieces).div(upp)))
     }
     if (cents(total).minus(p.total).abs().gt(D(0.01).times(p.items.length))) throw new Reject('Сумма возврата не сходится с его позициями')
@@ -1307,23 +1342,24 @@ export class SyncService {
     const shiftId = p.refund === 'cash' ? await this.shiftRef(tx, p.shiftId, ctx) : null
 
     const rows: Prisma.SupplierReturnItemUncheckedCreateWithoutRetInput[] = []
-    for (const it of p.items) {
+    for (const [n, it] of p.items.entries()) {
       const product = byId.get(it.productId)
+      const unitsPerPack = upps[n]
       if (!product) {
-        rows.push({ id: it.id, productId: null, name: it.name, qty: it.qty, pieces: it.pieces, price: D(it.price), cost: D(0), batches: [] })
+        rows.push({ id: it.id, productId: null, name: it.name, qty: it.qty, pieces: it.pieces, unitsPerPack, price: D(it.price), cost: D(0), batches: [] })
         continue
       }
-      const units = it.qty * uppOf(product) + it.pieces
+      const units = it.qty * unitsPerPack + it.pieces
       const count = counted.get(product.id)
       if (count) {
         await this.absorb(tx, ctx, p, count, product, -units)
-        rows.push({ id: it.id, productId: product.id, name: product.name, qty: it.qty, pieces: it.pieces, price: D(it.price), cost: product.cost, batches: [] })
+        rows.push({ id: it.id, productId: product.id, name: product.name, qty: it.qty, pieces: it.pieces, unitsPerPack, price: D(it.price), cost: product.cost, batches: [] })
         continue
       }
       // Первой уходит партия с ближайшим сроком — в том числе просроченная
       const { taken, short } = await consumeUnitsTolerant(tx, product.id, units, { atDate: p.date })
       if (short > 0) await this.flag(tx, ctx, p, { kind: 'supreturn', productId: product.id, name: product.name, units: short })
-      rows.push({ id: it.id, productId: product.id, name: product.name, qty: it.qty, pieces: it.pieces, price: D(it.price), cost: product.cost, batches: batchesOf(taken) })
+      rows.push({ id: it.id, productId: product.id, name: product.name, qty: it.qty, pieces: it.pieces, unitsPerPack, price: D(it.price), cost: product.cost, batches: batchesOf(taken) })
     }
 
     await tx.supplierReturn.create({

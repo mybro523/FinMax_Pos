@@ -15,8 +15,14 @@ import { useAuth, useCan } from '../db/auth'
 import { isVesovoy, kgText, KG, gramsOfKg, edinica, isKg,
   uppOf, isDivisible as isDiv, lineUnits, lineGross, lineNet, pricePerPiece,
   sellableUnits, expiredUnits, hasExpired, stockUnits,
-  fitLine,
+  fitLine, pieceUnits, packPieces, packLabel,
 } from '../lib/units'
+
+// Весовой товар: на вес (одно поле «кг») или в мешке (1.5.12) — «Упаковок» и «кг», как штучный
+const vesOnly = (x) => isVesovoy(x) && !isDiv(x)
+const vesPack = (x) => isVesovoy(x) && isDiv(x)
+// «2,5» вместо «2.5» — сколько килограммов в мешке
+const drob = (n) => String(Math.round(Number(n) * 1000) / 1000).replace('.', ',')
 import {
   MAX_CHEKOV, klyuch, chitat, pisat, razobrat, novyChek, svobodnyNomer, posleProdazhi,
   osvezhit, sdacha, kupyury, pohozheNaKod, estBukva, raspredelit,
@@ -376,7 +382,8 @@ export default function Pos() {
 
   // ── Весовой товар в корзину ──
   // Вес приходит с этикетки весов (точный) или добавляется килограммом по клику,
-  // а дальше кассир правит его в строке. Хранится граммами в «штуках» строки.
+  // а дальше кассир правит его в строке. Хранится граммами в «штуках» строки. У товара в
+  // мешке (1.5.12) вес — отдельные килограммы: мешки в строке остаются как были
   const addWeight = useCallback(
     (p, grams) => {
       const avail = availUnits(p)
@@ -390,11 +397,13 @@ export default function Pos() {
       if (add < grams) toast(`${t('Максимум на складе')}: ${kgText(avail)} ${t(edinica(p))}`, 'err')
       setCart((c) => {
         const e = c.find((i) => i.productId === p.id)
-        if (e) return c.map((i) => (i.productId === p.id ? { ...i, qty: 0, pieces: lineUnits(i) + add } : i))
+        if (e) return c.map((i) => (i.productId !== p.id ? i : vesPack(i) ? { ...i, pieces: (i.pieces || 0) + add } : { ...i, qty: 0, pieces: lineUnits(i) + add }))
         return [
           ...c,
           {
             productId: p.id, name: p.name, price: p.price, cost: p.cost,
+            // Своя цена за 1 кг у товара в мешке (1.5.12): отдельные килограммы — по ней
+            piecePrice: p.piecePrice ?? null,
             unitsPerPack: uppOf(p), unit: p.unit, stock: p.stock, looseUnits: p.looseUnits,
             qty: 0, pieces: add, discount: 0,
           },
@@ -409,9 +418,13 @@ export default function Pos() {
   // Возвращает true, если товар реально добавлен в корзину (false — нет на складе / лимит)
   const addProduct = useCallback(
     (p) => {
-      // Весовой добавляется килограммом, а не «упаковкой»
-      if (isVesovoy(p)) return addWeight(p, KG)
+      // Весовой без мешка добавляется килограммом. Весовой в мешке (1.5.12) — как штучный:
+      // мешком, а если целого мешка нет — килограммом
+      if (vesOnly(p)) return addWeight(p, KG)
       const upp = uppOf(p)
+      // Отдельно продаётся штука, у весового — килограмм (тысяча граммов)
+      const step = pieceUnits(p)
+      const skolko = (n) => (isVesovoy(p) ? `${kgText(n)} ${t(edinica(p))}` : `${n} ${t('шт')}`)
       const avail = availUnits(p)
       if (avail <= 0) {
         // Годного не осталось. Разделяем два случая: товара нет вовсе и товар есть,
@@ -427,12 +440,17 @@ export default function Pos() {
       // Годный товар есть, но часть остатка просрочена — предупреждаем сразу,
       // а не когда кассир упрётся в лимит количества
       if (hasExpired(p)) {
-        toast(`«${p.name}»: ${expiredUnits(p)} ${t('шт просрочено — уберите с полки')}`, 'err')
+        toast(
+          isVesovoy(p)
+            ? `«${p.name}»: ${kgText(expiredUnits(p))} ${t(edinica(p))} ${t('просрочено — уберите с полки')}`
+            : `«${p.name}»: ${expiredUnits(p)} ${t('шт просрочено — уберите с полки')}`,
+          'err',
+        )
       }
       const ex = cartRef.current.find((i) => i.productId === p.id)
       const used = ex ? ex.qty * upp + (ex.pieces || 0) : 0
       if (used >= avail) {
-        toast(`${t('Максимум на складе')}: ${avail} ${t('шт')}`, 'err')
+        toast(`${t('Максимум на складе')}: ${skolko(avail)}`, 'err')
         return false
       }
       // Добавляем целую упаковку, если она помещается; иначе — одну штуку (осталась вскрытая)
@@ -445,7 +463,7 @@ export default function Pos() {
             i.productId === p.id
               ? addPack
                 ? { ...i, qty: i.qty + 1 }
-                : { ...i, pieces: (i.pieces || 0) + 1 }
+                : { ...i, pieces: (i.pieces || 0) + Math.min(step, avail - (e.qty * upp + (e.pieces || 0))) }
               : i,
           )
         }
@@ -453,10 +471,11 @@ export default function Pos() {
           ...c,
           {
             productId: p.id, name: p.name, price: p.price, cost: p.cost,
-            // Своя цена штуки (1.5.11): отдельные штуки — по ней, упаковки — по цене упаковки
+            // Своя цена штуки (1.5.11; у весового — за 1 кг): отдельные — по ней, упаковки —
+            // по цене упаковки
             piecePrice: p.piecePrice ?? null,
             unitsPerPack: upp, unit: p.unit, stock: p.stock, looseUnits: p.looseUnits,
-            qty: addPack ? 1 : 0, pieces: addPack ? 0 : 1, discount: 0,
+            qty: addPack ? 1 : 0, pieces: addPack ? 0 : Math.min(step, avail - used), discount: 0,
           },
         ]
       })
@@ -764,7 +783,8 @@ export default function Pos() {
       // что делать, — а сделать было и правда нечего.
       toast(
         isVesovoy(item)
-          ? `${t('Максимум на складе')}: ${kgText(avail)} ${t(edinica(item))}`
+          ? `${t('Максимум на складе')}: ${kgText(avail)} ${t(edinica(item))}` +
+              (fit.blockedByPacks ? `. ${t('Уберите упаковку кнопкой «−», чтобы продать на вес')}` : '')
           : fit.blockedByPacks
             ? `${t('Максимум на складе')}: ${avail} ${t('шт')}. ${t('Уберите упаковку кнопкой «−», чтобы продать штуками')}`
             : `${t('Максимум на складе')}: ${avail} ${t('шт')}`,
@@ -791,7 +811,9 @@ export default function Pos() {
   // Вес в строке правится одним числом в килограммах. Черновик набора живёт,
   // только пока поле в фокусе: убрали курсор — показывается точный вес строки
   const [vesDraft, setVesDraft] = useState(null) // { id, val }
-  const vesValue = (i) => (vesDraft?.id === i.productId ? vesDraft.val : String(lineUnits(i) / KG || ''))
+  // Сколько килограммов в поле: весь вес строки, у товара в мешке — отдельные килограммы
+  const vesNow = (i) => String((vesPack(i) ? Number(i.pieces) || 0 : lineUnits(i)) / KG || '')
+  const vesValue = (i) => (vesDraft?.id === i.productId ? vesDraft.val : vesNow(i))
   // Нажал на поле веса — набранное выделяется, и новое число ЗАМЕНЯЕТ старое. Раньше
   // курсор вставал в конец: в строке «1» (кг) кассир набирал 2 и получал «12» — и отказ
   // «максимум на складе» (владелец 31.10: «хочу просто купить 2 кг, а тут невозможно»).
@@ -806,14 +828,16 @@ export default function Pos() {
   }
   const changeVes = (id, val) => {
     setVesDraft({ id, val })
-    applyLine(id, 0, gramsOfKg(val))
+    const it = cart.find((i) => i.productId === id)
+    // У товара в мешке — отдельные килограммы, мешки остаются
+    applyLine(id, it && vesPack(it) ? it.qty : 0, gramsOfKg(val))
   }
 
   const changeQty = (id, delta) => {
     const it = cart.find((i) => i.productId === id)
     if (!it) return
-    // Весовому «упаковкой больше/меньше» означает ±1 кг
-    if (isVesovoy(it)) return applyLine(id, 0, Math.max(0, lineUnits(it) + delta * KG))
+    // Весовому без мешка «упаковкой больше/меньше» означает ±1 кг; у мешка — ±1 мешок
+    if (vesOnly(it)) return applyLine(id, 0, Math.max(0, lineUnits(it) + delta * KG))
     const empty = it.qty === 0 && (it.pieces || 0) === 0
     if (delta < 0 && empty) return remove(id)
     applyLine(id, it.qty + delta, it.pieces || 0)
@@ -864,8 +888,12 @@ export default function Pos() {
   const dobavit = (u, n) => poEdinicam.set(u, (poEdinicam.get(u) || 0) + n)
   let piecesCount = 0
   for (const i of cart) {
-    if (isVesovoy(i)) dobavit(edinica(i), lineUnits(i))
-    else {
+    if (vesOnly(i)) dobavit(edinica(i), lineUnits(i))
+    else if (isVesovoy(i)) {
+      // Мешки — к упаковкам, отдельные килограммы — к килограммам
+      if (i.qty) dobavit(packLabel(i), i.qty)
+      if (i.pieces) dobavit(edinica(i), i.pieces)
+    } else {
       if (i.qty) dobavit(edinica(i), i.qty)
       piecesCount += i.pieces || 0
     }
@@ -930,9 +958,11 @@ export default function Pos() {
             : n.kind === 'out'
               ? `«${n.name}» ${t('закончился — убран из чека')}`
               : n.kind === 'stock'
-                ? `«${n.name}»: ${t('на складе осталось')} ${n.avail} ${t('шт')} — ${t('количество уменьшено')}`
+                ? `«${n.name}»: ${t('на складе осталось')} ${n.unit && n.unit !== 'шт' ? kgText(n.avail) : n.avail} ${t(n.unit || 'шт')} — ${t('количество уменьшено')}`
                 : n.kind === 'piece'
-                  ? `«${n.name}»: ${t('цена за 1 шт изменилась')} ${money(n.was)} → ${money(n.now)}`
+                  ? n.unit && n.unit !== 'шт'
+                    ? `«${n.name}»: ${t('цена за 1')} ${t(n.unit)} ${t('изменилась')} ${money(n.was)} → ${money(n.now)}`
+                    : `«${n.name}»: ${t('цена за 1 шт изменилась')} ${money(n.was)} → ${money(n.now)}`
                   : `«${n.name}»: ${t('цена изменилась')} ${money(n.was)} → ${money(n.now)}`,
         )
         .join(' · '),
@@ -1522,17 +1552,32 @@ export default function Pos() {
                           <b>{i.name}</b>
                           <div className="tag-cat">
                             {money(i.price)}
-                            {isVesovoy(i) ? ` / ${t(edinica(i))}` : isDiv(i) && ` · ${money(pricePerPiece(i))}/${t('шт')}`}
+                            {vesOnly(i)
+                              ? ` / ${t(edinica(i))}`
+                              : isDiv(i) && ` · ${money(pricePerPiece(i))}/${t(vesPack(i) ? edinica(i) : 'шт')}`}
                             {/* На телефоне колонки «В уп.» нет — число переезжает сюда */}
-                            {!isVesovoy(i) && isDiv(i) && <span className="kt-upp-m"> · {t('в уп.')} {uppOf(i)}</span>}
+                            {isDiv(i) && (
+                              <span className="kt-upp-m"> · {t('в уп.')} {vesPack(i) ? `${drob(packPieces(i))} ${t(edinica(i))}` : uppOf(i)}</span>
+                            )}
                           </div>
                         </td>
-                        <td className="num kt-upp">{isVesovoy(i) ? <span className="tag-cat">{t(edinica(i))}</span> : isDiv(i) ? uppOf(i) : <span className="tag-cat">—</span>}</td>
+                        <td className="num kt-upp">
+                          {vesOnly(i) ? (
+                            <span className="tag-cat">{t(edinica(i))}</span>
+                          ) : vesPack(i) ? (
+                            `${drob(packPieces(i))} ${t(edinica(i))}`
+                          ) : isDiv(i) ? (
+                            uppOf(i)
+                          ) : (
+                            <span className="tag-cat">—</span>
+                          )}
+                        </td>
                         {/* data-label — подпись поля на телефоне: заголовка таблицы там нет */}
-                        {/* Весовой товар упаковками не продаётся: вес вводится в колонке «Штук»,
-                            как штуки (1.5.11). На карточке телефона пустая клетка не видна */}
-                        <td className={'kt-qty' + (isVesovoy(i) ? ' kt-empty' : '')} data-label={isVesovoy(i) ? undefined : t('Упаковок')}>
-                          {isVesovoy(i) ? (
+                        {/* Весовой без мешка упаковками не продаётся: вес вводится в колонке
+                            «Штук», как штуки (1.5.11). В мешке (1.5.12) — мешки здесь, килограммы
+                            в «Штук». На карточке телефона пустая клетка не видна */}
+                        <td className={'kt-qty' + (vesOnly(i) ? ' kt-empty' : '')} data-label={vesOnly(i) ? undefined : t('Упаковок')}>
+                          {vesOnly(i) ? (
                             <span className="tag-cat">—</span>
                           ) : (
                             <div className="qty-ctrl" data-tour="pos.qty">
@@ -1553,7 +1598,7 @@ export default function Pos() {
                                 onMouseDown={vybratVse}
                                 onFocus={(e) => {
                                   snapLine(i.productId)
-                                  setVesDraft({ id: i.productId, val: String(lineUnits(i) / KG || '') })
+                                  setVesDraft({ id: i.productId, val: vesNow(i) })
                                   e.target.select?.()
                                 }}
                                 onBlur={() => setVesDraft(null)}
