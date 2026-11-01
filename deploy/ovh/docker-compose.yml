@@ -13,14 +13,15 @@ name: finmax
 
 services:
   db:
-    image: postgres:17
+    image: postgres:18
     restart: unless-stopped
     env_file: /srv/finmax/db.env
     environment:
       POSTGRES_USER: finmax
       POSTGRES_DB: finmax
     volumes:
-      - /srv/finmax/pgdata:/var/lib/postgresql/data
+      # С 18-й версии образ держит данные в /var/lib/postgresql/18/docker — монтируется вся папка
+      - /srv/finmax/pgdata:/var/lib/postgresql
     shm_size: 256mb
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U finmax -d finmax']

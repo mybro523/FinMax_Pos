@@ -8,7 +8,7 @@ C=/srv/finmax/repo/deploy/ovh/docker-compose.yml
 URL_FILE=/srv/finmax/railway.url
 [ -s "$URL_FILE" ] || { echo "нет $URL_FILE"; exit 1; }
 RAILWAY_URL=$(tr -d '\r\n' < "$URL_FILE")
-PG=postgres:17
+PG=postgres:18
 
 echo "Railway: $(docker run --rm --network host -e U="$RAILWAY_URL" $PG sh -c 'psql "$U" -tAc "show server_version"')"
 F=/srv/finmax/backups/db/railway-$(date -u +%Y%m%d-%H%M).dump

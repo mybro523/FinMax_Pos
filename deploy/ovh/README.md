@@ -12,7 +12,7 @@
 | Что | Где |
 |---|---|
 | Код (клон GitHub, ветка main) | `/srv/finmax/repo` |
-| База PostgreSQL 17 | `/srv/finmax/pgdata` (наружу не открыта) |
+| База PostgreSQL 18 (как была на Railway) | `/srv/finmax/pgdata` (наружу не открыта) |
 | Секреты: пароль базы, ключ входа | `/srv/finmax/db.env`, `/srv/finmax/finmax.env` (права 600) |
 | Копии базы целиком (каждую ночь, 14 шт.) | `/srv/finmax/backups/db` |
 | Копии магазинов от самого сервера | `/srv/finmax/backups/app` |
