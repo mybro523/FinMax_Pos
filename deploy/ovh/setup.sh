@@ -31,6 +31,9 @@ if [ ! -f /srv/finmax/db.env ]; then
     echo "AUTH_SECRET=$(openssl rand -hex 48)"
   } > /srv/finmax/finmax.env
 fi
+# Пароль панели сервера (Portainer, вход admin)
+[ -s /srv/finmax/portainer.pw ] || (umask 077; openssl rand -hex 12 | tr -d '\n' > /srv/finmax/portainer.pw)
+install -d -m 700 /srv/finmax/portainer
 [ -f /srv/finmax/commit.env ] || echo "GIT_COMMIT_SHA=$(git -C /srv/finmax/repo rev-parse HEAD)" > /srv/finmax/commit.env
 
 # Таймеры: ночная копия базы сразу; новые версии с GitHub — включаются после первого запуска

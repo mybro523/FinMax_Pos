@@ -1,10 +1,16 @@
 # Вход снаружи: https для адреса сервера OVH. Сертификат Caddy получает и продлевает сам
 # (Let's Encrypt, при отказе — ZeroSSL); письма о сертификате — на почту владельца сервера.
 # Чужой X-Forwarded-For Caddy не пропускает: сервер программы видит настоящий адрес устройства.
+# /panel — панель сервера (Portainer, вход по своему паролю), всё остальное — сервер программы.
 {
 	email finmaxtj@gmail.com
 }
 
 vps-04688c58.vps.ovh.net {
-	reverse_proxy api:3000
+	handle /panel* {
+		reverse_proxy portainer:9000
+	}
+	handle {
+		reverse_proxy api:3000
+	}
 }

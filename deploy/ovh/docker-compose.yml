@@ -5,6 +5,9 @@
 #   api   — сервер программы (server/Dockerfile, тот же, что был на Railway).
 #   caddy — вход снаружи: https (сертификат получает и продлевает сам), передаёт запросы
 #           серверу программы, в том числе постоянное соединение (WebSocket).
+#   portainer — панель сервера в браузере (как на Railway): части проекта, их состояние,
+#           нагрузка, журналы, перезапуск. https://…/panel, вход admin и пароль из
+#           /srv/finmax/portainer.pw. Управляет всем сервером — пароль никому не давать.
 #
 # Всё, что хранится, — на диске сервера в /srv/finmax (база, копии, сертификаты); секреты —
 # в /srv/finmax/db.env и /srv/finmax/finmax.env (их заводит setup.sh, в репозиторий не попадают).
@@ -49,6 +52,15 @@ services:
       db:
         condition: service_healthy
 
+  portainer:
+    image: portainer/portainer-ce:lts
+    restart: unless-stopped
+    command: --base-url /panel --admin-password-file /run/secrets/portainer.pw
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /srv/finmax/portainer:/data
+      - /srv/finmax/portainer.pw:/run/secrets/portainer.pw:ro
+
   caddy:
     image: caddy:2
     restart: unless-stopped
@@ -62,3 +74,4 @@ services:
       - /srv/finmax/caddy/config:/config
     depends_on:
       - api
+      - portainer

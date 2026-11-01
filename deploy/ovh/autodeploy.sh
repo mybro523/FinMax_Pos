@@ -13,5 +13,7 @@ fi
 git reset -q --hard origin/main
 echo "GIT_COMMIT_SHA=$REMOTE" > /srv/finmax/commit.env
 docker compose -f deploy/ovh/docker-compose.yml up -d --build --remove-orphans
+# Caddyfile мог поменяться — Caddy перечитывает его без остановки
+docker compose -f deploy/ovh/docker-compose.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile > /dev/null 2>&1 || true
 docker image prune -f > /dev/null
 echo "$(date -Is) выложено ${REMOTE:0:7}"
