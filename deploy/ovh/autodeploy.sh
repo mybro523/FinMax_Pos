@@ -3,6 +3,9 @@
 # Раз в 2 минуты (finmax-autodeploy.timer) смотрим ветку main на GitHub. Появился новый
 # коммит — берём его и пересобираем сервер программы. --force — пересобрать и без нового коммита.
 set -euo pipefail
+# Одна выкладка за раз: таймер и ручной запуск, пришедшие вместе, иначе ломают друг другу контейнеры
+exec 9> /srv/finmax/autodeploy.lock
+flock 9
 cd /srv/finmax/repo
 git fetch -q origin main
 LOCAL=$(git rev-parse HEAD)
