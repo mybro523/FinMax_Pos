@@ -110,7 +110,7 @@ export default function KodyAktivacii({ onClose }) {
               <div className="field" style={{ flex: 1 }}>
                 <label htmlFor="lic-until">{t('Действует до')}</label>
                 <input id="lic-until" type="date" value={f.until} min={dushanbeDay()} disabled={f.forever} required={!f.forever} onChange={(e) => set('until', e.target.value)} />
-                <label className="check" style={{ marginTop: 6 }}>
+                <label className="restore-check" style={{ fontWeight: 500 }}>
                   <input type="checkbox" checked={f.forever} onChange={(e) => set('forever', e.target.checked)} /> {t('Навсегда')}
                 </label>
               </div>
