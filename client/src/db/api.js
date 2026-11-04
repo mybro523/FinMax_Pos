@@ -4,10 +4,45 @@
 import { setServerTime } from '../lib/time.js'
 import { bridge } from '../lib/desktop.js'
 import { translate } from '../lib/i18n.js'
+import { createBaseChooser } from './apiBase.js'
 
 // import.meta.env есть только при сборке Vite. Проверка нужна, чтобы этот файл
 // можно было загрузить и в тестах, где сборщика нет.
-const BASE = (import.meta.env?.VITE_API_URL || '/api').replace(/\/$/, '')
+const PRIMARY = (import.meta.env?.VITE_API_URL || '/api').replace(/\/$/, '')
+
+// ── Запасной адрес сервера (04.11.2026) ──
+// Тот же сервер под своим именем у OVH: если у регистратора домена откажет DNS (так и было
+// 04.11 — api.finmaxpos.tj перестал находиться), сайт работает через него (db/apiBase.js).
+// Задаётся VITE_API_URL_FALLBACK (пустая строка — без запасного); не задан — для боевого
+// адреса api.finmaxpos.tj берётся имя сервера у OVH. В программе для Windows запросы идут
+// через её основную часть — там окно адрес не выбирает
+const FALLBACK = (() => {
+  const v = import.meta.env?.VITE_API_URL_FALLBACK
+  if (typeof v === 'string') return v.replace(/\/$/, '')
+  return PRIMARY === 'https://api.finmaxpos.tj/api' ? 'https://vps-04688c58.vps.ovh.net/api' : ''
+})()
+const PROBE_MS = 6000
+
+// Отвечает ли сервер по этому адресу: GET /health (открыт без входа)
+async function probe(base) {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), PROBE_MS)
+  try {
+    const r = await fetch(base + '/health', { cache: 'no-store', signal: ctrl.signal })
+    return r.ok
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timer)
+  }
+}
+const chooser = createBaseChooser({ primary: PRIMARY, fallback: bridge ? '' : FALLBACK, probe })
+
+// Адрес сервера, с которым работает сайт сейчас (постоянное соединение берёт его же)
+export const apiBase = () => chooser.current()
+export const apiBaseChosen = () => chooser.chosen()
+export const apiReady = () => chooser.ready()
+export const onApiBaseChange = (fn) => chooser.onChange(fn)
 
 // Пятнадцати секунд хватает любой обычной операции: продаже, приходу, списку товаров.
 // Если сервер молчит дольше — это не «медленно», а «не отвечает», и кассиру надо
@@ -61,11 +96,13 @@ function noLink(timedOut, explain) {
 // разойтись между сайтом и программой.
 
 async function viaFetch(method, path, body, timeoutMs) {
+  await chooser.ready()
+  const base = chooser.current()
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   let res
   try {
-    res = await fetch(BASE + path, {
+    res = await fetch(base + path, {
       method,
       headers: {
         ...(body ? { 'Content-Type': 'application/json' } : {}),
@@ -76,7 +113,12 @@ async function viaFetch(method, path, body, timeoutMs) {
     })
   } catch (e) {
     clearTimeout(timer)
-    throw noLink(e.name === 'AbortError')
+    const err = noLink(e.name === 'AbortError')
+    // Запрос не дошёл до сервера (имя не нашлось, соединение не открылось) — по этому адресу;
+    // выше решат, не перейти ли на другой
+    err.network = e.name !== 'AbortError'
+    err.base = base
+    throw err
   }
   clearTimeout(timer)
   return { status: res.status, ok: res.ok, date: res.headers?.get?.('date'), read: () => res.json() }
@@ -133,16 +175,19 @@ async function once(method, path, body, timeoutMs = TIMEOUT_MS) {
 
 async function request(method, path, body, opts = {}) {
   const timeout = opts.timeout || TIMEOUT_MS
-  // GET идемпотентен — одна авто-повторная попытка при сетевом сбое
-  if (method === 'GET') {
-    try {
-      return await once(method, path, body, timeout)
-    } catch (e) {
-      await new Promise((r) => setTimeout(r, 600))
-      return once(method, path, body, timeout)
-    }
+  try {
+    return await once(method, path, body, timeout)
+  } catch (e) {
+    // Запрос не дошёл до сервера — возможно, основной адрес отказал посреди работы: выбрать
+    // адрес заново (db/apiBase.js). Запись не повторяем сами — она могла дойти; её повторит
+    // человек, уже по новому адресу
+    let moved = false
+    if (e?.status === 0 && e.network && !bridge) moved = (await chooser.failed()) !== e.base
+    if (method !== 'GET') throw e
+    // GET идемпотентен — одна авто-повторная попытка при сетевом сбое
+    if (!moved) await new Promise((r) => setTimeout(r, 600))
+    return once(method, path, body, timeout)
   }
-  return once(method, path, body, timeout)
 }
 
 // opts.timeout — для операций, которые честно идут долго (см. LONG_TIMEOUT_MS).
