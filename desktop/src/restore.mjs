@@ -319,7 +319,9 @@ export function applyRestore({ userData, dataDir, fs, Database, now, schemaMax, 
         put.run('needFull', '1')
         // Магазин без интернета с кассами (1.7.0): у главного теперь другое «поколение» базы — кассы,
         // знавшие прежнее, подключаются заново (их несделанное главным он примет при подключении)
-        if (metaOf(db, 'soloEpoch') || fromRegister) put.run('soloEpoch', randomUUID())
+        // Копия без «поколения» (снята до первой кассы) у магазина, где кассы уже есть, — тоже новое:
+        // иначе кассы продолжили бы обмен, не принеся главному того, чего в копии нет
+        if (metaOf(db, 'soloEpoch') || fromRegister || was?.shopId) put.run('soloEpoch', randomUUID())
         // Копия кассы: пометка «касса», её имя, ключи обмена и её главный — не этого компьютера
         if (fromRegister) {
           const drop = db.prepare('DELETE FROM meta WHERE key = ?')

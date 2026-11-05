@@ -33,7 +33,7 @@ export const sealOf = (tag) => ({
 
 // Один компьютер магазина: шлюз программы и обмен по сети на свободных портах. Таймеры обмена
 // пустые — обмениваться проверка велит сама (lan.now). Часы — общие для всех компьютеров
-export function computer(tag, { time, udpFind = 0, core: coreDb, dataDir: dir } = {}) {
+export function computer(tag, { time, udpFind = 0, core: coreDb, dataDir: dir, openFile = null } = {}) {
   const core = coreDb || openDb(':memory:', CORE_SCHEMA)
   const events = []
   const errors = []
@@ -57,6 +57,8 @@ export function computer(tag, { time, udpFind = 0, core: coreDb, dataDir: dir } 
     standalone: { publicKey: KEYS.publicKey, computerRaw: computerRawOf(machine), computerCode: computerCodeOf(machine), requireCode: false },
     offlineOnly: true,
     lanPorts: { udpPort: udpFind },
+    // Открытие базы магазина — как у программы (починка из копии): проверки подменяют его
+    ...(openFile ? { openFile } : {}),
   })
   const lan = createLan({
     hub: gw.lanHub,

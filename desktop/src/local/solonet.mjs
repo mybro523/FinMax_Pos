@@ -50,6 +50,19 @@ const KIND_KEY = Object.fromEntries(Object.entries(DOC_KEYS).map(([key, kind]) =
 // Номер последней основы: у главного — выданной, у кассы — положенной
 export const soloAcc = (db) => Number(getMeta(db, 'soloAcc') || 0)
 
+// ── Принятое главным ──
+// Номера операций, которые главный уже принял (свои и касс), — на 120 дней: касса, подключаясь
+// заново, несёт всё, что у неё есть, и принятое второй раз не ложится
+export function markSeen(db, ids, now) {
+  const put = q(db, 'INSERT OR IGNORE INTO solo_seen (id, at) VALUES (?, ?)')
+  const at = iso(now)
+  for (const id of ids) if (typeof id === 'string' && id) put.run(id, at)
+}
+export const seenHas = (db, id) => !!q(db, 'SELECT 1 FROM solo_seen WHERE id = ?').get(id)
+export function pruneSeen(db, now, days = 120) {
+  q(db, 'DELETE FROM solo_seen WHERE at < ?').run(iso(now - days * 86400000))
+}
+
 // ── Кассы главного компьютера ──
 // [{ deviceId, name, host, pairedAt }] — по порядку подключения: по коду активации работают первые
 export function soloPairedList(db) {
@@ -245,7 +258,10 @@ const ROW_KEY = {
   products: 'products', categories: 'categories', product_types: 'productTypes', pay_services: 'payServices',
   expense_categories: 'expenseCategories', income_categories: 'incomeCategories', suppliers: 'suppliers',
 }
-export function mainLogBase(db, { ops = [], extras = [], logins = [], gone = null, lic = null, logo = null, rejected = [], rows: withRows = false, deviceId, now }) {
+// touch — строки и документы, которые касса должна взять у главного целиком, хоть их и не правили
+// принятые операции: их правила операция кассы, которую главный не принял (касса откатит её к
+// прежнему виду, а нынешний — главного)
+export function mainLogBase(db, { ops = [], extras = [], logins = [], gone = null, lic = null, logo = null, rejected = [], rows: withRows = false, touch = [], deviceId, now }) {
   const goneCustomers = Array.isArray(gone?.customers) ? gone.customers.filter((x) => typeof x === 'string') : []
   const withLogo = !!logo && typeof logo === 'object' && typeof logo.logo === 'string'
   const rejectedList = (Array.isArray(rejected) ? rejected : []).filter((x) => x && typeof x.id === 'string').map((x) => ({ id: x.id, error: String(x.error || '').slice(0, 200) }))
@@ -258,6 +274,19 @@ export function mainLogBase(db, { ops = [], extras = [], logins = [], gone = nul
     const shifts = new Set()
     const edited = new Map()
     const editedDocs = new Map()
+    for (const t of Array.isArray(touch) ? touch : []) {
+      if (typeof t?.tbl !== 'string' || typeof t.rowId !== 'string' || !t.rowId) continue
+      if (BASE_ROW_TABLES.includes(t.tbl)) {
+        if (!edited.has(t.tbl)) edited.set(t.tbl, new Set())
+        edited.get(t.tbl).add(t.rowId)
+        if (t.tbl === 'products') products.add(t.rowId)
+        if (t.tbl === 'suppliers') suppliers.add(t.rowId)
+      } else if (t.tbl.startsWith('doc:') && t.tbl !== SHEET_TBL) {
+        const kind = t.tbl.slice(4)
+        if (!editedDocs.has(kind)) editedDocs.set(kind, new Set())
+        editedDocs.get(kind).add(t.rowId)
+      }
+    }
     if (ids.length) {
       const list = ids.map(() => '?').join(', ')
       for (const r of q(db, `SELECT DISTINCT productId FROM stock_moves WHERE opId IN (${list})`).all(...ids)) products.add(r.productId)
@@ -578,11 +607,18 @@ export function dbSoloMain(db) {
 // компьютер заменили, недостающее он возьмёт отсюда — и ничего, что успели продать, не пропадёт.
 // Главный сам отбрасывает то, что у него уже есть (gateway, pairServe). Свои операции, ещё не
 // записанные в журнал, туда сначала записывает вызывающий (lanCatchUp)
+// Неотправленное (своё ждущее, чужое не названное в основе) — всё, какой бы давности оно ни было;
+// принятое — за последние days дней (главный мог его потерять с загруженной копией)
 export function regRecoveryEntries(db, { now, days = 30 } = {}) {
   const from = new Date(now - days * 86400000).toISOString()
   return q(
     db,
-    `SELECT l.* FROM lan_log l WHERE l.kind = 'op' AND l.state IN ('own', 'applied', 'confirmed') AND l.createdAt >= ?
+    `SELECT l.* FROM lan_log l WHERE l.kind = 'op'
+       AND (
+         (l.state = 'own' AND EXISTS (SELECT 1 FROM outbox o WHERE o.id = l.id AND o.state = 'pending'))
+         OR l.state = 'applied'
+         OR (l.state IN ('own', 'confirmed') AND l.createdAt >= ?)
+       )
        AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.id = l.id AND o.state IN ('rejected', 'dismissed'))
      ORDER BY l.seq`,
   )

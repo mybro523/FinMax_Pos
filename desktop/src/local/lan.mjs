@@ -238,6 +238,20 @@ export function lanCatchUp(db, { deviceId, now, fates: withFates = true, pwOut =
   return logged
 }
 
+// Своё ждущее, чьей записи в журнале нет (её убрали), — в журнал снова (магазин без интернета:
+// касса, подключаясь заново, несёт главному всё, что он ещё не принял)
+export function lanLogPending(db, { deviceId, pwOut = null }) {
+  let n = 0
+  inTx(db, () => {
+    const rows = q(db, "SELECT o.* FROM outbox o WHERE o.state = 'pending' AND NOT EXISTS (SELECT 1 FROM lan_log l WHERE l.id = o.id) ORDER BY o.seq").all()
+    for (const r of rows) {
+      logOwn(db, { ...r, payload: parse(r.payload) || {} }, deviceId, pwOut)
+      n++
+    }
+  })
+  return n
+}
+
 // ── Сервер сказал о своей операции ──
 // Запоминаем и кладём в журнал отметку: соседи по ней снимут свою поправку (принял)
 // или уберут операцию совсем (отверг)
@@ -812,8 +826,13 @@ export function lanPrune(db, now, { expire = true, keepAbove = null } = {}) {
     const before = new Date(now - LOG_KEEP_DAYS * DAY_MS).toISOString()
     if (Number.isInteger(keepAbove)) {
       // Магазин без интернета: сервера нет — «не принятого сервером» не бывает. Убирается то, что
-      // уже получили все свои кассы (новая касса при подключении получает базу целиком, а не журнал)
-      q(db, "DELETE FROM lan_log WHERE createdAt < ? AND state <> 'applied' AND seq <= ?").run(before, keepAbove)
+      // уже получили все свои кассы (новая касса при подключении получает базу целиком, а не журнал).
+      // Своё, что главный ещё не принял, остаётся: подключаясь заново, касса понесёт его главному
+      q(
+        db,
+        `DELETE FROM lan_log WHERE createdAt < ? AND state <> 'applied' AND seq <= ?
+           AND NOT (kind = 'op' AND state = 'own' AND EXISTS (SELECT 1 FROM outbox o WHERE o.id = lan_log.id AND o.state = 'pending'))`,
+      ).run(before, keepAbove)
     } else {
       const ownBefore = new Date(now - OWN_KEEP_DAYS * DAY_MS).toISOString()
       q(db, "DELETE FROM lan_log WHERE createdAt < ? AND state <> 'applied' AND NOT (kind = 'op' AND state = 'own' AND fate IS NULL)").run(before)

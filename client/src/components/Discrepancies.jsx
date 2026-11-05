@@ -79,7 +79,9 @@ export default function Discrepancies() {
       setBusy(null)
     }
   }
-  const canMerge = (d) => d.kind === 'barcode' && d.productId && !noteOf(d).edit && noteOf(d).other?.id
+  // Магазин без интернета: дубли бывают только с кассами, а при них карточки не объединяются —
+  // лишнюю карточку владелец поправит или удалит сам
+  const canMerge = (d) => d.kind === 'barcode' && d.productId && !noteOf(d).edit && noteOf(d).other?.id && !getUser()?.standalone
 
   if (!list.length) return null
 
