@@ -199,6 +199,7 @@ test('при подключении заново не принятое глав�
   assert.equal(re.ok, true, JSON.stringify(re))
   const disc = (await m.req('GET', '/discrepancies')).data.filter((d) => d.kind === 'notTaken')
   assert.equal(disc.length, 1, 'приход удалённого сотрудника без права — у владельца')
+  assert.equal(disc[0].deviceName, re.name, 'с какой кассы — подписано и при подключении заново')
   const note = JSON.parse(disc[0].note)
   assert.equal(disc[0].opType, 'arrival')
   assert.equal(note.what.docs[0].kind, 'arrival')

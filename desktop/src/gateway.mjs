@@ -2334,7 +2334,9 @@ export function createGateway({
   // основа — одной записью на диск: принятое, но не названное в основе (компьютер выключили между
   // ними), касса ждала бы вечно. refused — что касса прислать не вправе; declined — что не легло
   // (lanReceive): уже известное — принято, повторное применение листа пересчёта — не принято
-  function mainAccept(ph, { refused = [], declined = [], flags = [], touch: extraTouch = [], strict = false } = {}) {
+  // names — имена касс, которых ещё нет в списке (касса подключается заново: её операции
+  // принимаются до того, как она снова в списке)
+  function mainAccept(ph, { refused = [], declined = [], flags = [], touch: extraTouch = [], strict = false, names = null } = {}) {
     let r = null
     try {
       inTx(ph.db, () => {
@@ -2342,6 +2344,7 @@ export function createGateway({
         const known = declined.filter((d) => d.why === 'known').map((d) => ({ id: d.id, type: '', docs: [] }))
         r.notTaken = [...r.rejected, ...refused, ...declined.filter((d) => d.why !== 'known').map((d) => ({ ...d, error: MESSAGES.sheetTwice }))]
         const regs = new Map(soloPairedList(ph.db).map((x) => [x.deviceId, x.name]))
+        if (names) for (const [id, name] of names) if (!regs.has(id)) regs.set(id, name)
         const who = (x) => (x.accountId && accountById(core, x.accountId)?.login) || ''
         const at = new Date(clock.now()).toISOString()
         addDiscrepancies(ph.db, [
@@ -2535,6 +2538,9 @@ export function createGateway({
     if (shopId && shopId !== myShop) return { error: 'othershop' }
     const now = clock.now()
     const at = new Date(now).toISOString()
+    const list = soloPairedList(ph.db)
+    const known = list.find((r) => r.deviceId === from)
+    const regName = known?.name || nextRegisterName(list)
     if (!fresh && Array.isArray(entries) && entries.length) {
       // Частями: и запись на диск, и основа для касс — не огромные. Не легло — кассе подключиться
       // снова (принятое уже здесь, второй раз не ляжет); снимок с непринятым ей не отдаём
@@ -2549,7 +2555,7 @@ export function createGateway({
           applied += t.applied
           // Не принятое главным — на панель владельцу (с тем, что в нём было) и в «принято главным»:
           // база кассы сейчас заменится, и её «не принято» вместе с ней
-          if (t.applied || t.refused.length) for (const k of mainAccept(ph, { ...t, strict: true })) keys.add(k)
+          if (t.applied || t.refused.length) for (const k of mainAccept(ph, { ...t, strict: true, names: new Map([[from, regName]]) })) keys.add(k)
         }
         if (applied) log.info(`кассы по сети: с подключением кассы получено ${applied} операций`)
         if (keys.size) send('changed', [...keys])
@@ -2563,9 +2569,6 @@ export function createGateway({
     const regKey = randomBytes(32).toString('base64url')
     const sealedReg = seal(regKey)
     if (!sealedReg) return { error: 'broken' }
-    const list = soloPairedList(ph.db)
-    const known = list.find((r) => r.deviceId === from)
-    const regName = known?.name || nextRegisterName(list)
     const hostName = String(host || '').slice(0, 60)
     const entry = { deviceId: from, name: regName, host: hostName, pairedAt: at, k: sealedReg }
     setSoloPaired(ph.db, known ? list.map((r) => (r.deviceId === from ? entry : r)) : [...list, entry])
