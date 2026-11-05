@@ -22,7 +22,8 @@
 //     следующем обмене с сервером, начатом ПОСЛЕ этого известия: его данные сняты
 //     позже приёма и точно её содержат.
 // Сервер отверг операцию — её касса сообщит и это: документы и движения убираются.
-// Операция, которая за две недели так и не дошла до сервера, снимается тоже.
+// Операция, которая так и не дошла до сервера, а её касса замолчала (см. LAN_KEEP_DAYS),
+// снимается тоже.
 //
 // Кассир видит не всё: расходы, доходы и списания сервер отдаёт только тем, у кого
 // есть права (pullScope на сервере). Соседу без таких прав журнал уходит урезанным:
@@ -38,15 +39,27 @@ import { hasPerm } from './accounts.mjs'
 import { SHEET_TBL, sheetShut } from './sheet.mjs'
 import { MAX_UPP } from './check.mjs'
 
-// Сколько дней чужая операция может ждать сервера. До 1.6.5 касса без связи работала не
-// больше недели, и двух недель хватало с запасом. С 1.6.5 срока работы без связи нет: магазин
-// может месяцами работать без интернета, а кассы — обмениваться по местной сети. Снять чужое
-// через две недели значило бы отменить настоящие продажи соседней кассы (остатки «вернулись»
-// бы, её чеки и новые клиенты пропали). Поэтому — год
-export const LAN_KEEP_DAYS = 365
-// Сколько дней журнал хранит то, что уже не нужно соседям: касса, выключенная надолго, должна
-// догнать соседей по сети и без интернета. Дольше, чем ждёт чужое
-const LOG_KEEP_DAYS = 400
+// ── Сколько чужая операция ждёт сервера ──
+// До 1.6.5 касса без связи работала не больше недели, и через две недели чужое снималось всегда.
+// С 1.6.5 срока без связи нет: магазин может месяцами работать без интернета, а кассы —
+// обмениваться по местной сети. Снять продажу живой соседней кассы значило бы «вернуть» остаток,
+// потерять её чеки и новых клиентов. Поэтому чужая операция снимается, только если ей больше
+// LAN_KEEP_DAYS и её касса молчит в сети PEER_SILENT_DAYS (сломалась, переустановлена, выключена
+// насовсем): её чеки до сервера уже не дойдут, а очередь соседа (waitsForPeer) не должна ждать их
+// вечно. И всё же не дольше LAN_MAX_DAYS: живая касса могла откатиться на старую копию и потерять
+// свои операции — тогда их нет уже нигде
+export const LAN_KEEP_DAYS = 14
+export const PEER_SILENT_DAYS = 14
+export const LAN_MAX_DAYS = 180
+// Сколько дней журнал хранит то, что соседям уже не нужно: принятое и отвергнутое сервером,
+// снятое. Коротко — как до 1.6.5: новая касса читает журнал соседа с самого начала, и давнее,
+// уже принятое сервером, применила бы второй раз (проверка «документ уже пришёл с сервера» помнит
+// не всё — local/docs.mjs)
+const LOG_KEEP_DAYS = 21
+// Свою операцию, которую сервер ещё не принял (магазин без интернета), журнал хранит дольше:
+// сосед, выключенный надолго, догоняет по сети и без интернета. Сервера в ней нет — применить её
+// новой кассе правильно
+const OWN_KEEP_DAYS = LAN_MAX_DAYS
 const DAY_MS = 86400000
 
 // Виды документов, которые видит не каждый. Листы пересчёта (1.4.15) уходят всем — как и с
@@ -721,8 +734,17 @@ export function lanBeforePull(db, data, { startedGen, now }) {
 
 function expireOld(db, now) {
   const before = new Date(now - LAN_KEEP_DAYS * DAY_MS).toISOString()
+  const silent = new Date(now - PEER_SILENT_DAYS * DAY_MS).toISOString()
+  const limit = new Date(now - LAN_MAX_DAYS * DAY_MS).toISOString()
   let any = false
-  for (const r of q(db, "SELECT id FROM lan_log WHERE kind = 'op' AND state = 'applied' AND receivedAt < ?").all(before)) {
+  // Касса-источник «жива», если её видели в сети последние PEER_SILENT_DAYS (lan_peers.seenAt)
+  const rows = q(
+    db,
+    `SELECT l.id FROM lan_log l LEFT JOIN lan_peers p ON p.deviceId = l.origin
+     WHERE l.kind = 'op' AND l.state = 'applied' AND l.receivedAt < ?
+       AND (l.receivedAt < ? OR p.seenAt IS NULL OR p.seenAt < ?)`,
+  ).all(before, limit, silent)
+  for (const r of rows) {
     if (undoOp(db, r.id, 'expired')) any = true
   }
   return any
@@ -730,7 +752,7 @@ function expireOld(db, now) {
 
 // ── Уборка журнала ──
 // Раз в сутки: старое и уже ненужное соседям уходит; чужое, что так и не дошло до
-// сервера за LAN_KEEP_DAYS (год), снимается
+// сервера, а его касса замолчала, снимается (expireOld)
 export function lanPrune(db, now) {
   const last = Number(getMeta(db, 'lanPrunedAt') || 0)
   if (now - last < DAY_MS) return false
@@ -740,8 +762,12 @@ export function lanPrune(db, now) {
       rebuild(db)
       rebuilt = true
     }
+    // Принятое, отвергнутое, снятое — через LOG_KEEP_DAYS; своё, ещё не принятое сервером, — через
+    // OWN_KEEP_DAYS
     const before = new Date(now - LOG_KEEP_DAYS * DAY_MS).toISOString()
-    q(db, "DELETE FROM lan_log WHERE createdAt < ? AND state <> 'applied'").run(before)
+    const ownBefore = new Date(now - OWN_KEEP_DAYS * DAY_MS).toISOString()
+    q(db, "DELETE FROM lan_log WHERE createdAt < ? AND state <> 'applied' AND NOT (kind = 'op' AND state = 'own' AND fate IS NULL)").run(before)
+    q(db, "DELETE FROM lan_log WHERE createdAt < ? AND kind = 'op' AND state = 'own' AND fate IS NULL").run(ownBefore)
     setMeta(db, 'lanPrunedAt', String(now))
   })
   return rebuilt

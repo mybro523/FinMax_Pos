@@ -1444,6 +1444,32 @@ test('1.6.5: честная касса — оплату продлили, кас
   assert.equal((await sell(t, 1)).status, 201, 'новый срок — и в обычных столбцах, и в зашифрованной записи')
 })
 
+test('1.6.5: «работа приостановлена» пришла по постоянному соединению — и в зашифрованную запись: правка файла не помогает', async (tt) => {
+  const t = await loggedIn()
+  tt.after(() => t.gw.close())
+  t.gw.listen(true)
+  t.gw.serverEvent('suspended', { message: 'Работа магазина приостановлен. Обратитесь к поставщику программы.' })
+  t.srv.state.online = false
+  t.core.prepare("UPDATE accounts SET subStatus = 'active'").run()
+  const sale = await sell(t, 1)
+  assert.equal(sale.status, 403)
+  assert.match(sale.data.message, /приостановлен/)
+})
+
+test('1.6.5: касса, обновлённая с 1.6.4, сразу запечатывает срок оплаты — поздняя правка файла не помогает', async (tt) => {
+  const t = await loggedIn()
+  tt.after(() => t.gw.close())
+  // Запись, какой её оставила 1.6.4: срока оплаты в ней нет
+  t.core.prepare('UPDATE licences SET sealed = ?').run(fakeSeal.seal(JSON.stringify({ code: 'apteka-1', checkedAt: NOW, offlineDays: 7 })))
+  t.srv.state.online = false
+  assert.equal((await t.req('GET', '/auth/me')).status, 200, 'первое же обращение — и срок запечатан')
+  t.core.prepare("UPDATE accounts SET paidUntil = '2099-01-01T00:00:00.000Z'").run()
+  t.time.now += 30 * DAY_MS
+  const sale = await sell(t, 1)
+  assert.equal(sale.status, 403)
+  assert.match(sale.data.message, /Подписка закончилась/)
+})
+
 test('постоянное соединение оборвалось — касса сразу выясняет, есть ли интернет, а не ждёт пяти минут', async (tt) => {
   const t = await loggedIn()
   tt.after(() => t.gw.close())

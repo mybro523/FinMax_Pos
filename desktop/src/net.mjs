@@ -95,7 +95,8 @@ export function checkRequest(raw) {
 // интернета не должен ждать дольше (05.11 при 3 с вход без связи занимал 4,6 с)
 export const PICK_WAIT_MS = 2000
 // Обмен идёт на сервер, о котором проверка сказала «молчит» (вдруг связь просто медленная), —
-// но ждёт заголовков ответа не дольше этого: иначе без интернета каждая попытка висела бы минутами
+// но получение ждёт заголовков ответа не дольше этого: иначе без интернета каждая попытка висела бы
+// минутами. Отправку не трогаем: тяжёлой пачке её срок дан по размеру (gateway.mjs, pushTimeout)
 export const UNSURE_WAIT_MS = 30000
 
 export function createRemote({ apiUrl, fetchImpl, onDate = () => {}, stopwatch = () => performance.now(), chooser = null, pickWaitMs = PICK_WAIT_MS }) {
@@ -119,7 +120,7 @@ export function createRemote({ apiUrl, fetchImpl, onDate = () => {}, stopwatch =
     // Сервер сейчас недоступен ни по одному адресу — «связи нет» сразу. skipped: на сервер
     // запрос не ходил (тот, кому без сервера никак, может попробовать по-настоящему)
     if (base === null) return { status: 0, date: null, data: null, timedOut: false, skipped: true }
-    const unsure = !!chooser && chooser.reachable() === false
+    const unsure = !!chooser && chooser.reachable() === false && req.method === 'GET'
 
     // Свои заголовки бывают только у запросов самой программы (обмен называет ключ
     // кассы). У запроса окна их нет: checkRequest пропускает метод, путь и тело

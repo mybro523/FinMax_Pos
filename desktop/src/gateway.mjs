@@ -34,7 +34,7 @@ import {
   permissionsOf,
 } from './local/accounts.mjs'
 import { matchFallback, matchLocal, pendingInPeriod } from './local/api.mjs'
-import { confirmLicence, licenceOf, licenceTerms, sealStatus, touchLicence } from './local/licence.mjs'
+import { confirmLicence, licenceOf, licenceTerms, sealStatus, sealTerms, touchLicence } from './local/licence.mjs'
 import { ApiError, getMeta, inTx, openDb, q, setMeta } from './local/db.mjs'
 import { getDoc, putDoc } from './local/docs.mjs'
 import { REJECTED_SALE } from './local/ops/return.mjs'
@@ -936,8 +936,14 @@ export function createGateway({
   const STRICT = { suspended: 3, expired: 2, trial: 1, active: 0 }
   function withTerms(acc) {
     if (!acc) return acc
-    const t = licenceTerms(core, acc.pharmacyCode, sealing)
+    let t = licenceTerms(core, acc.pharmacyCode, sealing)
     if (!t) return { ...acc, unverified: true }
+    // Запись прежней версии программы (до 1.6.5) срока оплаты не знает: до первого ответа сервера
+    // берём обычные столбцы — и сразу запечатываем их, чтобы поздняя правка руками не помогла
+    if (t.paidUntil == null && t.status == null && (acc.paidUntil || acc.subStatus)) {
+      sealTerms(core, acc.pharmacyCode, { paidUntil: acc.paidUntil || null, status: acc.subStatus || null }, sealing)
+      t = licenceTerms(core, acc.pharmacyCode, sealing) || t
+    }
     const plain = Date.parse(acc.paidUntil || '')
     const sealed = Date.parse(t.paidUntil || '')
     const paidUntil = Number.isFinite(sealed) && !(plain <= sealed) ? t.paidUntil : acc.paidUntil
@@ -1070,6 +1076,7 @@ export function createGateway({
 
     // Сервер не ответил или ответил бедой по дороге — проверяем пароль сами
     if (isLinkFailure(res)) {
+      let refusal = null
       try {
         // Счёт неудачных попыток и срок подписки — по времени срока: за часами компьютера,
         // которым нельзя верить, оно не идёт, и переводом даты запрет на вход не снять
@@ -1081,13 +1088,17 @@ export function createGateway({
         return reply(201, { token: DESKTOP_TOKEN, user: { ...userView(withTerms(acc), licNow()), subscription: access(acc) } })
       } catch (e) {
         if (!(e instanceof ApiError)) throw e
-        if (e.status !== 503) return refuse(e.status, e.message)
-        // Человека на этом компьютере не знают: без сервера не войти. Если сам вход на сервер не
-        // ходил (сервер недавно молчал или адрес ещё выбирается) — пробуем по-настоящему, с обычным
-        // ожиданием: на медленной связи короткая проверка адреса могла не успеть (net.mjs)
-        if (res.skipped) res = await remote({ ...req, patient: true })
-        // Не вышло и так — отвечаем как «нет связи», но с объяснением
-        if (isLinkFailure(res)) return offline(MESSAGES.noOfflineLogin, !!res.timedOut)
+        refusal = e
+      }
+      // Без сервера не вышло: человека здесь не знают, пароль не тот (его могли сменить на
+      // сервере), оплату не подтвердить. Если сам вход на сервер не ходил (сервер недавно молчал
+      // или адрес ещё выбирается) — пробуем по-настоящему, с обычным ожиданием: на медленной связи
+      // короткая проверка адреса могла не успеть (net.mjs). Кроме «слишком много попыток»
+      if (res.skipped && refusal.status !== 429) res = await remote({ ...req, patient: true })
+      if (isLinkFailure(res)) {
+        // Человека на этом компьютере не знают — отвечаем как «нет связи», но с объяснением
+        if (refusal.status === 503) return offline(MESSAGES.noOfflineLogin, !!res.timedOut)
+        return refuse(refusal.status, refusal.message)
       }
     }
 
@@ -1579,6 +1590,7 @@ export function createGateway({
         pharmacy.sync.run().catch(() => {})
       } else if (type === 'suspended') {
         setSubscription(core, acc.pharmacyCode, { status: 'suspended' })
+        sealStatus(core, acc.pharmacyCode, 'suspended', sealing)
         send(type, payload)
       }
     },
@@ -1684,7 +1696,7 @@ export function createGateway({
       const acc = activeAccount()
       if (acc) touchLicence(core, acc.pharmacyCode, licNow(), sealing, floorNow())
       // Раз в сутки — уборка журнала обмена по сети; чужое, так и не дошедшее до
-      // сервера за две недели, снимается
+      // сервера, а её касса замолчала, снимается (local/lan.mjs)
       if (pharmacy) {
         try {
           if (lanPrune(pharmacy.db, clock.now())) send('changed', ['products', 'customers', 'sales', 'returns', 'shifts', 'arrivals'])

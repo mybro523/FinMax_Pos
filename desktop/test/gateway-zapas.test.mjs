@@ -168,3 +168,25 @@ test('сервер молчит, а на этом компьютере под э
   assert.equal(r.status, 0)
   assert.match(r.data.message, /первый вход возможен только с интернетом/)
 })
+
+test('пароль сменили на сервере, а касса сочла сервер недоступным (медленная связь) — вход пробует сервер по-настоящему', async (tt) => {
+  const m = machine()
+  const first = start(m)
+  assert.equal((await first.login()).status, 201)
+  first.gw.logout()
+  first.stop()
+
+  // Владелец сменил пароль на сервере; связь медленная: короткая проверка адреса не успевает,
+  // а сам запрос проходит
+  m.srv.state.users.get('kassir').password = 'novyy-parol-7'
+  const slow = (url, init = {}) => (url.endsWith('/health') ? Promise.reject(new Error('не успела')) : m.wire.fetchImpl(url, init))
+  const p = start({ ...m, wire: { ...m.wire, fetchImpl: slow } })
+  tt.after(p.stop)
+  await p.chooser.ready()
+  assert.equal(p.chooser.reachable(), false)
+  const r = await p.req('POST', '/auth/login', { name: 'kassir', password: 'novyy-parol-7' })
+  assert.equal(r.status, 201, JSON.stringify(r.data))
+  assert.match(m.session.get(), /^ключ-kassir-/, 'вошли через сервер — с новым паролем')
+  assert.equal(p.chooser.reachable(), true, 'ответ сервера вернул кассу «на связь»')
+})
+

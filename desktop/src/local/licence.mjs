@@ -114,6 +114,12 @@ export function licenceTerms(db, code, cipher) {
   return r ? { paidUntil: r.paidUntil, status: r.status } : null
 }
 
+// Запись прежней версии программы срока оплаты не знает — положить его туда (gateway.mjs, withTerms)
+export function sealTerms(db, code, { paidUntil, status }, cipher) {
+  const r = readLicence(db, code, cipher)
+  if (r) write(db, { ...r, paidUntil: r.paidUntil ?? paidUntil ?? null, status: r.status ?? status ?? null }, cipher)
+}
+
 // Сервер закрыл работу магазина (ответ 403) — запомнить и в зашифрованной записи: иначе
 // обычный столбец можно было бы вернуть руками
 export function sealStatus(db, code, status, cipher) {
