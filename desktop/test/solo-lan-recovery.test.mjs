@@ -168,8 +168,11 @@ test('старое удаление и старая цена с кассы не 
   const onReg = (await r1.req('GET', '/products')).data
   assert.equal(onReg.find((x) => x.id === extra.id)?.stock, 20, 'и на кассе товар вернулся')
   assert.equal(Number(onReg.find((x) => x.id === p.id)?.price), 20)
-  const disc = (await m.req('GET', '/discrepancies')).data.filter((d) => d.kind === 'notTaken')
-  assert.equal(disc.length, 2, 'владелец видит обе правки кассы, которые не легли')
+  const disc = (await m.req('GET', '/discrepancies')).data
+  assert.equal(disc.filter((d) => d.kind === 'notTaken').length, 1, 'удаление с кассы не легло — владелец видит')
+  const edit = disc.find((d) => d.kind === 'soloEdit')
+  assert.ok(edit, 'и цену, которая не легла')
+  assert.deepEqual(JSON.parse(edit.note).fields.map((f) => [f.field, f.kassa, f.main]), [['priceC', 1500, 2000]])
 })
 
 test('один штрихкод на кассе и на главном — товар кассы получает внутренний код, владелец видит дубль', async (tt) => {

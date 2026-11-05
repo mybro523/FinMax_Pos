@@ -51,15 +51,15 @@ const KIND_KEY = Object.fromEntries(Object.entries(DOC_KEYS).map(([key, kind]) =
 export const soloAcc = (db) => Number(getMeta(db, 'soloAcc') || 0)
 
 // ── Принятое главным ──
-// Номера операций, которые главный уже принял (свои и касс), — на 120 дней: касса, подключаясь
-// заново, несёт всё, что у неё есть, и принятое второй раз не ложится
+// Номера операций, которые главный уже принял (свои и касс), — на 400 дней: касса, подключаясь
+// заново, несёт всё, что у неё есть (и ждущее любой давности), и принятое второй раз не ложится
 export function markSeen(db, ids, now) {
   const put = q(db, 'INSERT OR IGNORE INTO solo_seen (id, at) VALUES (?, ?)')
   const at = iso(now)
   for (const id of ids) if (typeof id === 'string' && id) put.run(id, at)
 }
 export const seenHas = (db, id) => !!q(db, 'SELECT 1 FROM solo_seen WHERE id = ?').get(id)
-export function pruneSeen(db, now, days = 120) {
+export function pruneSeen(db, now, days = 400) {
   q(db, 'DELETE FROM solo_seen WHERE at < ?').run(iso(now - days * 86400000))
 }
 
@@ -147,6 +147,9 @@ export function mainAcceptPeers(db, { now }) {
   inTx(db, () => {
     const rows = q(db, "SELECT * FROM lan_log WHERE kind = 'op' AND state = 'applied' ORDER BY seq").all()
     if (!rows.length) return
+    // Долг поставщика, заведённого на кассе тем, кому деньги магазина не видны, «сервер» всё равно
+    // ведёт: без основы его поправки долга просто не легли бы (как acceptAll, standalone.mjs)
+    q(db, 'UPDATE suppliers SET openingDebtC = COALESCE(openingDebtC, 0), sDebtC = COALESCE(sDebtC, openingDebtC, 0), debtArrivals = COALESCE(debtArrivals, 0)').run()
     const taker = new Map()
     for (const r of rows) {
       const fx = parse(r.body)?.effects || {}
@@ -549,7 +552,7 @@ export function shopSnapshot(db) {
   try {
     copy.exec('DELETE FROM outbox; DELETE FROM lan_log; DELETE FROM lan_docs; DELETE FROM lan_peers; DELETE FROM lan_manual;')
     const drop = copy.prepare('DELETE FROM meta WHERE key = ?')
-    for (const key of ['lanKey', 'lanRegKey', 'soloPaired', 'soloDisc', 'restored', 'deviceName', 'needFull', 'lanWide', 'lanDevices', 'soloMain', 'batchTag', 'soloRestoredFrom']) drop.run(key)
+    for (const key of ['lanKey', 'lanRegKey', 'soloPaired', 'soloDisc', 'restored', 'deviceName', 'needFull', 'lanWide', 'lanDevices', 'soloMain', 'batchTag', 'soloRestoredFrom', 'soloEpochSeq']) drop.run(key)
     copy
       .prepare("UPDATE row_edits SET data = json_remove(data, '$.pw') WHERE tbl = 'team_accounts' AND json_valid(data) AND json_extract(data, '$.pw') IS NOT NULL")
       .run()

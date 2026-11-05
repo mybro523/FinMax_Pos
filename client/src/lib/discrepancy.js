@@ -84,15 +84,34 @@ export function discrepancyTitle(kind, t) {
   if (kind === 'supreturn') return t('Поставщику отдали больше, чем было на складе')
   // Магазин без интернета (1.7.0): касса прислала операцию, которую главный компьютер не принял
   if (kind === 'notTaken') return t('Операция с кассы не принята главным компьютером')
+  // …и правку, часть которой на главном к тому времени уже поменяли
+  if (kind === 'soloEdit') return t('Правку сделали и на кассе, и на главном компьютере')
+  // …или касса так долго молчала, что журнал главного за это время уже убран
+  if (kind === 'soloOld') return t('Правка с кассы, которая больше месяца не была на связи')
   return t('Расхождение')
 }
 
 // Подробность: сколько штук или какие цены. money — как печатать деньги
 export function discrepancyDetail(d, t, money = String) {
   if (d.kind === 'edit') return editDetail(noteOf(d), t, money)
+  if (d.kind === 'soloEdit' || d.kind === 'soloOld') {
+    const n = noteOf(d)
+    if (n.gone) return t('запись удалили на главном — правка с кассы не применена')
+    const parts = (Array.isArray(n.fields) ? n.fields : []).map((f) => {
+      const field = COL_FIELD[f.field] || f.field
+      const val = (v) => (MONEY_COLS.has(f.field) && Number.isFinite(Number(v)) ? Number(v) / 100 : v)
+      return `${fieldLabel(field, t)}: ${t('на кассе')} ${shown(field, val(f.kassa), t, money)}, ${t('на главном')} ${shown(field, val(f.main), t, money)}`
+    })
+    return `${parts.join('; ')}${parts.length ? ' — ' : ''}${t('осталось как на главном')}`
+  }
   if (d.kind === 'notTaken') {
-    const why = String(noteOf(d).error || '')
-    return `${t(OP_TYPE[d.opType] || 'Операция')}${why ? ' — ' + t(why) : ''}`
+    const n = noteOf(d)
+    const why = String(n.error || '')
+    // Что было в операции (касса, подключаясь заново, свою копию заменила): сумма документа, название
+    const doc = Array.isArray(n.what?.docs) ? n.what.docs.find((x) => x && x.sum !== null && x.sum !== undefined) : null
+    const sum = doc && Number.isFinite(Number(doc.sum)) ? ` ${t('на сумму')} ${money(doc.sum)}` : ''
+    const name = Array.isArray(n.what?.rows) ? n.what.rows.find((x) => x?.name)?.name : null
+    return `${t(OP_TYPE[d.opType] || 'Операция')}${sum}${name ? ` «${name}»` : ''}${why ? ' — ' + t(why) : ''}`
   }
   if (d.kind === 'barcode') {
     const n = noteOf(d)
@@ -131,6 +150,10 @@ function editDetail(n, t, money) {
   return parts.join('; ') || t('правку сделали в двух местах')
 }
 
+// Столбцы базы программы → поля, как их называет окно (правка с кассы, магазин без интернета)
+const COL_FIELD = { priceC: 'price', costC: 'cost', sCostC: 'cost', pieceC: 'piecePrice', openingDebtC: 'openingDebt' }
+const MONEY_COLS = new Set(['priceC', 'costC', 'sCostC', 'pieceC', 'openingDebtC'])
+
 // Виды операций кассы — для расхождения «не принято»
 const OP_TYPE = {
   sale: 'Продажа',
@@ -149,6 +172,8 @@ const OP_TYPE = {
 
 // Что владельцу с этим делать
 export function discrepancyAdvice(kind, t) {
+  if (kind === 'soloEdit') return t('Проверьте запись: если осталось не то, что нужно, поправьте её на главном компьютере.')
+  if (kind === 'soloOld') return t('Что меняли на главном за это время, уже не узнать — оставлено как на главном. Если с кассы было верно, поправьте запись на главном компьютере.')
   if (kind === 'notTaken') return t('Операция не легла в базу магазина: проверьте её на кассе и, если нужно, проведите заново на главном компьютере.')
   if (kind === 'edit') return t('Проверьте карточку: если осталось не то, что нужно, поправьте её ещё раз.')
   if (kind === 'barcode') {

@@ -189,7 +189,7 @@ function effectsOf(db, op, pwOut = null) {
   return out
 }
 
-function logOwn(db, op, deviceId, pwOut = null) {
+function logOwn(db, op, deviceId, pwOut = null, extra = null) {
   if (q(db, 'SELECT 1 FROM lan_log WHERE id = ?').get(op.id)) return
   const effects = effectsOf(db, op, pwOut)
   const wide =
@@ -202,7 +202,7 @@ function logOwn(db, op, deviceId, pwOut = null) {
     db,
     `INSERT INTO lan_log (id, kind, origin, opId, type, accountId, createdAt, body, wide, redacted, state)
      VALUES (?, 'op', ?, NULL, ?, ?, ?, ?, ?, 0, 'own')`,
-  ).run(op.id, deviceId, op.type, op.accountId ?? null, op.createdAt, JSON.stringify({ effects }), wide ? 1 : 0)
+  ).run(op.id, deviceId, op.type, op.accountId ?? null, op.createdAt, JSON.stringify({ effects, ...(extra && typeof extra === 'object' ? extra : {}) }), wide ? 1 : 0)
 }
 
 // ── Догнать очередь ──
@@ -212,14 +212,16 @@ function logOwn(db, op, deviceId, pwOut = null) {
 // которую уже знает очередь (сервер принял или отверг), для соседей
 // Магазин без интернета (1.7.0): отметок о судьбе нет (fates: false) — принятое кассы узнают из
 // основы главного компьютера (local/solonet.mjs); pwOut — см. effectsOf
-export function lanCatchUp(db, { deviceId, now, fates: withFates = true, pwOut = null }) {
+// extra — что ещё записать при операции (касса магазина без интернета: seen — докуда она видела
+// журнал главного)
+export function lanCatchUp(db, { deviceId, now, fates: withFates = true, pwOut = null, extra = null }) {
   let logged = 0
   inTx(db, () => {
     const last = Number(getMeta(db, 'lanOutboxSeq') || 0)
     const rows = q(db, 'SELECT * FROM outbox WHERE seq > ? ORDER BY seq').all(last)
     for (const r of rows) {
       if (r.state !== 'pending') continue
-      logOwn(db, { ...r, payload: parse(r.payload) || {} }, deviceId, pwOut)
+      logOwn(db, { ...r, payload: parse(r.payload) || {} }, deviceId, pwOut, extra)
       logged++
     }
     if (rows.length) setMeta(db, 'lanOutboxSeq', String(rows[rows.length - 1].seq))
@@ -240,12 +242,12 @@ export function lanCatchUp(db, { deviceId, now, fates: withFates = true, pwOut =
 
 // Своё ждущее, чьей записи в журнале нет (её убрали), — в журнал снова (магазин без интернета:
 // касса, подключаясь заново, несёт главному всё, что он ещё не принял)
-export function lanLogPending(db, { deviceId, pwOut = null }) {
+export function lanLogPending(db, { deviceId, pwOut = null, extra = null }) {
   let n = 0
   inTx(db, () => {
     const rows = q(db, "SELECT o.* FROM outbox o WHERE o.state = 'pending' AND NOT EXISTS (SELECT 1 FROM lan_log l WHERE l.id = o.id) ORDER BY o.seq").all()
     for (const r of rows) {
-      logOwn(db, { ...r, payload: parse(r.payload) || {} }, deviceId, pwOut)
+      logOwn(db, { ...r, payload: parse(r.payload) || {} }, deviceId, pwOut, extra)
       n++
     }
   })

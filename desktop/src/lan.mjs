@@ -481,6 +481,8 @@ export function createLan({
     if (!validMsg(msg, s, t)) return { code: 400 }
     // Назвался одной кассой, а ключ — другой
     if (claimed && msg.from !== claimed) return { code: 403 }
+    // Магазин без интернета: другая версия обмена — до обновления программы ничего не передаём
+    if (s.version && msg.sv !== s.version) return { code: 426 }
     // Звоним сами себе (вписали свой же адрес)
     if (msg.from === s.deviceId) return { code: 409 }
     // Магазин без интернета: не своя касса (её отключили на главном) и касса прежнего «поколения»
@@ -492,7 +494,7 @@ export function createLan({
     hub.receive(msg.from, msg.entries)
     hub.progress(msg.from, { sentUpTo: msg.ack, gotUpTo: msg.upTo })
     const out = hub.entriesFor(msg.ack, !!msg.wide)
-    const reply = { v: 1, t: 'x', from: s.deviceId, name: s.name, wide: !!s.wide, port, ts: t, ack: msg.upTo, entries: out.entries, upTo: out.upTo, more: !!out.more, e: s.epoch || undefined }
+    const reply = { v: 1, t: 'x', from: s.deviceId, name: s.name, wide: !!s.wide, port, ts: t, ack: msg.upTo, entries: out.entries, upTo: out.upTo, more: !!out.more, e: s.epoch || undefined, sv: s.version || undefined }
     return { code: 200, body: seal(enc, reply) }
   }
 
@@ -642,6 +644,8 @@ export function createLan({
     if (e?.status === 412) return 'epoch'
     // Журнала с нужного места у главного уже нет (касса долго молчала) — подключиться заново
     if (e?.status === 410) return 'gone'
+    // Другая версия программы — обновить на всех компьютерах магазина
+    if (e?.status === 426) return 'version'
     // Основа главного не легла на эту кассу (gateway, regReceive)
     if (e?.code === 'BASE') return 'base'
     if (e?.status === 503) return 'off'
@@ -677,13 +681,14 @@ export function createLan({
         const out = peer ? hub.entriesFor(peer.sentUpTo, !!peer.wide) : { entries: [], upTo: 0, more: false }
         const req = {
           v: 1, t: 'x', from: s.deviceId, name: s.name, wide: !!s.wide, port, ts: now(),
-          ack: peer ? peer.gotUpTo : 0, entries: out.entries, upTo: peer ? out.upTo : 0, e: s.epoch || undefined,
+          ack: peer ? peer.gotUpTo : 0, entries: out.entries, upTo: peer ? out.upTo : 0, e: s.epoch || undefined, sv: s.version || undefined,
         }
         const sealed = seal(k.enc, req)
         const msg = unseal(k.enc, await post(target.host, target.port, framed ? peerFrame(s.deviceId, sealed) : sealed))
         const t = now()
         if (!validMsg(msg, s, t)) throw new Error('сосед ответил непонятно')
         if (msg.from === s.deviceId) throw Object.assign(new Error('это этот же компьютер'), { status: 409 })
+        if (s.version && msg.sv !== s.version) throw Object.assign(new Error('другая версия программы'), { status: 426 })
         if (typeof hub.allow === 'function' && !hub.allow(msg.from)) throw Object.assign(new Error('не главный компьютер этой кассы'), { status: 423 })
         if (typeof hub.epochOk === 'function' && !hub.epochOk(msg.e)) throw Object.assign(new Error('главный компьютер загрузил копию базы'), { status: 412 })
         // По этому адресу теперь другая касса (компьютер переустановили) — прежней

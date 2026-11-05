@@ -321,7 +321,8 @@ export function applyRestore({ userData, dataDir, fs, Database, now, schemaMax, 
         // знавшие прежнее, подключаются заново (их несделанное главным он примет при подключении)
         // Копия без «поколения» (снята до первой кассы) у магазина, где кассы уже есть, — тоже новое:
         // иначе кассы продолжили бы обмен, не принеся главному того, чего в копии нет
-        if (metaOf(db, 'soloEpoch') || fromRegister || was?.shopId) put.run('soloEpoch', randomUUID())
+        const newEpoch = !!(metaOf(db, 'soloEpoch') || fromRegister || was?.shopId)
+        if (newEpoch) put.run('soloEpoch', randomUUID())
         // Копия кассы: пометка «касса», её имя, ключи обмена и её главный — не этого компьютера
         if (fromRegister) {
           const drop = db.prepare('DELETE FROM meta WHERE key = ?')
@@ -353,6 +354,12 @@ export function applyRestore({ userData, dataDir, fs, Database, now, schemaMax, 
           const row = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'lan_log'").get()
           if (!row) db.prepare("INSERT INTO sqlite_sequence (name, seq) VALUES ('lan_log', ?)").run(lanTop)
           else if (Number(row.seq) < lanTop) db.prepare("UPDATE sqlite_sequence SET seq = ? WHERE name = 'lan_log'").run(lanTop)
+        }
+        // С какого номера журнала началось новое «поколение» (кассы прежнего видели номера до него)
+        if (newEpoch && hasLan) {
+          const top = Number(db.prepare('SELECT COALESCE(MAX(seq), 0) AS n FROM lan_log').get().n) || 0
+          const used = Number(db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'lan_log'").get()?.seq) || 0
+          put.run('soloEpochSeq', String(Math.max(top, used)))
         }
       })()
     } finally {
