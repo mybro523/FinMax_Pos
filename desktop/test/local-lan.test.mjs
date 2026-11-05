@@ -153,6 +153,8 @@ test('1.6.5: магазин месяцами без интернета — пр�
   // «возвращался», чек пропадал
   lanPeerSeen(b, { deviceId: A, now: NOW + 14 * DAY })
   assert.equal(lanPrune(b, NOW + 15 * DAY), false)
+  // Две недели её не видели (компьютер владельца включают нечасто) — ещё не «замолчала»
+  assert.equal(lanPrune(b, NOW + 29 * DAY), false)
   lanPeerSeen(b, { deviceId: A, now: NOW + 99 * DAY })
   assert.equal(lanPrune(b, NOW + 100 * DAY), false)
   assert.equal(units(b), 4, 'сто дней без интернета — продажа соседней кассы на месте')
@@ -163,19 +165,36 @@ test('1.6.5: магазин месяцами без интернета — пр�
   assert.equal(units(b), 5)
 })
 
-test('касса-источник замолчала в сети — её не дошедшая до сервера операция снимается через две недели', () => {
+test('касса-источник замолчала в сети на месяц — её не дошедшая до сервера операция снимается', () => {
   const a = shop()
   const b = shop()
   checkout(atA(a), { items: [{ productId: 'nur', qty: 1 }], payment: 'cash' })
   pass(a, A, b)
   lanPeerSeen(b, { deviceId: A, now: NOW })
   assert.equal(units(b), 4)
-  // Касса A сломалась (или переустановлена): её чеки до сервера уже не дойдут, а очередь соседа,
-  // которая ждёт её данных (waitsForPeer), не должна стоять вечно
-  assert.equal(lanPrune(b, NOW + 10 * DAY), false, 'десять дней — ещё рано')
-  assert.equal(lanPrune(b, NOW + 15 * DAY), true)
+  // Касса A сломалась (или переустановлена): её чеки до сервера уже не дойдут
+  assert.equal(lanPrune(b, NOW + 20 * DAY), false, 'двадцать дней — ещё рано')
+  assert.equal(lanPrune(b, NOW + 31 * DAY), true)
   assert.equal(units(b), 5)
   assert.equal(listDocs(b, 'sale').length, 0)
+})
+
+test('своя операция ждёт соседнюю кассу не дольше двух недель — дальше решает сервер', () => {
+  const a = shop()
+  const b = shop()
+  // Владелец (B) завёл клиента, кассир (A) продал ему в долг — продажа A ждёт, пока B отправит клиента
+  createCustomer(atB(b), { name: 'Сосед', phone: '' })
+  pass(b, B, a)
+  const customer = q(a, 'SELECT id FROM customers WHERE local = 2').get()
+  assert.ok(customer, 'клиент соседа пришёл по сети')
+  checkout(atA(a), { items: [{ productId: 'nur', qty: 1 }], payment: 'debt', customerId: customer.id })
+  const sale = opOf(a, 'sale')
+  lanPeerSeen(a, { deviceId: B, now: NOW + 13 * DAY })
+  assert.equal(waitsForPeer(a, sale, NOW + 13 * DAY), true, 'две недели — ждёт')
+  // B жива (видна в сети), но клиента так и не отправила (откатилась на старую копию): ждать дальше
+  // незачем — продажа уйдёт, и сервер решит
+  lanPeerSeen(a, { deviceId: B, now: NOW + 15 * DAY })
+  assert.equal(waitsForPeer(a, sale, NOW + 15 * DAY), false)
 })
 
 test('журнал: своё, ещё не принятое сервером, хранится для соседей долго; принятое — коротко (новая касса не применит давнее второй раз)', () => {

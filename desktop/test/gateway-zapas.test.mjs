@@ -190,3 +190,21 @@ test('пароль сменили на сервере, а касса сочла 
   assert.equal(p.chooser.reachable(), true, 'ответ сервера вернул кассу «на связь»')
 })
 
+test('опечатка в пароле без связи — отказ быстро: сервер ждём не дольше 4 секунд', async (tt) => {
+  const m = machine()
+  const first = start(m)
+  assert.equal((await first.login()).status, 201)
+  first.gw.logout()
+  first.stop()
+  m.wire.main = 'hang'
+  m.wire.spare = 'hang'
+  const p = start({ ...m, probeMs: 2000, pickWaitMs: 150 })
+  tt.after(p.stop)
+  await p.chooser.ready()
+  const t0 = Date.now()
+  const r = await p.req('POST', '/auth/login', { name: 'kassir', password: 'opechatka' })
+  assert.deepEqual([r.status, r.data.message], [401, 'Неверное имя или пароль'])
+  // Адрес «висит» 3 секунды (как сбой DNS), ждём не дольше 4
+  assert.ok(Date.now() - t0 < 4500, 'ждали ' + (Date.now() - t0) + ' мс')
+})
+
