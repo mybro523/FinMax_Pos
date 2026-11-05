@@ -843,7 +843,6 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
               note: ph.note,
               paidUntil: tjDate(ph.paidUntil),
               paidTime: tjTime(ph.paidUntil),
-              offlineDays: String(ph.offlineDays ?? 7),
               // Логотип меняется, только если его тронули в окне: иначе «Сохранить» его не касается
               logo: '',
               logoChanged: false,
@@ -874,8 +873,6 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
         <Kv label={t('Телефон')} value={ph.phone || '—'} />
         <Kv label={t('Город')} value={ph.city || '—'} />
         {ph.note && <Kv label={t('Примечание')} value={ph.note} />}
-        {/* Программа для Windows продаёт и без интернета, но подписку проверяет сервер */}
-        <Kv label={t('Касса работает без связи')} value={`${ph.offlineDays ?? 7} ${t('дн.')}`} />
         {ph.calledAt && (
           <Kv label={t('Последний звонок')} value={`${fmtDate(ph.calledAt)}${ph.callNote ? ' · ' + ph.callNote : ''}`} />
         )}
@@ -1023,12 +1020,6 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
             toast={toast}
             t={t}
           />
-          <div className="field"><label>{t('Касса работает без связи, дней')}</label>
-            <input type="number" min="1" max="30" step="1" inputMode="numeric" style={{ maxWidth: 120 }} value={edit.offlineDays}
-              onChange={(e) => setEdit({ ...edit, offlineDays: e.target.value })} data-testid="offline-days" />
-            <div className="tag-cat">{t('Программа для Windows продаёт и без интернета. Дольше этого срока без связи с сервером она не работает — пока не проверит подписку. От 1 до 30 дней.')}</div>
-          </div>
-
           <div className="note info" style={{ marginBottom: 14 }}>
             {t('Дату меняют, когда ошиблись при вводе, дают бесплатное продление или закрывают сразу. Обычную оплату лучше проводить кнопкой «Продлить» — она попадёт в историю оплат.')}
           </div>
@@ -1056,8 +1047,6 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
                         paidUntil: edit.paidUntil
                           ? new Date(`${edit.paidUntil}T${edit.paidTime || '23:59'}:00.000+05:00`).toISOString()
                           : undefined,
-                        // Пустое поле — число не трогаем; негодное сервер отвергнет с объяснением
-                        offlineDays: String(edit.offlineDays).trim() === '' ? undefined : Number(edit.offlineDays),
                         // Логотип: новая картинка или '' (убрать); не трогали — поле не отправляем
                         logo: edit.logoChanged ? edit.logo : undefined,
                       })

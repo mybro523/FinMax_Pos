@@ -4,7 +4,7 @@ import { AdminDbService } from '../admin/admin-db.service'
 import { LoginThrottle } from './throttle'
 import { AUTH_SECRET as SECRET } from '../common/config'
 import { hashPassword, verifyPassword, passwordProblem, isOutdatedHash } from './password'
-import { offlineDaysOf, subscriptionOf, subscriptionMessage } from '../admin/subscription'
+import { OFFLINE_DAYS_FOR_OLD_APPS, subscriptionOf, subscriptionMessage } from '../admin/subscription'
 import { mayChangeOwnPassword, NO_PASSWORD_CHANGE, permissionsOf } from './permissions'
 import { AccountCache } from '../admin/account-cache.service'
 import { PrismaService } from '../prisma/prisma.service'
@@ -139,9 +139,9 @@ export class AuthService {
         canWrite: sub.canWrite,
         warn: sub.warn,
         message: subscriptionMessage(sub, ph!.name),
-        // Сколько дней программа для Windows может работать без связи с сервером.
-        // Сайту это число ни к чему: он без связи не работает вовсе
-        offlineDays: offlineDaysOf(ph!),
+        // Срок работы без связи для программ до 1.6.5: с 1.6.5 срока нет, а прежние
+        // программы получают наибольшее число, которое понимают (см. admin/subscription.ts)
+        offlineDays: OFFLINE_DAYS_FOR_OLD_APPS,
       },
     }
   }
