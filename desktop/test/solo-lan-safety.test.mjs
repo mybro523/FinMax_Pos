@@ -199,7 +199,7 @@ test('главный сломался — его заменили, подняв 
   assert.equal(r1.gw.standalone.net().main.error, '')
 })
 
-test('касса не меняет сотрудников и чужие пароли — даже подделав запись; свой пароль меняет', async (tt) => {
+test('касса не меняет сотрудников и пароли и не проводит то, на что у сотрудника нет права, — даже подделав запись', async (tt) => {
   const time = { now: NOW }
   const { m } = await mainShop(time)
   tt.after(() => m.close())
@@ -222,14 +222,40 @@ test('касса не меняет сотрудников и чужие паро
   await forged('forge-2', 'user.update', [{ tbl: 'team_accounts', rowId: kassirId, action: 'put', data: { set: { role: 'founder' }, was: { role: 'cashier' } } }])
   // Новая роль
   await forged('forge-3', 'role.create', [{ tbl: 'team_roles', rowId: 'r-evil', action: 'put', data: { row: { name: 'Всё', permissions: '[]' } } }])
+  // «Переименовать во всех строках»: всех кассиров — во владельцев
+  await forged('forge-4', 'user.update', [{ tbl: 'team_accounts', rowId: kassirId, action: 'map', data: { pwChanged: true, col: 'role', from: 'cashier', to: 'founder' } }])
+  // Назвалась владельцем — и меняет «свой» пароль
+  q(
+    r1.db(),
+    `INSERT INTO lan_log (id, kind, origin, opId, type, accountId, createdAt, body, wide, redacted, state)
+     VALUES ('forge-5', 'op', ?, NULL, 'user.update', ?, ?, ?, 1, 0, 'own')`,
+  ).run(r1.gw.deviceId, ownerId, new Date(time.now).toISOString(), JSON.stringify({ effects: { docs: [], moves: [], debts: [], edits: { rows: [{ tbl: 'team_accounts', rowId: ownerId, action: 'put', data: { set: {}, was: {}, pwChanged: true, pwLan: evil } }], adj: [] } } }))
+  // Расход от имени кассира, у которого нет права на расходы
+  const exp = { id: 'exp-evil', amount: 500, date: new Date(time.now).toISOString(), category: 'Прочее', note: '' }
+  q(
+    r1.db(),
+    `INSERT INTO lan_log (id, kind, origin, opId, type, accountId, createdAt, body, wide, redacted, state)
+     VALUES ('forge-6', 'op', ?, NULL, 'expense', ?, ?, ?, 1, 0, 'own')`,
+  ).run(r1.gw.deviceId, kassirId, new Date(time.now).toISOString(), JSON.stringify({ effects: { docs: [{ kind: 'expense', body: exp }], moves: [], debts: [] } }))
+  // Продажа, к которой приложена правка цены товара
+  q(
+    r1.db(),
+    `INSERT INTO lan_log (id, kind, origin, opId, type, accountId, createdAt, body, wide, redacted, state)
+     VALUES ('forge-7', 'op', ?, NULL, 'sale', ?, ?, ?, 1, 0, 'own')`,
+  ).run(r1.gw.deviceId, kassirId, new Date(time.now).toISOString(), JSON.stringify({ effects: { docs: [], moves: [], debts: [], prices: [['nope', 1]] } }))
   await swap(r1)
   m.gw.logout()
   assert.equal((await m.login(OWNER, 'Vzlom-pass-1')).status, 401, 'пароль владельца не сменился')
   assert.equal((await m.login(OWNER, PASS)).status, 201)
   assert.equal(q(m.core, 'SELECT role FROM accounts WHERE id = ?').get(kassirId).role, 'cashier')
   assert.equal(q(m.db(), "SELECT COUNT(*) AS n FROM team_roles WHERE id = 'r-evil'").get().n, 0)
+  assert.equal(q(m.db(), "SELECT COUNT(*) AS n FROM team_accounts WHERE role = 'founder'").get().n, 1, 'владелец один')
+  assert.equal(q(m.db(), "SELECT COUNT(*) AS n FROM docs WHERE kind = 'expense'").get().n, 0, 'расход без права не лёг')
   const disc = (await m.req('GET', '/discrepancies')).data
-  assert.equal(disc.filter((d) => d.kind === 'notTaken').length, 3)
+  assert.equal(disc.filter((d) => d.kind === 'notTaken').length, 7)
+  // Свой пароль на кассе не меняют вовсе
+  assert.equal((await r1.login(KASSIR, KASSIR_PASS)).status, 201)
+  assert.equal((await r1.req('POST', '/auth/change-password', { oldPassword: KASSIR_PASS, newPassword: 'Novyi-pass-7' })).status, 403)
 })
 
 test('отключённая касса с главным больше не говорит и за другую кассу себя не выдаст', async (tt) => {

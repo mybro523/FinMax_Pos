@@ -262,7 +262,10 @@ export default function Settings() {
                   умолчанию нельзя: пароль ему выдаёт владелец). Сервер проверяет то же самое */}
               {!can('profile.password') && (
                 <div className="note info mt" style={{ maxWidth: 640 }}>
-                  <LuKeyRound size={14} style={{ verticalAlign: '-2px' }} /> {t('Пароль меняет владелец в разделе «Сотрудники».')}
+                  <LuKeyRound size={14} style={{ verticalAlign: '-2px' }} />{' '}
+                  {user?.register
+                    ? t('Пароль меняют на главном компьютере магазина — касса получит новый пароль при обмене.')
+                    : t('Пароль меняет владелец в разделе «Сотрудники».')}
                 </div>
               )}
               {can('profile.password') && <div className="panel mt" data-tour="set.password" style={{ maxWidth: 640 }}>

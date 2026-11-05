@@ -143,6 +143,9 @@ export const MESSAGES = {
   invMainOnly: 'Пересчёт и остаток товара меняют на главном компьютере магазина.',
   regNoUser: 'Сотрудника этой операции на главном компьютере нет или он заблокирован.',
   sheetTwice: 'Лист пересчёта уже применён.',
+  regUnknownOp: 'Главный компьютер такую операцию с кассы не принимает — обновите программу на кассе до версии главного.',
+  regBadOp: 'Операция с кассы повреждена или изменена — главный компьютер её не принял.',
+  pwOnMain: 'Пароль меняют на главном компьютере магазина — касса получит новый пароль при обмене.',
   noRights: 'Недостаточно прав',
   // Сверить оплату не с чем: зашифрованной записи о проверке сервером нет (её стёрли, или
   // проверки на этом компьютере не было) — работа после проверки (1.6.5, gateway withTerms)
@@ -1517,6 +1520,8 @@ export function createGateway({
   // сотрудника (как владелец меняет пароль в «Сотрудниках»), принимая её сразу
   const soloPwFails = new Map()
   async function soloChangePassword(req, acc) {
+    // Касса магазина (1.7.0): пароль меняют на главном компьютере — касса получит его при обмене
+    if (isRegister()) return refuse(403, MESSAGES.pwOnMain)
     if (!(acc.role === 'founder' || hasPerm(acc, 'profile.password'))) return refuse(403, MESSAGES.noPasswordChange)
     const oldPw = String(req.body?.oldPassword ?? '')
     const newPw = String(req.body?.newPassword ?? '')
@@ -1902,20 +1907,6 @@ export function createGateway({
     }
   }
 
-  // Главный: пароль, заданный сотрудником на кассе себе (пришёл с операцией), — во вход главного.
-  // С этой минуты нынешний пароль сотрудника известен здесь (pwLearned): перенос сотрудников во
-  // вход его не сотрёт
-  function soloPeerPasswords(ph, list) {
-    const key = lanKeyOf(ph)
-    for (const p of list) {
-      const v = pwFromLan(key, p.pwLan)
-      const sealedPw = v ? seal(v) : null
-      if (!sealedPw) continue
-      q(core, 'UPDATE accounts SET verifier = ?, localPw = NULL, prevVerifier = NULL WHERE id = ? AND pharmacyCode = ?').run(sealedPw, p.id, STANDALONE_CODE)
-      pwLearned(ph.db, p.id)
-    }
-  }
-
   // ── Главный: что касса вправе прислать ──
   // Касса говорит только за себя и от имени своего сотрудника (есть здесь и не заблокирован).
   // Сотрудников, роли и пересчёт остатка меняет только главный — кроме своего пароля: его меняют и
@@ -1929,22 +1920,82 @@ export function createGateway({
       return null
     }
   }
+  // Какие операции касса вправе прислать: вид → права (любое из них) и что операция может нести:
+  // документы каких видов (docs), правки каких таблиц (tbls), правку документа какого вида (edoc),
+  // переименование во всех строках (map), цены и упаковку из прихода (prices). Сотрудники, роли,
+  // пароли и пересчёт меняют только на главном; неизвестную операцию (касса другой версии) главный
+  // не берёт. Кто сделал операцию, касса называет сама — права проверяются по этому сотруднику
+  const REG_OPS = {
+    sale: { p: ['pos.sell'], docs: ['sale'] },
+    return: { p: ['returns.create'], docs: ['return', 'writeoff'] },
+    'shift.open': { p: ['shift.open'], docs: ['shift'] },
+    'shift.close': { p: ['shift.open'], docs: ['shift'] },
+    'cash.move': { p: ['shift.cash'], docs: ['cashmove'] },
+    'cashMove.delete': { p: ['shift.others'], edoc: 'cashmove' },
+    'customer.create': { p: ['customers.create'] },
+    'debt.pay': { p: ['debts.pay'], docs: ['payment'] },
+    'deferred.add': { p: ['pos.defer', 'deferred.manage'] },
+    'deferred.remove': { p: ['pos.defer', 'deferred.manage', 'pos.sell'] },
+    writeoff: { p: ['writeoffs.create'], docs: ['writeoff'] },
+    arrival: { p: ['arrivals.create'], docs: ['arrival'], tbls: ['products'], prices: true },
+    'arrival.update': { p: ['arrivals.edit'], edoc: 'arrival' },
+    'arrival.delete': { p: ['arrivals.edit'], edoc: 'arrival' },
+    'supplier.return': { p: ['arrivals.return'], docs: ['supplierreturn'] },
+    'supplierReturn.delete': { p: ['arrivals.edit'], edoc: 'supplierreturn' },
+    expense: { p: ['expenses.create'], docs: ['expense'] },
+    'expense.update': { p: ['expenses.edit'], edoc: 'expense' },
+    'expense.delete': { p: ['expenses.edit'], edoc: 'expense' },
+    income: { p: ['incomes.create'], docs: ['income'] },
+    'income.update': { p: ['incomes.edit'], edoc: 'income' },
+    'income.delete': { p: ['incomes.edit'], edoc: 'income' },
+    'product.create': { p: ['products.create'], tbls: ['products'] },
+    'product.update': { p: ['products.edit'], tbls: ['products'] },
+    'product.delete': { p: ['products.delete'], tbls: ['products'] },
+    'category.create': { p: ['settings.categories'], tbls: ['categories'] },
+    'category.update': { p: ['settings.categories'], tbls: ['categories', 'products'], map: true },
+    'category.delete': { p: ['settings.categories'], tbls: ['categories', 'products'], map: true },
+    'productType.create': { p: ['settings.categories'], tbls: ['product_types'] },
+    'productType.update': { p: ['settings.categories'], tbls: ['product_types', 'products'], map: true },
+    'productType.delete': { p: ['settings.categories'], tbls: ['product_types', 'products'], map: true },
+    'payService.create': { p: ['settings.payServices'], tbls: ['pay_services'] },
+    'payService.delete': { p: ['settings.payServices'], tbls: ['pay_services'] },
+    'expenseCategory.create': { p: ['settings.expenseCategories'], tbls: ['expense_categories'] },
+    'expenseCategory.delete': { p: ['settings.expenseCategories'], tbls: ['expense_categories'] },
+    'incomeCategory.create': { p: ['settings.incomeCategories'], tbls: ['income_categories'] },
+    'incomeCategory.delete': { p: ['settings.incomeCategories'], tbls: ['income_categories'] },
+    'supplier.create': { p: ['suppliers.edit'], tbls: ['suppliers'] },
+    'supplier.update': { p: ['suppliers.edit'], tbls: ['suppliers'] },
+    'supplier.delete': { p: ['suppliers.delete'], tbls: ['suppliers'] },
+    'supplier.pay': { p: ['suppliers.pay'], docs: ['supplierpayment'] },
+    'supplierPayment.delete': { p: ['suppliers.pay'], edoc: 'supplierpayment' },
+  }
   function registerOpProblem(e) {
     const type = String(e.type || '')
     const acc = typeof e.accountId === 'string' ? accountById(core, e.accountId) : null
     if (!acc || acc.pharmacyCode !== STANDALONE_CODE || acc.blocked) return MESSAGES.regNoUser
-    if (/^(role|staff|inventory)\./.test(type) || type === 'user.create' || type === 'user.delete') return MESSAGES.onMainOnly
+    if (/^(user|role|staff)\./.test(type)) return MESSAGES.onMainOnly
+    if (/^inventory\./.test(type)) return MESSAGES.invMainOnly
+    const spec = REG_OPS[type]
+    if (!spec) return MESSAGES.regUnknownOp
+    if (!(acc.role === 'founder' || hasPerm(acc, ...spec.p))) return MESSAGES.noRights
     const fx = parseFx(e.body)
-    if (!fx) return MESSAGES.pairBroken
+    if (!fx) return MESSAGES.regBadOp
+    // Сотрудники, роли, пароли — только на главном: ни одной такой правки с кассы
     const rows = Array.isArray(fx.edits?.rows) ? fx.edits.rows : []
-    const team = rows.filter((r) => TEAM_TBLS.has(r?.tbl))
-    if (type === 'user.update') {
-      const r = team[0]
-      const ownPw =
-        rows.length === 1 && team.length === 1 && r.tbl === 'team_accounts' && r.rowId === e.accountId && r.data?.pwChanged === true && !Object.keys(r.data?.set || {}).length
-      if (!ownPw) return MESSAGES.onMainOnly
-    } else if (team.length) return MESSAGES.onMainOnly
+    for (const r of rows) {
+      const tbl = String(r?.tbl || '')
+      if (TEAM_TBLS.has(tbl)) return MESSAGES.onMainOnly
+      if (r?.data && typeof r.data === 'object' && ('pw' in r.data || 'pwLan' in r.data || 'pwChanged' in r.data)) return MESSAGES.onMainOnly
+      if (r?.action === 'map' && !spec.map) return MESSAGES.regBadOp
+      if (tbl.startsWith('doc:')) {
+        if (tbl.slice(4) !== spec.edoc) return MESSAGES.regBadOp
+      } else if (!(spec.tbls || []).includes(tbl)) return MESSAGES.regBadOp
+    }
     if ((fx.moves || []).some((m) => m?.kind === 'count')) return MESSAGES.invMainOnly
+    if ((fx.docs || []).some((d) => !(spec.docs || []).includes(d?.kind))) return MESSAGES.regBadOp
+    if (!spec.prices && ((fx.prices || []).length || (fx.pieces || []).length || (fx.packs || []).length)) return MESSAGES.regBadOp
+    if (fx.customer && !['customer.create'].includes(type)) return MESSAGES.regBadOp
+    if ((fx.deferred || fx.deferredRemove) && !/^deferred\./.test(type)) return MESSAGES.regBadOp
     return ''
   }
   function fromRegister(peerId, entries) {
@@ -2007,10 +2058,8 @@ export function createGateway({
     if (!r) return []
     const team = r.ops.some((o) => /^(user|role)\./.test(o.type || ''))
     if (team) teamToCore(ph)
-    // Пароль — только свой: сотрудник на кассе сменил пароль себе
-    const pw = r.pw.filter((p) => p.id === p.accountId)
-    if (pw.length) soloPeerPasswords(ph, pw)
-    if (team || pw.length) {
+    // Пароли с касс не принимаются вовсе (их меняют на главном): сюда они не доходят
+    if (team) {
       try {
         mainLogBase(ph.db, { logins: soloLoginsFor(ph), deviceId, now: clock.now() })
       } catch (e) {
@@ -2021,7 +2070,7 @@ export function createGateway({
     for (const o of r.ops) for (const d of o.docs || []) if (KIND_KEY_ALL[d.kind]) keys.add(KIND_KEY_ALL[d.kind])
     if (r.extras.some((d) => d.kind === 'supplierpayment')) keys.add('supplierPayments')
     if (r.extras.some((d) => d.kind === 'writeoff')) keys.add('writeoffs')
-    if (team || pw.length) keys.add('users')
+    if (team) keys.add('users')
     if (r.short.length || r.notTaken.length) keys.add('discrepancies')
     return [...keys]
   }

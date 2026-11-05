@@ -90,22 +90,23 @@ test('кассы по сети: подключение по коду, вход �
   // Логотип — тоже на главном
   assert.equal((await r1.req('POST', '/shop/logo', { logo: PNG })).status, 403)
 
-  // Свой пароль на кассе меняют (владелец — всегда; кассир — если владелец разрешил): новый действует
-  // сразу, главный и другие кассы узнают его с обменом
-  assert.equal((await r1.req('POST', '/auth/change-password', { oldPassword: PASS, newPassword: 'Novyi-pass-5' })).status, 201)
-  r1.gw.logout()
-  assert.equal((await r1.login(OWNER, 'Novyi-pass-5')).status, 201, 'новый пароль — сразу')
-  await swap(r1)
+  // Пароль на кассе не меняют — даже свой: только на главном (касса — не место, где решают о
+  // паролях). Новый пароль с главного — на кассах после обмена
+  const own = await r1.req('POST', '/auth/change-password', { oldPassword: PASS, newPassword: 'Novyi-pass-5' })
+  assert.equal(own.status, 403)
+  assert.equal(own.data.message, MESSAGES.pwOnMain)
   m.gw.logout()
-  assert.equal((await m.login(OWNER, 'Novyi-pass-5')).status, 201, 'главный узнал новый пароль')
+  assert.equal((await m.login()).status, 201)
+  assert.equal((await m.req('POST', '/auth/change-password', { oldPassword: PASS, newPassword: 'Novyi-pass-5' })).status, 201)
   m.gw.logout()
   assert.equal((await m.login(OWNER, PASS)).status, 401)
+  await swap(r1)
   await swap(r2)
-  r2.gw.logout()
-  assert.equal((await r2.login(OWNER, 'Novyi-pass-5')).status, 201, 'и другая касса')
-  // Касса, сменившая пароль, после основы главного входит им же
-  r1.gw.logout()
-  assert.equal((await r1.login(OWNER, 'Novyi-pass-5')).status, 201)
+  for (const r of [r1, r2]) {
+    r.gw.logout()
+    assert.equal((await r.login(OWNER, PASS)).status, 401, 'прежний пароль на кассе больше не подходит')
+    assert.equal((await r.login(OWNER, 'Novyi-pass-5')).status, 201, 'новый пароль главного — на кассе')
+  }
 
   // Логотип с главного — на кассы (чеки, экран покупателя)
   assert.equal((await m.login(OWNER, 'Novyi-pass-5')).status, 201)

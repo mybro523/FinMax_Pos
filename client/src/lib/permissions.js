@@ -121,9 +121,9 @@ export function permissionsOf(user) {
 }
 
 // Достаточно любого из перечисленных прав
-// Касса магазина без интернета (1.7.0): удалить покупателя и пересчитать остаток можно только на
-// главном компьютере — даже владельцу. Кнопок этого на кассе нет
-export const MAIN_ONLY = new Set(['customers.delete', 'inventory.count', 'inventory.apply'])
+// Касса магазина без интернета (1.7.0): удалить покупателя, пересчитать остаток и сменить свой
+// пароль можно только на главном компьютере — даже владельцу. Кнопок этого на кассе нет
+export const MAIN_ONLY = new Set(['customers.delete', 'inventory.count', 'inventory.apply', 'profile.password'])
 export function can(user, ...keys) {
   if (!user) return false
   const list = user.register ? keys.filter((k) => !MAIN_ONLY.has(k)) : keys
