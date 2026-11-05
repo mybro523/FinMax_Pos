@@ -4,10 +4,14 @@ import { Public } from './auth/decorators'
 // Отпечаток запущенной сборки. Без него после выкладки невозможно понять, работает
 // уже новый код или платформа ещё собирает старый, — а по внешним признакам сервер
 // в обоих случаях отвечает одинаково.
-// Номер коммита подставляет Railway; при локальном запуске его нет.
+// Номер коммита подставляет площадка: свой сервер (deploy/ovh, GIT_COMMIT_SHA) или Railway;
+// при локальном запуске его нет.
 const BUILD = {
+  // НЕ ПЕРЕИМЕНОВЫВАТЬ: по { status: 'ok', service: 'apteka-api' } сайт и программа для Windows
+  // (с 1.6.5) узнают свой сервер, выбирая основной или запасной адрес (client/src/db/apiBase.js,
+  // desktop/src/net.mjs healthProbe). Другое имя — и все кассы сочтут сервер недоступным
   service: 'apteka-api',
-  commit: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || 'dev',
+  commit: (process.env.GIT_COMMIT_SHA || process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || 'dev',
   startedAt: new Date().toISOString(),
 }
 

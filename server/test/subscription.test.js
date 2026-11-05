@@ -184,3 +184,28 @@ test('срок работы кассы без связи: неделя по ум
   assert.equal(offlineDaysOf({ offlineDays: 365 }), 30)
   assert.equal(offlineDaysOf({ offlineDays: 2.9 }), 2)
 })
+
+// ── 1.6.5: срока без связи нет ──
+// Касса 1.6.5 не считает дни без связи вовсе. Прежние программы считают — им сервер отдаёт
+// наибольшее число, которое они понимают (30), что бы ни стояло в настройке магазина
+
+test('1.6.5: программам до 1.6.5 сервер отдаёт 30 дней без связи — при любой настройке магазина', () => {
+  const { AuthService } = require('../dist/auth/auth.service')
+  const svc = new AuthService({}, {})
+  const future = new Date(Date.now() + 40 * DAY)
+  for (const offlineDays of [7, 1, 30, undefined]) {
+    const v = svc.view({ id: 'a1', login: 'kassir', role: 'cashier', pharmacy: { code: 'shifo', name: 'Шифо', paidUntil: future, trial: false, blocked: false, offlineDays } })
+    assert.equal(v.subscription.offlineDays, 30, 'настройка ' + offlineDays)
+    assert.equal(v.subscription.canWrite, true)
+  }
+})
+
+test('1.6.5: /health — слово нашего сервера, по нему кассы и сайт выбирают адрес: status ok и service apteka-api', () => {
+  const { AppController } = require('../dist/app.controller')
+  const c = new AppController()
+  for (const v of [c.health(), c.root()]) {
+    assert.equal(v.status, 'ok')
+    assert.equal(v.service, 'apteka-api', 'другое имя — и все кассы 1.6.5 сочтут сервер недоступным')
+  }
+})
+

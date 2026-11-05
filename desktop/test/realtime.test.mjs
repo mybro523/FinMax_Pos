@@ -131,3 +131,33 @@ test('вышли из программы — после нового входа 
   assert.equal(sockets.length, 2)
   assert.deepEqual(sockets[1].opts.auth, { token: 'ключ-2' })
 })
+
+// ── Адрес сервера сменился (1.6.5: основной ↔ запасной) ──
+
+test('адрес сервера сменился — соединение переоткрывается на новом, тот же — не трогается', () => {
+  const { io, sockets } = fakeIo()
+  let origin = 'https://main.example'
+  const session = { get: () => 'ключ-1' }
+  const rt = createRealtime({ io, origin: () => origin, session, send: () => {} })
+  rt.start()
+  assert.equal(sockets[0].origin, 'https://main.example')
+  rt.originChanged()
+  assert.equal(sockets.length, 1, 'адрес прежний — второе соединение не открывается')
+
+  origin = 'https://spare.example'
+  rt.originChanged()
+  assert.equal(sockets.length, 2)
+  assert.equal(sockets[0].closed, true, 'прежнее соединение закрыто')
+  assert.equal(sockets[1].origin, 'https://spare.example')
+  assert.equal(sockets[1].opts.auth.token, 'ключ-1')
+
+  // После остановки смена адреса соединения не открывает
+  rt.stop()
+  origin = 'https://main.example'
+  rt.originChanged()
+  assert.equal(sockets.length, 2)
+  // А новый вход открывает его по нынешнему адресу
+  rt.start()
+  assert.equal(sockets[2].origin, 'https://main.example')
+})
+

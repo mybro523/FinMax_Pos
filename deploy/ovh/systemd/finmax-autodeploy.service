@@ -1,0 +1,8 @@
+[Unit]
+Description=FinMax POS: новая версия сервера с GitHub (ветка main)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash /srv/finmax/repo/deploy/ovh/autodeploy.sh

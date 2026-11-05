@@ -86,6 +86,18 @@
     text('idle-shop', shop)
     show('idle-shop', !!shop)
     text('idle-welcome', label(s, 'welcome'))
+    // Логотип магазина (1.6.4) — на приветствии над названием. Картинку присылает сама
+    // программа (только data URL PNG или JPEG) и только когда она сменилась: нет поля logo —
+    // остаётся прежний; пустая строка — логотипа нет, как прежде
+    if (typeof s.logo === 'string') {
+      var logo = /^data:image\/(?:png|jpeg);base64,/.test(s.logo) ? s.logo : ''
+      var img = $('idle-logo')
+      if (img) {
+        if (logo && img.getAttribute('src') !== logo) img.setAttribute('src', logo)
+        if (!logo && img.hasAttribute('src')) img.removeAttribute('src')
+        img.hidden = !logo
+      }
+    }
     text('bar-test', label(s, 'test'))
     show('bar-test', view === 'test')
     // Полоса с названием — пока покупатель у кассы; в ожидании название и так во весь экран

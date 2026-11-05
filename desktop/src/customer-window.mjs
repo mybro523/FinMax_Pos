@@ -8,7 +8,7 @@
 //
 // Электрон передаётся снаружи (BrowserWindow, screen, ipcMain) — модуль проверяется
 // обычными тестами на заглушках.
-import { pickDisplay, sanitizeCustomer, sanitizeScreenState } from './customer-screen.mjs'
+import { pickDisplay, sanitizeCustomer, sanitizeScreenState, screenLogo } from './customer-screen.mjs'
 
 export const CUSTOMER_TITLE = 'FinMax POS — экран покупателя'
 // Сколько держится проба из «Настроек»
@@ -22,7 +22,7 @@ export const SETTLE_MS = 500
 // точку-две — это то же самое
 const near = (a, b) => Math.abs(a.x - b.x) <= 2 && Math.abs(a.y - b.y) <= 2 && Math.abs(a.width - b.width) <= 2 && Math.abs(a.height - b.height) <= 2
 
-export function createCustomerScreen({ BrowserWindow, screen, ipcMain, ses, settings, mainWindow, trusted, allowed, activeRole, preload, url, isOurs, dev = false, log, timers = { set: setTimeout, clear: clearTimeout } }) {
+export function createCustomerScreen({ BrowserWindow, screen, ipcMain, ses, settings, mainWindow, trusted, allowed, activeRole, preload, url, isOurs, dev = false, log, timers = { set: setTimeout, clear: clearTimeout }, logo = () => '' }) {
   let win = null
   let state = sanitizeScreenState(null)
   let testTimer = null
@@ -48,8 +48,19 @@ export function createCustomerScreen({ BrowserWindow, screen, ipcMain, ses, sett
       return []
     }
   }
+  // Логотип магазина (1.6.4) программа добавляет сама: окну кассы незачем пересылать картинку.
+  // И экрану — только когда она сменилась: корзина меняется с каждым товаром, а картинка
+  // (до сотен килобайт) — раз в год. sentLogo — что уже показано (null — неизвестно: окно
+  // новое или страница перезагрузилась). Нет поля logo — страница оставляет прежний
+  let sentLogo = null
+  const withLogo = (s) => {
+    sentLogo = screenLogo(logo())
+    return { ...s, logo: sentLogo }
+  }
   const send = (s) => {
-    if (alive()) win.webContents.send('customer:state', s)
+    if (!alive()) return
+    const now = screenLogo(logo())
+    win.webContents.send('customer:state', now === sentLogo ? s : withLogo(s))
   }
 
   function close() {
@@ -120,6 +131,8 @@ export function createCustomerScreen({ BrowserWindow, screen, ipcMain, ses, sett
       },
     })
     const own = win
+    // Новая страница — логотипа на ней ещё нет
+    sentLogo = null
     own.setAlwaysOnTop(true, 'screen-saver')
     own.once('ready-to-show', () => {
       if (own.isDestroyed()) return
@@ -134,6 +147,7 @@ export function createCustomerScreen({ BrowserWindow, screen, ipcMain, ses, sett
     own.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     own.webContents.on('render-process-gone', (_e, d) => {
       log?.warn?.('экран покупателя закрылся', d?.reason || '')
+      sentLogo = null
       if (!own.isDestroyed() && d?.reason !== 'clean-exit') own.reload()
     })
     own.loadURL(url).catch((e) => log?.warn?.('экран покупателя не открылся', e))
@@ -157,7 +171,7 @@ export function createCustomerScreen({ BrowserWindow, screen, ipcMain, ses, sett
   // Своё ли окно: только страница экрана покупателя
   const fromScreen = (event) => alive() && event.sender === win.webContents && isOurs(event.senderFrame?.url || '')
 
-  ipcMain.handle('customer:ready', (event) => (fromScreen(event) ? state : null))
+  ipcMain.handle('customer:ready', (event) => (fromScreen(event) ? withLogo(state) : null))
   ipcMain.handle('customer:update', (event, raw) => {
     if (!trusted(event)) return false
     state = sanitizeScreenState(raw)
@@ -203,5 +217,11 @@ export function createCustomerScreen({ BrowserWindow, screen, ipcMain, ses, sett
     }, MOVE_MS)
   }
 
-  return { place, close, config, mainMoved, window: () => (alive() ? win : null), state: () => state }
+  // Логотип магазина поставили, заменили или убрали — показать сразу (проба из «Настроек»
+  // досмотрится, а потом покажется уже с новым логотипом)
+  function refresh() {
+    if (!testTimer) send(state)
+  }
+
+  return { place, close, config, mainMoved, refresh, window: () => (alive() ? win : null), state: () => state }
 }

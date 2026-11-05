@@ -8,10 +8,11 @@
 // короткий список функций (preload.cjs). Ни к диску, ни к сети, ни к системе
 // у него доступа нет — даже если в интерфейс попадёт чужой сценарий, дальше окна
 // он не уйдёт.
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerMonitor, protocol, safeStorage, screen, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, powerMonitor, protocol, safeStorage, screen, session, shell } from 'electron'
 import Database from 'better-sqlite3'
 import updaterPackage from 'electron-updater'
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import nodeHttp from 'node:http'
 import nodeHttps from 'node:https'
@@ -23,7 +24,8 @@ import { fileURLToPath } from 'node:url'
 import { io } from 'socket.io-client'
 import { copyTime, createBackups, hostFolderOf, openOrRestore } from './backup.mjs'
 import { chooseDiskFolder, diskDue as diskDueOf, diskLabel, DISK_KEEP, DISK_ROOTS, writeDiskCopy } from './disk-backup.mjs'
-import { readBuildConfig, resolveApiUrl, resolveLicenceKey, resolveUpdateFeed, serverOrigin } from './config.mjs'
+import { createBaseChooser } from './apibase.mjs'
+import { readBuildConfig, resolveApiFallback, resolveApiUrl, resolveLicenceKey, resolveUpdateFeed, serverOrigin } from './config.mjs'
 import { machineIdOf, readMachineGuid } from './machine.mjs'
 import { computerRawOf, formatComputer } from './local/licence-code.mjs'
 import { createGateway } from './gateway.mjs'
@@ -36,8 +38,10 @@ import { lastFloor, lastSeen } from './local/licence.mjs'
 import { CORE_SCHEMA, PHARMACY_SCHEMA } from './local/schema.mjs'
 import { createLog } from './log.mjs'
 import { createFetch } from './fetch-compat.mjs'
+import { healthProbe } from './net.mjs'
 import { LITE_ARG, liteState, sanitizeLite } from './lite.mjs'
 import { layoutTicket, renderTicket } from './print/escpos.mjs'
+import { cleanLogo, logoTarget, monoToBgra, paperDots, toMono } from './print/logo.mjs'
 import { pageRequest, pdfOptions, printerKind, printOptions } from './print/page.mjs'
 import { labelPrintOptions, labelSize } from './print/labels.mjs'
 import { runPowerShell } from './print/powershell.mjs'
@@ -156,6 +160,7 @@ async function start() {
   const built = readBuildConfig(join(ROOT, 'build-config.json'))
   const apiUrl = resolveApiUrl({ packaged: app.isPackaged, env: process.env, built })
   if (!apiUrl) log.error('адрес сервера не задан — запросы к серверу работать не будут')
+  const apiFallback = apiUrl ? resolveApiFallback({ packaged: app.isPackaged, env: process.env, built, apiUrl }) : ''
   const settings = createSettings({ file: join(userData, 'settings.json'), fs })
 
   // ── Облегчённый вид (lite.mjs) ──
@@ -278,12 +283,36 @@ async function start() {
   })
   const clockTimer = setInterval(() => clock.persist(), 30000)
 
+  // ── Чем ходить на сервер ──
+  // net.fetch идёт через сетевую часть Chromium: она знает про системный прокси
+  // и сертификаты Windows. В магазине, где интернет раздаётся через прокси, обычный
+  // запрос Node просто не дошёл бы до сервера.
+  // На старом движке (Windows 7 и 8) net.fetch нет — тот же запрос через net.request
+  const fetchImpl = createFetch({ net, https: nodeHttps, http: nodeHttp, log })
+
+  // ── Основной или запасной адрес сервера (1.6.5) ──
+  // Оба адреса спрашиваются сразу при запуске, в фоне: к входу кассира адрес уже выбран.
+  // Сервер молчит по обоим — касса узнаёт об этом сразу и работает сама, без 10–15 секунд
+  // ожидания на каждом входе (apibase.mjs, net.mjs)
+  const chooser = apiFallback ? createBaseChooser({ primary: apiUrl, fallback: apiFallback, probe: healthProbe(fetchImpl) }) : null
+  if (chooser) {
+    log.info(`адреса сервера: ${apiUrl}, запасной ${apiFallback}`)
+    chooser.onChange((base) => {
+      log.info(`сервер: работа через ${base === apiUrl ? 'основной' : 'запасной'} адрес ${base}`)
+      realtime.originChanged()
+    })
+    chooser.ready().then(() => {
+      if (chooser.reachable() === false) log.warn('сервер не отвечает ни по одному адресу — касса работает без связи')
+    })
+  }
+  const serverBase = () => (chooser ? chooser.current() : apiUrl)
+
   // ── Постоянное соединение с сервером ──
   // События сервера идут не в окно, а в обмен с сервером: «раздел изменился»
   // означает «забери его в локальную базу», и уже она сообщит окну.
   const realtime = createRealtime({
     io,
-    origin: serverOrigin(apiUrl),
+    origin: () => serverOrigin(serverBase()),
     session: store,
     send: (type, payload) => gateway.serverEvent(type, payload),
   })
@@ -320,13 +349,12 @@ async function start() {
   }
 
   // ── Кто отвечает окну: локальная база или сервер ──
-  // net.fetch идёт через сетевую часть Chromium: она знает про системный прокси
-  // и сертификаты Windows. В магазине, где интернет раздаётся через прокси, обычный
-  // запрос Node просто не дошёл бы до сервера.
+  // Логотип магазина сменился → экран покупателя (заводится ниже и подставит себя сюда)
+  let logoChanged = () => {}
   const gateway = createGateway({
     apiUrl,
-    // На старом движке (Windows 7 и 8) net.fetch нет — тот же запрос через net.request
-    fetchImpl: createFetch({ net, https: nodeHttps, http: nodeHttp, log }),
+    chooser,
+    fetchImpl,
     session: store,
     core,
     // Отпечаток пароля для входа без интернета шифруется средствами Windows, как
@@ -338,7 +366,15 @@ async function start() {
     log,
     openFile: (file, name) => opening(name, PHARMACY_SCHEMA)(file),
     emit: (type, payload) => toWindow(type, type === 'status' ? fullStatus(payload) : payload),
-    onSession: () => realtime.sessionChanged(),
+    // Вход и выход меняют и логотип на экране покупателя (другой магазин, или кассир сменился, а
+    // корзина та же и окно кассы ничего нового покупателю не прислало)
+    onSession: () => {
+      realtime.sessionChanged()
+      logoChanged()
+    },
+    // Логотип магазина сменился — экран покупателя показывает новый сразу (сам экран
+    // заводится ниже, поэтому — через переменную)
+    onLogo: () => logoChanged(),
     standalone: { publicKey: licenceKey, computerRaw, computerCode: computerRaw ? formatComputer(computerRaw) : '' },
   })
   log.info(`касса ${gateway.deviceId}`)
@@ -605,6 +641,7 @@ async function start() {
     clearTimeout(backupFirst)
     updater.stop()
     clock.persist()
+    chooser?.stop()
     realtime.stop()
     gateway.close()
     try {
@@ -859,11 +896,45 @@ async function start() {
   // и уходят по сети или в очередь печати Windows. Принтер не настроен — отвечаем
   // «system», и окно печатает как на сайте, через окно печати.
   let printSeq = 0
+
+  // ── Логотип магазина на ленте (1.6.4) ──
+  // Картинку хранит шлюз (gateway.shopLogo — и без интернета); здесь она раскрывается,
+  // вписывается в ширину ленты и становится чёрными точками (print/logo.mjs). Готовое
+  // помним: чек печатается после каждой продажи, а логотип меняется раз в год.
+  // preview — та же полоса картинкой PNG для экрана печати
+  let tapeLogoMemo = { key: '', logo: null }
+  function tapeLogo(width) {
+    const url = cleanLogo(gateway.shopLogo())
+    if (!url) return null
+    const dots = paperDots(width)
+    const key = dots + ':' + createHash('sha1').update(url).digest('hex')
+    if (tapeLogoMemo.key === key) return tapeLogoMemo.logo
+    let logo = null
+    try {
+      const img = nativeImage.createFromDataURL(url)
+      if (img.isEmpty()) log.warn('логотип для ленты не раскрылся — чек печатается без него')
+      else {
+        const src = img.getSize()
+        const size = logoTarget(src.width, src.height, dots)
+        const small = img.resize({ width: size.width, height: size.height, quality: 'best' })
+        const real = small.getSize()
+        // toBitmap отдаёт BGRA с цветом, уже умноженным на прозрачность
+        const mono = toMono(small.toBitmap(), real.width, real.height, dots, { order: 'bgra', premultiplied: true })
+        const preview = nativeImage.createFromBitmap(monoToBgra(mono), { width: mono.width, height: mono.height }).toDataURL()
+        logo = { mono, preview }
+      }
+    } catch (e) {
+      log.warn('логотип для ленты не подготовлен: ' + (e?.message || e))
+    }
+    tapeLogoMemo = { key, logo }
+    return logo
+  }
+
   async function printTicket(ticket) {
     const cfg = settings.get().print
     if (cfg.mode === 'system') return { ok: true, mode: 'system' }
     try {
-      const bytes = renderTicket(ticket, cfg)
+      const bytes = renderTicket(ticket, { ...cfg, logo: tapeLogo(cfg.width)?.mono })
       if (cfg.mode === 'network') await sendNetwork({ net: nodeNet, host: cfg.host, port: cfg.port, bytes })
       else {
         await sendWindows({
@@ -906,8 +977,9 @@ async function start() {
       docAt: 1,
       rows: [{ name: 'Проверка русских букв: АБВГД абвгд ЁЖЗ', sub: '1 шт × 1', value: '1 сомони' }],
       totals: [{ label: 'Итого', value: '1 сомони', big: true }],
-      tail: ['Если этот текст читается — принтер настроен верно', ...(shop ? [shop] : [])],
+      tail: ['Если этот текст читается — принтер настроен верно', ...(shop ? [shop] : []), 'www.finmaxpos.tj'],
       signAt: shop ? 1 : -1,
+      siteAt: shop ? 2 : 1,
     })
   })
 
@@ -936,7 +1008,9 @@ async function start() {
   ipcMain.handle('print:tape', (event, req) => {
     if (!trusted(event) || !gateway.activeRole()) return { ok: false, error: 'Требуется вход в систему' }
     const cfg = settings.get().print
-    return { ok: true, lines: layoutTicket(req?.ticket, { width: lentaWidth(req?.width, cfg) }) }
+    const width = lentaWidth(req?.width, cfg)
+    const logo = tapeLogo(width)
+    return { ok: true, lines: [...(logo ? [{ image: logo.preview }] : []), ...layoutTicket(req?.ticket, { width })] }
   })
   ipcMain.handle('print:raw', async (event, req) => {
     if (!trusted(event) || !gateway.activeRole()) return { ok: false, error: 'Требуется вход в систему' }
@@ -944,7 +1018,8 @@ async function start() {
     if (!printer) return { ok: false, error: 'Не удалось отправить задание на принтер.' }
     const cfg = settings.get().print
     try {
-      const bytes = renderTicket(req?.ticket, { width: lentaWidth(req?.width, cfg), codepage: cfg.codepage, cut: cfg.cut, drawer: false })
+      const width = lentaWidth(req?.width, cfg)
+      const bytes = renderTicket(req?.ticket, { width, codepage: cfg.codepage, cut: cfg.cut, drawer: false, logo: tapeLogo(width)?.mono })
       // Копии — отдельными чеками: каждый со своим отрезом
       for (let n = 0; n < copies; n++) {
         await sendWindows({
@@ -1125,7 +1200,10 @@ async function start() {
     isOurs,
     dev: DEV,
     log,
+    // Логотип магазина (1.6.4): на приветствии, над названием магазина
+    logo: () => gateway.shopLogo(),
   })
+  logoChanged = () => customer.refresh()
   win.once('ready-to-show', () => {
     setTimeout(() => {
       try {

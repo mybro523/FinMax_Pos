@@ -4,6 +4,7 @@ import { getUser, useAuth } from '../db/auth'
 import { fmtDateTime } from '../lib/time'
 import { translate as tr } from '../lib/i18n'
 import { activeDoc, cssString, printTitle } from '../lib/pechat'
+import { useShopLogo } from '../lib/logo'
 
 // ── Печатный слой ──
 // Всё, что идёт на бумагу, рисуется сюда — в отдельный блок прямо в <body>, рядом со
@@ -47,9 +48,30 @@ export default function PrintDoc({ prio = 1, kind = 'sheet', title = '', childre
 // ── Шапка печатного листа ──
 // Как у «Отчёта о прибылях и убытках»: тёмно-синяя полоса — магазин, название листа
 // крупно, ниже дата и подробности. Эмблемы программы нет: лист — бумага магазина.
-// Цвета заданы прямо: на бумаге они одинаковы при любой теме программы
+// Цвета заданы прямо: на бумаге они одинаковы при любой теме программы.
+// Логотип магазина (1.6.4) — над полосой, слева, если владелец сервиса его поставил
 export function PrintHead({ title, sub }) {
   const apt = getUser()?.pharmacy?.name || ''
+  return (
+    <>
+      <PrintLogo />
+      <PrintBand apt={apt} title={title} sub={sub} />
+    </>
+  )
+}
+
+// Логотип магазина на листе: картинка как есть, в цвете. Нет логотипа — ничего
+export function PrintLogo({ className = 'pd-logo' }) {
+  const logo = useShopLogo()
+  if (!logo) return null
+  return (
+    <div className={className}>
+      <img src={logo} alt="" />
+    </div>
+  )
+}
+
+function PrintBand({ apt, title, sub }) {
   return (
     <div className="pd-band">
       <div className="pd-band-text">

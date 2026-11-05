@@ -54,6 +54,12 @@ export class AdminController {
     return this.pharmacies.usage(id)
   }
 
+  // Логотип магазина — картинкой (data URL); отдельно от карточки, чтобы она грузилась быстро
+  @Get(':id/logo')
+  logo(@Param('id') id: string) {
+    return this.pharmacies.adminLogo(id)
+  }
+
   @Get(':id')
   detail(@Param('id') id: string) {
     return this.pharmacies.detail(id)

@@ -1,0 +1,20 @@
+# Вход снаружи: https для адреса сервера OVH. Сертификат Caddy получает и продлевает сам
+# (Let's Encrypt, при отказе — ZeroSSL); письма о сертификате — на почту владельца сервера.
+# Чужой X-Forwarded-For Caddy не пропускает: сервер программы видит настоящий адрес устройства.
+# /panel — панель сервера (Portainer, вход по своему паролю), всё остальное — сервер программы.
+{
+	email finmaxtj@gmail.com
+}
+
+# Постоянный адрес — api.finmaxpos.tj (домен клиента у Navju Cloud); адрес OVH остаётся для
+# программ, собранных с ним (1.6.2)
+api.finmaxpos.tj, vps-04688c58.vps.ovh.net {
+	# Portainer отвечает в корне (--base-url — только для его ссылок): /panel отрезается
+	redir /panel /panel/ 308
+	handle_path /panel/* {
+		reverse_proxy portainer:9000
+	}
+	handle {
+		reverse_proxy api:3000
+	}
+}

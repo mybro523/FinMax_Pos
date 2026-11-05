@@ -1312,101 +1312,163 @@ test('у каждого объяснения программы есть тад�
 const DAY_MS = 86400000
 const stops = (t) => t.events.filter((e) => e.type === 'suspended' || e.type === 'resumed')
 
-test('семь дней без связи касса работает, потом закрывается до проверки — и объясняет почему', async (tt) => {
+test('1.6.5: без связи касса работает и после семи дней — продаёт, пускает, ничего не «закрывает»', async (tt) => {
   const t = await loggedIn()
   tt.after(() => t.gw.close())
   t.gw.listen(true)
   t.srv.state.online = false
 
-  t.time.now += 6 * DAY_MS
-  assert.equal((await sell(t, 1)).status, 201, 'на шестой день без связи касса продаёт')
+  // Прежний срок был семь дней (самое большее — тридцать). Двадцать пять дней без связи,
+  // а оплата ещё действует (до 1 ноября)
+  t.time.now += 25 * DAY_MS
   t.gw.tick()
+  assert.equal((await sell(t, 1)).status, 201, 'на 25-й день без связи касса продаёт')
+  t.gw.tick()
+  assert.deepEqual(stops(t), [], 'объявлений об остановке нет')
   const lic = t.gw.status().licence
-  assert.deepEqual([lic.offlineDays, lic.expired, lic.warn], [7, false, true], 'за два дня до остановки касса предупреждает')
-  assert.deepEqual(stops(t), [])
+  assert.equal(lic.unlimited, true)
+  assert.equal(lic.checkedAt, new Date(NOW).toISOString(), 'видно, когда касса последний раз была на связи')
+  assert.equal((await t.req('GET', '/products')).status, 200)
+  assert.equal((await t.req('GET', '/auth/me')).status, 200)
 
-  // Срок вышел, пока программа просто стояла открытой
-  t.time.now += DAY_MS + 1000
-  t.gw.tick()
-  assert.deepEqual(stops(t), [{ type: 'suspended', payload: { message: MESSAGES.offlineLimit, title: MESSAGES.offlineTitle } }])
-  t.gw.tick()
-  assert.equal(stops(t).length, 1, 'объявление показывается один раз, а не каждую минуту')
-
-  const sale = await sell(t, 1)
-  assert.deepEqual([sale.status, sale.data.message], [403, MESSAGES.offlineLimit])
-  assert.equal((await t.req('GET', '/products')).status, 403, 'закрыта вся работа, а не только продажа — как при истёкшей подписке')
-  assert.equal((await t.req('GET', '/auth/me')).status, 403)
-  // Сделанное до остановки цело и ждёт отправки
-  assert.equal(t.gw.status().pending, 1)
-
-  // Выйти и войти без связи не получится: пароль верный, но нужна проверка
+  // Выйти и войти без связи — можно
   t.gw.logout()
-  const again = await t.login()
-  assert.deepEqual([again.status, again.data.message], [401, MESSAGES.offlineLimit])
-  assert.equal((await t.req('GET', '/products')).status, 401, 'отказ во входе не должен оставлять вход открытым')
-
-  // Интернет появился: вход идёт через сервер — это и есть проверка
-  t.srv.state.online = true
   assert.equal((await t.login()).status, 201)
-  await settle(t)
-  assert.equal(t.gw.status().pending, 0, 'чек шестого дня ушёл на сервер')
   assert.equal((await sell(t, 1)).status, 201)
-  assert.equal(t.gw.status().licence.expired, false)
+
+  // Связь вернулась — всё сделанное ушло на сервер
+  t.srv.state.online = true
+  await settle(t)
+  assert.equal(t.gw.status().pending, 0)
 })
 
-test('срок вышел при открытой кассе: связь вернулась — работа продолжается сама, без выхода и входа', async (tt) => {
+test('1.6.5: оплачено надолго — и через сто дней без связи касса работает', async (tt) => {
   const t = await loggedIn()
   tt.after(() => t.gw.close())
   t.gw.listen(true)
-  t.srv.state.online = false
-  t.time.now += 8 * DAY_MS
-  t.gw.tick()
-  assert.equal((await sell(t, 1)).status, 403)
-
-  t.srv.state.online = true
-  t.events.length = 0
+  // Владелец сервиса продлил оплату — касса узнала при обмене
+  t.srv.state.pharmacy.paidUntil = '2027-12-31T12:00:00.000Z'
   await t.gw.syncNow()
-  assert.deepEqual(stops(t).map((e) => e.type), ['resumed'], 'объявление об остановке должно сняться само')
+  t.srv.state.online = false
+  t.time.now += 100 * DAY_MS
+  t.gw.tick()
   assert.equal((await sell(t, 1)).status, 201)
+  assert.deepEqual(stops(t), [])
 })
 
-test('сколько дней работать без связи, назначает сервер — и может передумать', async (tt) => {
+test('1.6.5: число дней без связи от сервера (для прежних версий) кассу не закрывает', async (tt) => {
   const t = setup()
   tt.after(() => t.gw.close())
-  t.srv.state.pharmacy.offlineDays = 14
+  t.srv.state.pharmacy.offlineDays = 2
   assert.equal((await t.login()).status, 201)
   await t.gw.syncNow()
-  assert.equal(t.gw.status().licence.offlineDays, 14)
-  // Смена — пока связь есть: без неё касса не продаёт
   assert.equal((await t.req('POST', '/shifts/open', { openingCash: 0 })).status, 201)
   await t.gw.syncNow()
 
   t.srv.state.online = false
   t.time.now += 10 * DAY_MS
-  assert.equal((await sell(t, 1)).status, 201, 'этому магазину дано две недели')
-
-  // Владелец сервиса сократил срок — касса узнаёт при первом же обмене
-  t.srv.state.online = true
-  t.srv.state.pharmacy.offlineDays = 2
-  await t.gw.syncNow()
-  assert.equal(t.gw.status().licence.offlineDays, 2)
-  t.srv.state.online = false
-  t.time.now += 2 * DAY_MS + 1000
-  assert.equal((await sell(t, 1)).status, 403)
+  t.gw.tick()
+  assert.equal((await sell(t, 1)).status, 201, 'два дня от сервера — не повод закрывать кассу')
 })
 
-test('подписка закончилась раньше срока без связи — касса называет настоящую причину', async (tt) => {
+test('оплата закончилась, пока касса без связи, — касса закрывается в срок и называет настоящую причину', async (tt) => {
   const t = await loggedIn()
   tt.after(() => t.gw.close())
   t.gw.listen(true)
   t.srv.state.online = false
-  // Оплачено до 1 ноября; прошло 30 дней без связи — вышло и то, и другое
+  // Оплачено до 1 ноября; прошло 30 дней без связи — оплата кончилась. Дату касса знала заранее
   t.time.now += 30 * DAY_MS
   t.gw.tick()
   const sale = await sell(t, 1)
   assert.equal(sale.status, 403)
   assert.match(sale.data.message, /Подписка закончилась/)
-  assert.deepEqual(stops(t), [], 'объявление про связь тут только запутало бы: дело в оплате')
+  assert.deepEqual(stops(t), [], 'объявления про связь нет: дело в оплате')
+})
+
+// ── 1.6.5: дату оплаты не продлить правкой файла базы ──
+// Срока работы без связи больше нет — значит, и потолка «месяц», который раньше ограничивал
+// правку обычных столбцов базы руками. Срок оплаты и состояние подписки касса сверяет с
+// зашифрованной записью: берёт более ранний срок и более строгое состояние
+
+test('1.6.5: срок оплаты, поправленный в файле базы, работу без связи не продлевает', async (tt) => {
+  const t = await loggedIn()
+  tt.after(() => t.gw.close())
+  t.srv.state.online = false
+  t.core.prepare("UPDATE accounts SET paidUntil = '2099-01-01T00:00:00.000Z', subStatus = 'active'").run()
+  t.time.now += 30 * DAY_MS
+  const sale = await sell(t, 1)
+  assert.equal(sale.status, 403)
+  assert.match(sale.data.message, /Подписка закончилась/)
+  // И стёртый срок — тоже
+  t.core.prepare('UPDATE accounts SET paidUntil = NULL').run()
+  assert.equal((await sell(t, 1)).status, 403)
+})
+
+test('1.6.5: сервер приостановил работу — «active», вписанное в файл базы, без связи не помогает', async (tt) => {
+  const t = await loggedIn()
+  tt.after(() => t.gw.close())
+  t.srv.state.pharmacy.status = 'suspended'
+  await t.gw.syncNow()
+  t.srv.state.online = false
+  t.core.prepare("UPDATE accounts SET subStatus = 'active'").run()
+  const sale = await sell(t, 1)
+  assert.equal(sale.status, 403)
+  assert.match(sale.data.message, /приостановлен/)
+})
+
+test('1.6.5: зашифрованную запись о проверке стёрли — без связи работа до проверки; связь вернулась — работа сама', async (tt) => {
+  const t = await loggedIn()
+  tt.after(() => t.gw.close())
+  t.srv.state.online = false
+  t.core.prepare('DELETE FROM licences').run()
+  const products = await t.req('GET', '/products')
+  assert.deepEqual([products.status, products.data.message], [403, MESSAGES.unverified])
+  t.gw.logout()
+  const again = await t.login()
+  assert.deepEqual([again.status, again.data.message], [401, MESSAGES.unverified])
+  // Связь вернулась: вход через сервер — это и есть проверка
+  t.srv.state.online = true
+  assert.equal((await t.login()).status, 201)
+  assert.equal((await sell(t, 1)).status, 201)
+  // А дальше и без связи — как обычно
+  t.srv.state.online = false
+  assert.equal((await sell(t, 1)).status, 201)
+})
+
+test('1.6.5: честная касса — оплату продлили, касса узнала при обмене и работает без связи дальше', async (tt) => {
+  const t = await loggedIn()
+  tt.after(() => t.gw.close())
+  t.srv.state.pharmacy.paidUntil = '2026-12-31T12:00:00.000Z'
+  await t.gw.syncNow()
+  t.srv.state.online = false
+  t.time.now += 40 * DAY_MS
+  assert.equal((await sell(t, 1)).status, 201, 'новый срок — и в обычных столбцах, и в зашифрованной записи')
+})
+
+test('1.6.5: «работа приостановлена» пришла по постоянному соединению — и в зашифрованную запись: правка файла не помогает', async (tt) => {
+  const t = await loggedIn()
+  tt.after(() => t.gw.close())
+  t.gw.listen(true)
+  t.gw.serverEvent('suspended', { message: 'Работа магазина приостановлен. Обратитесь к поставщику программы.' })
+  t.srv.state.online = false
+  t.core.prepare("UPDATE accounts SET subStatus = 'active'").run()
+  const sale = await sell(t, 1)
+  assert.equal(sale.status, 403)
+  assert.match(sale.data.message, /приостановлен/)
+})
+
+test('1.6.5: касса, обновлённая с 1.6.4, сразу запечатывает срок оплаты — поздняя правка файла не помогает', async (tt) => {
+  const t = await loggedIn()
+  tt.after(() => t.gw.close())
+  // Запись, какой её оставила 1.6.4: срока оплаты в ней нет
+  t.core.prepare('UPDATE licences SET sealed = ?').run(fakeSeal.seal(JSON.stringify({ code: 'apteka-1', checkedAt: NOW, offlineDays: 7 })))
+  t.srv.state.online = false
+  assert.equal((await t.req('GET', '/auth/me')).status, 200, 'первое же обращение — и срок запечатан')
+  t.core.prepare("UPDATE accounts SET paidUntil = '2099-01-01T00:00:00.000Z'").run()
+  t.time.now += 30 * DAY_MS
+  const sale = await sell(t, 1)
+  assert.equal(sale.status, 403)
+  assert.match(sale.data.message, /Подписка закончилась/)
 })
 
 test('постоянное соединение оборвалось — касса сразу выясняет, есть ли интернет, а не ждёт пяти минут', async (tt) => {
@@ -1954,28 +2016,28 @@ test('сервер ответил, что такой смены у него не
   }
 })
 
-test('срок работы без связи считается по своему времени, а чеки датируются временем часов', async (tt) => {
+test('дата оплаты считается по своему времени, а чеки датируются временем часов', async (tt) => {
   const t = await loggedIn()
   tt.after(() => t.gw.close())
   t.gw.listen(true)
   t.srv.state.online = false
-  // Компьютер со сбитыми часами: время чеков стоит на месте, а срок за шесть ночей
-  // уменьшился на шесть раз по полсуток — и ещё три дня работы
-  t.time.licAhead = 6 * DAY_MS
+  // Компьютер со сбитыми часами: время чеков стоит на месте, а своё время (по нему считается
+  // дата окончания оплаты) ушло вперёд на неизвестные простои
+  t.time.licAhead = 8 * DAY_MS
   t.gw.tick()
   const st = t.gw.status()
-  assert.equal(st.licence.expired, false)
-  assert.equal(st.licence.warn, true, 'до остановки меньше двух дней — по времени срока')
-  assert.ok(Math.abs(st.licence.leftMs - DAY_MS) < 60_000)
+  assert.equal(st.licence.unlimited, true, 'срока без связи нет — восемь «своих» дней кассу не закрывают')
   const sale = await sell(t, 1)
   assert.equal(sale.status, 201)
   assert.equal(sale.data.date, new Date(t.time.now).toISOString(), 'в чеке — время часов, без выдуманных суток')
+  assert.deepEqual(stops(t), [])
 
-  // Срок вышел — по своему времени
-  t.time.licAhead = 8 * DAY_MS
+  // А дата оплаты (1 ноября) — по своему времени: оно её уже прошло
+  t.time.licAhead = 29 * DAY_MS
   t.gw.tick()
-  assert.equal(t.gw.status().licence.expired, true)
-  assert.ok(stops(t).some((e) => e.type === 'suspended'), 'касса останавливается до проверки')
+  const late = await sell(t, 1)
+  assert.equal(late.status, 403)
+  assert.match(late.data.message, /Подписка закончилась/)
 })
 
 // ── Поставщики, наличные в смене и переводы (версия 1.0.2) ──

@@ -1,0 +1,9 @@
+[Unit]
+Description=FinMax POS: копия базы каждую ночь (03:30 по Душанбе)
+
+[Timer]
+OnCalendar=*-*-* 22:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

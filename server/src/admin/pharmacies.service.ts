@@ -16,6 +16,7 @@ import { AuthService } from '../auth/auth.service'
 import { EventsGateway } from '../events/events.gateway'
 import { AccountCache } from './account-cache.service'
 import { SubscriptionWatchService } from './subscription-watch.service'
+import { checkLogo } from './logo'
 
 export interface NewPharmacy {
   code: string
@@ -33,6 +34,8 @@ export interface NewPharmacy {
   ownerPassword?: string
   // Заполнить демонстрационными товарами и продажами — для показа программы
   demo?: boolean
+  // Логотип магазина — data URL картинки (src/admin/logo.ts). Нет — чеки без логотипа
+  logo?: string
 }
 
 export interface UpdatePharmacy {
@@ -47,6 +50,8 @@ export interface UpdatePharmacy {
   trial?: boolean
   // Сколько дней касса может работать без связи с сервером
   offlineDays?: number
+  // Логотип: data URL — поставить или заменить, '' — убрать, нет поля — не трогать
+  logo?: string
 }
 
 export interface ExtendPharmacy {
@@ -146,6 +151,9 @@ export class PharmaciesService {
     // таким кодом программа приняла бы за магазин без сервера
     if (RESERVED_CODES.has(code)) throw new BadRequestException(`Код «${code}» занят программой — выберите другой`)
     if (!name) throw new BadRequestException('Укажите название магазина')
+    // Логотип проверяем до того, как что-либо заводить: негодная картинка не должна
+    // оставить после себя полузаведённый магазин
+    const logo = checkLogo(dto.logo)
 
     const schemaName = schemaNameFor(code)
     const trialDays = Math.max(1, Math.trunc(dto.trialDays ?? DEFAULT_TRIAL_DAYS))
@@ -164,6 +172,8 @@ export class PharmaciesService {
           schemaName,
           paidUntil,
           trial: true,
+          // Логотип — той же записью: магазин заводится сразу с ним или без него
+          ...(logo ? { logoAt: new Date(), logo: { create: { data: logo } } } : {}),
         },
       })
     } catch (e) {
@@ -275,6 +285,30 @@ export class PharmaciesService {
     }
   }
 
+  // ── Логотип магазина ──
+  // Картинка лежит отдельно от карточки (PharmacyLogo): список и карточка её не тащат,
+  // панель забирает её только тогда, когда надо показать. at — когда поставили, пусто —
+  // логотипа нет
+  async adminLogo(id: string) {
+    const ph = await this.admin.pharmacy.findUnique({ where: { id }, select: { logoAt: true, logo: { select: { data: true } } } })
+    if (!ph) throw new NotFoundException('Магазин не найден')
+    return { logo: ph.logo?.data || '', at: ph.logoAt ? ph.logoAt.toISOString() : null }
+  }
+
+  // Логотип своего магазина — для касс: они печатают его на чеках и листах. Магазин
+  // берётся из входа (pharmacyId учётной записи), чужой логотип так не получить.
+  // known — отметка той картинки, что у кассы уже есть: совпала — отвечаем коротко
+  // ({ at, same: true }), без самой картинки — незачем гонять сотни килобайт при каждой сверке
+  async shopLogo(pharmacyId: string | undefined | null, known?: string) {
+    if (!pharmacyId) return { logo: '', at: null }
+    const ph = await this.admin.pharmacy.findUnique({ where: { id: pharmacyId }, select: { logoAt: true } })
+    const at = ph?.logoAt ? ph.logoAt.toISOString() : null
+    if (!at) return { logo: '', at: null }
+    if (known && known === at) return { at, same: true }
+    const row = await this.admin.pharmacyLogo.findUnique({ where: { pharmacyId }, select: { data: true } })
+    return row ? { logo: row.data, at } : { logo: '', at: null }
+  }
+
   // ── Правка карточки ──
   // Телефон меняется, название уточняется, а срок оплаты иногда надо поставить
   // руками: ошиблись при вводе, дали бесплатное продление или, наоборот, решили
@@ -299,7 +333,26 @@ export class PharmaciesService {
     if (dto.trial !== undefined) data.trial = !!dto.trial
     if (dto.offlineDays !== undefined) data.offlineDays = offlineDaysOf({ offlineDays: dto.offlineDays })
 
-    const updated = await this.admin.pharmacy.update({ where: { id }, data })
+    // Логотип: новая картинка — заменить, пустая строка — убрать. Отметка logoAt меняется
+    // вместе с картинкой одной транзакцией: по ней кассы решают, забирать ли картинку заново
+    const logo = checkLogo(dto.logo)
+    const logoChanged = logo !== undefined && (logo !== '' || !!ph.logoAt)
+    if (logoChanged) data.logoAt = logo ? new Date() : null
+
+    const updated = logoChanged
+      ? await this.admin.$transaction(async (tx) => {
+          if (logo) await tx.pharmacyLogo.upsert({ where: { pharmacyId: id }, create: { pharmacyId: id, data: logo }, update: { data: logo } })
+          else await tx.pharmacyLogo.deleteMany({ where: { pharmacyId: id } })
+          return tx.pharmacy.update({ where: { id }, data })
+        }, TX)
+      : await this.admin.pharmacy.update({ where: { id }, data })
+    if (logoChanged) {
+      // «Кто я» отдаёт отметку логотипа — пусть сразу новую. Открытым кассам магазина —
+      // сигнал «магазин изменился»: они заберут картинку, не дожидаясь перезапуска
+      this.accounts.dropPharmacy(id)
+      this.events.changedIn(ph.schemaName, 'shop')
+      await this.log_(byAccountId, ph, logo ? 'set-logo' : 'remove-logo', logo ? 'логотип загружен' : 'логотип убран')
+    }
     // Срок оплаты правят руками нечасто, но именно тогда касса и должна узнать:
     // либо ей вернули работу, либо закрыли — и то и другое сейчас, а не потом
     // Новое число дней без связи кассы узнают при ближайшем обмене — он и так идёт

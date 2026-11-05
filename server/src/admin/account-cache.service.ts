@@ -38,6 +38,8 @@ const SHAPE = {
         paidUntil: true,
         trial: true,
         offlineDays: true,
+        // Когда поставили логотип: «кто я» отдаёт её кассам (см. AuthService.view)
+        logoAt: true,
       },
     },
     roleRef: { select: { id: true, name: true, permissions: true, system: true } },
@@ -54,6 +56,7 @@ type Account = NonNullable<Awaited<ReturnType<AdminDbService['account']['findUni
     paidUntil: Date
     trial: boolean
     offlineDays: number
+    logoAt: Date | null
   } | null
   roleRef: { id: string; name: string; permissions: string[]; system: string | null } | null
 }

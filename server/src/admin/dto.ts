@@ -19,6 +19,9 @@ export class CreatePharmacyDto {
 
   // Заполнить демонстрационными товарами и продажами — для показа программы
   @IsOptional() @IsBoolean() demo?: boolean
+
+  // Логотип магазина — data URL картинки (проверяет src/admin/logo.ts). Нет — чек без логотипа
+  @IsOptional() @IsString() logo?: string
 }
 
 export class ExtendPharmacyDto {
@@ -40,4 +43,6 @@ export class UpdatePharmacyDto {
   @IsOptional() @IsBoolean() trial?: boolean
   // Сколько дней касса может работать без связи с сервером (см. subscription.ts)
   @IsOptional() @IsInt() @Min(1) @Max(30) offlineDays?: number
+  // Логотип: data URL — поставить или заменить, пустая строка — убрать, нет поля — не трогать
+  @IsOptional() @IsString() logo?: string
 }

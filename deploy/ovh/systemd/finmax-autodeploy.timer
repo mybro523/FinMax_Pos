@@ -1,0 +1,9 @@
+[Unit]
+Description=FinMax POS: проверять новую версию каждые 2 минуты
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+
+[Install]
+WantedBy=timers.target

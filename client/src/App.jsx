@@ -35,6 +35,7 @@ import TurHost from './components/TurHost'
 import { PechatHost } from './components/PrintPreview'
 import PrintKeeper from './components/PrintKeeper'
 import { PrintPageStyle } from './components/PrintDoc'
+import { useShopLogo } from './lib/logo'
 import { startTour, obucheniePokazano, OBSHIY } from './lib/tur'
 const WriteOffs = lazy(() => import('./pages/WriteOffs'))
 const Inventory = lazy(() => import('./pages/Inventory'))
@@ -172,6 +173,8 @@ function AuthedApp({ user }) {
   // Владелец поменял права роли — открытые окна перечитывают «кто я» и тут же
   // прячут или показывают разделы, не дожидаясь нового входа
   useEffect(() => onChanged((keys) => keys.includes('roles') && refreshMe()), [])
+  // Логотип магазина забираем сразу после входа: к первой печати чека он уже на месте
+  useShopLogo()
 
   if (isService) {
     return (

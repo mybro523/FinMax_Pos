@@ -27,6 +27,7 @@ import { SupplierReturnsModule } from './supplier-returns/supplier-returns.modul
 import { SuppliersModule } from './suppliers/suppliers.module'
 import { PayServicesModule } from './payservices/pay-services.module'
 import { ProductTypesModule } from './producttypes/product-types.module'
+import { ShopModule } from './shop/shop.module'
 import { ChangeEventsInterceptor } from './events/change-events.interceptor'
 import { FreshnessInterceptor } from './events/freshness.interceptor'
 import { AuthGuard } from './auth/auth.guard'
@@ -63,6 +64,8 @@ import { AppController } from './app.controller'
     SuppliersModule,
     PayServicesModule,
     ProductTypesModule,
+    // Свой магазин глазами кассы: логотип, который заводит владелец сервиса
+    ShopModule,
     // Обмен с кассами, которые работают без интернета (программа для Windows)
     SyncModule,
     SeedModule,

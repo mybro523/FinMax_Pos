@@ -35,7 +35,7 @@ import {
   permissionsOf,
 } from './local/accounts.mjs'
 import { matchFallback, matchLocal, pendingInPeriod } from './local/api.mjs'
-import { confirmLicence, hasLicence, licenceOf, touchLicence } from './local/licence.mjs'
+import { confirmLicence, hasLicence, licenceOf, licenceTerms, sealStatus, sealTerms, touchLicence } from './local/licence.mjs'
 import { ApiError, getMeta, inTx, newId, openDb, q, setMeta } from './local/db.mjs'
 import { getDoc, putDoc } from './local/docs.mjs'
 import { REJECTED_SALE } from './local/ops/return.mjs'
@@ -78,6 +78,7 @@ import {
   waitsForPeer,
 } from './local/lan.mjs'
 import { checkRequest, createRemote, DESKTOP_TOKEN, isLinkFailure } from './net.mjs'
+import { cleanLogo } from './print/logo.mjs'
 import { parseAddress } from './lan.mjs'
 import { createSync } from './sync.mjs'
 import { activate as activateCode, activationState, useResetCode } from './local/activation.mjs'
@@ -94,12 +95,12 @@ export const MESSAGES = {
   onlineOnly: 'Этот раздел работает только с интернетом. Касса, склад, инвентаризация, товары, поставщики, расходы, доходы и сотрудники доступны и без него.',
   notSent: 'Эта запись ещё не отправлена на сервер. Изменить или удалить её можно будет после отправки.',
   noOfflineLogin: 'Нет связи с сервером. Под этим именем на этом компьютере ещё не входили — первый вход возможен только с интернетом.',
+  // Сверить оплату не с чем: зашифрованной записи о проверке сервером нет (её стёрли, или
+  // проверки на этом компьютере не было) — работа после проверки (1.6.5, gateway withTerms)
+  unverified: 'Программа не может подтвердить оплату магазина на этом компьютере. Подключите интернет хотя бы на минуту — работа продолжится сразу после проверки. Все чеки сохранены на этом компьютере.',
   suspended: 'Работа магазина приостановлен. Обратитесь к поставщику программы.',
   broken: 'Программа не смогла выполнить действие. Повторите; если не поможет — перезапустите программу.',
   oldSale: 'Этот чек оформлен давно и на кассе не хранится. Возврат по нему возможен только с интернетом.',
-  offlineLimit:
-    'Программа слишком долго работала без связи с сервером. Подключите интернет — работа продолжится сразу после проверки подписки. Все чеки сохранены на этом компьютере.',
-  offlineTitle: 'Нужна связь с сервером',
   // Файл базы испорчен, а убрать его и поднять копию не даёт другая программа
   dbBusy: BUSY_MESSAGE,
   rejectedSale: REJECTED_SALE,
@@ -130,6 +131,9 @@ export const MESSAGES = {
     `В загруженной копии несколько владельцев: ${logins.map((l) => `«${l}»`).join(', ')}. Войдите логином своего владельца из этого списка и паролем этого компьютера.`,
   loginMoved: (typed, now) => `Ваш логин на этом компьютере теперь «${now}»: логин «${typed}» в загруженной копии занят сотрудником. Войдите как «${now}» тем же паролем.`,
 }
+
+// Неверный пароль без связи: сколько ждать сервер (вдруг пароль сменили там)
+const TYPO_WAIT_MS = 4000
 
 // Записи, у которых осталось действие «только на сервере»: удаление клиента. Если клиент
 // заведён здесь и сервер его ещё не видел, идти к нему незачем
@@ -175,6 +179,10 @@ const fileSafe = (code) => String(code).replace(/[^A-Za-z0-9_-]/g, '_').slice(0,
 
 export function createGateway({
   apiUrl,
+  // Основной или запасной адрес сервера (apibase.mjs, с 1.6.5). Нет — запросы идут на apiUrl.
+  // pickWaitMs — сколько запрос ждёт выбора адреса (проверки ставят поменьше)
+  chooser = null,
+  pickWaitMs,
   fetchImpl,
   session,
   core,
@@ -196,12 +204,14 @@ export function createGateway({
   // Магазин без интернета (1.6.0): открытый ключ кодов активации (из сборки) и код этого
   // компьютера — 5 байт и как его видит человек («XXXXX-XXXXX»)
   standalone = {},
+  // Логотип магазина сменился (1.6.4) — экран покупателя показывает новый сразу
+  onLogo = () => {},
 }) {
   const deviceId = deviceIdOf(core)
   // Обмен называет серверу ключ кассы: под её номером сервер слушает только того,
   // кто назвал этот ключ (см. local/accounts.mjs)
   const asDevice = { 'X-Device-Key': deviceKeyOf(core) }
-  const remote = createRemote({ apiUrl, fetchImpl, onDate: (d, age) => clock.serverTime(d, age) })
+  const remote = createRemote({ apiUrl, chooser, pickWaitMs, fetchImpl, onDate: (d, age) => clock.serverTime(d, age) })
 
   // Открытая база магазина. Одна: на компьютере работает один магазин
   let pharmacy = null
@@ -363,7 +373,7 @@ export function createGateway({
         sentOps: (n) => sentOps(db, n),
         // Операция ссылается на чек или клиента соседней кассы, которых сервер ещё не
         // знает (пришли по местной сети), — ждёт, пока сосед отправит своё (lan.mjs)
-        waitsForPeer: (op) => waitsForPeer(db, op),
+        waitsForPeer: (op) => waitsForPeer(db, op, clock.now()),
         // Нужно всё заново (попросил человек или сервер что-то отверг): обмен не называет
         // отметку, пока полный ответ не ляжет в базу (см. sync.mjs)
         wantsFull: () => getMeta(db, 'needFull') === '1',
@@ -405,6 +415,7 @@ export function createGateway({
           {
             method: 'POST',
             path: '/sync/push',
+            patient: true,
             timeoutMs: pushTimeout(ops),
             headers: asDevice,
             body: {
@@ -423,7 +434,7 @@ export function createGateway({
         // Вошли без интернета, а ключа от прошлого входа нет. Забрать данные нечем;
         // но если сервер уже доступен — просим войти заново, теперь через него
         if (!token) {
-          const probe = await remote({ method: 'GET', path: '/health', timeoutMs: 10000 })
+          const probe = await remote({ method: 'GET', path: '/health', timeoutMs: 10000, patient: true })
           return probe.status === 200 && !probe.foreign ? { status: 401, data: { message: MESSAGES.needLogin } } : { status: 0 }
         }
         const query = new URLSearchParams({
@@ -441,7 +452,7 @@ export function createGateway({
           // придёт целиком и ляжет основой
           ...(getMeta(db, 'teamv') && getMeta(db, 'needFull') !== '1' ? { teamv: getMeta(db, 'teamv') } : {}),
         })
-        return remote({ method: 'GET', path: '/sync/pull?' + query, timeoutMs: SYNC_TIMEOUT_MS, headers: asDevice }, token)
+        return remote({ method: 'GET', path: '/sync/pull?' + query, timeoutMs: SYNC_TIMEOUT_MS, headers: asDevice, patient: true }, token)
       },
       onChanged: (keys) => send('changed', keys),
       onDenied: (res, token) => {
@@ -524,8 +535,8 @@ export function createGateway({
       // Сколько операций соседних касс лежит здесь, а сервер их ещё не видел
       fromPeers: lanAppliedCount(pharmacy.db),
       syncedAt: getMeta(pharmacy.db, 'syncedAt'),
-      // Сколько программе осталось работать без связи с сервером
-      licence: { checkedAt: lic.checkedAt, offlineDays: lic.offlineDays, until: lic.until, leftMs: lic.leftMs, warn: lic.warn, expired: lic.expired },
+      // Работа без связи: с 1.6.5 без ограничения; checkedAt — последняя связь с сервером
+      licence: { checkedAt: lic.checkedAt, unlimited: true },
       restored: restoredNote(pharmacy.db),
     }
   }
@@ -964,8 +975,13 @@ export function createGateway({
     if (res.status === 403) {
       // Сервер закрыл работу магазина. Запоминаем, чтобы и без связи касса не работала
       const text = String(res.data?.message || '')
-      if (/приостановлен/i.test(text)) setSubscription(core, acc.pharmacyCode, { status: 'suspended' })
-      else if (/Подписка закончилась/.test(text)) setSubscription(core, acc.pharmacyCode, { status: 'expired' })
+      if (/приостановлен/i.test(text)) {
+        setSubscription(core, acc.pharmacyCode, { status: 'suspended' })
+        sealStatus(core, acc.pharmacyCode, 'suspended', sealing)
+      } else if (/Подписка закончилась/.test(text)) {
+        setSubscription(core, acc.pharmacyCode, { status: 'expired' })
+        sealStatus(core, acc.pharmacyCode, 'expired', sealing)
+      }
     }
   }
 
@@ -974,48 +990,70 @@ export function createGateway({
     const acc = saveAccount(core, user, { now: clock.now(), ...extra })
     if (acc && user.subscription) {
       setSubscription(core, acc.pharmacyCode, { status: user.subscription.status, paidUntil: user.subscription.paidUntil })
-      // Сервер ответил про подписку — это и есть проверка: срок работы без связи
-      // отсчитывается заново
-      confirmLicence(core, acc.pharmacyCode, { now: clock.now(), days: user.subscription.offlineDays }, sealing)
-      watchLicence()
+      // Сервер ответил про подписку — отметка «последняя связь с сервером» (по ней же
+      // держится память часов, см. local/licence.mjs)
+      confirmLicence(
+        core,
+        acc.pharmacyCode,
+        { now: clock.now(), days: user.subscription.offlineDays, paidUntil: user.subscription.paidUntil ?? null, status: user.subscription.status ?? null },
+        sealing,
+      )
     }
     return acc ? accountById(core, acc.id) : null
   }
 
   // ── Можно ли работать ──
-  // Подписка по словам сервера — и срок, который программа вправе проработать без
-  // его слова. Вышел любой из двух — работа закрыта
+  // По слову сервера о подписке: магазин заблокирован или кончилась оплата — работа закрыта.
+  // Дату окончания оплаты касса знает заранее и закрывается в срок и без связи. Срока работы
+  // без связи с 1.6.5 нет (решение владельца сервиса 05.11.2026, см. local/licence.mjs): без
+  // интернета касса работает сколько угодно
   const licence = (acc) => licenceOf(core, acc.pharmacyCode, licNow(), sealing)
 
-  function access(acc) {
-    if (isSolo(acc)) return soloAccess()
-    const sub = subscriptionOf(acc, licNow())
-    if (sub && !sub.canWrite) return sub
-    if (!licence(acc).expired) return sub
-    return { ...(sub || {}), status: 'offline', canWrite: false, warn: true, message: MESSAGES.offlineLimit }
+  // ── Подписка: обычные столбцы сверяются с зашифрованной записью (1.6.5) ──
+  // Срок оплаты и состояние лежат и в обычных столбцах (accounts), и в зашифрованной записи
+  // (local/licence.mjs) — со слова сервера в оба места. Столбцы можно поправить руками, запись —
+  // нет. Пока срок работы без связи ограничивал такую правку месяцем, этого хватало; с 1.6.5 срока
+  // нет — поэтому срок оплаты берётся более ранний, состояние — более строгое. Записи нет вовсе —
+  // проверки сервером на этом компьютере не было (её пишет любой вход и обмен с интернетом) или её
+  // стёрли: работа — после проверки
+  const STRICT = { suspended: 3, expired: 2, trial: 1, active: 0 }
+  function withTerms(acc) {
+    if (!acc) return acc
+    let t = licenceTerms(core, acc.pharmacyCode, sealing)
+    if (!t) return { ...acc, unverified: true }
+    // Запись прежней версии программы (до 1.6.5) срока оплаты не знает: до первого ответа сервера
+    // берём обычные столбцы — и сразу запечатываем их, чтобы поздняя правка руками не помогла
+    if (t.paidUntil == null && t.status == null && (acc.paidUntil || acc.subStatus)) {
+      sealTerms(core, acc.pharmacyCode, { paidUntil: acc.paidUntil || null, status: acc.subStatus || null }, sealing)
+      t = licenceTerms(core, acc.pharmacyCode, sealing) || t
+    }
+    const plain = Date.parse(acc.paidUntil || '')
+    const sealed = Date.parse(t.paidUntil || '')
+    const paidUntil = Number.isFinite(sealed) && !(plain <= sealed) ? t.paidUntil : acc.paidUntil
+    const subStatus = (STRICT[t.status] ?? -1) > (STRICT[acc.subStatus] ?? -1) ? t.status : acc.subStatus
+    return { ...acc, paidUntil, subStatus }
   }
 
-  // Срок без связи вышел прямо сейчас, посреди смены — кассир должен увидеть причину,
-  // а не упереться в отказ на оплате. Проверка прошла — объявление снимается само
+  function access(acc) {
+    // Магазин без интернета: подписки сервера нет — всё решает сам компьютер (soloAccess)
+    if (isSolo(acc)) return soloAccess()
+    const t = withTerms(acc)
+    if (t?.unverified) return { status: 'unverified', canWrite: false, warn: true, message: MESSAGES.unverified }
+    return subscriptionOf(t, licNow())
+  }
+
+  // Магазин без интернета: срок (если он есть) вышел посреди смены — кассир должен увидеть причину
+  // сразу. У магазина с сервером срока работы без связи с 1.6.5 нет — объявлять нечего
   let closedByLicence = false
   function watchLicence() {
     const acc = activeAccount()
-    if (!acc) {
+    if (!acc || !isSolo(acc)) {
       closedByLicence = false
       return
     }
-    // Магазин без интернета: срок — у кода активации. Вышел посреди смены — объявление сразу
-    if (isSolo(acc)) {
-      const sub = soloAccess()
-      const expired = !sub.canWrite
-      if (expired && !closedByLicence) send('suspended', { message: sub.message, title: MESSAGES.soloTitle, standalone: true, until: activation().untilHuman || '' })
-      if (!expired && closedByLicence) send('resumed')
-      closedByLicence = expired
-      return
-    }
-    const sub = subscriptionOf(acc, licNow())
-    const expired = (!sub || sub.canWrite) && licence(acc).expired
-    if (expired && !closedByLicence) send('suspended', { message: MESSAGES.offlineLimit, title: MESSAGES.offlineTitle })
+    const sub = soloAccess()
+    const expired = !sub.canWrite
+    if (expired && !closedByLicence) send('suspended', { message: sub.message, title: MESSAGES.soloTitle, standalone: true, until: activation().untilHuman || '' })
     if (!expired && closedByLicence) send('resumed')
     closedByLicence = expired
   }
@@ -1564,26 +1602,37 @@ export function createGateway({
     const password = String(req.body?.password ?? '')
     // Компьютер магазина без интернета: сервера нет — проверяем здесь, к серверу не ходим
     if (appMode() === 'standalone' || isSolo(accountByLogin(core, name.trim()))) return soloLogin(name, password)
-    const res = await remote(req)
+    let res = await remote(req)
 
     // Сервер не ответил или ответил бедой по дороге — проверяем пароль сами
     if (isLinkFailure(res)) {
+      let refusal = null
       try {
         // Счёт неудачных попыток и срок подписки — по времени срока: за часами компьютера,
         // которым нельзя верить, оно не идёт, и переводом даты запрет на вход не снять
-        const acc = await offlineLogin(core, { name, password }, { now: licNow(), open })
-        // Пароль верный, но программа слишком давно не сверялась с сервером
-        if (licence(acc).expired) return refuse(401, MESSAGES.offlineLimit)
+        const acc = await offlineLogin(core, { name, password }, { now: licNow(), open, terms: withTerms, unverified: MESSAGES.unverified })
         session.activate(acc.id)
         onSession()
         enter(acc)
         log.info(`вход без связи: ${acc.login}`)
-        return reply(201, { token: DESKTOP_TOKEN, user: userView(acc, licNow()) })
+        return reply(201, { token: DESKTOP_TOKEN, user: { ...userView(withTerms(acc), licNow()), subscription: access(acc) } })
       } catch (e) {
         if (!(e instanceof ApiError)) throw e
+        refusal = e
+      }
+      // Без сервера не вышло: человека здесь не знают, пароль не тот (его могли сменить на сервере),
+      // оплату не подтвердить или она закончилась (сервер мог её продлить). Если сам вход на сервер
+      // не ходил (сервер недавно молчал или адрес ещё выбирается) — пробуем по-настоящему: на медленной
+      // связи короткая проверка адреса могла не успеть (net.mjs). На неверный пароль — коротко
+      // (опечатка не должна ждать, пока Windows ищет адрес, 10–15 секунд). Кроме «слишком много попыток»
+      if (res.skipped && refusal.status !== 429) {
+        const typo = refusal.status === 401 && refusal.message === 'Неверное имя или пароль'
+        res = await remote({ ...req, patient: true, ...(typo ? { timeoutMs: Math.min(req.timeoutMs || TYPO_WAIT_MS, TYPO_WAIT_MS) } : {}) })
+      }
+      if (isLinkFailure(res)) {
         // Человека на этом компьютере не знают — отвечаем как «нет связи», но с объяснением
-        if (e.status === 503) return offline(MESSAGES.noOfflineLogin, !!res.timedOut)
-        return refuse(e.status, e.message)
+        if (refusal.status === 503) return offline(MESSAGES.noOfflineLogin, !!res.timedOut)
+        return refuse(refusal.status, refusal.message)
       }
     }
 
@@ -1622,6 +1671,9 @@ export function createGateway({
       session.activate(user.id)
       onSession()
       if (acc) enter(acc)
+      // Логотип убрали, пока программа была закрыта или без связи: окно за ним не пойдёт
+      // (сервер сказал «логотипа нет») — стираем и копию кассы, иначе лента печатала бы прежний
+      if (ph) logoFromView(ph, user.pharmacy)
       // Настоящий ключ в окно не уходит — только пометка «вход выполнен»
       return { ...res, data: { ...res.data, token: DESKTOP_TOKEN } }
     }
@@ -1661,6 +1713,7 @@ export function createGateway({
       const res = await remote(req, token)
       if (res.status === 200 && res.data?.id) {
         remember(res.data)
+        if (pharmacy && pharmacy.code === acc.pharmacyCode) logoFromView(pharmacy, res.data.pharmacy)
         return res
       }
       if (res.status === 401 || res.status === 403) {
@@ -1704,6 +1757,92 @@ export function createGateway({
       return { ...res, data: { ...res.data, token: DESKTOP_TOKEN } }
     }
     return res
+  }
+
+  // ── Логотип магазина (1.6.4) ──
+  // Картинку ставит владелец сервиса; касса печатает её на чеках и ленте и показывает на
+  // экране покупателя — и без интернета. Поэтому последняя полученная картинка лежит в базе
+  // магазина (meta: shopLogo, shopLogoAt). Окно спрашивает GET /shop/logo: есть связь — ответ
+  // сервера (он же — в базу), нет связи или сервер прежней версии — то, что лежит.
+  const LOGO_KEY = 'shopLogo'
+  const LOGO_AT_KEY = 'shopLogoAt'
+  let logoMemo = { code: '', logo: '', at: null }
+  function storedLogo(ph) {
+    if (logoMemo.code !== ph.code) {
+      const logo = cleanLogo(getMeta(ph.db, LOGO_KEY) || '')
+      logoMemo = { code: ph.code, logo, at: logo ? getMeta(ph.db, LOGO_AT_KEY) || null : null }
+    }
+    return logoMemo
+  }
+  function keepLogo(ph, logo, at) {
+    const was = storedLogo(ph)
+    const clean = cleanLogo(logo)
+    const when = clean && typeof at === 'string' ? at : null
+    if (was.logo === clean && was.at === when) return
+    inTx(ph.db, () => {
+      setMeta(ph.db, LOGO_KEY, clean)
+      setMeta(ph.db, LOGO_AT_KEY, when || '')
+    })
+    logoMemo = { code: ph.code, logo: clean, at: when }
+    try {
+      onLogo()
+    } catch {
+      /* экран покупателя не важнее кассы */
+    }
+  }
+  // Сверка с сервером. Ответы могут прийти не по порядку (окно, «связь вернулась» и сигнал
+  // «магазин изменился» спрашивают почти разом, а картинка едет секунды) — записывается только
+  // ответ на последний вопрос. У сервера спрашиваем со своей отметкой: та же картинка — он
+  // ответит коротко ({ same: true }), без сотен килобайт. Отказ сервера (401/403) — возвращаем
+  let logoSeq = 0
+  async function fetchLogo(ph, acc, timeoutMs) {
+    const token = session.tokenOf(acc.id)
+    if (!token) return null
+    const my = ++logoSeq
+    const kept = storedLogo(ph)
+    const known = kept.logo && kept.at ? kept.at : ''
+    const res = await remote({ method: 'GET', path: '/shop/logo' + (known ? '?at=' + encodeURIComponent(known) : ''), timeoutMs }, token)
+    // Ответил не наш сервер (вход в чужой Wi-Fi) — как «нет связи»: сессию не трогаем
+    if (res.foreign) return null
+    if (res.status === 200 && res.data && typeof res.data === 'object') {
+      if (my === logoSeq && !(res.data.same === true && known && res.data.at === known)) keepLogo(ph, res.data.logo, res.data.at)
+      return null
+    }
+    if (res.status === 401 || res.status === 403) {
+      denied(acc, res)
+      return res
+    }
+    return null
+  }
+  // Сверка в фоне (связь вернулась, «кто я» сказал «логотипа нет»): сменился — окну сигнал
+  // «магазин изменился», оно заберёт картинку у кассы
+  async function refreshLogo() {
+    const acc = activeAccount()
+    if (!acc || !pharmacy || pharmacy.code !== acc.pharmacyCode) return
+    const ph = pharmacy
+    const before = storedLogo(ph)
+    await fetchLogo(ph, acc)
+    const after = storedLogo(ph)
+    if (after.logo !== before.logo || after.at !== before.at) send('changed', ['shop'])
+  }
+  // «Логотипа нет» в ответе «кто я» или входа (logoAt: null). У кассы картинки и нет — делать
+  // нечего. Есть — сверяемся с сервером, а не стираем сразу: «кто я» мог отстать от смены
+  // логотипа (сервер помнит сотрудника 10 секунд). Отметки нет вовсе (сервер прежней версии) —
+  // ничего не трогаем
+  function logoFromView(ph, view) {
+    if (view && view.logoAt === null && storedLogo(ph).logo) refreshLogo().catch(() => {})
+  }
+  // Окну отдаём картинку целиком (это не сеть). Связь есть — сначала сверка с сервером. Связи нет
+  // (или касса уже знает, что она плохая) — сразу то, что лежит у кассы, а сверка — в фоне:
+  // окно не ждёт пятнадцать секунд, чек печатается с логотипом
+  async function shopLogo(req, acc) {
+    const ph = openPharmacy(acc.pharmacyCode)
+    if (ph.sync.isOnline()) {
+      const denial = await fetchLogo(ph, acc, req.timeoutMs)
+      if (denial) return denial
+    } else refreshLogo().catch(() => {})
+    const now = storedLogo(ph)
+    return reply(200, { logo: now.logo, at: now.at })
   }
 
   // ── Готова ли локальная база ──
@@ -1906,6 +2045,7 @@ export function createGateway({
       if (!acc) return refuse(401, MESSAGES.needLogin)
 
       if (route === '/auth/me' && req.method === 'GET') return await me(req, acc)
+      if (route === '/shop/logo' && req.method === 'GET') return await shopLogo(req, acc)
       if (route === '/auth/change-password' && req.method === 'POST') return await changePassword(req, acc)
       if (isSolo(acc)) return await soloRequest(req, acc)
 
@@ -1990,6 +2130,8 @@ export function createGateway({
       if (type === 'connect') {
         // Связь вернулась — отправляем накопленное и забираем изменившееся
         pharmacy.sync.run().catch(() => {})
+        // …и сверяем логотип магазина (1.6.4)
+        refreshLogo().catch(() => {})
       } else if (type === 'disconnect') {
         // Постоянное соединение оборвалось. Возможно, пропал интернет — выясняем это
         // сейчас, а не при очередной сверке через пять минут: кассир должен увидеть
@@ -2008,6 +2150,7 @@ export function createGateway({
         pharmacy.sync.run().catch(() => {})
       } else if (type === 'suspended') {
         setSubscription(core, acc.pharmacyCode, { status: 'suspended' })
+        sealStatus(core, acc.pharmacyCode, 'suspended', sealing)
         send(type, payload)
       }
     },
@@ -2092,22 +2235,30 @@ export function createGateway({
     activeRole: () => activeAccount()?.role || '',
     // Название магазина вошедшего — как его задали в панели (пробный чек печатается с ним)
     activeShop: () => String(activeAccount()?.pharmacyName || '').trim(),
+    // Логотип магазина вошедшего (data URL или ''): печать на ленте и экран покупателя
+    // Логотип открытого магазина. За кассой никого (вышли) — всё равно его: экран покупателя
+    // после выхода остаётся с названием магазина, пусть и с логотипом. Печатать без входа нельзя
+    shopLogo() {
+      const acc = activeAccount()
+      if (!pharmacy || (acc && pharmacy.code !== acc.pharmacyCode)) return ''
+      return storedLogo(pharmacy).logo
+    },
     // Есть ли у вошедшего право (любое из перечисленных). Владелец может всё
     activeCan: (...keys) => hasPerm(activeAccount(), ...keys),
 
     // Открытая база магазина — для резервной копии
     pharmacyFile: () => (pharmacy ? { name: pharmacy.name, db: pharmacy.db } : null),
 
-    // Раз в минуту: не вышел ли срок работы без связи, пока программа просто стояла
-    // открытой. Заодно окно получает свежий отсчёт для значка состояния
+    // Раз в минуту: память часов и уборка журнала обмена по сети
     tick() {
       // До какого момента программа дожила — в ту же зашифрованную запись, что и
       // проверка подписки: с него часы продолжат после перезапуска (см. licence.mjs)
       const acc = activeAccount()
       if (acc) touchLicence(core, acc.pharmacyCode, licNow(), sealing, floorNow())
+      // Магазин без интернета: не вышел ли срок, пока программа просто стояла открытой
       watchLicence()
       // Раз в сутки — уборка журнала обмена по сети; чужое, так и не дошедшее до
-      // сервера за две недели, снимается
+      // сервера, а её касса замолчала, снимается (local/lan.mjs)
       if (pharmacy) {
         try {
           if (lanPrune(pharmacy.db, clock.now())) send('changed', ['products', 'customers', 'sales', 'returns', 'shifts', 'arrivals'])

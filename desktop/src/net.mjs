@@ -77,11 +77,50 @@ export function checkRequest(raw) {
 // и что касса умеет ответить сама.
 //
 // onDate получает время сервера из каждого ответа — по нему сверяются часы программы.
-export function createRemote({ apiUrl, fetchImpl, onDate = () => {}, stopwatch = () => performance.now() }) {
+//
+// chooser — выбор между основным и запасным адресом сервера (apibase.mjs, с 1.6.5). Без него
+// запросы идут на apiUrl, как прежде. С ним — на выбранный адрес, и «связи нет» касса узнаёт
+// сразу, а не через 10–15 секунд ожидания (04.11.2026 при сбое DNS у регистратора домена каждый
+// вход и запуск ждали, пока Windows перестанет искать адрес):
+//   • выбор ещё идёт (первые секунды после запуска) — запрос окна ждёт его не дольше PICK_WAIT_MS;
+//   • при прошлом выборе сервер молчал по обоим адресам — окну сразу «связи нет» (ответ из базы
+//     кассы), а выбор в фоне делается заново (apibase.mjs: не чаще раза в 20 секунд);
+//   • запрос не дошёл или ответил не наш сервер — выбор делается заново, для следующих запросов.
+//     Сам запрос не повторяется: запись могла дойти, а касса и так ответит сама.
+// req.patient — запрос самой программы, а не окна (обмен): он не спешит. Ждёт выбора сколько
+// нужно и идёт на сервер, даже если проверка адреса сказала «молчит»: на медленной связи (плохой
+// 3G) короткая проверка может не успеть, а настоящий запрос со своим долгим ожиданием проходит.
+// Любой настоящий ответ нашего сервера — знак «сервер доступен» (chooser.answered)
+// Две секунды: запасной адрес отвечает за полсекунды-секунду, а вход сразу после запуска без
+// интернета не должен ждать дольше (05.11 при 3 с вход без связи занимал 4,6 с)
+export const PICK_WAIT_MS = 2000
+// Обмен идёт на сервер, о котором проверка сказала «молчит» (вдруг связь просто медленная), —
+// но получение ждёт заголовков ответа не дольше этого: иначе без интернета каждая попытка висела бы
+// минутами. Отправку не трогаем: тяжёлой пачке её срок дан по размеру (gateway.mjs, pushTimeout)
+export const UNSURE_WAIT_MS = 30000
+
+export function createRemote({ apiUrl, fetchImpl, onDate = () => {}, stopwatch = () => performance.now(), chooser = null, pickWaitMs = PICK_WAIT_MS }) {
+  async function baseNow(patient) {
+    if (!chooser) return apiUrl
+    const base = await chooser.ready(patient ? undefined : pickWaitMs)
+    if (base === null) return null
+    if (chooser.reachable() === false) {
+      // Сервер молчал при прошлом выборе: выбрать заново — в фоне
+      chooser.failed()
+      return patient ? chooser.current() : null
+    }
+    return base
+  }
+
   return async function call(req, token = '') {
     if (!apiUrl) {
       return { status: 503, date: null, data: { message: 'В программе не задан адрес сервера. Переустановите программу.' } }
     }
+    const base = await baseNow(!!req.patient)
+    // Сервер сейчас недоступен ни по одному адресу — «связи нет» сразу. skipped: на сервер
+    // запрос не ходил (тот, кому без сервера никак, может попробовать по-настоящему)
+    if (base === null) return { status: 0, date: null, data: null, timedOut: false, skipped: true }
+    const unsure = !!chooser && chooser.reachable() === false && req.method === 'GET'
 
     // Свои заголовки бывают только у запросов самой программы (обмен называет ключ
     // кассы). У запроса окна их нет: checkRequest пропускает метод, путь и тело
@@ -89,7 +128,7 @@ export function createRemote({ apiUrl, fetchImpl, onDate = () => {}, stopwatch =
     if (req.body !== undefined && req.body !== null) headers['Content-Type'] = 'application/json'
     if (token) headers.Authorization = 'Bearer ' + token
 
-    const timeoutMs = req.timeoutMs || DEFAULT_TIMEOUT_MS
+    const timeoutMs = unsure ? Math.min(req.timeoutMs || DEFAULT_TIMEOUT_MS, UNSURE_WAIT_MS) : req.timeoutMs || DEFAULT_TIMEOUT_MS
     const ctrl = new AbortController()
     let timer = setTimeout(() => ctrl.abort(), timeoutMs)
     let res
@@ -101,7 +140,7 @@ export function createRemote({ apiUrl, fetchImpl, onDate = () => {}, stopwatch =
     // заглушка прокси). Для программы это то же самое, что отсутствие связи
     let foreign = false
     try {
-      res = await fetchImpl(apiUrl + req.path, {
+      res = await fetchImpl(base + req.path, {
         method: req.method,
         headers,
         body: req.body !== undefined && req.body !== null ? JSON.stringify(req.body) : undefined,
@@ -120,11 +159,15 @@ export function createRemote({ apiUrl, fetchImpl, onDate = () => {}, stopwatch =
         }
       }
     } catch (e) {
+      // Запрос не дошёл — для следующих выбрать адрес заново
+      chooser?.failed()
       // status 0 — связи не было вовсе. По нему решают, отвечать ли из локальной базы
       return { status: 0, date: null, data: null, timedOut: e?.name === 'AbortError' }
     } finally {
       clearTimeout(timer)
     }
+    if (foreign) chooser?.failed()
+    else chooser?.answered(base)
 
     const date = res.headers?.get?.('date') || null
     // Часы сверяем только по ответу нашего сервера. Страница входа в гостиничный
@@ -134,6 +177,27 @@ export function createRemote({ apiUrl, fetchImpl, onDate = () => {}, stopwatch =
     const out = { status: res.status, date, data }
     if (foreign) out.foreign = true
     return out
+  }
+}
+
+// ── Отвечает ли по этому адресу наш сервер ──
+// GET /health открыт без входа. Страница входа в чужой Wi-Fi тоже отвечает «200», поэтому
+// смотрим и на сам ответ: он должен быть словом нашего сервера
+export const PROBE_MS = 5000
+export function healthProbe(fetchImpl, timeoutMs = PROBE_MS) {
+  return async (base) => {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+    try {
+      const res = await fetchImpl(base + '/health', { method: 'GET', headers: {}, signal: ctrl.signal })
+      if (res.status !== 200) return false
+      const data = JSON.parse(await res.text())
+      return data?.status === 'ok' && data?.service === 'apteka-api'
+    } catch {
+      return false
+    } finally {
+      clearTimeout(timer)
+    }
   }
 }
 

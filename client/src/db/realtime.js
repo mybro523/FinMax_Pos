@@ -17,6 +17,7 @@ import { io } from 'socket.io-client'
 import { invalidate, notify, refreshAll, setRealtimeConnected } from './store.js'
 import { refreshDesktopStatus, setDesktopStatus } from './desktopStatus.js'
 import { bridge } from '../lib/desktop.js'
+import { apiBase, apiBaseChosen, apiReady, onApiBaseChange } from './api.js'
 
 const TOKEN_KEY = 'apteka_token'
 
@@ -28,6 +29,14 @@ export function serverOrigin(apiUrl) {
 }
 
 let socket = null
+// По какому адресу сервера открыто соединение: сайт перешёл на запасной — переоткрываемся там
+let socketBase = ''
+onApiBaseChange((base) => {
+  if (socket && socketBase !== base) {
+    stopRealtime()
+    startRealtime()
+  }
+})
 // По какому токену открыто нынешнее соединение. Токен меняется чаще, чем кажется:
 // вход под владельцем магазина, возврат к себе, смена собственного пароля. Каждый раз
 // прежнее соединение остаётся жить со старым токеном — оно слушает не ту комнату,
@@ -155,10 +164,19 @@ export function startRealtime() {
   const token = readToken()
   if (!token) return null
   if (socket && socketToken === token) return socket
+  // Адрес сервера ещё выбирается (основной или запасной, db/apiBase.js) — соединение откроется,
+  // когда выбор сделан
+  if (!apiBaseChosen()) {
+    apiReady().then(() => {
+      if (readToken() === token) startRealtime()
+    })
+    return null
+  }
   if (socket) stopRealtime()
   socketToken = token
 
-  socket = io(serverOrigin(import.meta.env?.VITE_API_URL) || undefined, {
+  socketBase = apiBase()
+  socket = io(serverOrigin(socketBase) || undefined, {
     auth: { token },
     // ── Сразу постоянное соединение, с откатом на обычные запросы ──
     // Раньше связь всегда начиналась с обычных запросов и лишь потом переходила

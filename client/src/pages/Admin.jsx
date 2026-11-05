@@ -1,8 +1,8 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   LuPlus, LuLogOut, LuRefreshCw, LuTriangleAlert, LuKeyRound,
   LuBanknote, LuPause, LuPlay, LuLogIn, LuScrollText, LuTrash2, LuPencil, LuCheck,
-  LuPhone, LuSettings, LuSun, LuMoon,
+  LuPhone, LuSettings, LuSun, LuMoon, LuImagePlus, LuX,
 } from 'react-icons/lu'
 import { Modal, useToast, useDialog } from '../components/ui'
 import NumberInput from '../components/NumberInput'
@@ -15,6 +15,7 @@ import { fmtDate, fmtDateTime, tjMoment, tjDate, tjTime, serverNow } from '../li
 import { useT, useLang, setLang, LANGS } from '../lib/i18n'
 import { useTheme, setTheme } from '../lib/theme'
 import emblem from '../assets/brand/emblem-64.png'
+import { prepareLogo, LOGO_TYPES } from '../lib/logoImage'
 
 // Библиотека диаграмм весит около 370 КБ — грузим её после того, как показаны
 // числа и список магазинов
@@ -119,7 +120,7 @@ const CODE_RE = /^[a-z0-9][a-z0-9-]{1,30}$/
 const emptyPay = { months: '1', amount: '', method: 'cash', note: '' }
 const emptyNew = {
   code: '', name: '', ownerName: '', phone: '', city: '',
-  trialDays: '14', ownerLogin: '', ownerPassword: '', demo: false,
+  trialDays: '14', ownerLogin: '', ownerPassword: '', demo: false, logo: '',
 }
 
 export default function Admin() {
@@ -234,6 +235,8 @@ export default function Admin() {
       ownerLogin: form.ownerLogin.trim() || undefined,
       ownerPassword: form.ownerPassword.trim() || undefined,
       demo: form.demo || undefined,
+      // Логотип — уже уменьшенной картинкой (lib/logoImage.js); не выбран — магазин без логотипа
+      logo: form.logo || undefined,
     }
 
     setForm(null)
@@ -504,7 +507,10 @@ export default function Admin() {
 
 // ── Заведение нового магазина ──
 function NewPharmacy({ form, setForm, onStart, toast, t }) {
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
+  // Окно уже закрыли (картинка дорабатывалась после «Отмена» или «Завести») — не открываем его снова
+  const set = (k, v) => setForm((f) => f && { ...f, [k]: v })
+  // Картинка логотипа ещё готовится — «Завести» ждёт её, иначе магазин завёлся бы без логотипа
+  const [logoBusy, setLogoBusy] = useState(false)
 
   // Всё, что можно проверить здесь, проверяется здесь: окно закрывается сразу,
   // и отказ, пришедший через полминуты, унёс бы с собой всё введённое. Сервер
@@ -544,6 +550,8 @@ function NewPharmacy({ form, setForm, onStart, toast, t }) {
           <NumberInput value={form.trialDays} onChange={(e) => set('trialDays', e.target.value)} /></div>
       </div>
 
+      <LogoField value={form.logo} onChange={(v) => set('logo', v)} onBusy={setLogoBusy} toast={toast} t={t} />
+
       <div className="note info" style={{ marginBottom: 14 }}>
         {t('Под этим логином войдёт владелец магазина. Пароль можно не задавать — он придумается и покажется один раз.')}
       </div>
@@ -565,9 +573,63 @@ function NewPharmacy({ form, setForm, onStart, toast, t }) {
 
       <div className="modal-actions">
         <button className="btn ghost" onClick={() => setForm(null)}>{t('Отмена')}</button>
-        <button className="btn" onClick={submit}>{t('Завести')}</button>
+        <button className="btn" onClick={submit} disabled={logoBusy}>{t('Завести')}</button>
       </div>
     </Modal>
+  )
+}
+
+// ── Логотип магазина (1.6.4) ──
+// Картинку выбирает владелец сервиса; она печатается на чеках, листах и видна на экране
+// покупателя этого магазина. Здесь же она и готовится: пустые поля обрезаются, картинка
+// уменьшается до 720×360 (lib/logoImage.js). Видно сразу, что получится; «Убрать» — магазин
+// снова без логотипа, всё как прежде
+function LogoField({ value, onChange, onBusy, loading = false, toast, t }) {
+  const input = useRef(null)
+  const [working, setWorking] = useState(false)
+  // Пока картинка готовится, окно не сохраняет (onBusy): иначе «Сохранено» ушло бы без неё
+  const busy = (on) => {
+    setWorking(on)
+    onBusy?.(on)
+  }
+  async function pick(e) {
+    const file = e.target.files?.[0]
+    // Тот же файл можно выбрать ещё раз
+    e.target.value = ''
+    if (!file) return
+    busy(true)
+    try {
+      const r = await prepareLogo(file)
+      onChange(r.dataUrl)
+    } catch (err) {
+      toast(t(err?.message || 'Картинку не удалось открыть — возможно, файл повреждён'), 'err')
+    } finally {
+      busy(false)
+    }
+  }
+  return (
+    <div className="field logo-field" data-testid="logo-field">
+      <label>{t('Логотип')}</label>
+      <div className="logo-box">
+        <div className={'logo-preview' + (value ? '' : ' empty')}>
+          {value ? <img src={value} alt={t('Логотип')} data-testid="logo-preview" /> : <span>{loading || working ? t('Загрузка…') : t('Нет логотипа')}</span>}
+        </div>
+        <div className="logo-actions">
+          <button type="button" className="btn ghost" onClick={() => input.current?.click()} disabled={working || loading} data-testid="logo-pick">
+            <span className="ic"><LuImagePlus size={16} /></span> {value ? t('Заменить') : t('Выбрать картинку')}
+          </button>
+          {value && (
+            <button type="button" className="btn ghost" onClick={() => onChange('')} disabled={working} data-testid="logo-remove">
+              <span className="ic"><LuX size={16} /></span> {t('Убрать')}
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="tag-cat">
+        {t('PNG, JPG или WebP до 2 МБ. Логотип печатается на чеках и листах магазина и виден на экране покупателя. Без логотипа — всё как сейчас.')}
+      </div>
+      <input ref={input} type="file" accept={LOGO_TYPES.join(',')} hidden onChange={pick} data-testid="logo-input" />
+    </div>
   )
 }
 
@@ -590,6 +652,25 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
   const [busy, setBusy] = useState(false)
   const [pay, setPay] = useState(null)
   const [edit, setEdit] = useState(null)
+  // Картинка логотипа в «Изменить магазин» ещё готовится
+  const [logoBusy, setLogoBusy] = useState(false)
+  // Логотип магазина: undefined — ещё грузится, '' — логотипа нет. Картинка лежит отдельно
+  // от карточки и забирается заново, когда меняется отметка logoAt
+  const [logo, setLogo] = useState(() => (row && !row.logoAt ? '' : undefined))
+  useEffect(() => {
+    let alive = true
+    if (!ph.logoAt) {
+      setLogo('')
+      return undefined
+    }
+    api
+      .get(`/admin/pharmacies/${id}/logo`)
+      .then((r) => alive && setLogo(typeof r?.logo === 'string' ? r.logo : ''))
+      .catch(() => alive && setLogo(''))
+    return () => {
+      alive = false
+    }
+  }, [id, ph.logoAt])
 
   const load = useCallback(async () => {
     try {
@@ -769,7 +850,9 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
               note: ph.note,
               paidUntil: tjDate(ph.paidUntil),
               paidTime: tjTime(ph.paidUntil),
-              offlineDays: String(ph.offlineDays ?? 7),
+              // Логотип меняется, только если его тронули в окне: иначе «Сохранить» его не касается
+              logo: '',
+              logoChanged: false,
             })
           }
         >
@@ -781,12 +864,22 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
       </div>
 
       <Section title={t('Контакты')}>
+        <Kv
+          label={t('Логотип')}
+          value={
+            logo ? (
+              <img className="admin-logo-thumb" src={logo} alt={t('Логотип')} data-testid="card-logo" />
+            ) : logo === undefined ? (
+              '…'
+            ) : (
+              t('нет')
+            )
+          }
+        />
         <Kv label={t('Владелец')} value={ph.ownerName || '—'} />
         <Kv label={t('Телефон')} value={ph.phone || '—'} />
         <Kv label={t('Город')} value={ph.city || '—'} />
         {ph.note && <Kv label={t('Примечание')} value={ph.note} />}
-        {/* Программа для Windows продаёт и без интернета, но подписку проверяет сервер */}
-        <Kv label={t('Касса работает без связи')} value={`${ph.offlineDays ?? 7} ${t('дн.')}`} />
         {ph.calledAt && (
           <Kv label={t('Последний звонок')} value={`${fmtDate(ph.calledAt)}${ph.callNote ? ' · ' + ph.callNote : ''}`} />
         )}
@@ -924,12 +1017,16 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
           </div>
           <div className="field"><label>{t('Примечание')}</label>
             <input value={edit.note} onChange={(e) => setEdit({ ...edit, note: e.target.value })} /></div>
-          <div className="field"><label>{t('Касса работает без связи, дней')}</label>
-            <input type="number" min="1" max="30" step="1" inputMode="numeric" style={{ maxWidth: 120 }} value={edit.offlineDays}
-              onChange={(e) => setEdit({ ...edit, offlineDays: e.target.value })} data-testid="offline-days" />
-            <div className="tag-cat">{t('Программа для Windows продаёт и без интернета. Дольше этого срока без связи с сервером она не работает — пока не проверит подписку. От 1 до 30 дней.')}</div>
-          </div>
-
+          <LogoField
+            value={edit.logoChanged ? edit.logo : logo || ''}
+            loading={!edit.logoChanged && logo === undefined}
+            // Картинка готовится не мгновенно: берём окно таким, каким оно стало к этому
+            // моменту (иначе откатились бы поля, набранные за это время), а закрытое — не открываем
+            onChange={(v) => setEdit((e) => e && { ...e, logo: v, logoChanged: true })}
+            onBusy={setLogoBusy}
+            toast={toast}
+            t={t}
+          />
           <div className="note info" style={{ marginBottom: 14 }}>
             {t('Дату меняют, когда ошиблись при вводе, дают бесплатное продление или закрывают сразу. Обычную оплату лучше проводить кнопкой «Продлить» — она попадёт в историю оплат.')}
           </div>
@@ -938,7 +1035,8 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
             <button className="btn ghost" onClick={() => setEdit(null)} disabled={busy}>{t('Отмена')}</button>
             <button
               className="btn"
-              disabled={busy}
+              // Пока картинка логотипа готовится, «Сохранить» ждёт её
+              disabled={busy || logoBusy}
               onClick={() =>
                 act(
                   () =>
@@ -956,8 +1054,8 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
                         paidUntil: edit.paidUntil
                           ? new Date(`${edit.paidUntil}T${edit.paidTime || '23:59'}:00.000+05:00`).toISOString()
                           : undefined,
-                        // Пустое поле — число не трогаем; негодное сервер отвергнет с объяснением
-                        offlineDays: String(edit.offlineDays).trim() === '' ? undefined : Number(edit.offlineDays),
+                        // Логотип: новая картинка или '' (убрать); не трогали — поле не отправляем
+                        logo: edit.logoChanged ? edit.logo : undefined,
                       })
                       .then(() => setEdit(null)),
                   t('Сохранено'),

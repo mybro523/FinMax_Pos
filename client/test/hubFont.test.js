@@ -3,7 +3,8 @@
 // Владелец: надписи как можно крупнее, слово целиком (не влезает — переходит на следующую
 // строку), у всех плиток один размер, растут вместе с экраном; «КАССА» — в полтора раза
 // крупнее; цифра в углу на надпись не налезает. 1.5.10: «чуть-чуть меньше» — на 15 % мельче
-// самого крупного размера, но не мельче 11 px, если столько помещается. Ширины слов — в em
+// самого крупного размера, но не мельче 11 px, если столько помещается. 1.6.4: «ещё меньше» —
+// 0,65 самого крупного (на экране владельца 16,5 px вместо 21,5). Ширины слов — в em
 // шрифта Inter 700 с интервалом −0,02 em, мерены на странице (canvas и страница сходятся до 0,1 %).
 //
 // Запуск: npm test (в папке client)
@@ -34,8 +35,8 @@ const fltFor = (t, fs) => {
   const g = badgeGeom(fs)
   return t.badgeEm == null ? null : { w: badgeWidth(g, t.badgeEm) + g.gap, bottom: g.mt + g.bh }
 }
-// 1.5.10: на 15 % мельче самого крупного, шагом 0,5 px, но не мельче 11 px, если столько помещается
-const smaller = (max) => Math.max(Math.floor((max * 0.85) / 0.5) * 0.5, Math.min(max, 11))
+// 1.6.4: 0,65 самого крупного (1.5.10 — 0,85), шагом 0,5 px, но не мельче 11 px, если столько помещается
+const smaller = (max) => Math.max(Math.floor((max * 0.65) / 0.5) * 0.5, Math.min(max, 11))
 
 test('самый крупный размер: самое длинное слово («Инвентаризация») во всю ширину плитки', () => {
   const r = hubSizes({ box: BOX, tiles: RU, space: SPACE, gold: null })
@@ -44,18 +45,18 @@ test('самый крупный размер: самое длинное слов
   assert.ok(r.max >= 25 && r.max <= 26, `самый крупный на экране владельца — около 25,5 px (как в 1.5.9), а не ${r.max}`)
 })
 
-test('1.5.10: надпись на 15 % мельче самого крупного — на экране владельца около 21,5 px', () => {
-  assert.equal(SCALE, 0.85)
+test('1.6.4: надпись — 0,65 самого крупного: на экране владельца 16,5 px (было 21,5)', () => {
+  assert.equal(SCALE, 0.65)
   assert.equal(READABLE, 11)
   const r = hubSizes({ box: BOX, tiles: RU, space: SPACE, gold: KASSA(300, 120) })
   assert.equal(r.fs, smaller(r.max))
-  assert.equal(r.fs, 21.5, `на экране владельца ${r.fs} px вместо 21,5`)
+  assert.equal(r.fs, 16.5, `на экране владельца ${r.fs} px вместо 16,5`)
   const share = (INV * r.fs) / BOX.w
-  assert.ok(share > 0.8 && share <= 0.85, `«Инвентаризация» занимает ${share.toFixed(3)} ширины, а не ~0,84`)
+  assert.ok(share > 0.6 && share <= 0.65, `«Инвентаризация» занимает ${share.toFixed(3)} ширины, а не ~0,64`)
   for (const t of RU) assert.notEqual(lineCount(t.words, SPACE, r.fs, BOX.w * SAFE, fltFor(t, r.fs)), Infinity, 'какое-то слово рвётся')
-  // «КАССА» уменьшилась вместе со всеми и осталась в 1,5 раза крупнее: 32 px вместо 38
+  // «КАССА» уменьшилась вместе со всеми и осталась в 1,5 раза крупнее: 24,5 px вместо 32
   assert.equal(r.gold, Math.floor((r.fs * GOLD) / 0.5) * 0.5)
-  assert.equal(r.gold, 32)
+  assert.equal(r.gold, 24.5)
 })
 
 test('длинное название уходит на вторую строку целыми словами и не выше доли плитки', () => {
@@ -65,9 +66,10 @@ test('длинное название уходит на вторую строк�
     assert.ok(n >= 1 && n <= 2, `строк ${n}`)
     assert.ok(n * r.fs * LINE <= BOX.h * FILL + 1e-9, 'надпись выше допустимого')
   }
-  // «Отложенные штрихкоды» в одну строку не влезает → две строки; «Панель управления» при
-  // уменьшенном на 15 % размере (1.5.10) встаёт в одну
-  assert.equal(lineCount([6.35, 5.67], SPACE, r.fs, BOX.w * SAFE, null), 2)
+  // При 16,5 px (1.6.4) «Отложенные штрихкоды» без цифры в углу встаёт в одну строку, а с
+  // цифрой — в две (цифра отнимает начало первой строки); «Панель управления» — в одну
+  assert.equal(lineCount([6.35, 5.67], SPACE, r.fs, BOX.w * SAFE, null), 1)
+  assert.equal(lineCount([6.35, 5.67], SPACE, r.fs, BOX.w * SAFE, fltFor(tile([6.35, 5.67], 0.43), r.fs)), 2)
   assert.equal(lineCount([3.62, 5.83], SPACE, r.fs, BOX.w * SAFE, null), 1)
 })
 
@@ -80,13 +82,17 @@ test('надпись растёт и уменьшается вместе с пл
   ].map((box) => ({ box, ...hubSizes({ box, tiles: RU, space: SPACE, gold: null }) }))
   for (let i = 1; i < sizes.length; i++) assert.ok(sizes[i].fs > sizes[i - 1].fs, 'на большем экране надпись не крупнее')
   for (const s of sizes) {
-    // самый крупный — во всю ширину; надпись — на 15 % мельче (шаг 0,5 px чуть сдвигает долю)
+    // самый крупный — во всю ширину; надпись — 0,65 от него (шаг 0,5 px чуть сдвигает долю)
     const most = (INV * s.max) / s.box.w
     assert.ok(most > 0.95 && most <= 1, `самый крупный: доля ${most.toFixed(3)} при ${s.box.w} px`)
     assert.equal(s.fs, smaller(s.max), `при ${s.box.w} px надпись ${s.fs} px, а самый крупный ${s.max}`)
     const share = (INV * s.fs) / s.box.w
-    assert.ok(share > 0.77 && share <= 0.85, `пропорция ${share.toFixed(3)} при ${s.box.w} px`)
+    // 1024×768: 0,65 дало бы 9,5 px — встаёт нижняя граница 11 px, доля выходит больше
+    if (s.max * SCALE < READABLE) assert.equal(s.fs, READABLE, `при ${s.box.w} px — не мельче 11 px`)
+    else assert.ok(share > 0.6 && share <= 0.65, `пропорция ${share.toFixed(3)} при ${s.box.w} px`)
   }
+  // Размеры на экранах из заметок к 1.6.4
+  assert.deepEqual(sizes.map((s) => s.fs), [11, 14, 16.5, 21])
 })
 
 test('узкий экран (планшет стоя): уменьшение не делает надпись мельче 11 px', () => {
@@ -94,7 +100,7 @@ test('узкий экран (планшет стоя): уменьшение не
   const narrow = hubSizes({ box: { w: 102.7, h: 256 }, tiles: RU, space: SPACE, gold: null })
   assert.equal(narrow.max, 11)
   assert.equal(narrow.fs, 11)
-  // самый крупный 12 px: на 15 % мельче было бы 10 px — встаёт 11
+  // самый крупный 12 px: 0,65 от него было бы 7,5 px — встаёт 11
   const tiles = [tile([INV])]
   const w12 = hubSizes({ box: { w: (INV * 12.2) / 0.99, h: 256 }, tiles, space: SPACE, gold: null })
   assert.equal(w12.max, 12)

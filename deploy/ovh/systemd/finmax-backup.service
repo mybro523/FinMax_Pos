@@ -1,0 +1,7 @@
+[Unit]
+Description=FinMax POS: копия всей базы
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash /srv/finmax/repo/deploy/ovh/backup-db.sh

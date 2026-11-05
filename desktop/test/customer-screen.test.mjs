@@ -95,7 +95,7 @@ test('страница экрана покупателя отдаётся из �
 })
 
 // ── Окно: на заглушках Электрона ──
-function harness({ displays = [KASSA, POKUPATEL], cfg = { mode: 'auto', display: '' }, trustedOk = true, can = true } = {}) {
+function harness({ displays = [KASSA, POKUPATEL], cfg = { mode: 'auto', display: '' }, trustedOk = true, can = true, logo = () => '' } = {}) {
   const windows = []
   const handlers = new Map()
   const listeners = new Map()
@@ -172,6 +172,7 @@ function harness({ displays = [KASSA, POKUPATEL], cfg = { mode: 'auto', display:
     url: SCREEN_URL,
     isOurs: (u) => u.startsWith(ORIGIN),
     timers: { set: (fn, ms) => (timers.push({ fn, ms }), timers.length), clear: () => {} },
+    logo,
   })
   return {
     cs,
@@ -338,4 +339,47 @@ test('окно встало не того размера (экран с друг
   h.fire('display-removed')
   h.timers.at(-1).fn()
   assert.deepEqual(w.bounds, { x: 0, y: 0, width: 10, height: 10 })
+})
+
+test('логотип магазина (1.6.4): программа сама добавляет его покупателю — только когда он сменился; мусор не проходит', () => {
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+  let current = PNG
+  const h = harness({ logo: () => current })
+  h.cs.place()
+  const w = h.windows[0]
+  const last = () => w.sent.at(-1)[1]
+  // Последний логотип, который получила страница (сообщение без поля logo оставляет прежний)
+  const shown = () => [...w.sent].reverse().find(([, s]) => 'logo' in s)?.[1].logo
+  // Окно кассы логотип не присылает (и прислать не может — его отбрасывает проверка)
+  h.listeners.get('customer:update')(h.fromKassa, { mode: 'idle', shop: 'Шифо', logo: 'data:text/html;base64,PGI+' })
+  assert.equal(last().logo, PNG, 'первое сообщение — с логотипом')
+  assert.equal(last().shop, 'Шифо')
+  // Корзина меняется — логотип второй раз не гоняется (он до сотен килобайт)
+  h.listeners.get('customer:update')(h.fromKassa, { mode: 'cart', items: [{ name: 'Хлеб', sub: '1 шт', sum: '5' }], total: '5' })
+  assert.equal('logo' in last(), false)
+  assert.equal(shown(), PNG)
+  // Страница покупателя открылась заново — получает и логотип
+  assert.equal(h.handlers.get('customer:ready')({ sender: w.webContents, senderFrame: { url: SCREEN_URL } }).logo, PNG)
+  // Логотип убрали — refresh показывает это сразу, без новой строки корзины
+  current = ''
+  const before = w.sent.length
+  h.cs.refresh()
+  assert.equal(w.sent.length, before + 1)
+  assert.equal(last().logo, '')
+  // Вместо картинки — ссылка или WebP: как «логотипа нет» (уже показано — заново не шлётся)
+  current = 'https://example.com/logo.png'
+  h.cs.refresh()
+  assert.equal(shown(), '')
+  current = 'data:image/webp;base64,UklGRg=='
+  h.cs.refresh()
+  assert.equal(shown(), '')
+  // Пока идёт проба из «Настроек», refresh её не перебивает
+  current = PNG
+  h.handlers.get('customer:test')(h.fromKassa, { items: [] })
+  const during = w.sent.length
+  h.cs.refresh()
+  assert.equal(w.sent.length, during, 'проба досматривается')
+  // Проба закончилась — на экране уже новый логотип
+  h.timers.at(-1).fn()
+  assert.equal(shown(), PNG)
 })

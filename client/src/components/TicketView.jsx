@@ -1,3 +1,5 @@
+import { useShopLogo } from '../lib/logo'
+
 // ── Чек на экране и на листе ──
 // Рисует то, что собрал lib/ticket.js, и ровно в том же порядке, что уйдёт на
 // ленту и в PDF: шапка, позиции, итоги, подвал. Никаких собственных строк здесь
@@ -5,13 +7,22 @@
 //
 // Оформление фирменное, как у «Отчёта о прибылях и убытках»: название магазина на
 // тёмно-синей полосе, строка документа («Чек № …») жирной, итог — синей плашкой.
-// Внизу — снова название магазина, жирным. Эмблемы программы на чеке нет: чек —
-// бумага магазина. Чек белый и при тёмной теме программы.
+// Внизу — снова название магазина, жирным, и под ним мелко наш сайт. Эмблемы программы
+// на чеке нет: чек — бумага магазина. Чек белый и при тёмной теме программы.
+//
+// Логотип магазина (1.6.4) — по центру над полосой с названием, если владелец сервиса его
+// поставил (lib/logo.js). Нет логотипа — чек как прежде
 export default function TicketView({ ticket }) {
-  const { head = [], rows = [], totals = [], tail = [], docAt = -1, signAt = -1 } = ticket || {}
+  const { head = [], rows = [], totals = [], tail = [], docAt = -1, signAt = -1, siteAt = -1 } = ticket || {}
   const [shop, ...rest] = head
+  const logo = useShopLogo()
   return (
     <div className="ticket">
+      {logo && (
+        <div className="tk-logo">
+          <img src={logo} alt="" />
+        </div>
+      )}
       {shop !== undefined && <div className="tk-band">{shop}</div>}
       {rest.length > 0 && (
         <div className="ticket-head">
@@ -53,7 +64,7 @@ export default function TicketView({ ticket }) {
           <div className="ticket-rule" aria-hidden="true" />
           <div className="ticket-tail">
             {tail.map((line, i) => (
-              <div key={i} className={i === signAt ? 'tk-sign' : undefined}>{line}</div>
+              <div key={i} className={i === signAt ? 'tk-sign' : i === siteAt ? 'tk-site' : undefined}>{line}</div>
             ))}
           </div>
         </>

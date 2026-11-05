@@ -143,15 +143,82 @@ test('сервер отверг продажу соседа — у владел�
   assert.equal(row(b, 'SELECT state FROM lan_log WHERE id = ?', op.id).state, 'rejected')
 })
 
-test('чужая операция, не дошедшая до сервера за две недели, снимается', () => {
+test('1.6.5: магазин месяцами без интернета — продажа живой соседней кассы держится', () => {
   const a = shop()
   const b = shop()
   checkout(atA(a), { items: [{ productId: 'nur', qty: 1 }], payment: 'cash' })
   pass(a, A, b)
   assert.equal(units(b), 4)
-  assert.equal(lanPrune(b, NOW + 15 * DAY), true)
+  // Касса A жива: её видно в сети. Прежде через 15 дней её продажа снималась — остаток
+  // «возвращался», чек пропадал
+  lanPeerSeen(b, { deviceId: A, now: NOW + 14 * DAY })
+  assert.equal(lanPrune(b, NOW + 15 * DAY), false)
+  // Две недели её не видели (компьютер владельца включают нечасто) — ещё не «замолчала»
+  assert.equal(lanPrune(b, NOW + 29 * DAY), false)
+  lanPeerSeen(b, { deviceId: A, now: NOW + 99 * DAY })
+  assert.equal(lanPrune(b, NOW + 100 * DAY), false)
+  assert.equal(units(b), 4, 'сто дней без интернета — продажа соседней кассы на месте')
+  assert.equal(listDocs(b, 'sale').length, 1)
+  // Полгода — снимается и у живой: она могла откатиться на старую копию, и этой продажи нет уже нигде
+  lanPeerSeen(b, { deviceId: A, now: NOW + 180 * DAY })
+  assert.equal(lanPrune(b, NOW + 181 * DAY), true)
+  assert.equal(units(b), 5)
+})
+
+test('касса-источник замолчала в сети на месяц — её не дошедшая до сервера операция снимается', () => {
+  const a = shop()
+  const b = shop()
+  checkout(atA(a), { items: [{ productId: 'nur', qty: 1 }], payment: 'cash' })
+  pass(a, A, b)
+  lanPeerSeen(b, { deviceId: A, now: NOW })
+  assert.equal(units(b), 4)
+  // Касса A сломалась (или переустановлена): её чеки до сервера уже не дойдут
+  assert.equal(lanPrune(b, NOW + 20 * DAY), false, 'двадцать дней — ещё рано')
+  assert.equal(lanPrune(b, NOW + 31 * DAY), true)
   assert.equal(units(b), 5)
   assert.equal(listDocs(b, 'sale').length, 0)
+})
+
+test('своя операция ждёт соседнюю кассу не дольше двух недель — дальше решает сервер', () => {
+  const a = shop()
+  const b = shop()
+  // Владелец (B) завёл клиента, кассир (A) продал ему в долг — продажа A ждёт, пока B отправит клиента
+  createCustomer(atB(b), { name: 'Сосед', phone: '' })
+  pass(b, B, a)
+  const customer = q(a, 'SELECT id FROM customers WHERE local = 2').get()
+  assert.ok(customer, 'клиент соседа пришёл по сети')
+  checkout(atA(a), { items: [{ productId: 'nur', qty: 1 }], payment: 'debt', customerId: customer.id })
+  const sale = opOf(a, 'sale')
+  lanPeerSeen(a, { deviceId: B, now: NOW + 13 * DAY })
+  assert.equal(waitsForPeer(a, sale, NOW + 13 * DAY), true, 'две недели — ждёт')
+  // B жива (видна в сети), но клиента так и не отправила (откатилась на старую копию): ждать дальше
+  // незачем — продажа уйдёт, и сервер решит
+  lanPeerSeen(a, { deviceId: B, now: NOW + 15 * DAY })
+  assert.equal(waitsForPeer(a, sale, NOW + 15 * DAY), false)
+})
+
+test('журнал: своё, ещё не принятое сервером, хранится для соседей долго; принятое — коротко (новая касса не применит давнее второй раз)', () => {
+  const a = shop()
+  checkout(atA(a), { items: [{ productId: 'nur', qty: 1 }], payment: 'cash' })
+  const accepted = opOf(a, 'sale')
+  ackOp(a, accepted)
+  checkout(atA(a), { items: [{ productId: 'nur', qty: 1 }], payment: 'cash' })
+  const waiting = pendingOps(a, 100).find((o) => o.type === 'sale' && o.id !== accepted.id)
+  lanCatchUp(a, { deviceId: A, now: NOW })
+  lanFate(a, accepted.id, 'ok', null, { deviceId: A, now: NOW })
+  lanPrune(a, NOW + 30 * DAY)
+  const left = q(a, 'SELECT id, kind FROM lan_log ORDER BY seq').all().map((r) => r.id)
+  assert.ok(left.includes(waiting.id), 'не принятое сервером — в журнале: сосед догонит по сети')
+  assert.ok(!left.includes(accepted.id) && !left.includes('fate:' + accepted.id), 'принятое сервером через месяц из журнала ушло')
+  // Новая касса читает журнал с начала — и получает только не принятое
+  const c = shop()
+  const out = lanEntriesSince(a, 0, { wide: true })
+  assert.deepEqual(out.entries.map((e) => e.id), [waiting.id])
+  lanReceive(c, out.entries, { now: NOW + 30 * DAY, gen: lanGen(c) })
+  assert.equal(units(c), 4)
+  // Полгода — уходит и не принятое
+  lanPrune(a, NOW + 200 * DAY)
+  assert.equal(q(a, 'SELECT COUNT(*) AS n FROM lan_log').get().n, 0)
 })
 
 test('кассе без прав на деньги журнал уходит урезанным; остатки всё равно сходятся', () => {

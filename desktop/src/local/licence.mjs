@@ -1,10 +1,10 @@
-// ── Срок работы без связи ──
+// ── Последняя связь с сервером (бывший «срок работы без связи») ──
 //
-// Программа продаёт и без интернета — но не бесконечно. Подписку проверяет сервер,
-// при каждом обмене. Если связи с ним нет дольше разрешённого (по умолчанию семь
-// дней; число назначает владелец сервиса для каждого магазина), программа закрывает
-// работу до первой удачной проверки. Иначе магазин, переставший платить, просто
-// выдернула бы провод и работала дальше.
+// До 1.6.5 программа без интернета работала не дольше разрешённого (по умолчанию семь дней)
+// и потом закрывалась до первой проверки подписки. С 1.6.5 срока нет (решение владельца
+// сервиса, 05.11.2026): касса без связи работает сколько угодно, а закрыть её может только
+// слово сервера — блокировка магазина или конец оплаты. Здесь осталась отметка «когда сервер
+// последний раз подтвердил подписку» и память часов, которая держится на ней.
 //
 // Отметка «когда сервер последний раз подтвердил подписку» лежит на диске
 // зашифрованной средствами Windows — так же, как ключи входа. Поправить её в файле
@@ -13,16 +13,12 @@
 // и не зависит от перевода часов компьютера, — перевести дату и получить ещё неделю
 // не выйдет, а опечатка в дате не запрёт кассу.
 import { q } from './db.mjs'
-import { DAY_MS } from './time.mjs'
 
+// Число дней без связи, которое прежние версии сервера присылали магазину. С 1.6.5 оно ни на
+// что не влияет, но остаётся в записи — её читают и прежние версии программы
 export const OFFLINE_DAYS_DEFAULT = 7
 const OFFLINE_DAYS_MIN = 1
 const OFFLINE_DAYS_MAX = 30
-// За сколько дней до остановки начинаем предупреждать
-export const OFFLINE_WARN_DAYS = 2
-// Часы программы назад не идут. Если «сейчас» оказалось раньше последней проверки
-// больше, чем на эту погрешность, — данные о времени стёрты или подменены
-const CLOCK_SLACK_MS = 10 * 60 * 1000
 
 // Число дней — в тех же границах, что на сервере (server/src/admin/subscription.ts)
 export function offlineDaysOf(n) {
@@ -65,9 +61,12 @@ function unpack(stored, cipher) {
 }
 
 // ── Сервер только что подтвердил подписку ──
-// days — сколько дней он разрешает этому магазину работать без связи. Не сказал
-// (ответ на вход у прежней версии сервера) — остаётся прежнее число.
-export function confirmLicence(db, code, { now, days }, cipher) {
+// days — сколько дней он разрешает этому магазину работать без связи (с 1.6.5 ни на что не
+// влияет). paidUntil и status — до какого момента оплачено и что с подпиской, со слова сервера
+// (1.6.5). Те же значения лежат и в обычных столбцах базы (accounts), но их можно поправить
+// руками, а эту запись — нет: касса сверяет одно с другим (gateway.mjs, withTerms). Не сказал
+// (ответ прежней версии сервера) — остаётся прежнее.
+export function confirmLicence(db, code, { now, days, paidUntil, status }, cipher) {
   const before = readLicence(db, code, cipher)
   const record = {
     code,
@@ -77,6 +76,8 @@ export function confirmLicence(db, code, { now, days }, cipher) {
     seenAt: now,
     floorAt: now,
     offlineDays: days === undefined || days === null ? before?.offlineDays ?? OFFLINE_DAYS_DEFAULT : offlineDaysOf(days),
+    paidUntil: paidUntil === undefined ? before?.paidUntil ?? null : paidUntil || null,
+    status: status === undefined ? before?.status ?? null : status || null,
   }
   write(db, record, cipher)
   return record
@@ -108,6 +109,26 @@ export function touchLicence(db, code, now, cipher, floor = now) {
 
 // Есть ли у магазина целая запись о сроке (её не стёрли и не подменили)
 export const hasLicence = (db, code, cipher) => !!readLicence(db, code, cipher)
+
+// ── Срок оплаты и состояние подписки из зашифрованной записи (1.6.5) ──
+// null — записи нет: проверки на этом компьютере не было, или запись стёрли
+export function licenceTerms(db, code, cipher) {
+  const r = readLicence(db, code, cipher)
+  return r ? { paidUntil: r.paidUntil, status: r.status } : null
+}
+
+// Запись прежней версии программы срока оплаты не знает — положить его туда (gateway.mjs, withTerms)
+export function sealTerms(db, code, { paidUntil, status }, cipher) {
+  const r = readLicence(db, code, cipher)
+  if (r) write(db, { ...r, paidUntil: r.paidUntil ?? paidUntil ?? null, status: r.status ?? status ?? null }, cipher)
+}
+
+// Сервер закрыл работу магазина (ответ 403) — запомнить и в зашифрованной записи: иначе
+// обычный столбец можно было бы вернуть руками
+export function sealStatus(db, code, status, cipher) {
+  const r = readLicence(db, code, cipher)
+  if (r) write(db, { ...r, status }, cipher)
+}
 
 // Самый поздний момент, до которого дожил срок работы без связи, — по всем магазинам
 // этого компьютера. С него время срока продолжается после запуска
@@ -144,29 +165,26 @@ function readLicence(db, code, cipher) {
     seenAt,
     // Отдельной отметки часов у прежних записей тоже нет: тогда это был один момент
     floorAt: Number.isFinite(r.floorAt) ? Math.max(r.floorAt, r.checkedAt) : seenAt,
+    // У записи прежней версии программы их нет — до первой проверки сервером
+    paidUntil: typeof r.paidUntil === 'string' ? r.paidUntil : null,
+    status: typeof r.status === 'string' ? r.status : null,
   }
 }
 
 // ── Что сейчас со сроком ──
-//   checkedAt   — когда сервер последний раз подтвердил подписку (пусто — никогда);
-//   offlineDays — сколько дней разрешено без связи;
-//   until       — момент, когда работа остановится;
-//   expired     — срок вышел: работать нельзя до проверки;
-//   warn        — до остановки меньше двух дней.
+// С 1.6.5 срока работы без связи нет (решение владельца сервиса, 05.11.2026): касса без связи
+// работает сколько угодно. Остановить её может только слово сервера — магазин заблокирован или
+// кончилась оплата; дату окончания оплаты касса знает заранее (local/accounts.mjs). Запись о
+// последней проверке остаётся: по ней видно, когда касса последний раз была на связи, и на ней
+// держится память часов (lastSeen, lastFloor).
+//   checkedAt — когда сервер последний раз подтвердил подписку (пусто — никогда);
+//   expired, warn — всегда false: срок больше ничего не закрывает.
 export function licenceOf(db, code, now, cipher) {
   const r = readLicence(db, code, cipher)
-  if (!r) return { checkedAt: null, offlineDays: OFFLINE_DAYS_DEFAULT, until: null, leftMs: 0, expired: true, warn: true }
-  const until = r.checkedAt + r.offlineDays * DAY_MS
-  // «Сейчас» не раньше момента, до которого программа уже дожила: перевод часов
-  // назад (и стёртая память часов) срока не возвращает
-  const leftMs = until - Math.max(now, r.seenAt)
-  const clockBack = now < r.checkedAt - CLOCK_SLACK_MS
   return {
-    checkedAt: new Date(r.checkedAt).toISOString(),
-    offlineDays: r.offlineDays,
-    until: new Date(until).toISOString(),
-    leftMs,
-    expired: leftMs <= 0 || clockBack,
-    warn: leftMs <= OFFLINE_WARN_DAYS * DAY_MS,
+    checkedAt: r ? new Date(r.checkedAt).toISOString() : null,
+    unlimited: true,
+    expired: false,
+    warn: false,
   }
 }

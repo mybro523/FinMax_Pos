@@ -6,7 +6,7 @@ import { useAuth } from '../db/auth'
 import { money } from '../db/store'
 import { fmtDate, fmtShort, serverNow } from '../lib/time'
 import { useT } from '../lib/i18n'
-import { badgeOf, leftText, opTitle, updateBadgeOf, updateText, versionBadgeOf } from '../lib/syncStatus'
+import { badgeOf, opTitle, updateBadgeOf, updateText, versionBadgeOf } from '../lib/syncStatus'
 import { rejectedDetail } from '../lib/rejected'
 import { lanBadgeOf } from '../lib/lanStatus'
 import { soloMessage } from '../lib/aktivaciya'
@@ -461,26 +461,14 @@ function StatusModal({ st, onClose }) {
           </div>
         )}
 
-        {/* ── Сколько можно работать без связи ── */}
+        {/* ── Работа без связи (у магазина с сервером) ──
+            С 1.6.5 срока нет: без связи касса работает сколько угодно. Остановить её может
+            только слово сервера (магазин заблокирован, кончилась оплата) */}
         {!solo && lic && (
           <div className="sync-section">
             <h4>{t('Работа без связи')}</h4>
-            <Row label={t('Без связи программа работает')}>{lic.offlineDays} {t('дн.')}</Row>
-            <Row label={t('Сервер подтвердил подписку')}>{lic.checkedAt ? fmtShort(lic.checkedAt) : '—'}</Row>
-            <Row label={t('Без связи можно работать ещё')} tone={lic.expired ? 'bad' : lic.warn ? 'warn' : undefined}>
-              {leftText(lic.leftMs, t)}
-              {lic.until ? ` (${t('до')} ${fmtShort(lic.until)})` : ''}
-            </Row>
-            {(st?.clockDoubt || st?.clockUnsure) && (
-              <div className="tag-cat" style={{ marginTop: 4 }}>
-                {t('Пока время не сверено с сервером, срок уменьшается и за время, пока компьютер был выключен. Сколько именно, программе узнать не у кого — она считает по тому, как этот компьютер работает обычно.')}
-              </div>
-            )}
-            {lic.warn && !lic.expired && !st?.online && (
-              <div className="note warn" style={{ marginTop: 6 }}>
-                {t('Подключите интернет хотя бы на минуту — программа проверит подписку, и срок начнётся заново.')}
-              </div>
-            )}
+            <Row label={t('Без связи программа работает')}>{t('без ограничения')}</Row>
+            <Row label={t('Последняя связь с сервером')}>{lic.checkedAt ? fmtShort(lic.checkedAt) : '—'}</Row>
           </div>
         )}
 

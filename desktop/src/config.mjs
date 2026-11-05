@@ -58,6 +58,24 @@ export function resolveApiUrl({ packaged, env = {}, built = {} }) {
   return normalizeApiUrl(env.APTEKA_API_URL || env.VITE_API_URL) || fromBuild
 }
 
+// ── Запасной адрес сервера (1.6.5) ──
+// Тот же сервер под своим именем у OVH. 04.11.2026 у регистратора домена (Navju) отказали DNS:
+// api.finmaxpos.tj перестал находиться, и кассы остались без связи, хотя сервер работал. Теперь
+// программа спрашивает оба адреса и работает через тот, что ответил (apibase.mjs).
+//
+// Запасной известен только для боевого адреса и берётся из самой программы: как и основной,
+// переменной окружения на компьютере магазина его не подменить. При запуске из исходников
+// (проверки) — APTEKA_API_URL_FALLBACK; пустая строка — без запасного.
+export const PRIMARY_API = 'https://api.finmaxpos.tj/api'
+export const FALLBACK_API = 'https://vps-04688c58.vps.ovh.net/api'
+
+export function resolveApiFallback({ packaged, env = {}, built = {}, apiUrl }) {
+  const known = normalizeApiUrl(built.apiFallback) || (apiUrl === PRIMARY_API ? FALLBACK_API : '')
+  let out = known
+  if (!packaged && typeof env.APTEKA_API_URL_FALLBACK === 'string') out = normalizeApiUrl(env.APTEKA_API_URL_FALLBACK)
+  return out && out !== apiUrl ? out : ''
+}
+
 // ── Откуда брать обновления ──
 // Правило то же, что с адресом сервера: в собранной программе — только зашитое при
 // сборке. Иначе одной переменной окружения программу можно было бы заставить скачать
