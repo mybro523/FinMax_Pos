@@ -229,7 +229,13 @@ function soloOf(file, Database) {
       } catch {
         paired = []
       }
-      return { shopId: metaOf(db, 'shopId') || '', lanKey: metaOf(db, 'lanKey') || '', paired, register: !!metaOf(db, 'soloMain') }
+      let mainId = ''
+      try {
+        mainId = String(JSON.parse(metaOf(db, 'soloMain') || 'null')?.deviceId || '')
+      } catch {
+        mainId = ''
+      }
+      return { shopId: metaOf(db, 'shopId') || '', lanKey: metaOf(db, 'lanKey') || '', paired, register: !!metaOf(db, 'soloMain'), mainId }
     },
     null,
   )
@@ -270,7 +276,8 @@ export function applyRestore({ userData, dataDir, fs, Database, now, schemaMax, 
   if (!(schema <= schemaMax)) return done({ ok: false, error: PROBLEMS.newer })
   // Копия кассы магазина без интернета (1.7.0): база в ней — полная копия магазина, но номер этой
   // кассы компьютер не берёт — главный с номером кассы с ней же и спутался бы. Становится главным
-  const fromRegister = !!soloOf(src, Database)?.register
+  const copySolo = soloOf(src, Database)
+  const fromRegister = !!copySolo?.register
   const identity = ask.foreign && !fromRegister ? deviceOfCopy(join(stage, 'core.db'), Database) : null
   if (ask.foreign && !fromRegister && !identity) return done({ ok: false, error: 'в копии нет номера кассы' })
 
@@ -323,6 +330,13 @@ export function applyRestore({ userData, dataDir, fs, Database, now, schemaMax, 
         // иначе кассы продолжили бы обмен, не принеся главному того, чего в копии нет
         const newEpoch = !!(metaOf(db, 'soloEpoch') || fromRegister || was?.shopId)
         if (newEpoch) put.run('soloEpoch', randomUUID())
+        // Копия кассы: у её журнала своя нумерация — правки касс прежнего поколения сравнить не с
+        // чем («вслепую», gateway checkRegisterEntry); операции прежнего главного, которые принесут
+        // кассы, — свои (gateway takeEntries). Своя копия — нумерация та же
+        if (fromRegister) {
+          put.run('soloEpochBlind', '1')
+          if (copySolo?.mainId) put.run('soloFormerMain', copySolo.mainId)
+        } else if (newEpoch) db.prepare("DELETE FROM meta WHERE key = 'soloEpochBlind'").run()
         // Копия кассы: пометка «касса», её имя, ключи обмена и её главный — не этого компьютера
         if (fromRegister) {
           const drop = db.prepare('DELETE FROM meta WHERE key = ?')

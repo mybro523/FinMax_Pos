@@ -87,7 +87,7 @@ export function discrepancyTitle(kind, t) {
   // …и правку, часть которой на главном к тому времени уже поменяли
   if (kind === 'soloEdit') return t('Правку сделали и на кассе, и на главном компьютере')
   // …или касса так долго молчала, что журнал главного за это время уже убран
-  if (kind === 'soloOld') return t('Правка с кассы, которая больше месяца не была на связи')
+  if (kind === 'soloOld') return t('Правка с кассы, которая долго не была на связи')
   return t('Расхождение')
 }
 
@@ -97,11 +97,26 @@ export function discrepancyDetail(d, t, money = String) {
   if (d.kind === 'soloEdit' || d.kind === 'soloOld') {
     const n = noteOf(d)
     if (n.gone) return t('запись удалили на главном — правка с кассы не применена')
-    const parts = (Array.isArray(n.fields) ? n.fields : []).map((f) => {
+    const once = new Set()
+    const parts = []
+    for (const f of Array.isArray(n.fields) ? n.fields : []) {
       const field = COL_FIELD[f.field] || f.field
-      const val = (v) => (MONEY_COLS.has(f.field) && Number.isFinite(Number(v)) ? Number(v) / 100 : v)
-      return `${fieldLabel(field, t)}: ${t('на кассе')} ${shown(field, val(f.kassa), t, money)}, ${t('на главном')} ${shown(field, val(f.main), t, money)}`
-    })
+      // Закупочная цена в базе — двумя столбцами: строка одна
+      if (once.has(field)) continue
+      once.add(field)
+      // Фото и аналоги — без самих значений
+      if (f.field === 'image' || f.field === 'analogIds' || (!('kassa' in f) && !('main' in f))) {
+        parts.push(fieldLabel(field, t))
+        continue
+      }
+      const val = (v) => {
+        if (v === null || v === undefined) return null
+        if (MONEY_COLS.has(f.field) && Number.isFinite(Number(v))) return Number(v) / 100
+        if (BOOL_COLS.has(f.field)) return !!Number(v)
+        return v
+      }
+      parts.push(`${fieldLabel(field, t)}: ${t('на кассе')} ${shown(field, val(f.kassa), t, money)}, ${t('на главном')} ${shown(field, val(f.main), t, money)}`)
+    }
     return `${parts.join('; ')}${parts.length ? ' — ' : ''}${t('осталось как на главном')}`
   }
   if (d.kind === 'notTaken') {
@@ -153,6 +168,8 @@ function editDetail(n, t, money) {
 // Столбцы базы программы → поля, как их называет окно (правка с кассы, магазин без интернета)
 const COL_FIELD = { priceC: 'price', costC: 'cost', sCostC: 'cost', pieceC: 'piecePrice', openingDebtC: 'openingDebt' }
 const MONEY_COLS = new Set(['priceC', 'costC', 'sCostC', 'pieceC', 'openingDebtC'])
+// Да/нет в базе — 1/0
+const BOOL_COLS = new Set(['noExpiry', 'analogs'])
 
 // Виды операций кассы — для расхождения «не принято»
 const OP_TYPE = {
@@ -168,6 +185,37 @@ const OP_TYPE = {
   expense: 'Расход',
   income: 'Доход',
   'user.update': 'Смена пароля',
+  'cashMove.delete': 'Удаление внесения или изъятия',
+  'deferred.add': 'Отложенный штрихкод',
+  'deferred.remove': 'Отложенный штрихкод',
+  'arrival.update': 'Правка прихода',
+  'arrival.delete': 'Удаление прихода',
+  'supplier.return': 'Возврат поставщику',
+  'supplierReturn.delete': 'Удаление возврата поставщику',
+  'expense.update': 'Правка расхода',
+  'expense.delete': 'Удаление расхода',
+  'income.update': 'Правка дохода',
+  'income.delete': 'Удаление дохода',
+  'product.create': 'Новый товар',
+  'product.update': 'Правка товара',
+  'product.delete': 'Удаление товара',
+  'category.create': 'Новая категория',
+  'category.update': 'Правка категории',
+  'category.delete': 'Удаление категории',
+  'productType.create': 'Новый тип товара',
+  'productType.update': 'Правка типа товара',
+  'productType.delete': 'Удаление типа товара',
+  'payService.create': 'Новый сервис перевода',
+  'payService.delete': 'Удаление сервиса перевода',
+  'expenseCategory.create': 'Новая статья расходов',
+  'expenseCategory.delete': 'Удаление статьи расходов',
+  'incomeCategory.create': 'Новая статья доходов',
+  'incomeCategory.delete': 'Удаление статьи доходов',
+  'supplier.create': 'Новый поставщик',
+  'supplier.update': 'Правка поставщика',
+  'supplier.delete': 'Удаление поставщика',
+  'supplier.pay': 'Оплата поставщику',
+  'supplierPayment.delete': 'Удаление оплаты поставщику',
 }
 
 // Что владельцу с этим делать

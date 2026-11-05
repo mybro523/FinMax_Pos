@@ -112,3 +112,25 @@ test('остаток кассы на объединённой карточке �
     setLang('ru')
   }
 })
+
+test('кассы магазина без интернета: правка с кассы и «не принято» — понятными словами, на обоих языках', () => {
+  setLang('ru')
+  const note = (fields, extra = {}) => JSON.stringify({ tbl: 'products', gone: false, fields, ...extra })
+  const d = (kind, fields) => discrepancyDetail({ kind, note: note(fields) }, translate, money)
+  // Деньги — из копеек, пустая цена штуки — прочерком, а не нулём
+  assert.equal(d('soloEdit', [{ field: 'pieceC', kassa: 150, main: null }]), 'Цена за 1 шт: на кассе 1.50 с., на главном — — осталось как на главном')
+  // Закупочная цена в базе — двумя столбцами: строка одна
+  assert.equal(d('soloEdit', [{ field: 'sCostC', kassa: 400, main: 600 }, { field: 'costC', kassa: 400, main: 600 }]), 'Закупочная цена: на кассе 4.00 с., на главном 6.00 с. — осталось как на главном')
+  // Да/нет — словами; фото и аналоги — без значений
+  assert.equal(d('soloOld', [{ field: 'noExpiry', kassa: 1, main: 0 }]), 'Без срока годности: на кассе да, на главном нет — осталось как на главном')
+  assert.equal(d('soloEdit', [{ field: 'image', kassa: 'data:image/png;base64,AAAA', main: '' }, { field: 'analogIds' }]), 'Фото; Аналоги — осталось как на главном')
+  assert.equal(discrepancyTitle('soloOld', translate), 'Правка с кассы, которая долго не была на связи')
+  // «Не принято»: какая операция — по-русски, а не служебным именем
+  const nt = (opType) => discrepancyDetail({ kind: 'notTaken', opType, note: JSON.stringify({ error: 'x' }) }, translate, money)
+  for (const t of ['product.delete', 'supplier.delete', 'category.update', 'arrival.update', 'supplier.pay']) assert.doesNotMatch(nt(t), /^Операция/, t)
+  setLang('tg')
+  assert.notEqual(discrepancyTitle('soloOld', translate), 'Правка с кассы, которая долго не была на связи')
+  assert.match(d('soloEdit', [{ field: 'priceC', kassa: 700, main: 900 }]), /9\.00 с\./)
+  for (const t of ['product.delete', 'supplier.delete', 'category.update']) assert.doesNotMatch(nt(t), /[А-ЯЁа-яё]{3,} [а-яё]+а$/, t)
+  setLang('ru')
+})

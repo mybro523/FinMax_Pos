@@ -347,5 +347,5 @@ test('касса молчала больше месяца: её правки с�
   assert.ok(q(m.db(), 'SELECT 1 FROM products WHERE id = ?').get(p4.id), 'товар не удалён')
   const nt = (await m.req('GET', '/discrepancies')).data.filter((d) => d.kind === 'notTaken')
   assert.equal(nt.length, 1)
-  assert.match(JSON.parse(nt[0].note).error, /больше месяца не была на связи/)
+  assert.match(JSON.parse(nt[0].note).error, /долго не была на связи/)
 })

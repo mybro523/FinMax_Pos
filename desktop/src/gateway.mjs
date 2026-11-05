@@ -116,7 +116,9 @@ import { activate as activateCode, activationState, useResetCode } from './local
 import { validKey } from './local/licence-code.mjs'
 import { acceptAll, deleteCustomer, isStandaloneDb, mergeProducts, pruneAccepted, setupShopDb, STANDALONE_CODE } from './local/standalone.mjs'
 import { updateUser } from './local/ops/team.mjs'
-import { knownDebt, SUPPLIER_HAS_DEBT, SUPPLIER_HAS_PAYMENTS } from './local/ops/supplierops.mjs'
+import { SUPPLIER_HAS_DEBT, SUPPLIER_HAS_PAYMENTS } from './local/ops/supplierops.mjs'
+import { pendingDebtOf } from './local/suppliers.mjs'
+import { fromCentsD } from './local/money.mjs'
 import { touchedBy as touchedByOp } from './local/outbox.mjs'
 
 // Объяснения для человека. Каждое есть в словаре интерфейса (client/src/lib/i18n.js)
@@ -152,7 +154,8 @@ export const MESSAGES = {
   regUnknownOp: 'Главный компьютер такую операцию с кассы не принимает — обновите программу на кассе до версии главного.',
   regBadOp: 'Операция с кассы повреждена или изменена — главный компьютер её не принял.',
   regStale: 'Запись поправили на главном компьютере позже — правка с кассы не применена.',
-  regOld: 'Касса больше месяца не была на связи: что за это время меняли на главном, не узнать — правка с кассы не применена.',
+  regOld: 'Касса долго не была на связи: что за это время меняли на главном, не узнать — правка с кассы не применена.',
+  regPack: 'Упаковку или цену товара на главном поменяли позже — приход с другой упаковкой не принят: проведите его на главном компьютере.',
   pwOnMain: 'Пароль меняют на главном компьютере магазина — касса получит новый пароль при обмене.',
   noRights: 'Недостаточно прав',
   // Сверить оплату не с чем: зашифрованной записи о проверке сервером нет (её стёрли, или
@@ -385,6 +388,7 @@ export function createGateway({
           // С какого номера журнала началось нынешнее «поколение»: касса, видевшая журнал прежнего,
           // могла видеть номера, которые здесь заняты заново (см. checkRegisterEntry)
           setMeta(db, 'soloEpochSeq', String(lanTopSeq(db)))
+          q(db, "DELETE FROM meta WHERE key = 'soloEpochBlind'").run()
         }
       }
       log.error(`база магазина ${code} была повреждена — ${restored.at ? 'поднята из копии' : 'начата заново'}`)
@@ -1447,12 +1451,12 @@ export function createGateway({
     if (team) teamToCore(ph)
     let done = []
     const extras = []
-    // К главному подключены кассы: своё — сначала в журнал (касса получит операцию), приём и
-    // основа для касс — одной записью на диск
+    // Своё — сначала в журнал (касса получит операцию; и без касс: подключённая потом касса,
+    // подключаясь заново, сверит с ним свои правки), приём и основа для касс — одной записью на диск
     const net = soloRegisters(ph).length > 0
     try {
       inTx(ph.db, () => {
-        if (net) lanCatchUp(ph.db, { deviceId, now: clock.now(), fates: false, pwOut: pwOutFor(ph) })
+        lanCatchUp(ph.db, { deviceId, now: clock.now(), fates: false, pwOut: pwOutFor(ph) })
         done = acceptAll(ph.db, { now: clock.now(), extras })
         markSeen(ph.db, done.map((op) => op.id), clock.now())
         if (net && done.length) {
@@ -2040,29 +2044,22 @@ export function createGateway({
   // Что на главном (или на другой кассе) поменяли в этой строке после того, как касса последний
   // раз получила журнал главного (seen — докуда): какие поля, удалили ли строку, двигался ли товар.
   // Правки самого origin — не в счёт (null — в счёт всё). upTo — докуда смотреть журнал (null — до
-  // конца). Часы касс с главным не сверены — решает порядок журнала. blind — журнал после seen уже
-  // убран (касса молчала больше месяца): что меняли, не узнать — вся правка строки под вопросом
-  function concurrent(ph, r, { seen, origin = null, upTo = null, blind = false }) {
+  // конца). skip — операции, которые касса уже видела, хоть они и легли здесь позже (подключение
+  // заново: порядок её журнала). Часы касс с главным не сверены — решает порядок журнала. blind —
+  // журнал после seen уже убран (касса долго молчала): что меняли, не узнать — вся правка под вопросом
+  function concurrent(ph, r, { seen, origin = null, upTo = null, blind = false, skip = null }) {
     const tbl = String(r?.tbl || '')
     const id = String(r?.rowId || '')
     if (!tbl || !id || id === '*' || r.action === 'map' || r.action === 'lines') return null
     // Строку заводят — сравнивать не с чем
     if (r.action === 'put' && r.data?.row && !r.data?.set) return null
     if (blind) return { keys: new Set(), deleted: false, moved: false, all: true }
-    const edits = q(
-      ph.db,
-      `SELECT e.action, e.data FROM row_edits e JOIN lan_log l ON l.id = e.opId
-       WHERE e.tbl = ? AND e.rowId = ? AND l.seq > ? AND (? IS NULL OR l.seq <= ?) AND (? IS NULL OR l.origin <> ?)`,
-    ).all(tbl, id, seen, upTo, upTo, origin, origin)
-    const moved =
-      tbl === 'products' && r.action === 'del'
-        ? !!q(
-            ph.db,
-            `SELECT 1 FROM stock_moves m JOIN lan_log l ON l.id = m.opId
-             WHERE m.productId = ? AND l.seq > ? AND (? IS NULL OR l.seq <= ?) AND (? IS NULL OR l.origin <> ?) LIMIT 1`,
-          ).get(id, seen, upTo, upTo, origin, origin)
-        : false
-    if (!edits.length && !moved) return null
+    const win = 'l.seq > ? AND (? IS NULL OR l.seq <= ?) AND (? IS NULL OR l.origin <> ?)'
+    const args = [seen, upTo, upTo, origin, origin]
+    const fresh = (opId) => !skip || !skip.has(opId)
+    const edits = q(ph.db, `SELECT e.opId, e.action, e.data FROM row_edits e JOIN lan_log l ON l.id = e.opId WHERE e.tbl = ? AND e.rowId = ? AND ${win}`)
+      .all(tbl, id, ...args)
+      .filter((x) => fresh(x.opId))
     const keys = new Set()
     let deleted = false
     for (const x of edits) {
@@ -2079,8 +2076,53 @@ export function createGateway({
       for (const k of Object.keys(d?.set || {})) keys.add(k)
       for (const k of Object.keys(d?.row || {})) keys.add(k)
     }
+    let moved = false
+    if (tbl === 'products') {
+      // Цены и упаковка из прихода — не правкой строки, а своими списками операции
+      for (const x of q(ph.db, `SELECT l.id, l.body FROM lan_log l WHERE l.kind = 'op' AND l.type = 'arrival' AND instr(l.body, ?) > 0 AND ${win}`).all(id, ...args)) {
+        if (fresh(x.id)) for (const k of priceKeysOf(parseFx(x.body), id)) keys.add(k)
+      }
+      if (r.action === 'del') {
+        moved = q(ph.db, `SELECT m.opId FROM stock_moves m JOIN lan_log l ON l.id = m.opId WHERE m.productId = ? AND ${win}`)
+          .all(id, ...args)
+          .some((x) => fresh(x.opId))
+      }
+    }
+    if (!keys.size && !deleted && !moved) return null
     return { keys, deleted, moved, all: false }
   }
+
+  // Какие столбцы товара меняет приход своими списками: цена (prices), цена штуки (pieces),
+  // упаковка (packs; с переводом цен — и цены)
+  function priceKeysOf(fx, productId) {
+    const keys = new Set()
+    for (const pr of Array.isArray(fx?.prices) ? fx.prices : []) if (Array.isArray(pr) && pr[0] === productId) keys.add('priceC')
+    for (const pr of Array.isArray(fx?.pieces) ? fx.pieces : []) if (Array.isArray(pr) && pr[0] === productId) keys.add('pieceC')
+    for (const pk of Array.isArray(fx?.packs) ? fx.packs : []) {
+      if (!Array.isArray(pk) || pk[0] !== productId) continue
+      keys.add('unitsPerPack')
+      if (pk[2] && typeof pk[2] === 'object') for (const k of ['priceC', 'costC', 'sCostC']) keys.add(k)
+    }
+    return keys
+  }
+  // Справочник, переименование которого двигает товары (map того же столбца)
+  const MAP_COL = { categories: 'category', product_types: 'type' }
+  // Поля товара, которые меняются вместе: упаковка и цены, переведённые на неё
+  const PACK_GROUP = ['unitsPerPack', 'priceC', 'pieceC', 'costC', 'sCostC']
+  // Поле для владельца: картинку и аналоги — без самих значений (картинка — до 200 КБ)
+  const flagField = (k, kassa, main) => (k === 'image' || k === 'analogIds' ? { field: k } : { field: k, kassa: kassa ?? null, main: main ?? null })
+  const sameVal = (a, b) => String(a ?? null) === String(b ?? null)
+  // Товары, чьи цены и упаковку операция меняет своими списками (приход), — как строки правки:
+  // касса, чью операцию главный не принял, получит их строки с главного
+  const priceRows = (fx) => {
+    const ids = new Set()
+    for (const list of [fx?.prices, fx?.pieces, fx?.packs]) for (const x of Array.isArray(list) ? list : []) if (Array.isArray(x) && typeof x[0] === 'string') ids.add(x[0])
+    return [...ids].map((rowId) => ({ tbl: 'products', rowId }))
+  }
+  // Партии этого товара в операции (приход): их цены посчитаны в упаковке, с которой он пришёл
+  const packArrival = (fx, productId) => (Array.isArray(fx.moves) ? fx.moves : []).some((m) => m?.kind === 'arrival' && m.productId === productId)
+  // Закупочная цена в базе — два столбца (sCostC и costC) одним полем: владельцу — один раз
+  const oneCost = (fields) => (fields.some((f) => f.field === 'sCostC') ? fields.filter((f) => f.field !== 'costC') : fields)
 
   // Одновременные правки строк операции. Поля, которые после того, что видела касса, поменяли на
   // главном или на другой кассе, — остаются как там (касса возьмёт строку главного); остальные поля
@@ -2088,50 +2130,136 @@ export function createGateway({
   // документа, который за это время правили, — не проходят. own — операция самого главного,
   // вернувшаяся с кассой (он потерял её с копией): сделанное здесь после копии — позже неё,
   // расхождений не заводится. Правит fx на месте; ответ — { problem } или { touch, flags }
-  function trimConcurrent(ph, fx, { seen, origin = null, upTo = null, own = false }) {
+  function trimConcurrent(ph, fx, { seen, origin = null, upTo = null, own = false, skip = null, blind: forceBlind = false }) {
     const rows = Array.isArray(fx.edits?.rows) ? fx.edits.rows : []
     const touch = []
     const flags = []
-    if (!rows.length) return { touch, flags }
-    const blind = seen + 1 < lanFloor(ph.db)
+    const opt = { seen, origin, upTo, skip, blind: forceBlind || seen + 1 < lanFloor(ph.db) }
+    const flag = (c, tbl, rowId, now, fields) => {
+      const list = oneCost(fields)
+      if (!list.length || own) return
+      flags.push({
+        kind: c.all ? 'soloOld' : 'soloEdit',
+        productId: tbl === 'products' ? rowId : null,
+        name: String(now?.name || ''),
+        units: 0,
+        note: JSON.stringify({ tbl, gone: !now, fields: list }),
+      })
+    }
     const kept = []
+    const renamed = []
     for (const r of rows) {
-      const c = concurrent(ph, r, { seen, origin, upTo, blind })
+      const c = concurrent(ph, r, opt)
       if (!c) {
         kept.push(r)
         continue
       }
       if (r.action === 'del' || String(r.tbl).startsWith('doc:')) return { problem: c.all ? MESSAGES.regOld : MESSAGES.regStale }
       touch.push({ tbl: r.tbl, rowId: r.rowId })
-      if (r.action === 'put' && r.data?.set && typeof r.data.set === 'object') {
-        const set = { ...r.data.set }
-        const was = { ...(r.data.was || {}) }
-        const now = EDIT_TBLS.has(r.tbl) ? q(ph.db, `SELECT * FROM ${r.tbl} WHERE id = ?`).get(r.rowId) : null
-        const fields = []
-        for (const k of Object.keys(set)) {
-          if (!(c.all || c.deleted || c.keys.has(k))) continue
-          const main = now ? (now[k] ?? null) : null
-          // «Вслепую» спорно только то, что расходится с главным
-          if (!(c.all && now && String(main) === String(set[k] ?? null))) fields.push({ field: k, kassa: set[k], main })
-          delete set[k]
-          delete was[k]
-        }
-        if (Object.keys(set).length) kept.push({ ...r, data: { ...r.data, set, was } })
-        // Владельцу — что с кассы не легло: поля, которые на главном поменяли позже (или касса
-        // так долго молчала, что не узнать, меняли ли)
-        if (fields.length && !own) {
-          flags.push({
-            kind: c.all ? 'soloOld' : 'soloEdit',
-            productId: r.tbl === 'products' ? r.rowId : null,
-            name: String(now?.name || ''),
-            units: 0,
-            note: JSON.stringify({ tbl: r.tbl, gone: !now, fields }),
-          })
-        }
-      } else kept.push(r)
+      if (!(r.action === 'put' && r.data?.set && typeof r.data.set === 'object')) {
+        kept.push(r)
+        continue
+      }
+      const set = { ...r.data.set }
+      const was = { ...(r.data.was || {}) }
+      const now = EDIT_TBLS.has(r.tbl) ? q(ph.db, `SELECT * FROM ${r.tbl} WHERE id = ?`).get(r.rowId) : null
+      const disputed = new Set(Object.keys(set).filter((k) => c.all || c.deleted || c.keys.has(k)))
+      // Упаковка и цены, переведённые на неё, — вместе: иначе цена одной упаковки легла бы к другой.
+      // Приход другой упаковкой — целиком или никак: его партии посчитаны в ней
+      if (r.tbl === 'products' && 'unitsPerPack' in set && PACK_GROUP.some((k) => disputed.has(k))) {
+        if (packArrival(fx, r.rowId)) return { problem: MESSAGES.regPack }
+        for (const k of PACK_GROUP) if (k in set) disputed.add(k)
+      }
+      const fields = []
+      for (const k of disputed) {
+        const main = now ? (now[k] ?? null) : null
+        // То же значение и там, и там — не спор
+        if (!(now && sameVal(main, set[k]))) fields.push(flagField(k, set[k], main))
+        delete set[k]
+        delete was[k]
+      }
+      // Новое название категории или типа не легло — товары за ним не переезжают
+      if (MAP_COL[r.tbl] && disputed.has('name')) renamed.push({ col: MAP_COL[r.tbl], from: r.data.was?.name, to: r.data.set.name, main: now?.name })
+      // Закупочная цена не легла — и движение «закупочная из карточки» той же операции
+      if (r.tbl === 'products' && (disputed.has('sCostC') || disputed.has('costC')) && Array.isArray(fx.moves)) {
+        fx.moves = fx.moves.filter((m) => !(m?.kind === 'cost' && m.productId === r.rowId))
+      }
+      if (Object.keys(set).length) kept.push({ ...r, data: { ...r.data, set, was } })
+      flag(c, r.tbl, r.rowId, now, fields)
     }
-    fx.edits.rows = kept
+    for (const n of renamed) {
+      for (let i = kept.length - 1; i >= 0; i--) {
+        const x = kept[i]
+        if (x.action === 'map' && x.tbl === 'products' && x.data?.col === n.col && (x.data.from === n.from || x.data.to === n.to)) kept.splice(i, 1)
+      }
+      // Касса, у которой товары уже переехали, получит их строки с главного
+      const names = [...new Set([n.from, n.to, n.main].filter((x) => typeof x === 'string' && x))]
+      if (names.length) touch.push({ tbl: 'products', col: n.col, names })
+    }
+    if (rows.length) fx.edits.rows = kept
+    // Цены и упаковка из прихода — так же: поле, которое на главном поменяли позже, остаётся там.
+    // Упаковка — вместе со своими ценами
+    const ids = new Set()
+    for (const list of [fx.prices, fx.pieces, fx.packs]) for (const x of Array.isArray(list) ? list : []) if (Array.isArray(x) && typeof x[0] === 'string') ids.add(x[0])
+    for (const id of ids) {
+      const c = concurrent(ph, { tbl: 'products', rowId: id, action: 'put', data: { set: {} } }, opt)
+      if (!c) continue
+      const of = (list) => (Array.isArray(list) ? list.filter((x) => Array.isArray(x) && x[0] === id) : [])
+      const prices = of(fx.prices)
+      const pieces = of(fx.pieces)
+      const packs = of(fx.packs)
+      const hit = (k) => c.all || c.deleted || c.keys.has(k)
+      let drop = {
+        prices: prices.length > 0 && hit('priceC'),
+        pieces: pieces.length > 0 && hit('pieceC'),
+        packs: packs.length > 0 && (hit('unitsPerPack') || (packs.some((pk) => pk[2]) && ['priceC', 'costC', 'sCostC'].some(hit))),
+      }
+      if (packs.length && (drop.prices || drop.pieces || drop.packs)) {
+        if (packArrival(fx, id)) return { problem: MESSAGES.regPack }
+        drop = { prices: prices.length > 0, pieces: pieces.length > 0, packs: true }
+      }
+      if (!drop.prices && !drop.pieces && !drop.packs) continue
+      const now = q(ph.db, 'SELECT * FROM products WHERE id = ?').get(id)
+      const fields = []
+      const add = (k, v) => {
+        const main = now ? (now[k] ?? null) : null
+        if (!(now && sameVal(main, v))) fields.push(flagField(k, v, main))
+      }
+      const not = (list) => list.filter((x) => !(Array.isArray(x) && x[0] === id))
+      if (drop.prices) {
+        for (const x of prices) add('priceC', x[1])
+        fx.prices = not(fx.prices)
+      }
+      if (drop.pieces) {
+        for (const x of pieces) add('pieceC', x[1])
+        fx.pieces = not(fx.pieces)
+      }
+      if (drop.packs) {
+        for (const x of packs) add('unitsPerPack', x[1])
+        fx.packs = not(fx.packs)
+      }
+      touch.push({ tbl: 'products', rowId: id })
+      flag(c, 'products', id, now, fields)
+    }
     return { touch, flags }
+  }
+
+  // Долг поставщику на главном сейчас — и с приходами и возвратами касс, ещё не свёрнутыми в
+  // основу (они могли прийти в той же пачке, что и удаление поставщика)
+  function supplierDebtNow(db, s) {
+    let debt = fromCentsD(s.sDebtC ?? s.openingDebtC ?? 0).plus(pendingDebtOf(db, s.id))
+    for (const row of q(db, "SELECT kind, body FROM docs WHERE kind IN ('arrival', 'supplierreturn') AND sync = 'peer'").all()) {
+      let b = null
+      try {
+        b = JSON.parse(row.body)
+      } catch {
+        b = null
+      }
+      if (b?.supplierId !== s.id) continue
+      if (row.kind === 'arrival') debt = debt.plus(b.debt || 0)
+      else if (b.refund === 'debt') debt = debt.minus(b.total || 0)
+    }
+    return debt
   }
 
   // ── Штрихкод товара с кассы уже занят другим товаром на главном ──
@@ -2175,13 +2303,18 @@ export function createGateway({
 
   // Что было в операции — коротко, для владельца: касса, подключаясь заново, свою базу заменит, и
   // не принятое главным останется только в «Расхождениях»
-  function opWhat(fx) {
+  function opWhat(ph, fx) {
     if (!fx) return null
     const docs = (fx.docs || [])
       .filter((d) => d && typeof d.kind === 'string' && d.body && typeof d.body === 'object')
       .slice(0, 3)
       .map((d) => ({ kind: d.kind, sum: d.body.total ?? d.body.amount ?? d.body.totalCost ?? null, items: Array.isArray(d.body.items) ? d.body.items.length : null }))
-    const rows = (fx.edits?.rows || []).slice(0, 5).map((r) => ({ tbl: String(r?.tbl || ''), name: r?.data?.row?.name ?? r?.data?.set?.name ?? null }))
+    const nameOf = (r) => {
+      const n = r?.data?.row?.name ?? r?.data?.set?.name ?? r?.data?.wasRow?.name ?? r?.data?.was?.name ?? null
+      if (n !== null || !EDIT_TBLS.has(String(r?.tbl || '')) || typeof r?.rowId !== 'string') return n
+      return q(ph.db, `SELECT name FROM ${r.tbl} WHERE id = ?`).get(r.rowId)?.name ?? null
+    }
+    const rows = (fx.edits?.rows || []).slice(0, 5).map((r) => ({ tbl: String(r?.tbl || ''), name: nameOf(r) }))
     return { docs, rows }
   }
 
@@ -2189,7 +2322,7 @@ export function createGateway({
   // Ответ: { problem } — не принимать (текст — владельцу на панель и кассе в «не принято»); или
   // { entry, touch, flags } — запись (исправленная: занятый штрихкод, поля, которые на главном
   // поменяли позже), строки, которые касса должна взять у главного целиком, и расхождения
-  function checkRegisterEntry(ph, e, { upTo = null } = {}) {
+  function checkRegisterEntry(ph, e, { upTo = null, skip = null } = {}) {
     const type = String(e.type || '')
     if (/^(user|role|staff)\./.test(type)) return { problem: MESSAGES.onMainOnly }
     if (/^inventory\./.test(type)) return { problem: MESSAGES.invMainOnly }
@@ -2235,8 +2368,7 @@ export function createGateway({
         if (r?.tbl !== 'suppliers' || r.action !== 'del' || typeof r.rowId !== 'string') continue
         const s = q(ph.db, 'SELECT * FROM suppliers WHERE id = ?').get(r.rowId)
         if (!s) continue
-        const debt = knownDebt(ph.db, s)
-        if (debt !== null && !debt.isZero()) return { problem: SUPPLIER_HAS_DEBT }
+        if (!supplierDebtNow(ph.db, s).isZero()) return { problem: SUPPLIER_HAS_DEBT }
         const paid = q(ph.db, "SELECT 1 FROM docs WHERE kind = 'supplierpayment' AND sync NOT IN ('rejected', 'deleted') AND json_extract(body, '$.supplierId') = ? LIMIT 1").get(r.rowId)
         if (paid) return { problem: SUPPLIER_HAS_PAYMENTS }
       }
@@ -2245,13 +2377,16 @@ export function createGateway({
     let touch = []
     const flags = []
     let seen = Number.isInteger(body.seen) && body.seen >= 0 ? body.seen : null
+    let blind = false
     // Касса видела журнал прежнего «поколения» главного (он с тех пор поднят из копии): записи
-    // нынешнего ей не известны, хоть номера у них могут быть и меньше того, докуда она видела
+    // нынешнего ей не известны, хоть номера у них могут быть и меньше того, докуда она видела.
+    // Поколение из копии кассы — у журнала другая нумерация: сравнить не с чем
     if (seen !== null && typeof body.epoch === 'string' && body.epoch && body.epoch !== (getMeta(ph.db, 'soloEpoch') || '')) {
       seen = Math.min(seen, Number(getMeta(ph.db, 'soloEpochSeq')) || 0)
+      blind = getMeta(ph.db, 'soloEpochBlind') === '1'
     }
     if (seen !== null) {
-      const t = trimConcurrent(ph, fx, { seen, origin: String(e.origin || ''), upTo })
+      const t = trimConcurrent(ph, fx, { seen, origin: String(e.origin || ''), upTo, skip, blind })
       if (t.problem) return { problem: t.problem }
       touch = t.touch
       flags.push(...t.flags)
@@ -2265,17 +2400,21 @@ export function createGateway({
   // Проверка каждой видит то, что легло от предыдущих (штрихкод освободили — новый товар с ним
   // ляжет). origin — касса, от которой обмен (она говорит только за себя); recovery — касса
   // подключается заново и несёт всё, что у неё есть: известное главному отбрасывается (принятое,
-  // журнал, своя очередь, документы), своё, вернувшееся с кассой, — кроме сотрудников и ролей
-  function takeEntries(ph, entries, { origin = null, recovery = false, upTo = null } = {}) {
+  // журнал, своя очередь, документы), своё, вернувшееся с кассой, — кроме сотрудников и ролей.
+  // prior — номера записей, которые касса уже прислала раньше (порядок её журнала — то, что она
+  // видела до каждой своей операции; общий на все части подключения)
+  function takeEntries(ph, entries, { origin = null, recovery = false, upTo = null, prior = null } = {}) {
     const refused = []
-    const flags = []
-    const touch = []
     const declined = []
     let applied = 0
     const seenHere = new Set()
+    // «Своё» при подключении заново — и операции главного, чья это была база (магазин поднят из
+    // копии кассы на другом компьютере)
+    const former = recovery ? getMeta(ph.db, 'soloFormerMain') || '' : ''
     for (const e of entries) {
       if (e?.kind !== 'op' || typeof e.id !== 'string' || seenHere.has(e.id)) continue
       seenHere.add(e.id)
+      prior?.add(e.id)
       if (origin && e.origin !== origin) continue
       // Уже принятое или уже отказанное (прислали второй раз: ответ потерялся) — мимо
       if (seenHas(ph.db, e.id) || q(ph.db, 'SELECT 1 FROM lan_log WHERE id = ?').get(e.id)) continue
@@ -2287,15 +2426,17 @@ export function createGateway({
         // Смена — единственный документ, который меняют две операции: её закрытие кладётся всегда
         const docs = (fx.docs || []).filter((d) => d && typeof d.kind === 'string' && typeof d.body?.id === 'string')
         if (docs.some((d) => d.kind !== 'shift' && q(ph.db, 'SELECT 1 FROM docs WHERE kind = ? AND id = ?').get(d.kind, d.body.id))) continue
-        if (e.origin === deviceId) {
+        if (e.origin === deviceId || (former && e.origin === former)) {
           if (/^(user|role|staff)\./.test(String(e.type || '')) || (fx.edits?.rows || []).some((r) => TEAM_TBLS.has(r?.tbl))) continue
           // Своя операция главного, потерянная с копией: всё, что здесь сделано после копии, — позже
           // неё (и правки самого главного тоже). Устаревшее в ней не ложится, молча
-          const t = trimConcurrent(ph, fx, { seen: Number(getMeta(ph.db, 'soloEpochSeq')) || 0, upTo, own: true })
+          const t = trimConcurrent(ph, fx, { seen: Number(getMeta(ph.db, 'soloEpochSeq')) || 0, upTo, own: true, skip: prior })
           if (t.problem) {
             log.info(`кассы по сети: своя операция ${e.id}, вернувшаяся с кассой, устарела — не положена`)
             continue
           }
+          // Штрихкод, который здесь после копии заняла другая карточка, — как с кассы
+          const clash = barcodeClash(ph, String(e.type || ''), fx.edits?.rows || [])
           let body = null
           try {
             body = JSON.parse(e.body)
@@ -2303,10 +2444,10 @@ export function createGateway({
             continue
           }
           body.effects = fx
-          res = { entry: { ...e, body: JSON.stringify(body) }, touch: t.touch, flags: [] }
+          res = { entry: { ...e, body: JSON.stringify(body) }, touch: t.touch, flags: clash ? [clash] : [] }
         }
       }
-      if (!res) res = checkRegisterEntry(ph, e, { upTo })
+      if (!res) res = checkRegisterEntry(ph, e, { upTo, skip: prior })
       if (res.problem) {
         const fx = parseFx(e.body)
         refused.push({
@@ -2316,18 +2457,31 @@ export function createGateway({
           accountId: e.accountId ?? null,
           createdAt: e.createdAt,
           error: res.problem,
-          rows: Array.isArray(fx?.edits?.rows) ? fx.edits.rows : [],
-          what: opWhat(fx),
+          rows: [...(Array.isArray(fx?.edits?.rows) ? fx.edits.rows : []), ...priceRows(fx)],
+          what: opWhat(ph, fx),
         })
         continue
       }
-      touch.push(...res.touch)
-      for (const f of res.flags) flags.push({ ...f, opId: e.id, origin: e.origin, accountId: e.accountId ?? null, createdAt: e.createdAt })
-      const r = lanReceive(ph.db, [res.entry], { now: clock.now(), gen: lanGen(ph.db) })
+      const r = lanReceive(ph.db, [withTrim(res.entry, res)], { now: clock.now(), gen: lanGen(ph.db) })
       declined.push(...r.declined)
       applied++
     }
-    return { refused, flags, touch, declined, applied }
+    return { refused, declined, applied }
+  }
+  // Что главный поправил в операции при приёме (спорные поля, занятый штрихкод), — в саму запись:
+  // расхождения и строки для касс берутся из неё при приёме (и после выключения между записью и
+  // приёмом). Присланное кассой под этим именем — не в счёт
+  function withTrim(entry, { touch = [], flags = [] }) {
+    let body = null
+    try {
+      body = JSON.parse(entry.body)
+    } catch {
+      return entry
+    }
+    if (!body || typeof body !== 'object') return entry
+    delete body.trim
+    if (touch.length || flags.length) body.trim = { touch, flags }
+    return { ...entry, body: JSON.stringify(body) }
   }
 
   // Главный: операции касс, пришедшие по сети, — в принятые; основа — в журнал для касс. Приём и
@@ -2336,11 +2490,21 @@ export function createGateway({
   // (lanReceive): уже известное — принято, повторное применение листа пересчёта — не принято
   // names — имена касс, которых ещё нет в списке (касса подключается заново: её операции
   // принимаются до того, как она снова в списке)
-  function mainAccept(ph, { refused = [], declined = [], flags = [], touch: extraTouch = [], strict = false, names = null } = {}) {
+  function mainAccept(ph, { refused = [], declined = [], strict = false, names = null } = {}) {
     let r = null
+    let flags = []
     try {
       inTx(ph.db, () => {
         r = mainAcceptPeers(ph.db, { now: clock.now() })
+        // Что главный поправил в принятых операциях (withTrim)
+        flags = []
+        const trimTouch = []
+        for (const o of r.ops) {
+          const tr = o.trim && typeof o.trim === 'object' ? o.trim : null
+          if (!tr) continue
+          for (const f of Array.isArray(tr.flags) ? tr.flags : []) flags.push({ ...f, opId: o.id, origin: o.origin, accountId: o.accountId ?? null, createdAt: o.createdAt })
+          for (const x of Array.isArray(tr.touch) ? tr.touch : []) trimTouch.push(x)
+        }
         const known = declined.filter((d) => d.why === 'known').map((d) => ({ id: d.id, type: '', docs: [] }))
         r.notTaken = [...r.rejected, ...refused, ...declined.filter((d) => d.why !== 'known').map((d) => ({ ...d, error: MESSAGES.sheetTwice }))]
         const regs = new Map(soloPairedList(ph.db).map((x) => [x.deviceId, x.name]))
@@ -2387,11 +2551,18 @@ export function createGateway({
         ])
         // Строки, которые правили не принятые операции: касса откатит их к прежнему виду, а нынешний —
         // главного: его она и получит
-        const touch = [...extraTouch]
+        const touch = []
+        for (const x of trimTouch) {
+          // Товары переименованной категории или типа — по названиям, как они есть сейчас
+          if (x && (x.col === 'category' || x.col === 'type') && Array.isArray(x.names)) {
+            const list = x.names.filter((n) => typeof n === 'string' && n).slice(0, 10)
+            if (list.length) for (const p of q(ph.db, `SELECT id FROM products WHERE ${x.col} IN (${list.map(() => '?').join(', ')})`).all(...list)) touch.push({ tbl: 'products', rowId: p.id })
+          } else if (x && typeof x.tbl === 'string' && typeof x.rowId === 'string') touch.push({ tbl: x.tbl, rowId: x.rowId })
+        }
         for (const x of refused) for (const row of x.rows || []) touch.push({ tbl: row?.tbl, rowId: row?.rowId })
         for (const x of r.rejected) {
-          const body = q(ph.db, 'SELECT body FROM lan_log WHERE id = ?').get(x.id)?.body
-          for (const row of parseFx(body)?.edits?.rows || []) touch.push({ tbl: row?.tbl, rowId: row?.rowId })
+          const fx = parseFx(q(ph.db, 'SELECT body FROM lan_log WHERE id = ?').get(x.id)?.body)
+          for (const row of [...(fx?.edits?.rows || []), ...priceRows(fx)]) touch.push({ tbl: row?.tbl, rowId: row?.rowId })
         }
         mainLogBase(ph.db, { ops: [...r.ops, ...known], extras: r.extras, rejected: r.notTaken, rows: true, touch, deviceId, now: clock.now() })
         // Принятое и отказанное — запомнить: второй раз не ляжет и второго расхождения не будет
@@ -2529,11 +2700,12 @@ export function createGateway({
   // Главный: касса пришла с верным кодом — база магазина целиком и всё, что кассе надо знать.
   // Касса подключается заново (главный загрузил копию базы, его компьютер заменили, касса долго
   // молчала): она приносит всё, что у неё есть, — недостающее главный кладёт до снимка
-  function pairServe({ from, host, shopId, entries, schema, fresh }) {
+  function pairServe({ from, host, shopId, entries, schema, version = '', fresh }) {
     const ph = pharmacy
     if (!pairOpen() || !soloOpen(ph) || isRegister()) return { error: 'nocode' }
     // Базы разных версий программы друг к другу не подходят — сначала обновить программу
     if (schema !== PHARMACY_SCHEMA.length) return { error: 'version' }
+    if (version && version !== SOLO_VERSION) return { error: 'version' }
     const myShop = getMeta(ph.db, 'shopId') || ''
     if (shopId && shopId !== myShop) return { error: 'othershop' }
     const now = clock.now()
@@ -2550,8 +2722,9 @@ export function createGateway({
         // Одновременность — только с тем, что было здесь до подключения: легшее с ним же идёт по
         // порядку кассы (так оно и было у неё)
         const upTo = lanTopSeq(ph.db)
+        const prior = new Set()
         for (let i = 0; i < entries.length; i += 400) {
-          const t = takeEntries(ph, entries.slice(i, i + 400), { recovery: true, upTo })
+          const t = takeEntries(ph, entries.slice(i, i + 400), { recovery: true, upTo, prior })
           applied += t.applied
           // Не принятое главным — на панель владельцу (с тем, что в нём было) и в «принято главным»:
           // база кассы сейчас заменится, и её «не принято» вместе с ней
@@ -2566,6 +2739,16 @@ export function createGateway({
     }
     // Своё неотправленное (его быть не должно: главный принимает сразу) — принять до снимка
     soloAccept(ph)
+    // И легшее от касс, но ещё не принятое (приём сорвался): в снимке его движения были бы
+    // «неподтверждёнными», и новая касса посчитала бы их второй раз
+    if (q(ph.db, "SELECT 1 FROM lan_log WHERE kind = 'op' AND state = 'applied' LIMIT 1").get()) {
+      try {
+        mainAccept(ph, { strict: true })
+      } catch (e) {
+        log.error('кассы по сети: перед подключением кассы операции касс не приняты', e)
+        return { error: 'broken' }
+      }
+    }
     const regKey = randomBytes(32).toString('base64url')
     const sealedReg = seal(regKey)
     if (!sealedReg) return { error: 'broken' }
@@ -2698,6 +2881,7 @@ export function createGateway({
         shopId: again && !fresh ? soloMain()?.shopId || '' : '',
         entries,
         schema: PHARMACY_SCHEMA.length,
+        version: SOLO_VERSION,
         fresh,
         ...(Number.isInteger(lanPorts.udpPort) && lanPorts.udpPort > 0 ? { udpPort: lanPorts.udpPort } : {}),
       })
@@ -2871,6 +3055,7 @@ export function createGateway({
         pairedAt: r.pairedAt || null,
         online: onLine(live.get(r.deviceId)),
         seenAt: seen.get(r.deviceId)?.okAt || null,
+        error: live.get(r.deviceId)?.error || '',
       })),
       // Сколько коду осталось — по часам программы: окно считает дальше по своим
       pairing: p ? { code: formatPairCode(p.code), until: new Date(p.until).toISOString(), leftMs: Math.max(0, p.until - clock.now()) } : null,

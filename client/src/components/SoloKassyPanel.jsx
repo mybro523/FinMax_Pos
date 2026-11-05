@@ -171,7 +171,9 @@ export default function SoloKassyPanel() {
             <div className="lan-peer-main">
               <b>{r.name}</b>
               <div className="tag-cat">
-                {[r.host, r.online ? t('на связи') : r.seenAt ? `${t('последний обмен')} ${fmtShort(r.seenAt)}` : t('ещё не выходила на связь')].filter(Boolean).join(' · ')}
+                {r.error === 'version'
+                  ? [r.host, t('другая версия программы — обновите её на этой кассе')].filter(Boolean).join(' · ')
+                  : [r.host, r.online ? t('на связи') : r.seenAt ? `${t('последний обмен')} ${fmtShort(r.seenAt)}` : t('ещё не выходила на связь')].filter(Boolean).join(' · ')}
               </div>
             </div>
             <span className={'lan-dot' + (r.online ? ' on' : '')} aria-label={r.online ? t('на связи') : t('нет связи')} />

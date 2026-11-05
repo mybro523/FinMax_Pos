@@ -169,7 +169,10 @@ export function mainAcceptPeers(db, { now }) {
         type: r.type,
         accountId: r.accountId ?? null,
         origin: r.origin,
+        createdAt: r.createdAt,
         docs: (fx.docs || []).filter((d) => d && typeof d.kind === 'string' && d.body && typeof d.body === 'object'),
+        // Что главный поправил в операции при приёме (gateway withTrim): расхождения, строки для касс
+        trim: parse(r.body)?.trim || null,
       })
       for (const e of fx.edits?.rows || []) {
         if (e?.tbl === 'team_accounts' && typeof e.rowId === 'string' && typeof e.data?.pwLan === 'string') pw.push({ id: e.rowId, pwLan: e.data.pwLan, accountId: r.accountId ?? null })
@@ -552,7 +555,7 @@ export function shopSnapshot(db) {
   try {
     copy.exec('DELETE FROM outbox; DELETE FROM lan_log; DELETE FROM lan_docs; DELETE FROM lan_peers; DELETE FROM lan_manual;')
     const drop = copy.prepare('DELETE FROM meta WHERE key = ?')
-    for (const key of ['lanKey', 'lanRegKey', 'soloPaired', 'soloDisc', 'restored', 'deviceName', 'needFull', 'lanWide', 'lanDevices', 'soloMain', 'batchTag', 'soloRestoredFrom', 'soloEpochSeq']) drop.run(key)
+    for (const key of ['lanKey', 'lanRegKey', 'soloPaired', 'soloDisc', 'restored', 'deviceName', 'needFull', 'lanWide', 'lanDevices', 'soloMain', 'batchTag', 'soloRestoredFrom', 'soloEpochSeq', 'soloEpochBlind', 'soloFormerMain', 'lanPrunedTop']) drop.run(key)
     copy
       .prepare("UPDATE row_edits SET data = json_remove(data, '$.pw') WHERE tbl = 'team_accounts' AND json_valid(data) AND json_extract(data, '$.pw') IS NOT NULL")
       .run()

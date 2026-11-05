@@ -263,6 +263,8 @@ export async function pairRequest({
   entries = [],
   // Версия базы этой кассы (число шагов схемы): база главного другой версии ей не подойдёт
   schema = 0,
+  // Версия обмена кассы с главным (gateway SOLO_VERSION): другая — подключение не идёт
+  version = '',
   // Касса раньше работала с другим главным: подключить как новую, ничего не неся
   fresh = false,
   http = nodeHttp,
@@ -286,7 +288,7 @@ export async function pairRequest({
     if (!target) return { error: 'notfound' }
   }
   const z = gzipSync(Buffer.from(JSON.stringify(Array.isArray(entries) ? entries : []), 'utf8'))
-  const body = pairFrame(seal(k.enc, { v: 1, t: 'pair', from: deviceId, name, host, shopId, ts: now(), schema, fresh: !!fresh }), sealRaw(k.enc, z))
+  const body = pairFrame(seal(k.enc, { v: 1, t: 'pair', from: deviceId, name, host, shopId, ts: now(), schema, sv: String(version || ''), fresh: !!fresh }), sealRaw(k.enc, z))
   if (body.length > PAIR_MAX_REQ) return { error: 'big' }
   let raw
   try {
@@ -531,6 +533,7 @@ export function createLan({
         shopId: text(msg.shopId, 64),
         entries,
         schema: Number.isInteger(msg.schema) ? msg.schema : 0,
+        version: text(msg.sv, 20),
         fresh: msg.fresh === true,
         address: remote,
         at: t,

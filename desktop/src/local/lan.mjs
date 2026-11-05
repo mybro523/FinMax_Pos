@@ -380,9 +380,12 @@ export const lanTopSeq = (db) =>
 // только до записи раньше этой, недостающего уже не получит (магазин без интернета: касса
 // подключается заново, 1.7.0)
 export function lanFloor(db) {
+  // Уборка может оставить «дыры» (запись, которую ещё ждут, — ниже убранных): журнал целиком —
+  // только выше последней убранной записи
+  const pruned = (Number(getMeta(db, 'lanPrunedTop')) || 0) + 1
   const min = q(db, 'SELECT MIN(seq) AS n FROM lan_log').get().n
-  if (Number.isInteger(min)) return min
-  return (q(db, "SELECT seq FROM sqlite_sequence WHERE name = 'lan_log'").get()?.seq || 0) + 1
+  if (Number.isInteger(min)) return Math.max(min, pruned)
+  return Math.max((q(db, "SELECT seq FROM sqlite_sequence WHERE name = 'lan_log'").get()?.seq || 0) + 1, pruned)
 }
 
 // ── Чужая операция → в базу ──
@@ -830,11 +833,12 @@ export function lanPrune(db, now, { expire = true, keepAbove = null } = {}) {
       // Магазин без интернета: сервера нет — «не принятого сервером» не бывает. Убирается то, что
       // уже получили все свои кассы (новая касса при подключении получает базу целиком, а не журнал).
       // Своё, что главный ещё не принял, остаётся: подключаясь заново, касса понесёт его главному
-      q(
-        db,
-        `DELETE FROM lan_log WHERE createdAt < ? AND state <> 'applied' AND seq <= ?
-           AND NOT (kind = 'op' AND state = 'own' AND EXISTS (SELECT 1 FROM outbox o WHERE o.id = lan_log.id AND o.state = 'pending'))`,
-      ).run(before, keepAbove)
+      // Возраст — по часам этого компьютера (когда запись сюда пришла): часы касс не сверены
+      const gone = `COALESCE(receivedAt, createdAt) < ? AND state <> 'applied' AND seq <= ?
+           AND NOT (kind = 'op' AND state = 'own' AND EXISTS (SELECT 1 FROM outbox o WHERE o.id = lan_log.id AND o.state = 'pending'))`
+      const top = q(db, `SELECT MAX(seq) AS n FROM lan_log WHERE ${gone}`).get(before, keepAbove)?.n
+      if (Number.isInteger(top) && top > (Number(getMeta(db, 'lanPrunedTop')) || 0)) setMeta(db, 'lanPrunedTop', String(top))
+      q(db, `DELETE FROM lan_log WHERE ${gone}`).run(before, keepAbove)
     } else {
       const ownBefore = new Date(now - OWN_KEEP_DAYS * DAY_MS).toISOString()
       q(db, "DELETE FROM lan_log WHERE createdAt < ? AND state <> 'applied' AND NOT (kind = 'op' AND state = 'own' AND fate IS NULL)").run(before)
