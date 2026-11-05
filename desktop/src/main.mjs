@@ -24,7 +24,8 @@ import { fileURLToPath } from 'node:url'
 import { io } from 'socket.io-client'
 import { copyTime, createBackups, hostFolderOf, openOrRestore } from './backup.mjs'
 import { chooseDiskFolder, diskDue as diskDueOf, diskLabel, DISK_KEEP, DISK_ROOTS, writeDiskCopy } from './disk-backup.mjs'
-import { readBuildConfig, resolveApiUrl, resolveUpdateFeed, serverOrigin } from './config.mjs'
+import { createBaseChooser } from './apibase.mjs'
+import { readBuildConfig, resolveApiFallback, resolveApiUrl, resolveUpdateFeed, serverOrigin } from './config.mjs'
 import { createGateway } from './gateway.mjs'
 import { createCustomerScreen } from './customer-window.mjs'
 import { safePdfName, safeXlsxName, xlsxBytes } from './files.mjs'
@@ -35,6 +36,7 @@ import { lastFloor, lastSeen } from './local/licence.mjs'
 import { CORE_SCHEMA, PHARMACY_SCHEMA } from './local/schema.mjs'
 import { createLog } from './log.mjs'
 import { createFetch } from './fetch-compat.mjs'
+import { healthProbe } from './net.mjs'
 import { LITE_ARG, liteState, sanitizeLite } from './lite.mjs'
 import { layoutTicket, renderTicket } from './print/escpos.mjs'
 import { cleanLogo, logoTarget, monoToBgra, paperDots, toMono } from './print/logo.mjs'
@@ -153,6 +155,7 @@ async function start() {
   const built = readBuildConfig(join(ROOT, 'build-config.json'))
   const apiUrl = resolveApiUrl({ packaged: app.isPackaged, env: process.env, built })
   if (!apiUrl) log.error('адрес сервера не задан — запросы к серверу работать не будут')
+  const apiFallback = apiUrl ? resolveApiFallback({ packaged: app.isPackaged, env: process.env, built, apiUrl }) : ''
   const settings = createSettings({ file: join(userData, 'settings.json'), fs })
 
   // ── Облегчённый вид (lite.mjs) ──
@@ -275,26 +278,47 @@ async function start() {
   })
   const clockTimer = setInterval(() => clock.persist(), 30000)
 
+  // ── Чем ходить на сервер ──
+  // net.fetch идёт через сетевую часть Chromium: она знает про системный прокси
+  // и сертификаты Windows. В магазине, где интернет раздаётся через прокси, обычный
+  // запрос Node просто не дошёл бы до сервера.
+  // На старом движке (Windows 7 и 8) net.fetch нет — тот же запрос через net.request
+  const fetchImpl = createFetch({ net, https: nodeHttps, http: nodeHttp, log })
+
+  // ── Основной или запасной адрес сервера (1.6.5) ──
+  // Оба адреса спрашиваются сразу при запуске, в фоне: к входу кассира адрес уже выбран.
+  // Сервер молчит по обоим — касса узнаёт об этом сразу и работает сама, без 10–15 секунд
+  // ожидания на каждом входе (apibase.mjs, net.mjs)
+  const chooser = apiFallback ? createBaseChooser({ primary: apiUrl, fallback: apiFallback, probe: healthProbe(fetchImpl) }) : null
+  if (chooser) {
+    log.info(`адреса сервера: ${apiUrl}, запасной ${apiFallback}`)
+    chooser.onChange((base) => {
+      log.info(`сервер: работа через ${base === apiUrl ? 'основной' : 'запасной'} адрес ${base}`)
+      realtime.originChanged()
+    })
+    chooser.ready().then(() => {
+      if (chooser.reachable() === false) log.warn('сервер не отвечает ни по одному адресу — касса работает без связи')
+    })
+  }
+  const serverBase = () => (chooser ? chooser.current() : apiUrl)
+
   // ── Постоянное соединение с сервером ──
   // События сервера идут не в окно, а в обмен с сервером: «раздел изменился»
   // означает «забери его в локальную базу», и уже она сообщит окну.
   const realtime = createRealtime({
     io,
-    origin: serverOrigin(apiUrl),
+    origin: () => serverOrigin(serverBase()),
     session: store,
     send: (type, payload) => gateway.serverEvent(type, payload),
   })
 
   // ── Кто отвечает окну: локальная база или сервер ──
-  // net.fetch идёт через сетевую часть Chromium: она знает про системный прокси
-  // и сертификаты Windows. В магазине, где интернет раздаётся через прокси, обычный
-  // запрос Node просто не дошёл бы до сервера.
   // Логотип магазина сменился → экран покупателя (заводится ниже и подставит себя сюда)
   let logoChanged = () => {}
   const gateway = createGateway({
     apiUrl,
-    // На старом движке (Windows 7 и 8) net.fetch нет — тот же запрос через net.request
-    fetchImpl: createFetch({ net, https: nodeHttps, http: nodeHttp, log }),
+    chooser,
+    fetchImpl,
     session: store,
     core,
     // Отпечаток пароля для входа без интернета шифруется средствами Windows, как
@@ -566,6 +590,7 @@ async function start() {
     clearTimeout(backupFirst)
     updater.stop()
     clock.persist()
+    chooser?.stop()
     realtime.stop()
     gateway.close()
     try {

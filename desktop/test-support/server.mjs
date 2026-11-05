@@ -513,7 +513,8 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
       return json(forced.status, forced.body, date)
     }
 
-    if (route === '/health') return json(200, { status: 'ok' }, date)
+    // Как у настоящего сервера: по имени сервиса программа узнаёт свой сервер (net.mjs healthProbe)
+    if (route === '/health') return json(200, { status: 'ok', service: 'apteka-api' }, date)
 
     if (route === '/auth/login' && method === 'POST') {
       const u = s.users.get(String(body?.name || '').trim())

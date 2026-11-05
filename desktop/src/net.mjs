@@ -77,11 +77,37 @@ export function checkRequest(raw) {
 // и что касса умеет ответить сама.
 //
 // onDate получает время сервера из каждого ответа — по нему сверяются часы программы.
-export function createRemote({ apiUrl, fetchImpl, onDate = () => {}, stopwatch = () => performance.now() }) {
+//
+// chooser — выбор между основным и запасным адресом сервера (apibase.mjs, с 1.6.5). Без него
+// запросы идут на apiUrl, как прежде. С ним — на выбранный адрес, и «связи нет» касса узнаёт
+// сразу, а не через 10–15 секунд ожидания (04.11.2026 при сбое DNS у регистратора домена каждый
+// вход и запуск ждали, пока Windows перестанет искать адрес):
+//   • выбор ещё идёт (первые секунды после запуска) — ждём его не дольше PICK_WAIT_MS;
+//   • при прошлом выборе сервер молчал по обоим адресам — не ходим вовсе, пока не пора спросить
+//     снова (apibase.mjs: не чаще раза в 20 секунд);
+//   • запрос не дошёл или ответил не наш сервер — выбор делается заново, для следующих запросов.
+//     Сам запрос не повторяется: запись могла дойти, а касса и так ответит сама
+export const PICK_WAIT_MS = 3000
+
+export function createRemote({ apiUrl, fetchImpl, onDate = () => {}, stopwatch = () => performance.now(), chooser = null, pickWaitMs = PICK_WAIT_MS }) {
+  async function baseNow() {
+    if (!chooser) return apiUrl
+    let base = await chooser.ready(pickWaitMs)
+    if (base === null) return null
+    if (chooser.reachable() === false) {
+      base = await within(chooser.failed(), pickWaitMs)
+      if (base === null || chooser.reachable() === false) return null
+    }
+    return base
+  }
+
   return async function call(req, token = '') {
     if (!apiUrl) {
       return { status: 503, date: null, data: { message: 'В программе не задан адрес сервера. Переустановите программу.' } }
     }
+    const base = await baseNow()
+    // Сервер сейчас недоступен ни по одному адресу — «связи нет» сразу
+    if (base === null) return { status: 0, date: null, data: null, timedOut: false }
 
     // Свои заголовки бывают только у запросов самой программы (обмен называет ключ
     // кассы). У запроса окна их нет: checkRequest пропускает метод, путь и тело
@@ -101,7 +127,7 @@ export function createRemote({ apiUrl, fetchImpl, onDate = () => {}, stopwatch =
     // заглушка прокси). Для программы это то же самое, что отсутствие связи
     let foreign = false
     try {
-      res = await fetchImpl(apiUrl + req.path, {
+      res = await fetchImpl(base + req.path, {
         method: req.method,
         headers,
         body: req.body !== undefined && req.body !== null ? JSON.stringify(req.body) : undefined,
@@ -120,11 +146,14 @@ export function createRemote({ apiUrl, fetchImpl, onDate = () => {}, stopwatch =
         }
       }
     } catch (e) {
+      // Запрос не дошёл — для следующих выбрать адрес заново
+      chooser?.failed()
       // status 0 — связи не было вовсе. По нему решают, отвечать ли из локальной базы
       return { status: 0, date: null, data: null, timedOut: e?.name === 'AbortError' }
     } finally {
       clearTimeout(timer)
     }
+    if (foreign) chooser?.failed()
 
     const date = res.headers?.get?.('date') || null
     // Часы сверяем только по ответу нашего сервера. Страница входа в гостиничный
@@ -134,6 +163,44 @@ export function createRemote({ apiUrl, fetchImpl, onDate = () => {}, stopwatch =
     const out = { status: res.status, date, data }
     if (foreign) out.foreign = true
     return out
+  }
+}
+
+// Ждать обещание не дольше ms: не дождались (или оно отказало) — null
+function within(promise, ms) {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve(null), ms)
+    Promise.resolve(promise).then(
+      (v) => {
+        clearTimeout(t)
+        resolve(v)
+      },
+      () => {
+        clearTimeout(t)
+        resolve(null)
+      },
+    )
+  })
+}
+
+// ── Отвечает ли по этому адресу наш сервер ──
+// GET /health открыт без входа. Страница входа в чужой Wi-Fi тоже отвечает «200», поэтому
+// смотрим и на сам ответ: он должен быть словом нашего сервера
+export const PROBE_MS = 5000
+export function healthProbe(fetchImpl, timeoutMs = PROBE_MS) {
+  return async (base) => {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+    try {
+      const res = await fetchImpl(base + '/health', { method: 'GET', headers: {}, signal: ctrl.signal })
+      if (res.status !== 200) return false
+      const data = JSON.parse(await res.text())
+      return data?.status === 'ok' && data?.service === 'apteka-api'
+    } catch {
+      return false
+    } finally {
+      clearTimeout(timer)
+    }
   }
 }
 

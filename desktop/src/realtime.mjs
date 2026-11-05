@@ -12,17 +12,23 @@
 // владельца сервиса, в программе её нет.
 const FORWARD = ['changed', 'subscription', 'suspended', 'resumed']
 
+// origin — адрес сервера: строка или функция (с 1.6.5 адрес выбирается между основным и
+// запасным, apibase.mjs). Сменился выбор — originChanged(): соединение переоткрывается на новом
 export function createRealtime({ io, origin, session, send }) {
+  const originNow = () => (typeof origin === 'function' ? origin() : origin)
   let socket = null
   // По какому ключу открыто нынешнее соединение. Ключ меняется при входе другого
   // сотрудника и при смене пароля; прежнее соединение осталось бы жить со старым
   let socketToken = ''
+  // И по какому адресу
+  let socketOrigin = ''
   // Нужно ли соединение вообще. Открывается оно только при наличии ключа входа:
   // до входа и после выхода слушать сервер некому
   let wanted = false
 
   function close() {
     socketToken = ''
+    socketOrigin = ''
     if (!socket) return
     socket.removeAllListeners()
     socket.disconnect()
@@ -31,11 +37,13 @@ export function createRealtime({ io, origin, session, send }) {
 
   function open() {
     const token = session.get()
-    if (!token || !origin) return
-    if (socket && socketToken === token) return
+    const at = originNow()
+    if (!token || !at) return
+    if (socket && socketToken === token && socketOrigin === at) return
     close()
     socketToken = token
-    socket = io(origin, {
+    socketOrigin = at
+    socket = io(at, {
       auth: { token },
       // Сначала постоянное соединение; если сеть заведения его режет — обычные
       // запросы. Настройки те же, что у сайта (client/src/db/realtime.js)
@@ -64,6 +72,12 @@ export function createRealtime({ io, origin, session, send }) {
     // Сервер разбирает ключ один раз, при подключении, и сам об этом не узнает.
     sessionChanged() {
       if (!wanted) return
+      close()
+      open()
+    },
+    // Адрес сервера сменился (основной ↔ запасной) — переоткрываемся на новом
+    originChanged() {
+      if (!wanted || !socket || socketOrigin === originNow()) return
       close()
       open()
     },

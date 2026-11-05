@@ -10,7 +10,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { checkRequest, createRemote, DESKTOP_TOKEN, isLinkFailure } from '../src/net.mjs'
+import { checkRequest, createRemote, DESKTOP_TOKEN, healthProbe, isLinkFailure, PICK_WAIT_MS } from '../src/net.mjs'
+import { createBaseChooser } from '../src/apibase.mjs'
 
 const API = 'https://server.example/api'
 
@@ -294,4 +295,153 @@ test('время сервера отдаётся часам вместе с те
   })
   await remote({ method: 'GET', path: '/sync/pull' }, 'vhod')
   assert.deepEqual(seen, [['Sun, 04 Oct 2026 10:05:00 GMT', 40_000]])
+})
+
+// ── Основной или запасной адрес (1.6.5) ──
+// 04.11.2026 при сбое DNS у регистратора домена каждый вход и запуск кассы ждали 10–15 секунд,
+// пока Windows перестанет искать адрес. С выбором адреса запрос идёт туда, где сервер отвечает,
+// а «связи нет» касса узнаёт сразу
+
+const MAIN = 'https://main.example/api'
+const SPARE = 'https://spare.example/api'
+
+// Сеть по адресам: hang — запрос «висит» до обрыва (как при сбое DNS), down — отказ сразу
+function network() {
+  const net = { hang: new Set(), down: new Set(), calls: [] }
+  net.fetchImpl = (url, init = {}) => {
+    const host = url.startsWith(MAIN) ? MAIN : url.startsWith(SPARE) ? SPARE : ''
+    const path = url.slice(host.length)
+    net.calls.push((host === MAIN ? 'main' : 'spare') + path)
+    if (net.hang.has(host)) {
+      return new Promise((_, reject) =>
+        init.signal?.addEventListener('abort', () => {
+          const e = new Error('aborted')
+          e.name = 'AbortError'
+          reject(e)
+        }),
+      )
+    }
+    if (net.down.has(host)) return Promise.reject(new TypeError('net::ERR_NAME_NOT_RESOLVED'))
+    if (path === '/health') return Promise.resolve(jsonResponse(200, { status: 'ok', service: 'apteka-api' }))
+    return Promise.resolve(jsonResponse(200, { from: host === MAIN ? 'main' : 'spare', path }))
+  }
+  return net
+}
+
+function zapas(net, over = {}) {
+  const clock = { now: 0 }
+  const chooser = createBaseChooser({ primary: MAIN, fallback: SPARE, probe: healthProbe(net.fetchImpl, over.probeMs ?? 300), now: () => clock.now })
+  const remote = createRemote({ apiUrl: MAIN, fetchImpl: net.fetchImpl, chooser, pickWaitMs: over.pickWaitMs ?? 1000 })
+  return { chooser, remote, clock }
+}
+
+test('основной адрес «висит» (сбой DNS) — запрос идёт на запасной и не ждёт', async () => {
+  const net = network()
+  net.hang.add(MAIN)
+  const { chooser, remote } = zapas(net)
+  const t0 = Date.now()
+  const r = await remote({ method: 'GET', path: '/products', timeoutMs: 15000 })
+  assert.equal(r.status, 200)
+  assert.equal(r.data.from, 'spare')
+  assert.ok(Date.now() - t0 < 1000, 'ждали ' + (Date.now() - t0) + ' мс')
+  chooser.stop()
+})
+
+test('сервер молчит по обоим адресам — «связи нет» сразу, и без новых запросов, пока не пора спросить снова', async () => {
+  const net = network()
+  net.down.add(MAIN)
+  net.down.add(SPARE)
+  const { chooser, remote, clock } = zapas(net)
+  const t0 = Date.now()
+  const r = await remote({ method: 'POST', path: '/auth/login', body: { name: 'a' }, timeoutMs: 15000 })
+  assert.deepEqual([r.status, r.timedOut], [0, false])
+  assert.ok(Date.now() - t0 < 500)
+  assert.deepEqual(net.calls.sort(), ['main/health', 'spare/health'], 'кроме проверки адресов — ни одного запроса')
+
+  // Тут же ещё запрос — сеть не трогаем вовсе
+  net.calls.length = 0
+  assert.equal((await remote({ method: 'GET', path: '/auth/me' })).status, 0)
+  assert.deepEqual(net.calls, [])
+
+  // Прошло 20 секунд, интернет вернулся — адреса спрашиваются снова, запрос проходит
+  net.down.clear()
+  clock.now += 20000
+  const back = await remote({ method: 'GET', path: '/auth/me' })
+  assert.equal(back.status, 200)
+  assert.equal(back.data.from, 'main', 'основной снова отвечает — работа через него')
+  chooser.stop()
+})
+
+test('первый запрос после запуска: оба адреса «висят» — ответ «связи нет» не позже, чем через отведённое ожидание', async () => {
+  const net = network()
+  net.hang.add(MAIN)
+  net.hang.add(SPARE)
+  const { chooser, remote } = zapas(net, { probeMs: 2000, pickWaitMs: 150 })
+  const t0 = Date.now()
+  const r = await remote({ method: 'GET', path: '/auth/me', timeoutMs: 15000 })
+  const took = Date.now() - t0
+  assert.equal(r.status, 0)
+  assert.ok(took >= 140 && took < 1000, 'ждали ' + took + ' мс')
+  assert.equal(chooser.chosen(), false, 'выбор идёт дальше в фоне')
+  // Выбор закончился: оба молчат — и следующий запрос отвечает сразу
+  await chooser.ready()
+  assert.equal(chooser.reachable(), false)
+  const t1 = Date.now()
+  assert.equal((await remote({ method: 'GET', path: '/auth/me' })).status, 0)
+  assert.ok(Date.now() - t1 < 100)
+})
+
+test('основной отказал посреди работы — следующий запрос уже на запасной', async () => {
+  const net = network()
+  const { chooser, remote, clock } = zapas(net)
+  assert.equal((await remote({ method: 'GET', path: '/products' })).data.from, 'main')
+  net.down.add(MAIN)
+  clock.now += 30000
+  const failed = await remote({ method: 'GET', path: '/products' })
+  assert.equal(failed.status, 0, 'сам запрос не повторяется: запись могла дойти, а касса ответит сама')
+  // Выбор заново идёт в фоне — дожидаемся его
+  await chooser.failed()
+  const next = await remote({ method: 'GET', path: '/products' })
+  assert.equal(next.data.from, 'spare')
+  chooser.stop()
+})
+
+test('ответил не наш сервер (страница входа в чужой Wi-Fi) — адрес выбирается заново', async () => {
+  let picks = 0
+  const chooser = {
+    ready: async () => MAIN,
+    reachable: () => true,
+    failed: async () => {
+      picks++
+      return MAIN
+    },
+  }
+  const fetchImpl = async () => ({ status: 200, ok: true, headers: { get: () => null }, text: async () => '<html>Вход в сеть</html>' })
+  const remote = createRemote({ apiUrl: MAIN, fetchImpl, chooser })
+  const r = await remote({ method: 'GET', path: '/products' })
+  assert.equal(r.foreign, true)
+  assert.equal(picks, 1)
+})
+
+test('проверка адреса: отвечает только наш сервер — не страница входа в Wi-Fi и не ошибка', async () => {
+  const answer = (status, text) => async () => ({ status, ok: status === 200, headers: { get: () => null }, text: async () => text })
+  assert.equal(await healthProbe(answer(200, JSON.stringify({ status: 'ok', service: 'apteka-api' })))(MAIN), true)
+  assert.equal(await healthProbe(answer(200, '<html>Вход в сеть</html>'))(MAIN), false)
+  assert.equal(await healthProbe(answer(200, JSON.stringify({ status: 'ok' })))(MAIN), false, 'чужой сервер с похожим ответом')
+  assert.equal(await healthProbe(answer(502, 'Bad Gateway'))(MAIN), false)
+  assert.equal(await healthProbe(async () => Promise.reject(new TypeError('net::ERR_NAME_NOT_RESOLVED')))(MAIN), false)
+  // Молчит — не дольше отведённого
+  const net = network()
+  net.hang.add(MAIN)
+  const t0 = Date.now()
+  assert.equal(await healthProbe(net.fetchImpl, 100)(MAIN), false)
+  assert.ok(Date.now() - t0 < 600)
+})
+
+test('без запасного адреса — как прежде: запрос сразу на основной, без проверок', async () => {
+  const net = network()
+  const remote = createRemote({ apiUrl: MAIN, fetchImpl: net.fetchImpl })
+  assert.equal((await remote({ method: 'GET', path: '/products' })).data.from, 'main')
+  assert.deepEqual(net.calls, ['main/products'])
+  assert.ok(PICK_WAIT_MS >= 1000 && PICK_WAIT_MS <= 5000)
 })

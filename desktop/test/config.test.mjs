@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import { join } from 'node:path'
-import { normalizeApiUrl, readBuildConfig, resolveApiUrl, serverOrigin } from '../src/config.mjs'
+import { FALLBACK_API, normalizeApiUrl, PRIMARY_API, readBuildConfig, resolveApiFallback, resolveApiUrl, serverOrigin } from '../src/config.mjs'
 
 test('адрес приводится к одному виду', () => {
   assert.equal(normalizeApiUrl('https://x.up.railway.app/api'), 'https://x.up.railway.app/api')
@@ -62,3 +62,25 @@ test('файл настроек сборки: нет файла или мусо�
   fs.writeFileSync(join(dir, 'ok.json'), JSON.stringify({ apiUrl: 'https://x/api' }))
   assert.deepEqual(readBuildConfig(join(dir, 'ok.json')), { apiUrl: 'https://x/api' })
 })
+
+// ── Запасной адрес сервера (1.6.5) ──
+
+test('запасной адрес: у боевого — имя сервера у OVH, у любого другого — нет', () => {
+  assert.equal(PRIMARY_API, 'https://api.finmaxpos.tj/api')
+  assert.equal(FALLBACK_API, 'https://vps-04688c58.vps.ovh.net/api')
+  assert.equal(resolveApiFallback({ packaged: true, apiUrl: PRIMARY_API }), FALLBACK_API)
+  assert.equal(resolveApiFallback({ packaged: true, apiUrl: 'https://drugoy.example/api' }), '')
+  assert.equal(resolveApiFallback({ packaged: true, apiUrl: 'https://drugoy.example/api', built: { apiFallback: 'https://zapas.example/api/' } }), 'https://zapas.example/api')
+})
+
+test('запасной адрес: в собранной программе переменная окружения его не подменяет', () => {
+  const env = { APTEKA_API_URL_FALLBACK: 'https://podstava.example/api' }
+  assert.equal(resolveApiFallback({ packaged: true, env, apiUrl: PRIMARY_API }), FALLBACK_API)
+  // При запуске из исходников (проверки) — подменяет; пустая строка — без запасного
+  assert.equal(resolveApiFallback({ packaged: false, env, apiUrl: PRIMARY_API }), 'https://podstava.example/api')
+  assert.equal(resolveApiFallback({ packaged: false, env: { APTEKA_API_URL_FALLBACK: '' }, apiUrl: PRIMARY_API }), '')
+  assert.equal(resolveApiFallback({ packaged: false, env: { APTEKA_API_URL_FALLBACK: 'http://podstava.example/api' }, apiUrl: PRIMARY_API }), '', 'без https не берётся')
+  // Совпал с основным — выбирать нечего
+  assert.equal(resolveApiFallback({ packaged: false, env: { APTEKA_API_URL_FALLBACK: PRIMARY_API }, apiUrl: PRIMARY_API }), '')
+})
+

@@ -92,9 +92,6 @@ export const MESSAGES = {
   suspended: 'Работа магазина приостановлен. Обратитесь к поставщику программы.',
   broken: 'Программа не смогла выполнить действие. Повторите; если не поможет — перезапустите программу.',
   oldSale: 'Этот чек оформлен давно и на кассе не хранится. Возврат по нему возможен только с интернетом.',
-  offlineLimit:
-    'Программа слишком долго работала без связи с сервером. Подключите интернет — работа продолжится сразу после проверки подписки. Все чеки сохранены на этом компьютере.',
-  offlineTitle: 'Нужна связь с сервером',
   // Файл базы испорчен, а убрать его и поднять копию не даёт другая программа
   dbBusy: BUSY_MESSAGE,
   rejectedSale: REJECTED_SALE,
@@ -144,6 +141,10 @@ const fileSafe = (code) => String(code).replace(/[^A-Za-z0-9_-]/g, '_').slice(0,
 
 export function createGateway({
   apiUrl,
+  // Основной или запасной адрес сервера (apibase.mjs, с 1.6.5). Нет — запросы идут на apiUrl.
+  // pickWaitMs — сколько запрос ждёт выбора адреса (проверки ставят поменьше)
+  chooser = null,
+  pickWaitMs,
   fetchImpl,
   session,
   core,
@@ -169,7 +170,7 @@ export function createGateway({
   // Обмен называет серверу ключ кассы: под её номером сервер слушает только того,
   // кто назвал этот ключ (см. local/accounts.mjs)
   const asDevice = { 'X-Device-Key': deviceKeyOf(core) }
-  const remote = createRemote({ apiUrl, fetchImpl, onDate: (d, age) => clock.serverTime(d, age) })
+  const remote = createRemote({ apiUrl, chooser, pickWaitMs, fetchImpl, onDate: (d, age) => clock.serverTime(d, age) })
 
   // Открытая база магазина. Одна: на компьютере работает один магазин
   let pharmacy = null
@@ -459,8 +460,8 @@ export function createGateway({
       // Сколько операций соседних касс лежит здесь, а сервер их ещё не видел
       fromPeers: lanAppliedCount(pharmacy.db),
       syncedAt: getMeta(pharmacy.db, 'syncedAt'),
-      // Сколько программе осталось работать без связи с сервером
-      licence: { checkedAt: lic.checkedAt, offlineDays: lic.offlineDays, until: lic.until, leftMs: lic.leftMs, warn: lic.warn, expired: lic.expired },
+      // Работа без связи: с 1.6.5 без ограничения; checkedAt — последняя связь с сервером
+      licence: { checkedAt: lic.checkedAt, unlimited: true },
       restored: restoredNote(pharmacy.db),
     }
   }
@@ -897,40 +898,22 @@ export function createGateway({
     const acc = saveAccount(core, user, { now: clock.now(), ...extra })
     if (acc && user.subscription) {
       setSubscription(core, acc.pharmacyCode, { status: user.subscription.status, paidUntil: user.subscription.paidUntil })
-      // Сервер ответил про подписку — это и есть проверка: срок работы без связи
-      // отсчитывается заново
+      // Сервер ответил про подписку — отметка «последняя связь с сервером» (по ней же
+      // держится память часов, см. local/licence.mjs)
       confirmLicence(core, acc.pharmacyCode, { now: clock.now(), days: user.subscription.offlineDays }, sealing)
-      watchLicence()
     }
     return acc ? accountById(core, acc.id) : null
   }
 
   // ── Можно ли работать ──
-  // Подписка по словам сервера — и срок, который программа вправе проработать без
-  // его слова. Вышел любой из двух — работа закрыта
+  // По слову сервера о подписке: магазин заблокирован или кончилась оплата — работа закрыта.
+  // Дату окончания оплаты касса знает заранее и закрывается в срок и без связи. Срока работы
+  // без связи с 1.6.5 нет (решение владельца сервиса 05.11.2026, см. local/licence.mjs): без
+  // интернета касса работает сколько угодно
   const licence = (acc) => licenceOf(core, acc.pharmacyCode, licNow(), sealing)
 
   function access(acc) {
-    const sub = subscriptionOf(acc, licNow())
-    if (sub && !sub.canWrite) return sub
-    if (!licence(acc).expired) return sub
-    return { ...(sub || {}), status: 'offline', canWrite: false, warn: true, message: MESSAGES.offlineLimit }
-  }
-
-  // Срок без связи вышел прямо сейчас, посреди смены — кассир должен увидеть причину,
-  // а не упереться в отказ на оплате. Проверка прошла — объявление снимается само
-  let closedByLicence = false
-  function watchLicence() {
-    const acc = activeAccount()
-    if (!acc) {
-      closedByLicence = false
-      return
-    }
-    const sub = subscriptionOf(acc, licNow())
-    const expired = (!sub || sub.canWrite) && licence(acc).expired
-    if (expired && !closedByLicence) send('suspended', { message: MESSAGES.offlineLimit, title: MESSAGES.offlineTitle })
-    if (!expired && closedByLicence) send('resumed')
-    closedByLicence = expired
+    return subscriptionOf(acc, licNow())
   }
 
   const seal = (text) => {
@@ -1056,8 +1039,6 @@ export function createGateway({
         // Счёт неудачных попыток и срок подписки — по времени срока: за часами компьютера,
         // которым нельзя верить, оно не идёт, и переводом даты запрет на вход не снять
         const acc = await offlineLogin(core, { name, password }, { now: licNow(), open })
-        // Пароль верный, но программа слишком давно не сверялась с сервером
-        if (licence(acc).expired) return refuse(401, MESSAGES.offlineLimit)
         session.activate(acc.id)
         onSession()
         enter(acc)
@@ -1657,14 +1638,12 @@ export function createGateway({
     // Открытая база магазина — для резервной копии
     pharmacyFile: () => (pharmacy ? { name: pharmacy.name, db: pharmacy.db } : null),
 
-    // Раз в минуту: не вышел ли срок работы без связи, пока программа просто стояла
-    // открытой. Заодно окно получает свежий отсчёт для значка состояния
+    // Раз в минуту: память часов и уборка журнала обмена по сети
     tick() {
       // До какого момента программа дожила — в ту же зашифрованную запись, что и
       // проверка подписки: с него часы продолжат после перезапуска (см. licence.mjs)
       const acc = activeAccount()
       if (acc) touchLicence(core, acc.pharmacyCode, licNow(), sealing, floorNow())
-      watchLicence()
       // Раз в сутки — уборка журнала обмена по сети; чужое, так и не дошедшее до
       // сервера за две недели, снимается
       if (pharmacy) {

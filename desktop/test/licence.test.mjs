@@ -1,7 +1,9 @@
-// ── Срок работы без связи ──
+// ── Последняя связь с сервером (бывший «срок работы без связи») ──
 //
-// Программа продаёт без интернета, но подписку проверяет сервер. Здесь проверяется
-// счёт дней и то, что отметку о проверке нельзя ни подправить, ни подложить.
+// С 1.6.5 срока работы без связи нет (решение владельца сервиса 05.11.2026): касса без
+// интернета работает сколько угодно. Здесь проверяется, что срок больше ничего не закрывает,
+// что отметка о последней проверке по-прежнему записывается (её видно кассиру) и что её нельзя
+// ни подправить, ни подложить, — на ней держится память часов.
 //
 // Запуск: npm test (в папке desktop)
 import test from 'node:test'
@@ -21,73 +23,55 @@ const stored = (db, code = 'apteka-1') => db.prepare('SELECT sealed FROM licence
 const put = (db, sealed, code = 'apteka-1') =>
   db.prepare('INSERT INTO licences (pharmacyCode, sealed) VALUES (?, ?) ON CONFLICT(pharmacyCode) DO UPDATE SET sealed = excluded.sealed').run(code, sealed)
 
-test('после проверки программа работает без связи семь дней — и ни часом дольше', () => {
+test('1.6.5: срока нет — и через год без связи программа работает', () => {
   const db = core()
   confirmLicence(db, 'apteka-1', { now: NOW, days: 7 }, fakeSeal)
   const at = (ms) => licenceOf(db, 'apteka-1', NOW + ms, fakeSeal)
-
-  assert.deepEqual([at(0).expired, at(0).warn, at(0).offlineDays], [false, false, 7])
-  assert.equal(at(0).until, new Date(NOW + 7 * DAY).toISOString(), 'момент остановки известен заранее — его показывают кассиру')
-  assert.equal(at(4 * DAY).warn, false)
-  // За два дня до остановки — предупреждение
-  assert.deepEqual([at(5 * DAY + HOUR).expired, at(5 * DAY + HOUR).warn], [false, true])
-  assert.equal(at(7 * DAY - 1000).expired, false, 'последняя секунда седьмого дня ещё рабочая')
-  assert.equal(at(7 * DAY).expired, true)
-  assert.equal(at(30 * DAY).expired, true)
+  for (const ms of [0, 6 * DAY, 7 * DAY, 30 * DAY, 365 * DAY]) {
+    assert.deepEqual([at(ms).expired, at(ms).warn, at(ms).unlimited], [false, false, true], 'день ' + ms / DAY)
+  }
+  assert.equal(at(365 * DAY).checkedAt, new Date(NOW).toISOString(), 'видно, когда касса последний раз была на связи')
 })
 
-test('каждая проверка отсчитывает срок заново', () => {
+test('каждая проверка — новая отметка «последняя связь с сервером»', () => {
   const db = core()
   confirmLicence(db, 'apteka-1', { now: NOW, days: 7 }, fakeSeal)
-  assert.equal(licenceOf(db, 'apteka-1', NOW + 8 * DAY, fakeSeal).expired, true)
-  // Интернет появился на шестой день
   confirmLicence(db, 'apteka-1', { now: NOW + 6 * DAY, days: 7 }, fakeSeal)
-  assert.equal(licenceOf(db, 'apteka-1', NOW + 8 * DAY, fakeSeal).expired, false)
-  assert.equal(licenceOf(db, 'apteka-1', NOW + 13 * DAY, fakeSeal).expired, true)
+  assert.equal(licenceOf(db, 'apteka-1', NOW + 8 * DAY, fakeSeal).checkedAt, new Date(NOW + 6 * DAY).toISOString())
 })
 
-test('число дней назначает сервер — в границах от одного до тридцати', () => {
+test('прежнее число дней от сервера: границы те же, но на работу оно больше не влияет', () => {
   assert.equal(offlineDaysOf(14), 14)
-  assert.equal(offlineDaysOf(0), OFFLINE_DAYS_DEFAULT, 'ноль запретил бы работу без интернета вовсе')
-  assert.equal(offlineDaysOf(-3), OFFLINE_DAYS_DEFAULT)
+  assert.equal(offlineDaysOf(0), OFFLINE_DAYS_DEFAULT)
   assert.equal(offlineDaysOf('мусор'), OFFLINE_DAYS_DEFAULT)
-  assert.equal(offlineDaysOf(undefined), OFFLINE_DAYS_DEFAULT)
-  assert.equal(offlineDaysOf(365), 30, 'год без проверки — уже не проверка')
-  assert.equal(offlineDaysOf(2.9), 2)
-
+  assert.equal(offlineDaysOf(365), 30)
   const db = core()
-  confirmLicence(db, 'apteka-1', { now: NOW, days: 14 }, fakeSeal)
-  assert.equal(licenceOf(db, 'apteka-1', NOW + 10 * DAY, fakeSeal).expired, false)
-  assert.equal(licenceOf(db, 'apteka-1', NOW + 14 * DAY, fakeSeal).expired, true)
-  // Ответ без числа (вход, «кто я» у прежней версии сервера) срок не сбрасывает
-  confirmLicence(db, 'apteka-1', { now: NOW + DAY }, fakeSeal)
-  assert.equal(licenceOf(db, 'apteka-1', NOW + DAY, fakeSeal).offlineDays, 14)
-  // А на компьютере, который сервер ещё ни разу не видел, — неделя
-  confirmLicence(db, 'apteka-2', { now: NOW }, fakeSeal)
-  assert.equal(licenceOf(db, 'apteka-2', NOW, fakeSeal).offlineDays, 7)
+  confirmLicence(db, 'apteka-1', { now: NOW, days: 2 }, fakeSeal)
+  assert.equal(licenceOf(db, 'apteka-1', NOW + 10 * DAY, fakeSeal).expired, false, 'два дня от сервера не закрывают кассу')
 })
 
-test('проверки не было — работать нельзя', () => {
+test('проверки не было — работать всё равно можно, отметки «последняя связь» нет', () => {
   const db = core()
   const l = licenceOf(db, 'apteka-1', NOW, fakeSeal)
-  assert.deepEqual([l.expired, l.checkedAt, l.until], [true, null, null])
+  assert.deepEqual([l.expired, l.warn, l.checkedAt], [false, false, null])
 })
 
-test('отметка зашифрована: в файле базы её не прочитать и не поправить', () => {
+test('отметка зашифрована: в файле базы её не прочитать, а подложенная или испорченная не принимается', () => {
   const db = core()
   confirmLicence(db, 'apteka-1', { now: NOW, days: 7 }, fakeSeal)
   const raw = stored(db)
   assert.ok(!raw.includes('checkedAt') && !raw.includes(String(NOW)), 'отметка лежит открытым текстом')
 
-  // Подложили открытую запись «проверено вчера, работать можно месяц»
+  // Подложили открытую запись «проверено позже» — там, где шифрование работает, она не принимается
   put(db, 'plain:' + JSON.stringify({ code: 'apteka-1', checkedAt: NOW + 20 * DAY, offlineDays: 30 }))
-  assert.equal(licenceOf(db, 'apteka-1', NOW + 21 * DAY, fakeSeal).expired, true, 'открытая запись принята там, где шифрование работает')
+  assert.equal(licenceOf(db, 'apteka-1', NOW + 21 * DAY, fakeSeal).checkedAt, null)
+  assert.equal(lastSeen(db, fakeSeal), 0, 'и память часов по ней не сдвигается')
 
   // Испортили зашифрованную
   put(db, raw.slice(0, -4) + 'AAAA')
-  assert.equal(licenceOf(db, 'apteka-1', NOW, fakeSeal).expired, true)
+  assert.equal(licenceOf(db, 'apteka-1', NOW, fakeSeal).checkedAt, null)
   put(db, 'мусор')
-  assert.equal(licenceOf(db, 'apteka-1', NOW, fakeSeal).expired, true)
+  assert.equal(licenceOf(db, 'apteka-1', NOW, fakeSeal).checkedAt, null)
 })
 
 test('запись соседнего магазина, переложенная в чужую строку, не годится', () => {
@@ -95,23 +79,22 @@ test('запись соседнего магазина, переложенная
   confirmLicence(db, 'oplachena', { now: NOW + 20 * DAY, days: 30 }, fakeSeal)
   confirmLicence(db, 'dolzhnik', { now: NOW, days: 7 }, fakeSeal)
   put(db, stored(db, 'oplachena'), 'dolzhnik')
-  assert.equal(licenceOf(db, 'dolzhnik', NOW + 21 * DAY, fakeSeal).expired, true)
-  assert.equal(licenceOf(db, 'oplachena', NOW + 21 * DAY, fakeSeal).expired, false)
+  assert.equal(licenceOf(db, 'dolzhnik', NOW + 21 * DAY, fakeSeal).checkedAt, null)
+  assert.equal(licenceOf(db, 'oplachena', NOW + 21 * DAY, fakeSeal).checkedAt, new Date(NOW + 20 * DAY).toISOString())
 })
 
-test('часы назад не помогают: «сейчас» раньше последней проверки — значит, время подменили', () => {
+test('часы перевели назад — касса не закрывается: срока, который можно обмануть, больше нет', () => {
   const db = core()
   confirmLicence(db, 'apteka-1', { now: NOW, days: 7 }, fakeSeal)
-  assert.equal(licenceOf(db, 'apteka-1', NOW - 5 * 60 * 1000, fakeSeal).expired, false, 'погрешность в пять минут — не подмена')
-  assert.equal(licenceOf(db, 'apteka-1', NOW - DAY, fakeSeal).expired, true)
+  assert.equal(licenceOf(db, 'apteka-1', NOW - DAY, fakeSeal).expired, false)
 })
 
 test('на компьютере без шифрования Windows отметка хранится открыто — иначе программа не работала бы вовсе', () => {
   const db = core()
   confirmLicence(db, 'apteka-1', { now: NOW, days: 7 }, noSeal)
   assert.ok(stored(db).startsWith('plain:'))
-  assert.equal(licenceOf(db, 'apteka-1', NOW + DAY, noSeal).expired, false)
-  assert.equal(licenceOf(db, 'apteka-1', NOW + 8 * DAY, noSeal).expired, true)
+  assert.equal(licenceOf(db, 'apteka-1', NOW + 8 * DAY, noSeal).checkedAt, new Date(NOW).toISOString())
+  assert.equal(licenceOf(db, 'apteka-1', NOW + 8 * DAY, noSeal).expired, false)
 })
 
 // ── До какого момента программа дожила ──
@@ -124,19 +107,14 @@ test('память часов стёрли и перевели дату на д�
   assert.equal(lastSeen(db, fakeSeal), NOW + 5 * DAY)
   assert.equal(stored(db).includes(String(NOW + 5 * DAY)), false, 'отметка лежит в зашифрованной записи: поправить её в файле нельзя')
 
-  // Строку часов из базы стёрли, дату компьютера вернули на день проверки
-  const rewound = licenceOf(db, 'apteka-1', NOW + HOUR, fakeSeal)
-  assert.equal(rewound.leftMs, 2 * DAY, 'осталось столько, сколько оставалось, — а не семь дней без часа')
-  assert.equal(rewound.warn, true)
-
-  // Часы программы после запуска продолжают с этой отметки, что бы ни показывал
-  // компьютер, — и время чеков, и время срока. А раз сколько программа была выключена,
-  // узнать не у кого (часы показывают прошлое), срок уменьшается ещё на полсуток
+  // Строку часов из базы стёрли, дату компьютера вернули на день проверки. Часы программы
+  // после запуска продолжают с этой отметки, что бы ни показывал компьютер, — по ним идут
+  // время чеков и дата окончания оплаты. Сколько программа была выключена, узнать не у кого
+  // (часы показывают прошлое), поэтому время оплаты уходит ещё на полсуток вперёд
   const clock = createClock({ wall: () => NOW + HOUR, mono: () => 0, load: () => ({ seen: lastFloor(db, fakeSeal), licSeen: lastSeen(db, fakeSeal) }) })
   assert.equal(clock.now(), NOW + 5 * DAY)
   assert.equal(clock.lic(), NOW + 5 * DAY + 12 * HOUR)
-  assert.equal(licenceOf(db, 'apteka-1', clock.lic(), fakeSeal).expired, false)
-  assert.equal(licenceOf(db, 'apteka-1', clock.lic() + 2 * DAY, fakeSeal).expired, true)
+  assert.equal(licenceOf(db, 'apteka-1', clock.lic() + 2 * DAY, fakeSeal).expired, false, 'срок без связи кассу не закрывает')
 })
 
 test('в зашифрованной записи два момента — срока и часов; каждый только растёт', () => {
@@ -149,7 +127,6 @@ test('в зашифрованной записи два момента — ср�
   assert.deepEqual([lastSeen(db, fakeSeal), lastFloor(db, fakeSeal)], [NOW + 22 * HOUR, NOW + 10 * HOUR])
   touchLicence(db, 'apteka-1', NOW + 20 * HOUR, fakeSeal, NOW + 11 * HOUR)
   assert.deepEqual([lastSeen(db, fakeSeal), lastFloor(db, fakeSeal)], [NOW + 22 * HOUR, NOW + 11 * HOUR])
-  assert.equal(licenceOf(db, 'apteka-1', NOW, fakeSeal).leftMs, 7 * DAY - 22 * HOUR, 'срок считается от своей отметки')
   // Вызов по-старому, с одним моментом, двигает обе
   touchLicence(db, 'apteka-1', NOW + DAY, fakeSeal)
   assert.deepEqual([lastSeen(db, fakeSeal), lastFloor(db, fakeSeal)], [NOW + DAY, NOW + DAY])
@@ -166,20 +143,20 @@ test('отметка «дожила до» назад не идёт и ново�
   assert.equal(lastSeen(db, fakeSeal), NOW + 3 * DAY)
   assert.equal(licenceOf(db, 'apteka-1', NOW + 3 * DAY, fakeSeal).checkedAt, new Date(NOW).toISOString(), 'сама проверка при этом не «обновляется»')
 
-  // Сервер ответил: его время и есть «сейчас», срок — заново
+  // Сервер ответил: его время и есть «сейчас»
   confirmLicence(db, 'apteka-1', { now: NOW + 3 * DAY + HOUR, days: 7 }, fakeSeal)
   assert.equal(lastSeen(db, fakeSeal), NOW + 3 * DAY + HOUR)
-  assert.equal(licenceOf(db, 'apteka-1', NOW + 3 * DAY + HOUR, fakeSeal).leftMs, 7 * DAY)
+  assert.equal(licenceOf(db, 'apteka-1', NOW + 3 * DAY + HOUR, fakeSeal).checkedAt, new Date(NOW + 3 * DAY + HOUR).toISOString())
   // Проверки не было — и отмечать нечего
   touchLicence(db, 'drugaya', NOW, fakeSeal)
-  assert.equal(licenceOf(db, 'drugaya', NOW, fakeSeal).expired, true)
+  assert.equal(licenceOf(db, 'drugaya', NOW, fakeSeal).checkedAt, null)
 })
 
 test('запись прежней версии программы (без отметки «дожила до») читается как раньше', () => {
   const db = core()
   put(db, fakeSeal.seal(JSON.stringify({ code: 'apteka-1', checkedAt: NOW, offlineDays: 7 })))
   const l = licenceOf(db, 'apteka-1', NOW + DAY, fakeSeal)
-  assert.deepEqual([l.expired, l.leftMs], [false, 6 * DAY])
+  assert.deepEqual([l.expired, l.checkedAt], [false, new Date(NOW).toISOString()])
   assert.equal(lastSeen(db, fakeSeal), NOW)
   assert.equal(lastFloor(db, fakeSeal), NOW)
   // И запись с одной отметкой «дожила до» (без отдельной отметки часов): тогда это был один момент
