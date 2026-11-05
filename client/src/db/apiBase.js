@@ -2,23 +2,77 @@
 //
 // 04.11.2026 у регистратора домена (Navju) отказали DNS-серверы: имя api.finmaxpos.tj перестало
 // находиться, и сайт показывал «Нет связи с сервером», хотя сам сервер работал. Сервер отвечает и
-// под своим именем у OVH — это запасной адрес. Теперь сайт спрашивает оба адреса разом (GET
-// /health) и работает с тем, что ответил; основному даётся фора — запасной берётся, только если
-// основной молчит дольше PREFER_MS. Пропала связь посреди работы — выбор делается заново
-// (не чаще раза в RECHECK_MS).
+// под своим именем у OVH — это запасной адрес. Оба адреса спрашиваются разом (GET /health), и
+// работа идёт через тот, что ответил.
 //
-// Без браузера и без сети: проверка адреса (probe) передаётся снаружи — так это проверяют тесты
-// (client/test/apiBase.test.js). Расширение в пути указано намеренно.
+// Основной — главный: ему даётся фора PREFER_MS, а пока работа идёт через запасной, основной раз
+// в RETURN_MS проверяется снова — ответил, и работа возвращается на него. Пропала связь посреди
+// работы — выбор делается заново (не чаще раза в RECHECK_MS).
+//
+// Выбирать начинают сразу при запуске, в фоне: пока человек вводит логин и пароль, адрес уже
+// известен, и вход не ждёт проверки (05.11.2026: раньше выбор начинался по кнопке «Войти» и
+// добавлял ко входу почти две секунды).
+//
+// Один и тот же файл служит сайту (client/src/db/apiBase.js) и программе для Windows
+// (desktop/src/apibase.mjs) — их сверяет проверка desktop/test/apibase.test.mjs. Без браузера
+// и без сети: проверка адреса (probe) и таймеры передаются снаружи.
 
-export const PREFER_MS = 1500
+export const PREFER_MS = 300
 export const RECHECK_MS = 20000
+export const RETURN_MS = 5 * 60 * 1000
 
-export function createBaseChooser({ primary, fallback = '', probe, now = () => Date.now(), preferMs = PREFER_MS, recheckMs = RECHECK_MS }) {
+export function createBaseChooser({
+  primary,
+  fallback = '',
+  probe,
+  now = () => Date.now(),
+  preferMs = PREFER_MS,
+  recheckMs = RECHECK_MS,
+  returnMs = RETURN_MS,
+  timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (t) => clearTimeout(t) },
+}) {
   let base = primary
-  let chosen = !fallback // запасного нет — выбирать нечего
+  // Запасного нет — выбирать нечего: работа идёт через основной, без проверок
+  let chosen = !fallback
+  // Ответил ли сервер при последнем выборе: true — да, false — молчат оба адреса,
+  // null — ещё не выбирали (или выбирать нечего)
+  let reachable = null
   let picking = null
   let lastPick = -Infinity
+  let back = null
+  let stopped = false
   const listeners = new Set()
+
+  function setBase(b) {
+    const was = base
+    base = b
+    if (was !== b) for (const fn of [...listeners]) fn(b)
+  }
+
+  // Работа идёт через запасной — основной проверяется снова через returnMs
+  function planReturn() {
+    if (back) timers.clear(back)
+    back = null
+    if (stopped || !fallback || base !== fallback || !(returnMs > 0)) return
+    back = timers.set(async () => {
+      back = null
+      if (stopped || picking || base !== fallback) return planReturn()
+      let ok = false
+      try {
+        ok = !!(await probe(primary))
+      } catch {
+        ok = false
+      }
+      // Пока проверяли, мог начаться новый выбор — тогда решит он
+      if (ok && !picking && !stopped && base === fallback) {
+        reachable = true
+        setBase(primary)
+      }
+      planReturn()
+    }, returnMs)
+    // Таймер возврата не держит программу живой (в браузере такого вызова нет)
+    if (typeof back?.unref === 'function') back.unref()
+  }
 
   function pick() {
     lastPick = now()
@@ -27,38 +81,37 @@ export function createBaseChooser({ primary, fallback = '', probe, now = () => D
       let p = null // true / false — ответил ли основной
       let f = null
       let grace = null
-      const done = (b) => {
+      const done = (b, ok) => {
         if (settled) return
         settled = true
-        clearTimeout(grace)
-        const was = base
-        base = b
+        if (grace) timers.clear(grace)
         chosen = true
+        reachable = ok
         picking = null
-        if (was !== b) for (const fn of [...listeners]) fn(b)
+        setBase(b)
+        planReturn()
         resolve(b)
       }
       const check = () => {
-        if (p === true) return done(primary)
-        if (f === true && p === false) return done(fallback)
-        if (f === true && !grace) grace = setTimeout(() => done(fallback), preferMs)
-        // Оба молчат — остаёмся, где были: ошибку покажет сам запрос
-        if (p === false && f === false) return done(base)
+        if (p === true) return done(primary, true)
+        if (f === true && p === false) return done(fallback, true)
+        if (f === true && !grace) grace = timers.set(() => done(fallback, true), preferMs)
+        // Оба молчат — адрес прежний: ошибку покажет сам запрос
+        if (p === false && f === false) return done(base, false)
       }
-      Promise.resolve()
-        .then(() => probe(primary))
-        .then((ok) => !!ok, () => false)
-        .then((ok) => {
-          p = ok
-          check()
-        })
-      Promise.resolve()
-        .then(() => probe(fallback))
-        .then((ok) => !!ok, () => false)
-        .then((ok) => {
-          f = ok
-          check()
-        })
+      const ask = (b, set) =>
+        Promise.resolve()
+          .then(() => probe(b))
+          .then(
+            (ok) => !!ok,
+            () => false,
+          )
+          .then((ok) => {
+            set(ok)
+            check()
+          })
+      ask(primary, (ok) => (p = ok))
+      ask(fallback, (ok) => (f = ok))
     })
     return picking
   }
@@ -67,10 +120,20 @@ export function createBaseChooser({ primary, fallback = '', probe, now = () => D
     // Нынешний адрес (до выбора — основной)
     current: () => base,
     chosen: () => chosen,
-    // Дождаться выбора (первый раз — выбрать)
-    ready() {
+    reachable: () => reachable,
+    // Дождаться выбора (первый раз — выбрать). maxWaitMs — ждать не дольше: не успели —
+    // ответ null, а выбор идёт дальше в фоне
+    ready(maxWaitMs) {
       if (chosen) return Promise.resolve(base)
-      return picking || pick()
+      const job = picking || pick()
+      if (!(maxWaitMs >= 0) || maxWaitMs === Infinity) return job
+      return new Promise((resolve) => {
+        const t = timers.set(() => resolve(null), maxWaitMs)
+        job.then((b) => {
+          timers.clear(t)
+          resolve(b)
+        })
+      })
     },
     // Запрос не дошёл до сервера: выбрать заново (не чаще раза в recheckMs). Ответ — адрес
     // после выбора; совпал с прежним — повторять запрос незачем
@@ -84,6 +147,12 @@ export function createBaseChooser({ primary, fallback = '', probe, now = () => D
     onChange(fn) {
       listeners.add(fn)
       return () => listeners.delete(fn)
+    },
+    // Больше не нужен (проверки, выход из программы): таймер возврата снимается
+    stop() {
+      stopped = true
+      if (back) timers.clear(back)
+      back = null
     },
   }
 }

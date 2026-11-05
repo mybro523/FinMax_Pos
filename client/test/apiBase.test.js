@@ -2,7 +2,8 @@
 //
 // 04.11 у регистратора домена отказали DNS: api.finmaxpos.tj перестал находиться, сайт писал
 // «Нет связи с сервером», хотя сервер работал под своим именем у OVH. Теперь сайт спрашивает
-// оба адреса и работает с тем, что ответил; основному — фора.
+// оба адреса и работает с тем, что ответил; основному — фора. 05.11: выбор начинается в фоне,
+// ожидание можно ограничить, основной проверяется снова, пока работа идёт через запасной.
 //
 // Запуск: npm test (в папке client)
 import test from 'node:test'
@@ -55,6 +56,8 @@ test('основной не находится (как 04.11) — сразу з�
   assert.ok(Date.now() - t0 < 1000, 'фору не ждали: основной уже отказал')
   assert.equal(c.current(), F)
   assert.deepEqual(changes, [F])
+  assert.equal(c.reachable(), true)
+  c.stop()
 })
 
 test('основной молчит (DNS не отвечает) — запасной после форы', async () => {
@@ -65,10 +68,12 @@ test('основной молчит (DNS не отвечает) — запасн
   assert.ok(Date.now() - t0 >= 50, 'основному дали фору')
 })
 
-test('оба молчат — остаёмся на основном: ошибку покажет сам запрос', async () => {
+test('оба молчат — остаёмся на основном: ошибку покажет сам запрос, а сервер «недоступен»', async () => {
   const pr = probes({ [P]: false, [F]: false })
   const c = createBaseChooser({ primary: P, fallback: F, probe: pr.probe })
+  assert.equal(c.reachable(), null, 'до выбора — неизвестно')
   assert.equal(await c.ready(), P)
+  assert.equal(c.reachable(), false)
 })
 
 test('выбор один на все запросы, сколько бы их ни ждало', async () => {
@@ -93,4 +98,79 @@ test('основной отказал посреди работы — выбор
   clock = 30000
   assert.equal(await c.failed(), F)
   assert.equal(c.current(), F)
+  c.stop()
+})
+
+test('фора основному по умолчанию короткая — 0,3 с, а не полторы', async () => {
+  const pr = probes({ [P]: never, [F]: true })
+  const c = createBaseChooser({ primary: P, fallback: F, probe: pr.probe })
+  const t0 = Date.now()
+  assert.equal(await c.ready(), F)
+  const took = Date.now() - t0
+  assert.ok(took >= 250 && took < 1000, 'ждали ' + took + ' мс')
+  c.stop()
+})
+
+test('ограниченное ожидание: не успели выбрать — null, выбор идёт дальше и отвечает следующим', async () => {
+  const pr = probes({ [P]: () => later(120, false), [F]: () => later(120, false) })
+  const c = createBaseChooser({ primary: P, fallback: F, probe: pr.probe })
+  assert.equal(await c.ready(30), null, 'за 30 мс не решилось')
+  assert.equal(c.chosen(), false)
+  assert.equal(await c.ready(), P, 'выбор тот же самый, не новый')
+  assert.equal(pr.calls.length, 2)
+  assert.equal(c.reachable(), false)
+  assert.equal(await c.ready(0), P, 'решено — ответ сразу')
+})
+
+// Таймеры по команде: возврат на основной ждёт 5 минут — в проверке их «проматываем»
+function manualTimers() {
+  const list = new Map()
+  let id = 0
+  return {
+    timers: {
+      set: (fn, ms) => {
+        list.set(++id, { fn, ms })
+        return id
+      },
+      clear: (t) => list.delete(t),
+    },
+    // Запустить все таймеры не короче ms (возврат на основной), вернуть, сколько запустили
+    async fire(ms) {
+      const due = [...list.entries()].filter(([, t]) => t.ms >= ms)
+      for (const [k] of due) list.delete(k)
+      for (const [, t] of due) await t.fn()
+      return due.length
+    },
+    count: () => list.size,
+  }
+}
+
+test('работа через запасной — основной проверяется снова и, ответив, становится адресом опять', async () => {
+  let primaryUp = false
+  const pr = probes({ [P]: () => primaryUp, [F]: true })
+  const mt = manualTimers()
+  const changes = []
+  const c = createBaseChooser({ primary: P, fallback: F, probe: pr.probe, timers: mt.timers, preferMs: 0, returnMs: 300000 })
+  c.onChange((b) => changes.push(b))
+  assert.equal(await c.ready(), F)
+  // Основной всё ещё молчит — остаёмся, проверка назначена снова
+  assert.equal(await mt.fire(300000), 1)
+  assert.equal(c.current(), F)
+  assert.equal(mt.count(), 1, 'следующая проверка назначена')
+  // Основной ожил — возвращаемся, подписчики знают
+  primaryUp = true
+  assert.equal(await mt.fire(300000), 1)
+  assert.equal(c.current(), P)
+  assert.deepEqual(changes, [F, P])
+  assert.equal(mt.count(), 0, 'на основном проверять нечего')
+})
+
+test('stop() снимает проверку основного', async () => {
+  const pr = probes({ [P]: false, [F]: true })
+  const mt = manualTimers()
+  const c = createBaseChooser({ primary: P, fallback: F, probe: pr.probe, timers: mt.timers })
+  assert.equal(await c.ready(), F)
+  assert.equal(mt.count(), 1)
+  c.stop()
+  assert.equal(mt.count(), 0)
 })

@@ -23,13 +23,16 @@ const FALLBACK = (() => {
 })()
 const PROBE_MS = 6000
 
-// Отвечает ли сервер по этому адресу: GET /health (открыт без входа)
+// Отвечает ли по этому адресу наш сервер: GET /health (открыт без входа). Страница входа в
+// чужой Wi-Fi тоже отвечает «200» — поэтому смотрим и на сам ответ
 async function probe(base) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), PROBE_MS)
   try {
     const r = await fetch(base + '/health', { cache: 'no-store', signal: ctrl.signal })
-    return r.ok
+    if (!r.ok) return false
+    const j = await r.json().catch(() => null)
+    return j?.status === 'ok' && j?.service === 'apteka-api'
   } catch {
     return false
   } finally {
@@ -37,6 +40,9 @@ async function probe(base) {
   }
 }
 const chooser = createBaseChooser({ primary: PRIMARY, fallback: bridge ? '' : FALLBACK, probe })
+// Выбор — сразу при открытии страницы, в фоне: пока человек вводит логин и пароль, адрес
+// уже известен, и вход не ждёт проверки
+if (!chooser.chosen()) chooser.ready()
 
 // Адрес сервера, с которым работает сайт сейчас (постоянное соединение берёт его же)
 export const apiBase = () => chooser.current()
