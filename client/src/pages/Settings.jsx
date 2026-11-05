@@ -20,6 +20,7 @@ import PrintPanel from '../components/PrintPanel'
 import LabelPrinterPanel from '../components/LabelPrinterPanel'
 import CustomerScreenPanel from '../components/CustomerScreenPanel'
 import ChekPanel from '../components/ChekPanel'
+import ShopLogoPanel from '../components/ShopLogoPanel'
 import VesyPanel from '../components/VesyPanel'
 import LanPanel from '../components/LanPanel'
 import LitePanel from '../components/LitePanel'
@@ -304,6 +305,8 @@ export default function Settings() {
             <>
               {/* Что печатается на чеке: адрес, телефон, подпись — на сайте и в программе */}
               <ChekPanel />
+              {/* Логотип магазина без интернета ставят здесь (1.7.0); у магазина с сервером — владелец сервиса */}
+              {isDesktop && user?.standalone && <ShopLogoPanel />}
               {/* Чековый принтер настраивается на каждом компьютере отдельно — только в программе */}
               {isDesktop && <PrintPanel />}
               {/* Принтер этикеток — тоже у каждого компьютера свой */}

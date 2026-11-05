@@ -1,8 +1,8 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   LuPlus, LuLogOut, LuRefreshCw, LuTriangleAlert, LuKeyRound,
   LuBanknote, LuPause, LuPlay, LuLogIn, LuScrollText, LuTrash2, LuPencil, LuCheck,
-  LuPhone, LuSettings, LuSun, LuMoon, LuImagePlus, LuX,
+  LuPhone, LuSettings, LuSun, LuMoon,
 } from 'react-icons/lu'
 import { Modal, useToast, useDialog } from '../components/ui'
 import NumberInput from '../components/NumberInput'
@@ -15,7 +15,7 @@ import { fmtDate, fmtDateTime, tjMoment, tjDate, tjTime, serverNow } from '../li
 import { useT, useLang, setLang, LANGS } from '../lib/i18n'
 import { useTheme, setTheme } from '../lib/theme'
 import emblem from '../assets/brand/emblem-64.png'
-import { prepareLogo, LOGO_TYPES } from '../lib/logoImage'
+import LogoField from '../components/LogoField'
 
 // Библиотека диаграмм весит около 370 КБ — грузим её после того, как показаны
 // числа и список магазинов
@@ -584,55 +584,6 @@ function NewPharmacy({ form, setForm, onStart, toast, t }) {
 // покупателя этого магазина. Здесь же она и готовится: пустые поля обрезаются, картинка
 // уменьшается до 720×360 (lib/logoImage.js). Видно сразу, что получится; «Убрать» — магазин
 // снова без логотипа, всё как прежде
-function LogoField({ value, onChange, onBusy, loading = false, toast, t }) {
-  const input = useRef(null)
-  const [working, setWorking] = useState(false)
-  // Пока картинка готовится, окно не сохраняет (onBusy): иначе «Сохранено» ушло бы без неё
-  const busy = (on) => {
-    setWorking(on)
-    onBusy?.(on)
-  }
-  async function pick(e) {
-    const file = e.target.files?.[0]
-    // Тот же файл можно выбрать ещё раз
-    e.target.value = ''
-    if (!file) return
-    busy(true)
-    try {
-      const r = await prepareLogo(file)
-      onChange(r.dataUrl)
-    } catch (err) {
-      toast(t(err?.message || 'Картинку не удалось открыть — возможно, файл повреждён'), 'err')
-    } finally {
-      busy(false)
-    }
-  }
-  return (
-    <div className="field logo-field" data-testid="logo-field">
-      <label>{t('Логотип')}</label>
-      <div className="logo-box">
-        <div className={'logo-preview' + (value ? '' : ' empty')}>
-          {value ? <img src={value} alt={t('Логотип')} data-testid="logo-preview" /> : <span>{loading || working ? t('Загрузка…') : t('Нет логотипа')}</span>}
-        </div>
-        <div className="logo-actions">
-          <button type="button" className="btn ghost" onClick={() => input.current?.click()} disabled={working || loading} data-testid="logo-pick">
-            <span className="ic"><LuImagePlus size={16} /></span> {value ? t('Заменить') : t('Выбрать картинку')}
-          </button>
-          {value && (
-            <button type="button" className="btn ghost" onClick={() => onChange('')} disabled={working} data-testid="logo-remove">
-              <span className="ic"><LuX size={16} /></span> {t('Убрать')}
-            </button>
-          )}
-        </div>
-      </div>
-      <div className="tag-cat">
-        {t('PNG, JPG или WebP до 2 МБ. Логотип печатается на чеках и листах магазина и виден на экране покупателя. Без логотипа — всё как сейчас.')}
-      </div>
-      <input ref={input} type="file" accept={LOGO_TYPES.join(',')} hidden onChange={pick} data-testid="logo-input" />
-    </div>
-  )
-}
-
 // ── Карточка магазина ──
 // Всё про одного клиента на одном экране: чем он живёт, сколько платил, кто у него
 // за кассой и что мы с этим магазином делали. Перед звонком клиенту открывают её.

@@ -95,6 +95,8 @@ export const MESSAGES = {
   onlineOnly: 'Этот раздел работает только с интернетом. Касса, склад, инвентаризация, товары, поставщики, расходы, доходы и сотрудники доступны и без него.',
   notSent: 'Эта запись ещё не отправлена на сервер. Изменить или удалить её можно будет после отправки.',
   noOfflineLogin: 'Нет связи с сервером. Под этим именем на этом компьютере ещё не входили — первый вход возможен только с интернетом.',
+  // Логотип в программе (магазин без интернета, 1.7.0)
+  badLogo: 'Нужна картинка PNG или JPG не больше 300 КБ',
   // Сверить оплату не с чем: зашифрованной записи о проверке сервером нет (её стёрли, или
   // проверки на этом компьютере не было) — работа после проверки (1.6.5, gateway withTerms)
   unverified: 'Программа не может подтвердить оплату магазина на этом компьютере. Подключите интернет хотя бы на минуту — работа продолжится сразу после проверки. Все чеки сохранены на этом компьютере.',
@@ -1880,6 +1882,24 @@ export function createGateway({
     return reply(200, { logo: now.logo, at: now.at })
   }
 
+  // Магазин без интернета (1.7.0): сервера нет — логотип ставят в программе («Настройки» → «Чек и
+  // печать»). Картинку окно уже подготовило (client/src/lib/logoImage.js): PNG или JPEG до 300 КБ —
+  // здесь та же проверка, что у сервера (cleanLogo). Пустая строка — убрать логотип
+  async function setShopLogo(req, acc) {
+    if (!isSolo(acc)) return refuse(404, MESSAGES.soloUnavailable)
+    if (!(acc.role === 'founder' || hasPerm(acc, 'settings.print'))) return refuse(403, 'Недостаточно прав')
+    const raw = req.body?.logo
+    if (typeof raw !== 'string') return refuse(400, MESSAGES.badLogo)
+    const clean = cleanLogo(raw)
+    if (raw && !clean) return refuse(400, MESSAGES.badLogo)
+    const ph = openPharmacy(acc.pharmacyCode)
+    keepLogo(ph, clean, clean ? new Date(clock.now()).toISOString() : null)
+    log.info(clean ? 'логотип магазина поставлен в программе' : 'логотип магазина убран')
+    send('changed', ['shop'])
+    const now = storedLogo(ph)
+    return reply(200, { logo: now.logo, at: now.at })
+  }
+
   // ── Готова ли локальная база ──
   // До первой полной загрузки отвечать нечем: каталог пуст. Ждём идущий обмен
   // с сервером; не вышло — честно говорим, что связи нет.
@@ -2081,6 +2101,7 @@ export function createGateway({
 
       if (route === '/auth/me' && req.method === 'GET') return await me(req, acc)
       if (route === '/shop/logo' && req.method === 'GET') return await shopLogo(req, acc)
+      if (route === '/shop/logo' && req.method === 'POST') return await setShopLogo(req, acc)
       if (route === '/auth/change-password' && req.method === 'POST') return await changePassword(req, acc)
       if (isSolo(acc)) return await soloRequest(req, acc)
 

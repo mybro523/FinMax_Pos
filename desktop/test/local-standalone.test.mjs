@@ -753,3 +753,27 @@ test('1.7.0: без кода активации сброс пароля влад
   assert.deepEqual(t.net, [])
 })
 
+
+test('1.7.0: логотип магазина ставят в программе — чек, лента и экран покупателя берут его у кассы', async (tt) => {
+  const t = setup({ requireCode: false, offlineOnly: true })
+  tt.after(() => t.gw.close())
+  assert.equal((await t.gw.standalone.setupShop({ shopName: 'Магазин', login: OWNER, password: PASS })).ok, true)
+  assert.equal((await t.login()).status, 201)
+  t.gw.listen(true)
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  assert.deepEqual((await t.req('GET', '/shop/logo')).data, { logo: '', at: null })
+  const set = await t.req('POST', '/shop/logo', { logo: PNG })
+  assert.equal(set.status, 200)
+  assert.equal(set.data.logo, PNG)
+  assert.equal((await t.req('GET', '/shop/logo')).data.logo, PNG)
+  assert.equal(t.gw.shopLogo(), PNG, 'лента и экран покупателя берут его у кассы')
+  assert.ok(t.events.some((e) => e.type === 'changed' && e.payload.includes('shop')), 'окно узнаёт сразу')
+  // Не картинка — отказ, прежний логотип на месте
+  const bad = await t.req('POST', '/shop/logo', { logo: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' })
+  assert.equal(bad.status, 400)
+  assert.equal((await t.req('GET', '/shop/logo')).data.logo, PNG)
+  // Убрать
+  assert.equal((await t.req('POST', '/shop/logo', { logo: '' })).data.logo, '')
+  assert.equal(t.gw.shopLogo(), '')
+  assert.deepEqual(t.net, [])
+})
