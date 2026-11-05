@@ -87,7 +87,9 @@ export function checkRequest(raw) {
 //     снова (apibase.mjs: не чаще раза в 20 секунд);
 //   • запрос не дошёл или ответил не наш сервер — выбор делается заново, для следующих запросов.
 //     Сам запрос не повторяется: запись могла дойти, а касса и так ответит сама
-export const PICK_WAIT_MS = 3000
+// Две секунды: запасной адрес отвечает за полсекунды-секунду, а вход сразу после запуска без
+// интернета не должен ждать дольше (05.11 при 3 с вход без связи занимал 4,6 с)
+export const PICK_WAIT_MS = 2000
 
 export function createRemote({ apiUrl, fetchImpl, onDate = () => {}, stopwatch = () => performance.now(), chooser = null, pickWaitMs = PICK_WAIT_MS }) {
   async function baseNow() {
