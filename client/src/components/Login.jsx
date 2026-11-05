@@ -89,15 +89,18 @@ export default function Login() {
     refreshSolo()
   }, [refreshSolo])
   const soloMode = solo?.mode === 'standalone'
+  // 1.7.0: кода активации нет (codeRequired: false) и способа работы не выбирают (offlineOnly) —
+  // программа всегда без интернета. Прежняя основная часть этих полей не знает: как 1.6.0
+  const codeNeeded = solo?.codeRequired !== false
   // Пока программа не ответила, что показывать, — ничего: иначе при первом запуске на миг
   // мелькала бы форма входа перед выбором способа работы
   const panel = solo === null
     ? bridge?.standalone ? '' : 'login'
     : !solo
       ? 'login'
-      : solo.mode === '' && !solo.cloudAccounts
+      : solo.mode === '' && !solo.cloudAccounts && !solo.offlineOnly
       ? 'mode'
-      : soloMode && (!solo.activation?.active || soloView === 'renew')
+      : soloMode && codeNeeded && (!solo.activation?.active || soloView === 'renew')
         ? 'activate'
         : soloMode && !solo.shop
           ? 'setup'
@@ -186,7 +189,7 @@ export default function Login() {
             onBack={soloView === 'renew' ? () => setSoloView('') : !solo?.shop ? () => bridge.standalone.mode('').then(() => refreshSolo()) : null}
           />
         )}
-        {panel === 'setup' && <SetupCard onDone={enterAfterSetup} />}
+        {panel === 'setup' && <SetupCard info={solo} onDone={enterAfterSetup} />}
         {panel === 'reset' && (
           <ResetCard
             info={solo}

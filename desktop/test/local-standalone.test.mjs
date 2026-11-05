@@ -36,8 +36,9 @@ const PASS = 'Parol-777'
 
 // machine, cipher — другой компьютер: свой код компьютера и своё шифрование Windows (отпечатки
 // паролей, зашифрованные на одном компьютере, на другом не открыть). core и dataDir — та же
-// программа после перезапуска
-function setup({ machine = MACHINE, cipher = fakeSeal, core: coreDb, dataDir: dir, time: clockTime } = {}) {
+// программа после перезапуска. requireCode — с кодом активации (механизм 1.6.0; в 1.7.0 выключен,
+// но остаётся рабочим); offlineOnly — все магазины без интернета (1.7.0)
+function setup({ machine = MACHINE, cipher = fakeSeal, core: coreDb, dataDir: dir, time: clockTime, requireCode = true, offlineOnly = false } = {}) {
   const time = clockTime || { now: NOW }
   const core = coreDb || openDb(':memory:', CORE_SCHEMA)
   const session = memorySession()
@@ -61,7 +62,8 @@ function setup({ machine = MACHINE, cipher = fakeSeal, core: coreDb, dataDir: di
     timers: manualTimers(),
     emit: (type, payload) => events.push({ type, payload }),
     log: { info() {}, warn() {}, error: (...a) => errors.push(a) },
-    standalone: { publicKey: KEYS.publicKey, computerRaw: pc, computerCode: computerCodeOf(machine) },
+    standalone: { publicKey: KEYS.publicKey, computerRaw: pc, computerCode: computerCodeOf(machine), requireCode },
+    offlineOnly,
   })
   const req = (method, path, body) => gw.request({ method, path, body })
   const login = (name = OWNER, password = PASS) => req('POST', '/auth/login', { name, password })
@@ -690,3 +692,64 @@ test('выпуск кодов в проверках — тот же расчёт
   assert.equal(issueCode(privateKey, pc, { kind: 'activate', until: dayOf('2027-11-01'), registers: 2, serial: 7 }), V.code)
   assert.equal(issueCode(privateKey, pc, { kind: 'reset', until: dayOf('2026-11-03'), registers: 0, serial: 4242 }), V.reset)
 })
+
+// ── 1.7.0: все магазины без интернета, без кода активации ──
+
+test('1.7.0: первый запуск — без выбора способа работы и без кода: магазин, вход, продажа, ни одного обращения к сети', async (tt) => {
+  const t = setup({ requireCode: false, offlineOnly: true })
+  tt.after(() => t.gw.close())
+  const info = t.gw.standalone.info()
+  assert.equal(info.mode, 'standalone', 'способ работы задан сам')
+  assert.equal(info.offlineOnly, true)
+  assert.equal(info.codeRequired, false)
+  assert.equal(info.activation.active, true)
+  assert.equal(info.activation.forever, true)
+  assert.equal(info.shop, false)
+  // Другого способа работы нет
+  assert.ok(t.gw.standalone.chooseMode('cloud').error)
+  // Магазин — без кода
+  assert.equal((await t.gw.standalone.setupShop({ shopName: 'Магазин у дома', login: OWNER, password: PASS })).ok, true)
+  assert.equal((await t.login()).status, 201)
+  assert.equal((await t.req('POST', '/shifts/open', { openingCash: 0 })).status, 201)
+  const p = (await t.req('POST', '/products', { name: 'Соль', barcode: '4600000000401', price: 5, cost: 3, stock: 50 })).data
+  assert.equal((await t.req('POST', '/sales', { payment: 'cash', items: [{ productId: p.id, qty: 2 }] })).status, 201)
+  // Срока нет: и через три года всё работает
+  t.time.now += 3 * 365 * DAY
+  t.gw.tick()
+  assert.equal((await t.req('POST', '/sales', { payment: 'cash', items: [{ productId: p.id, qty: 1 }] })).status, 201)
+  assert.equal(t.events.filter((e) => e.type === 'suspended').length, 0)
+  assert.equal(t.gw.status().activation?.free ?? true, true)
+  assert.deepEqual(t.net, [], 'ни одного обращения к сети')
+})
+
+test('1.7.0: компьютер, работавший с сервером, переходит на работу без интернета — входы магазина сервера убираются', async (tt) => {
+  const core = openDb(':memory:', CORE_SCHEMA)
+  // Как было у тестового магазина с сервером: способ работы «с интернетом», вход кассира
+  q(core, "INSERT INTO meta (key, value) VALUES ('appMode', 'cloud')").run()
+  q(
+    core,
+    `INSERT INTO accounts (id, login, role, pharmacyCode, pharmacyName, verifier, subStatus, paidUntil, seenAt, permissions, roleName, roleSystem)
+     VALUES ('acc-test', 'test', 'founder', 'shifo', 'Шифо', 'dpapi:x', 'active', NULL, '2026-11-01T00:00:00.000Z', '', 'Владелец', 'owner')`,
+  ).run()
+  const t = setup({ core, requireCode: false, offlineOnly: true })
+  tt.after(() => t.gw.close())
+  assert.equal(q(core, "SELECT COUNT(*) AS n FROM accounts WHERE pharmacyCode <> 'local'").get().n, 0, 'вход магазина сервера убран')
+  const info = t.gw.standalone.info()
+  assert.equal(info.mode, 'standalone')
+  assert.equal(info.shop, false, 'магазин заводится заново')
+  // Тот же логин теперь свободен
+  assert.equal((await t.gw.standalone.setupShop({ shopName: 'Шифо', login: 'test', password: PASS })).ok, true)
+  assert.equal((await t.login('test', PASS)).status, 201)
+  assert.deepEqual(t.net, [])
+})
+
+test('1.7.0: без кода активации сброс пароля владельца кодом сброса работает', async (tt) => {
+  const t = setup({ requireCode: false, offlineOnly: true })
+  tt.after(() => t.gw.close())
+  assert.equal((await t.gw.standalone.setupShop({ shopName: 'Магазин', login: OWNER, password: PASS })).ok, true)
+  const reset = issueCode(KEYS.privateKey, t.pc, { kind: 'reset', until: todayDay(t.time.now) + 3, registers: 1, serial: 7 })
+  assert.equal((await t.gw.standalone.resetPassword({ code: reset, password: 'novyy-parol-1' })).ok, true)
+  assert.equal((await t.login(OWNER, 'novyy-parol-1')).status, 201)
+  assert.deepEqual(t.net, [])
+})
+

@@ -25,7 +25,7 @@ import { io } from 'socket.io-client'
 import { copyTime, createBackups, hostFolderOf, openOrRestore } from './backup.mjs'
 import { chooseDiskFolder, diskDue as diskDueOf, diskLabel, DISK_KEEP, DISK_ROOTS, writeDiskCopy } from './disk-backup.mjs'
 import { createBaseChooser } from './apibase.mjs'
-import { readBuildConfig, resolveApiFallback, resolveApiUrl, resolveLicenceKey, resolveUpdateFeed, serverOrigin } from './config.mjs'
+import { OFFLINE_ONLY, readBuildConfig, resolveApiFallback, resolveApiUrl, resolveLicenceKey, resolveUpdateFeed, serverOrigin } from './config.mjs'
 import { machineIdOf, readMachineGuid } from './machine.mjs'
 import { computerRawOf, formatComputer } from './local/licence-code.mjs'
 import { createGateway } from './gateway.mjs'
@@ -158,8 +158,10 @@ async function start() {
   log.info(`запуск: версия ${app.getVersion()}, ${DEV ? 'из исходников' : 'собранная программа'}`)
 
   const built = readBuildConfig(join(ROOT, 'build-config.json'))
-  const apiUrl = resolveApiUrl({ packaged: app.isPackaged, env: process.env, built })
-  if (!apiUrl) log.error('адрес сервера не задан — запросы к серверу работать не будут')
+  // Без интернета (OFFLINE_ONLY): адреса сервера у программы нет вовсе — ни один запрос туда не
+  // уйдёт, даже по ошибке в коде (net.mjs без адреса отвечает отказом, не трогая сеть)
+  const apiUrl = OFFLINE_ONLY ? '' : resolveApiUrl({ packaged: app.isPackaged, env: process.env, built })
+  if (!apiUrl && !OFFLINE_ONLY) log.error('адрес сервера не задан — запросы к серверу работать не будут')
   const apiFallback = apiUrl ? resolveApiFallback({ packaged: app.isPackaged, env: process.env, built, apiUrl }) : ''
   const settings = createSettings({ file: join(userData, 'settings.json'), fs })
 
@@ -376,6 +378,8 @@ async function start() {
     // заводится ниже, поэтому — через переменную)
     onLogo: () => logoChanged(),
     standalone: { publicKey: licenceKey, computerRaw, computerCode: computerRaw ? formatComputer(computerRaw) : '' },
+    // 1.7.0: все магазины без интернета — компьютер сам переходит на такую работу (config.mjs)
+    offlineOnly: OFFLINE_ONLY,
   })
   log.info(`касса ${gateway.deviceId}`)
   if (!licenceKey) log.warn('ключа кодов активации нет — программа без интернета не активируется')
@@ -598,7 +602,8 @@ async function start() {
   const pushStatus = () => toWindow('status', fullStatus())
 
   gateway.resume()
-  realtime.start()
+  // Постоянное соединение с сервером — только у магазина с сервером
+  if (!OFFLINE_ONLY) realtime.start()
   updater.start()
 
   // Раз в минуту: не вышел ли срок работы без связи; заодно окно получает свежий отсчёт

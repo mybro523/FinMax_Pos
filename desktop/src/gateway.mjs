@@ -204,6 +204,9 @@ export function createGateway({
   // Магазин без интернета (1.6.0): открытый ключ кодов активации (из сборки) и код этого
   // компьютера — 5 байт и как его видит человек («XXXXX-XXXXX»)
   standalone = {},
+  // 1.7.0: все магазины без интернета (config.mjs, OFFLINE_ONLY): компьютер, работавший с
+  // сервером, переходит на работу без интернета при запуске
+  offlineOnly = false,
   // Логотип магазина сменился (1.6.4) — экран покупателя показывает новый сразу
   onLogo = () => {},
 }) {
@@ -1082,8 +1085,32 @@ export function createGateway({
     publicKey: typeof standalone?.publicKey === 'string' ? standalone.publicKey : '',
     computerRaw: Buffer.isBuffer(standalone?.computerRaw) ? standalone.computerRaw : null,
     computerCode: typeof standalone?.computerCode === 'string' ? standalone.computerCode : '',
+    // 1.7.0: кода активации нет (решение владельца сервиса 05.11.2026) — программа работает без
+    // срока, касс сколько угодно. Механизм кодов не убран: вернуть его — requireCode: true (ключ и
+    // код компьютера нужны и без него: ими подписан код сброса пароля владельца)
+    requireCode: standalone?.requireCode === true,
   }
   const appMode = () => getMeta(core, 'appMode') || ''
+
+  // ── 1.7.0: все магазины без интернета ──
+  // Компьютер, работавший с сервером (тестовые магазины), переходит на работу без интернета:
+  // входы сотрудников магазинов сервера убираются (файлы их баз остаются на диске — их никто не
+  // открывает), способ работы — «без интернета». Магазин заводится заново, как на новом компьютере
+  function toStandalone() {
+    try {
+      const cloud = q(core, 'SELECT id, login FROM accounts WHERE pharmacyCode <> ?').all(STANDALONE_CODE)
+      inTx(core, () => {
+        for (const a of cloud) q(core, 'DELETE FROM accounts WHERE id = ?').run(a.id)
+        if (appMode() !== 'standalone') setMeta(core, 'appMode', 'standalone')
+      })
+      for (const a of cloud) session.drop(a.id)
+      if (session.activeId() && !accountById(core, session.activeId())) session.deactivate()
+      if (cloud.length) log.info(`без интернета: убраны входы магазинов сервера — ${cloud.map((a) => a.login).join(', ')}`)
+    } catch (e) {
+      log.error('переход на работу без интернета не удался', e)
+    }
+  }
+  if (offlineOnly) toStandalone()
   // Магазин без интернета — и код магазина 'local', и способ работы этого компьютера: магазин
   // сервера с таким кодом (сервер его больше не выдаёт, но мог выдать раньше) на компьютере,
   // работающем с сервером, обменивается с ним как обычно
@@ -1127,7 +1154,10 @@ export function createGateway({
     }
     return Math.max(now, floor)
   }
+  // Без кода активации (requireCode: false) — работает всегда, без срока и без счёта касс
+  const FREE = { active: true, activated: true, expired: false, warn: false, forever: true, until: null, untilHuman: null, endsAt: null, daysLeft: null, registers: null, serial: 0, message: '', free: true }
   function activation() {
+    if (!solo.requireCode) return FREE
     return activationState(core, { publicKey: solo.publicKey, computerRaw: solo.computerRaw, now: soloNow() })
   }
   // Подписка — словами сервера: окно показывает её так же, как подписку магазина с сервером
@@ -1389,11 +1419,16 @@ export function createGateway({
         computer: solo.computerCode,
         ready: validKey(solo.publicKey) && !!solo.computerRaw,
         activation: activation(),
+        // 1.7.0: способа работы не выбирают (всегда без интернета); код активации не нужен
+        offlineOnly,
+        codeRequired: solo.requireCode,
       }
     },
     // Выбор при первом запуске. Пока на компьютере никто не входил, его можно поменять
     chooseMode(mode) {
       if (!['cloud', 'standalone', ''].includes(mode)) return { error: MESSAGES.notStandalone }
+      // Все магазины без интернета — другого способа работы нет
+      if (offlineOnly && mode !== 'standalone') return { error: MESSAGES.notStandalone }
       if (q(core, 'SELECT 1 FROM accounts LIMIT 1').get()) return { error: MESSAGES.modeLocked }
       setMeta(core, 'appMode', mode)
       return { ok: true, mode }

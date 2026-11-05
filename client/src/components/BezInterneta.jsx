@@ -214,7 +214,7 @@ export function ActivateCard({ info, onDone, onBack }) {
 }
 
 // ── Магазин и владелец ──
-export function SetupCard({ onDone }) {
+export function SetupCard({ info, onDone }) {
   const t = useT()
   const [f, setF] = useState({ shopName: '', login: '', password: '', confirm: '' })
   const [err, setErr] = useState('')
@@ -234,7 +234,11 @@ export function SetupCard({ onDone }) {
   return (
     <form className="auth-card solo-card" onSubmit={submit} data-vkb-lift data-testid="solo-setup">
       <h1>{t('Новый магазин')}</h1>
-      <p className="auth-sub">{t('Программа активирована. Назовите магазин и придумайте вход владельца — он увидит всё и заведёт кассиров.')}</p>
+      <p className="auth-sub">
+        {info?.codeRequired === false
+          ? t('Назовите магазин и придумайте вход владельца — он увидит всё и заведёт кассиров. Интернет не нужен: всё хранится на этом компьютере.')
+          : t('Программа активирована. Назовите магазин и придумайте вход владельца — он увидит всё и заведёт кассиров.')}
+      </p>
       <div className="field">
         <label htmlFor="solo-shop">{t('Название магазина')}</label>
         <input id="solo-shop" value={f.shopName} onChange={set('shopName')} placeholder={t('Как на вывеске — оно будет на чеке')} autoFocus maxLength={120} />
@@ -324,14 +328,17 @@ export function SoloLine({ info, onReset, onRenew }) {
   const t = useT()
   const a = info?.activation || {}
   if (!info?.shop) return null
+  // 1.7.0: без кода активации — ни срока, ни счёта касс, ни нового кода; «Забыли пароль?» остаётся
+  const code = info?.codeRequired !== false
   return (
-    <div className={'solo-line' + (a.warn ? ' warn' : '')} data-testid="solo-line">
+    <div className={'solo-line' + (code && a.warn ? ' warn' : '')} data-testid="solo-line">
       <span>
-        <LuHardDrive size={13} style={{ verticalAlign: '-2px' }} /> {t('Без интернета')} · {a.forever ? t('без срока') : `${t('работает до')} ${a.untilHuman}`}
-        {a.registers ? ` · ${t('касс')}: ${a.registers}` : ''}
+        <LuHardDrive size={13} style={{ verticalAlign: '-2px' }} /> {t('Без интернета')}
+        {code ? ` · ${a.forever ? t('без срока') : `${t('работает до')} ${a.untilHuman}`}` : ` · ${t('всё на этом компьютере')}`}
+        {code && a.registers ? ` · ${t('касс')}: ${a.registers}` : ''}
       </span>
       <span className="solo-line-links">
-        <button type="button" className="link" onClick={onRenew} data-testid="solo-renew">{t('Ввести новый код')}</button>
+        {code && <button type="button" className="link" onClick={onRenew} data-testid="solo-renew">{t('Ввести новый код')}</button>}
         <button type="button" className="link" onClick={onReset} data-testid="solo-forgot">{t('Забыли пароль?')}</button>
       </span>
     </div>
@@ -365,6 +372,21 @@ export function ActivationPanel() {
       setOk(r.activation?.forever ? t('Код принят: программа работает без срока.') : `${t('Код принят: программа работает до')} ${r.activation?.untilHuman}.`)
       load()
     } else setErr(t(r?.error || 'Не получилось. Повторите.'))
+  }
+  // 1.7.0: без кода активации — только код компьютера (по нему поставщик выдаёт код сброса пароля)
+  if (info && info.codeRequired === false) {
+    return (
+      <div className="panel mt" style={{ maxWidth: 640 }} data-testid="solo-panel">
+        <h2><span className="h2-title"><span className="ic"><LuHardDrive size={17} /></span>{t('Программа без интернета')}</span></h2>
+        <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.6, marginBottom: 10 }}>
+          {t('База магазина хранится на этом компьютере. Сохраняйте копию на флешку хотя бы раз в неделю: «Настройки» → «Резервная копия» → «Сохранить копию в…».')}
+        </p>
+        <ComputerCode code={info?.computer} />
+        <p className="tag-cat" style={{ marginTop: 8 }}>
+          {t('Код этого компьютера нужен, если владелец забудет пароль: поставщик программы по нему выдаст код сброса.')}
+        </p>
+      </div>
+    )
   }
   return (
     <div className="panel mt" style={{ maxWidth: 640 }} data-testid="solo-panel">
