@@ -15,12 +15,14 @@ test('код подключения: заглавными, без лишнего
   assert.equal(normalizePair(null), '')
 })
 
-test('сколько коду осталось', () => {
+test('сколько коду осталось — по часам окна, не больше 10 минут', () => {
   const now = Date.parse('2026-11-05T10:00:00Z')
-  assert.equal(pairLeft('2026-11-05T10:09:41Z', now), '9:41')
-  assert.equal(pairLeft('2026-11-05T10:00:05Z', now), '0:05')
-  assert.equal(pairLeft('2026-11-05T09:59:00Z', now), '')
-  assert.equal(pairLeft('', now), '')
+  assert.equal(pairLeft(now + 581000, now), '9:41')
+  assert.equal(pairLeft(now + 5000, now), '0:05')
+  assert.equal(pairLeft(now - 1000, now), '')
+  assert.equal(pairLeft(0, now), '')
+  // Часы программы впереди окна — больше 10 минут не показываем
+  assert.equal(pairLeft(now + 601000, now), '10:00')
 })
 
 test('значок внизу: касса — связь с главным, главный — кассы на связи', () => {
@@ -31,5 +33,7 @@ test('значок внизу: касса — связь с главным, гл
   assert.equal(soloNetBadge({ role: 'main', registers: [] }, t), null)
   assert.deepEqual(soloNetBadge({ role: 'main', registers: [{ online: true }, { online: false }] }, t), { tone: 'ok', label: 'Кассы на связи: 1 из 2' })
   assert.match(mainProblemText('epoch', t), /копию базы/)
-  assert.equal(mainProblemText('timeout', t), '')
+  assert.match(mainProblemText('gone', t), /подключите кассу заново/i)
+  assert.equal(soloNetBadge({ role: 'register', main: { online: false, error: 'gone' }, pending: 0 }, t).tone, 'warn')
+  assert.equal(mainProblemText('error', t), '')
 })

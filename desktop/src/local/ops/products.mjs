@@ -23,6 +23,9 @@ import { isoOrNull } from '../time.mjs'
 import { uppOf } from '../units.mjs'
 import { reorderProducts } from '../snapshot.mjs'
 
+// Касса магазина без интернета: остаток меняют на главном (текст — и в словаре окна)
+export const REGISTER_STOCK = 'Пересчёт и остаток товара меняют на главном компьютере магазина.'
+
 // Тексты отказов — слово в слово как у сервера
 export const BARCODE_TAKEN = 'Товар с таким штрихкодом уже существует'
 const IMAGE = /^$|^data:image\/(jpeg|png|webp);base64,/
@@ -261,6 +264,9 @@ export function updateProduct(ctx, id, raw) {
     const expiryChanged = expiryDate !== undefined && String(expiryDate || '').slice(0, 10) !== String(view.expiryDate || '').slice(0, 10)
 
     if (!Object.keys(set).length && target === null && !expiryChanged) return view
+    // Касса магазина без интернета (1.7.0): остаток — «столько на полке сейчас» — меняют на главном
+    // компьютере: только у него все продажи всех касс
+    if (target !== null && ctx.register) throw bad(REGISTER_STOCK)
 
     const opId = newId()
     const at = new Date(now).toISOString()

@@ -4,6 +4,7 @@ import { LuArrowLeft, LuCloud, LuCopy, LuHardDrive, LuKeyRound, LuLink, LuMonito
 import { bridge } from '../lib/desktop'
 import { useT } from '../lib/i18n'
 import { CODE_LEN, caretAt, editCode, editEnd, formatCode, normalizeCode, pastedCode, physicalKey, soloMessage } from '../lib/aktivaciya'
+import { REJOIN } from '../lib/kassy'
 import { formatPair, normalizePair, PAIR_LEN } from '../lib/kassy'
 import { PasswordInput } from './ui'
 
@@ -334,24 +335,40 @@ export function ResetCard({ info, onDone, onBack }) {
 }
 
 // ── Под формой входа: магазин без интернета, до какого дня, забыли пароль ──
-export function SoloLine({ info, onReset, onRenew, onRejoin }) {
+export function SoloLine({ info, onReset, onRenew, onRejoin, onJoin }) {
   const t = useT()
   const a = info?.activation || {}
   if (!info?.shop) return null
   // 1.7.0: касса магазина — связь с главным; пароли и «Забыли пароль?» — на главном
   if (info.role === 'register') {
     const m = info.net?.main || {}
+    const rejoin = REJOIN.has(m.error)
     return (
-      <div className={'solo-line' + (m.error ? ' warn' : '')} data-testid="solo-line">
+      <div className={'solo-line' + (rejoin ? ' warn' : '')} data-testid="solo-line">
         <span>
           <LuHardDrive size={13} style={{ verticalAlign: '-2px' }} /> {t('Касса магазина')}
-          {m.name ? ` · ${t('главный')}: ${m.name}` : ''}
+          {info.net?.name ? ` · ${info.net.name}` : ''}
+          {rejoin ? ` · ${t('Подключите кассу заново')}` : ''}
         </span>
         <span className="solo-line-links">
-          {(m.error === 'star' || m.error === 'epoch') && onRejoin && (
+          {onRejoin && (
             <button type="button" className="link" onClick={onRejoin} data-testid="solo-rejoin-login">{t('Подключить заново')}</button>
           )}
           <span>{t('Забыли пароль — его меняют на главном компьютере')}</span>
+        </span>
+      </div>
+    )
+  }
+  // Магазин заведён, но в нём ещё ничего не делали — компьютер можно сделать кассой
+  if (info.empty && onJoin) {
+    return (
+      <div className="solo-line" data-testid="solo-line">
+        <span>
+          <LuHardDrive size={13} style={{ verticalAlign: '-2px' }} /> {t('Без интернета')} · {t('всё на этом компьютере')}
+        </span>
+        <span className="solo-line-links">
+          <button type="button" className="link" onClick={onJoin} data-testid="solo-join-empty">{t('Это касса магазина?')}</button>
+          <button type="button" className="link" onClick={onReset} data-testid="solo-forgot">{t('Забыли пароль?')}</button>
         </span>
       </div>
     )
@@ -378,23 +395,44 @@ export function SoloLine({ info, onReset, onRenew, onRejoin }) {
 // Касса находит главного в сети сама; не нашла (поиск закрыт брандмауэром или сети разные) —
 // вписывают адрес главного. again — касса подключается заново (из «Настроек»); compact — внутри
 // панели настроек, а не отдельной карточкой
-export function JoinCard({ onDone, onBack, again = false, compact = false }) {
+export function JoinCard({ onDone, onBack, again = false, compact = false, replacing = false }) {
   const t = useT()
   const [code, setCode] = useState('')
   const [address, setAddress] = useState('')
   const [manual, setManual] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  // Касса раньше работала с другим главным (его заводили заново): подключить как новую
+  const [other, setOther] = useState(false)
   const ready = normalizePair(code).length === PAIR_LEN && (!manual || address.trim())
+  const send = async (fresh) => {
+    setErr('')
+    setBusy(true)
+    const r = await solo()?.join({ code: normalizePair(code), address: manual ? address.trim() : '', fresh }).catch(() => null)
+    setBusy(false)
+    if (r?.ok) return onDone(r)
+    if (r?.code === 'othershop' && !fresh) setOther(true)
+    setErr(t(r?.error || 'Не получилось. Повторите.'))
+  }
   const submit = async (e) => {
     e.preventDefault()
     if (busy || !ready) return
-    setErr('')
-    setBusy(true)
-    const r = await solo()?.join({ code: normalizePair(code), address: manual ? address.trim() : '' }).catch(() => null)
-    setBusy(false)
-    if (r?.ok) onDone(r)
-    else setErr(t(r?.error || 'Не получилось. Повторите.'))
+    await send(false)
+  }
+  // Код набирают и в русской раскладке: буква — по месту клавиши (как код активации)
+  const typeCode = (e) => {
+    const ch = physicalKey(e)
+    if (!ch) return
+    e.preventDefault()
+    setCode((c) => normalizePair(c + ch))
+  }
+  // Адрес — цифры и точки: «ю» на месте точки, «Ж» на месте двоеточия
+  const typeAddress = (e) => {
+    const map = { Period: '.', NumpadDecimal: '.', Comma: '.', Semicolon: ':' }
+    const ch = map[e.code] || physicalKey(e)
+    if (!ch || e.ctrlKey || e.altKey || e.metaKey || /[0-9A-Za-z.:]/.test(e.key || '')) return
+    e.preventDefault()
+    setAddress((a) => (a + ch).slice(0, 100))
   }
   return (
     <form className={compact ? 'solo-join-inline' : 'auth-card solo-card'} onSubmit={submit} data-vkb-lift data-testid="solo-join">
@@ -419,6 +457,7 @@ export function JoinCard({ onDone, onBack, again = false, compact = false }) {
           className="solo-code pair-input"
           value={formatPair(code)}
           onChange={(e) => setCode(normalizePair(e.target.value))}
+          onKeyDown={typeCode}
           placeholder="XXXX-XXXX"
           autoComplete="off"
           spellCheck={false}
@@ -431,7 +470,7 @@ export function JoinCard({ onDone, onBack, again = false, compact = false }) {
       {manual ? (
         <div className="field">
           <label htmlFor="solo-pair-addr">{t('Адрес главного компьютера')}</label>
-          <input id="solo-pair-addr" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="192.168.1.10" maxLength={100} disabled={busy} />
+          <input id="solo-pair-addr" value={address} onChange={(e) => setAddress(e.target.value.replace(/[юЮбБ]/g, '.').replace(/[жЖ]/g, ':'))} onKeyDown={typeAddress} placeholder="192.168.1.10" maxLength={100} disabled={busy} />
           <div className="tag-cat" style={{ marginTop: 4 }}>{t('Адрес виден на главном компьютере: «Настройки» → «Кассы и устройства».')}</div>
         </div>
       ) : (
@@ -439,7 +478,22 @@ export function JoinCard({ onDone, onBack, again = false, compact = false }) {
           {t('Главный компьютер не находится? Вписать его адрес')}
         </button>
       )}
+      {replacing && !again && (
+        <div className="note warn" style={{ marginBottom: 10 }}>
+          {t('Магазин, заведённый на этом компьютере, будет заменён магазином главного компьютера.')}
+        </div>
+      )}
       <Problem text={err} />
+      {other && !busy && (
+        <div className="note warn" style={{ marginBottom: 10 }} data-testid="solo-join-other">
+          {t('Если главный компьютер заводили заново, кассу можно подключить к нему как новую. Продажи этой кассы, которых нет на главном, на него не перейдут — они останутся в копии этой кассы.')}
+          <div style={{ marginTop: 8 }}>
+            <button type="button" className="btn ghost sm" disabled={busy || !ready} onClick={() => send(true)} data-testid="solo-join-fresh">
+              {t('Подключить как новую кассу')}
+            </button>
+          </div>
+        </div>
+      )}
       {busy && <div className="note info" style={{ marginBottom: 10 }}>{t('Получаем базу магазина с главного компьютера — это может занять до минуты.')}</div>}
       <button className={'btn gold' + (compact ? '' : ' block auth-submit')} disabled={busy || !ready} data-testid="solo-join-submit">
         <span className="ic"><LuLink size={17} /></span> {busy ? t('Подключаем…') : t('Подключить')}
@@ -480,6 +534,17 @@ export function ActivationPanel() {
       setOk(r.activation?.forever ? t('Код принят: программа работает без срока.') : `${t('Код принят: программа работает до')} ${r.activation?.untilHuman}.`)
       load()
     } else setErr(t(r?.error || 'Не получилось. Повторите.'))
+  }
+  // 1.7.0: касса магазина — пароли и код сброса на главном компьютере
+  if (info && info.codeRequired === false && info.role === 'register') {
+    return (
+      <div className="panel mt" style={{ maxWidth: 640 }} data-testid="solo-panel">
+        <h2><span className="h2-title"><span className="ic"><LuHardDrive size={17} /></span>{t('Касса магазина')}</span></h2>
+        <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.6, marginBottom: 0 }}>
+          {t('База магазина — на главном компьютере, эта касса держит её копию и отправляет туда всё сделанное. Пароли сотрудников меняют на главном; если владелец забудет пароль, код сброса выдают по коду главного компьютера («Настройки» → «Профиль» на главном).')}
+        </p>
+      </div>
+    )
   }
   // 1.7.0: без кода активации — только код компьютера (по нему поставщик выдаёт код сброса пароля)
   if (info && info.codeRequired === false) {

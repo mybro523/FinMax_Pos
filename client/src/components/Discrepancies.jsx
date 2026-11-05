@@ -6,6 +6,7 @@ import { fmtShort } from '../lib/time'
 import { useT } from '../lib/i18n'
 import { useDialog, useToast } from './ui'
 import { discrepancyAdvice, discrepancyDetail, discrepancyTitle, noteOf } from '../lib/discrepancy'
+import { getUser } from '../db/auth'
 
 // ── Расхождения с касс ──
 // Касса в программе для Windows работает и без интернета. Её чеки сервер принимает
@@ -92,7 +93,9 @@ export default function Discrepancies() {
         <span className="badge low">{list.length}</span>
       </h2>
       <div className="note info" style={{ marginBottom: 12 }}>
-        {t('Касса работала без интернета, и что-то не сошлось с базой. Чеки приняты как есть — товар уже отдан. Проверьте и отметьте, когда разберётесь.')}
+        {getUser()?.standalone
+          ? t('Касса работала без связи с главным компьютером, и что-то не сошлось с базой. Чеки приняты как есть — товар уже отдан. Проверьте и отметьте, когда разберётесь.')
+          : t('Касса работала без интернета, и что-то не сошлось с базой. Чеки приняты как есть — товар уже отдан. Проверьте и отметьте, когда разберётесь.')}
       </div>
       <div className="rash-list">
         {list.map((d) => (
@@ -100,7 +103,7 @@ export default function Discrepancies() {
             <div className="rash-main">
               <div className="rash-title">{discrepancyTitle(d.kind, t)}</div>
               <div className="rash-what">
-                <b>{d.name}</b> — {discrepancyDetail(d, t, money)}
+                {d.name ? <><b>{d.name}</b> — </> : null}{discrepancyDetail(d, t, money)}
               </div>
               <div className="tag-cat">
                 {fmtShort(d.date)}

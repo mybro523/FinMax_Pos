@@ -216,6 +216,25 @@ function lanTopOf(file, Database) {
   )
 }
 
+// Магазин без интернета с кассами (1.7.0): что в этом файле о сети магазина
+function soloOf(file, Database) {
+  return withDb(
+    Database,
+    file,
+    (db) => {
+      let paired = []
+      try {
+        const v = JSON.parse(metaOf(db, 'soloPaired') || '[]')
+        paired = Array.isArray(v) ? v.filter((r) => r && typeof r.deviceId === 'string') : []
+      } catch {
+        paired = []
+      }
+      return { shopId: metaOf(db, 'shopId') || '', lanKey: metaOf(db, 'lanKey') || '', paired, register: !!metaOf(db, 'soloMain') }
+    },
+    null,
+  )
+}
+
 // ── Выполнить просьбу ──
 // Зовётся при запуске, пока ни одна база не открыта. Нет просьбы — null. Иначе
 // { ok, at, foreign } или { ok: false, error } — в последнем случае базы остаются как были.
@@ -249,8 +268,11 @@ export function applyRestore({ userData, dataDir, fs, Database, now, schemaMax, 
   if (!fs.existsSync(src) || !intactFile(src, Database)) return done({ ok: false, error: 'файл копии не найден или повреждён' })
   const schema = withDb(Database, src, (db) => Number(metaOf(db, 'schema') || 0), NaN)
   if (!(schema <= schemaMax)) return done({ ok: false, error: PROBLEMS.newer })
-  const identity = ask.foreign ? deviceOfCopy(join(stage, 'core.db'), Database) : null
-  if (ask.foreign && !identity) return done({ ok: false, error: 'в копии нет номера кассы' })
+  // Копия кассы магазина без интернета (1.7.0): база в ней — полная копия магазина, но номер этой
+  // кассы компьютер не берёт — главный с номером кассы с ней же и спутался бы. Становится главным
+  const fromRegister = !!soloOf(src, Database)?.register
+  const identity = ask.foreign && !fromRegister ? deviceOfCopy(join(stage, 'core.db'), Database) : null
+  if (ask.foreign && !fromRegister && !identity) return done({ ok: false, error: 'в копии нет номера кассы' })
 
   // ── Нынешний файл — в сторону ──
   // Сначала сам файл, потом его журналы: не убрался файл — не тронуто ничего. Не убрался
@@ -280,6 +302,9 @@ export function applyRestore({ userData, dataDir, fs, Database, now, schemaMax, 
     return done({ ok: false, error: 'файл базы занят другой программой: ' + (e?.message || e) })
   }
   const lanTop = moved.includes('') ? lanTopOf(join(aside, ask.shopFile), Database) : 0
+  // Магазин без интернета: номер магазина, ключ сети и кассы главного — из нынешней базы, если копия
+  // того же магазина старше первой кассы (своя копия этого компьютера): кассы подключатся заново
+  const was = moved.includes('') && !ask.foreign ? soloOf(join(aside, ask.shopFile), Database) : null
 
   // ── Копию — на место ──
   try {
@@ -294,7 +319,31 @@ export function applyRestore({ userData, dataDir, fs, Database, now, schemaMax, 
         put.run('needFull', '1')
         // Магазин без интернета с кассами (1.7.0): у главного теперь другое «поколение» базы — кассы,
         // знавшие прежнее, подключаются заново (их несделанное главным он примет при подключении)
-        if (metaOf(db, 'soloEpoch')) put.run('soloEpoch', randomUUID())
+        if (metaOf(db, 'soloEpoch') || fromRegister) put.run('soloEpoch', randomUUID())
+        // Копия кассы: пометка «касса», её имя, ключи обмена и её главный — не этого компьютера
+        if (fromRegister) {
+          const drop = db.prepare('DELETE FROM meta WHERE key = ?')
+          for (const key of ['soloMain', 'deviceName', 'lanRegKey', 'lanKey', 'soloPaired']) drop.run(key)
+          db.prepare('DELETE FROM lan_peers').run()
+        }
+        // Своя копия того же магазина: его номер, ключ сети и кассы — остаются (кассы, знавшие
+        // прежнее «поколение» базы, подключатся заново, а не окажутся «отключёнными»)
+        if (was?.shopId && !fromRegister) {
+          const copyShop = metaOf(db, 'shopId') || ''
+          if (!copyShop || copyShop === was.shopId) {
+            if (!copyShop) put.run('shopId', was.shopId)
+            if (!metaOf(db, 'lanKey') && was.lanKey) put.run('lanKey', was.lanKey)
+            let mine = []
+            try {
+              const v = JSON.parse(metaOf(db, 'soloPaired') || '[]')
+              mine = Array.isArray(v) ? v : []
+            } catch {
+              mine = []
+            }
+            const ids = new Set(was.paired.map((r) => r.deviceId))
+            put.run('soloPaired', JSON.stringify([...was.paired, ...mine.filter((r) => r && !ids.has(r.deviceId))]))
+          }
+        }
         put.run('cursor', '')
         put.run('wcursor', '')
         const hasLan = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'lan_log'").get()

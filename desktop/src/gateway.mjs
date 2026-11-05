@@ -14,10 +14,12 @@
 // Модуль не знает про Electron: сеть, диск, шифрование и часы ему передают снаружи.
 // Поэтому он целиком проверяется обычными тестами.
 import { randomBytes } from 'node:crypto'
-import { existsSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import * as nodeFs from 'node:fs'
+import { existsSync, renameSync, writeFileSync } from 'node:fs'
 import { hostname } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { BUSY_MESSAGE } from './backup.mjs'
+import { removeTree } from './disk-backup.mjs'
 import {
   accountById,
   accountByLogin,
@@ -74,6 +76,8 @@ import {
   lanPeers,
   lanPeerSeen,
   lanPrune,
+  lanFloor,
+  PEER_SILENT_DAYS,
   lanReceive,
   lanRemoveManual,
   lanTopSeq,
@@ -82,6 +86,7 @@ import {
 } from './local/lan.mjs'
 import {
   addDiscrepancies,
+  dbSoloMain,
   mainAcceptPeers,
   mainLogBase,
   nextRegisterName,
@@ -90,7 +95,7 @@ import {
   pwToLan,
   regApplyBase,
   regInstallDb,
-  regPendingEntries,
+  regRecoveryEntries,
   resolveDiscrepancy,
   setSoloPaired,
   shopSnapshot,
@@ -124,13 +129,21 @@ export const MESSAGES = {
   pairFormat: 'Код подключения — 8 знаков. Проверьте, все ли введены.',
   pairAddress: 'Адрес главного компьютера записан неверно. Пример: 192.168.1.10',
   pairNotFound:
-    'Главный компьютер не найден в сети. Проверьте, что он включён, программа на нём открыта и код подключения ещё действует. Не помогает — впишите адрес главного компьютера.',
+    'Главный компьютер не найден в сети. Проверьте, что он включён, программа на нём открыта и код подключения ещё действует. Если на главном Windows спрашивала про доступ к сети — там нужно нажать «Разрешить доступ». Не помогает — впишите адрес главного компьютера.',
   pairCode: 'Код подключения неверный или устарел — попросите новый на главном компьютере.',
   pairNoCode: 'На главном компьютере сейчас нет кода подключения — нажмите там «Подключить кассу» и введите новый код.',
   pairConnect: 'Не удалось связаться с главным компьютером. Проверьте сеть и брандмауэр Windows на обоих компьютерах.',
   pairBroken: 'Главный компьютер прислал повреждённые данные. Повторите подключение.',
   pairOtherShop: 'Эта касса раньше работала в другом магазине — подключить её к этому нельзя.',
   pairNotMain: 'Этот компьютер — касса магазина, подключить к нему другую кассу нельзя.',
+  pairVersion: 'На главном компьютере и на этой кассе разные версии программы. Обновите программу на обоих компьютерах до одной версии и подключите кассу снова.',
+  pairBusy: 'Касса подключается к главному компьютеру — подождите минуту.',
+  noSealingSolo: 'Не удалось сохранить ключ на этом компьютере: шифрование Windows недоступно. Перезапустите компьютер и повторите.',
+  noPasswordReg: 'Пароль этого сотрудника на этой кассе ещё не задан. Владелец задаёт его на главном компьютере в «Сотрудниках» — касса получит его при обмене.',
+  invMainOnly: 'Пересчёт и остаток товара меняют на главном компьютере магазина.',
+  regNoUser: 'Сотрудника этой операции на главном компьютере нет или он заблокирован.',
+  sheetTwice: 'Лист пересчёта уже применён.',
+  noRights: 'Недостаточно прав',
   // Сверить оплату не с чем: зашифрованной записи о проверке сервером нет (её стёрли, или
   // проверки на этом компьютере не было) — работа после проверки (1.6.5, gateway withTerms)
   unverified: 'Программа не может подтвердить оплату магазина на этом компьютере. Подключите интернет хотя бы на минуту — работа продолжится сразу после проверки. Все чеки сохранены на этом компьютере.',
@@ -288,6 +301,8 @@ export function createGateway({
   // ── База магазина ──
   function closePharmacy() {
     if (!pharmacy) return
+    // Логотип в памяти — от этой базы: новая (касса подключилась заново) скажет свой
+    logoMemo = { code: '', logo: '', at: null }
     pharmacy.sync.stop()
     try {
       pharmacy.db.close()
@@ -336,6 +351,22 @@ export function createGateway({
       log.error(`база магазина ${code} была повреждена — ${restored.at ? 'поднята из копии' : 'начата заново'}`)
     }
     const ph = { code, name, db, users: new Map(), sync: null }
+    // Магазин без интернета (1.7.0): база кассы помечена «касса такого-то главного» (local/solonet.mjs,
+    // regInstallDb). Роль компьютера в общей базе — по этой пометке: подключение, оборвавшееся
+    // между заменой базы и записью роли, так доводится до конца, а база главного кассой не станет
+    if (code === STANDALONE_CODE && getMeta(core, 'appMode') === 'standalone') {
+      const marker = dbSoloMain(db)
+      if (marker) {
+        const want = JSON.stringify({ deviceId: marker.deviceId, name: String(marker.name || ''), epoch: String(marker.epoch || ''), shopId: String(marker.shopId || '') })
+        if (getMeta(core, 'soloRole') !== 'register' || getMeta(core, 'soloMain') !== want) {
+          setMeta(core, 'soloRole', 'register')
+          setMeta(core, 'soloMain', want)
+        }
+      } else if (getMeta(core, 'soloRole') === 'register') {
+        setMeta(core, 'soloRole', '')
+        setMeta(core, 'soloMain', '')
+      }
+    }
     // Чьим ключом ушла пачка — чтобы знать, чей вход отозван, если сервер откажет
     const sentAs = new Map()
 
@@ -552,7 +583,8 @@ export function createGateway({
         blocked: false,
         refused: '',
         pending: 0,
-        rejected: 0,
+        // Касса магазина (1.7.0): операции, которые главный компьютер не принял, — владельцу на разбор
+        rejected: isRegister() ? rejectedCount(pharmacy.db) : 0,
         waiting: false,
         fromPeers: 0,
         syncedAt: null,
@@ -1210,7 +1242,7 @@ export function createGateway({
     if (a.active) return { status: 'active', canWrite: true, warn: !!a.warn, daysLeft: a.daysLeft, paidUntil: a.endsAt, message: a.message || '', standalone: true }
     return { status: 'expired', canWrite: false, warn: true, daysLeft: 0, paidUntil: a.endsAt ?? null, message: a.message || MESSAGES.notActivated, standalone: true }
   }
-  const soloView = (acc) => ({ ...userView(acc, licNow()), subscription: soloAccess(), standalone: true })
+  const soloView = (acc) => ({ ...userView(acc, licNow()), subscription: soloAccess(), standalone: true, register: isRegister() })
 
   async function soloLogin(name, password) {
     const login = String(name ?? '').trim()
@@ -1251,7 +1283,7 @@ export function createGateway({
         // сюда копией, а отпечатки паролей остались на старом компьютере (они зашифрованы
         // средствами того Windows). Кому задать пароль и как — так и говорим
         const need = ph ? soloNeedsPassword(ph, login) : ''
-        if (need) return refuse(401, need)
+        if (need) return refuse(401, isRegister() ? MESSAGES.noPasswordReg : need)
         // Такого имени здесь нет — для человека это тот же «неверное имя или пароль»
         return refuse(401, MESSAGES.wrongLogin)
       }
@@ -1440,6 +1472,8 @@ export function createGateway({
     if (isRegister() && req.method !== 'GET' && (TEAM_ROUTE.test(route) || /^\/customers\/[^/]+$/.test(route) && req.method === 'DELETE')) {
       return refuse(403, MESSAGES.onMainOnly)
     }
+    // Пересчёт — на главном: «остаток на такой-то момент» считает тот, у кого все продажи
+    if (isRegister() && req.method !== 'GET' && /^\/inventory(\/|$)/.test(route)) return refuse(403, MESSAGES.invMainOnly)
     // Всё, что касса умеет сама, — как всегда; история товара и карточка поставщика — здесь же:
     // у этой кассы все документы за всё время
     const found = matchLocal(req.method, req.path) || matchFallback(req.method, req.path)
@@ -1531,6 +1565,8 @@ export function createGateway({
         // Касса магазина ('register') или главный компьютер (''); что с её главным — для экрана входа
         role: soloRole(),
         net: soloShop() ? soloNet() : null,
+        // Магазин здесь заведён, но в нём ничего не делали: компьютер ещё можно сделать кассой
+        empty: soloShop() && !isRegister() && soloEmpty(),
       }
     },
     // Кассы по сети (1.7.0). Подключить кассу — до входа (первый запуск) и после (заново)
@@ -1590,7 +1626,12 @@ export function createGateway({
       const problem = passwordProblem(password)
       if (problem) return { error: problem }
       const sealed = seal(await makeVerifier(password))
-      if (!sealed) return { error: MESSAGES.noSealing }
+      if (!sealed) return { error: MESSAGES.noSealingSolo }
+      // Новый магазин — этот компьютер главный (была касса, чья база пропала, — больше не касса)
+      if (getMeta(core, 'soloRole')) {
+        setMeta(core, 'soloRole', '')
+        setMeta(core, 'soloMain', '')
+      }
       const ownerId = newId()
       const ownerUserId = newId()
       const now = clock.now()
@@ -1712,7 +1753,8 @@ export function createGateway({
   }
   // ── Магазин без интернета: кассы по сети (1.7.0) ──
   // Сервера нет — его роль берёт главный компьютер (local/solonet.mjs): принимает операции касс,
-  // рассылает им основу, выдаёт код подключения. Роль этого компьютера — в общей базе программы:
+  // рассылает им основу, выдаёт код подключения. Роль этого компьютера — в общей базе программы и
+  // в самой базе магазина (meta soloMain: база кассы говорит о себе сама, см. openPharmacy):
   // soloRole 'register' — касса магазина, soloMain — её главный (номер, имя, «поколение» базы,
   // номер магазина); иначе — главный (или единственный) компьютер
   const soloRole = () => getMeta(core, 'soloRole') || ''
@@ -1729,6 +1771,16 @@ export function createGateway({
   const soloOpen = (ph) => !!ph && ph.code === STANDALONE_CODE && appMode() === 'standalone'
   // Кассы главного (по порядку подключения)
   const soloRegisters = (ph) => (ph && !isRegister() ? soloPairedList(ph.db) : [])
+  // В магазине ничего не делали: ни одного документа, касс нет. Такой магазин (завели по ошибке на
+  // компьютере, который должен быть кассой) можно заменить базой главного
+  function soloEmpty() {
+    try {
+      const ph = openPharmacy(STANDALONE_CODE)
+      return !q(ph.db, 'SELECT 1 FROM docs LIMIT 1').get() && !soloPairedList(ph.db).length
+    } catch {
+      return false
+    }
+  }
 
   // Ключ сети магазина: у главного заводится при первом коде подключения (вместе с «поколением»
   // базы и номером магазина), касса получает его при подключении. Хранится зашифрованным
@@ -1745,7 +1797,28 @@ export function createGateway({
     if (!getMeta(ph.db, 'shopId')) setMeta(ph.db, 'shopId', newId())
     return key
   }
-  const mainName = (ph) => getMeta(ph.db, 'deviceName') || 'Главный компьютер'
+  // Имя главного компьютера для касс. Обычно его нет — окно кассы пишет «Главный компьютер» на
+  // своём языке
+  const mainName = (ph) => getMeta(ph.db, 'deviceName') || ''
+
+  // Ключ обмена кассы с главным: свой у каждой кассы (ключ магазина — у всех). У кассы — в её
+  // базе, у главного — в списке его касс. Отключил главный кассу — её ключа больше нет, и говорить с
+  // главным (и выдавать себя за другую кассу) ей нечем
+  function regKeyOf(ph) {
+    if (ph.regKey) return ph.regKey
+    const stored = getMeta(ph.db, 'lanRegKey')
+    const key = stored ? open(stored) : null
+    if (key) ph.regKey = key
+    return key || ''
+  }
+  function keyForPeer(ph, id) {
+    if (isRegister()) return id === soloMain()?.deviceId ? regKeyOf(ph) : ''
+    const reg = soloPairedList(ph.db).find((r) => r.deviceId === id)
+    if (!reg || typeof reg.k !== 'string' || !reg.k) return ''
+    if (!ph.regKeys) ph.regKeys = new Map()
+    if (!ph.regKeys.has(reg.k)) ph.regKeys.set(reg.k, open(reg.k) || '')
+    return ph.regKeys.get(reg.k)
+  }
 
   // Отпечаток пароля для соседей: здесь он зашифрован средствами Windows, по сети — ключом магазина
   const pwOutFor = (ph) => (sealed) => {
@@ -1829,8 +1902,9 @@ export function createGateway({
     }
   }
 
-  // Главный: пароли, заданные на кассах (пришли с их операциями) — во вход главного. С этой минуты
-  // нынешний пароль сотрудника известен здесь (pwLearned): перенос сотрудников во вход его не сотрёт
+  // Главный: пароль, заданный сотрудником на кассе себе (пришёл с операцией), — во вход главного.
+  // С этой минуты нынешний пароль сотрудника известен здесь (pwLearned): перенос сотрудников во
+  // вход его не сотрёт
   function soloPeerPasswords(ph, list) {
     const key = lanKeyOf(ph)
     for (const p of list) {
@@ -1842,51 +1916,119 @@ export function createGateway({
     }
   }
 
-  // Главный: операции касс, пришедшие по сети, — в принятые; основа — в журнал для касс
-  function mainAccept(ph) {
-    let r
+  // ── Главный: что касса вправе прислать ──
+  // Касса говорит только за себя и от имени своего сотрудника (есть здесь и не заблокирован).
+  // Сотрудников, роли и пересчёт остатка меняет только главный — кроме своего пароля: его меняют и
+  // на кассе. Остальное главный не кладёт, а называет кассе «не принято» (она отменит его у себя)
+  const TEAM_TBLS = new Set(['team_accounts', 'team_roles', 'staff'])
+  const parseFx = (body) => {
     try {
-      r = mainAcceptPeers(ph.db, { now: clock.now() })
+      const fx = JSON.parse(body)?.effects
+      return fx && typeof fx === 'object' ? fx : null
+    } catch {
+      return null
+    }
+  }
+  function registerOpProblem(e) {
+    const type = String(e.type || '')
+    const acc = typeof e.accountId === 'string' ? accountById(core, e.accountId) : null
+    if (!acc || acc.pharmacyCode !== STANDALONE_CODE || acc.blocked) return MESSAGES.regNoUser
+    if (/^(role|staff|inventory)\./.test(type) || type === 'user.create' || type === 'user.delete') return MESSAGES.onMainOnly
+    const fx = parseFx(e.body)
+    if (!fx) return MESSAGES.pairBroken
+    const rows = Array.isArray(fx.edits?.rows) ? fx.edits.rows : []
+    const team = rows.filter((r) => TEAM_TBLS.has(r?.tbl))
+    if (type === 'user.update') {
+      const r = team[0]
+      const ownPw =
+        rows.length === 1 && team.length === 1 && r.tbl === 'team_accounts' && r.rowId === e.accountId && r.data?.pwChanged === true && !Object.keys(r.data?.set || {}).length
+      if (!ownPw) return MESSAGES.onMainOnly
+    } else if (team.length) return MESSAGES.onMainOnly
+    if ((fx.moves || []).some((m) => m?.kind === 'count')) return MESSAGES.invMainOnly
+    return ''
+  }
+  function fromRegister(peerId, entries) {
+    const ok = []
+    const refused = []
+    for (const e of entries) {
+      if (e?.kind !== 'op' || typeof e.id !== 'string' || e.origin !== peerId) continue
+      const why = registerOpProblem(e)
+      if (why) refused.push({ id: e.id, type: String(e.type || ''), origin: e.origin, accountId: e.accountId ?? null, createdAt: e.createdAt, error: why })
+      else ok.push(e)
+    }
+    return { ok, refused }
+  }
+
+  // Главный: операции касс, пришедшие по сети, — в принятые; основа — в журнал для касс. Приём и
+  // основа — одной записью на диск: принятое, но не названное в основе (компьютер выключили между
+  // ними), касса ждала бы вечно. refused — что касса прислать не вправе; declined — что не легло
+  // (lanReceive): уже известное — принято, повторное применение листа пересчёта — не принято
+  function mainAccept(ph, { refused = [], declined = [] } = {}) {
+    let r = null
+    try {
+      inTx(ph.db, () => {
+        r = mainAcceptPeers(ph.db, { now: clock.now() })
+        const known = declined.filter((d) => d.why === 'known').map((d) => ({ id: d.id, type: '', docs: [] }))
+        r.notTaken = [...r.rejected, ...refused, ...declined.filter((d) => d.why !== 'known').map((d) => ({ ...d, error: MESSAGES.sheetTwice }))]
+        const regs = new Map(soloPairedList(ph.db).map((x) => [x.deviceId, x.name]))
+        const who = (x) => (x.accountId && accountById(core, x.accountId)?.login) || ''
+        const at = new Date(clock.now()).toISOString()
+        addDiscrepancies(ph.db, [
+          ...r.short.map((x) => ({
+            id: newId(),
+            kind: shortKind(x.type),
+            productId: x.productId,
+            name: x.name,
+            units: x.units,
+            date: x.createdAt,
+            deviceName: regs.get(x.origin) || '',
+            userName: who(x),
+            opId: x.opId,
+          })),
+          // Операция кассы, которую главный не принял: владелец должен о ней знать — товар мог уйти
+          ...[...r.rejected, ...refused].map((x) => ({
+            id: newId(),
+            kind: 'notTaken',
+            name: '',
+            opType: x.type || '',
+            note: JSON.stringify({ error: String(x.error || '') }),
+            date: x.createdAt || at,
+            deviceName: regs.get(x.origin) || '',
+            userName: who(x),
+            opId: x.id,
+          })),
+        ])
+        mainLogBase(ph.db, { ops: [...r.ops, ...known], extras: r.extras, rejected: r.notTaken, rows: true, deviceId, now: clock.now() })
+      })
     } catch (e) {
       log.error('кассы по сети: операции касс не приняты', e)
       return []
     }
-    if (!r.ops.length) return []
+    if (!r) return []
     const team = r.ops.some((o) => /^(user|role)\./.test(o.type || ''))
     if (team) teamToCore(ph)
-    if (r.pw.length) soloPeerPasswords(ph, r.pw)
-    if (r.short.length) {
-      const regs = new Map(soloPairedList(ph.db).map((x) => [x.deviceId, x.name]))
-      addDiscrepancies(
-        ph.db,
-        r.short.map((x) => ({
-          id: newId(),
-          kind: shortKind(x.type),
-          productId: x.productId,
-          name: x.name,
-          units: x.units,
-          date: x.createdAt,
-          deviceName: regs.get(x.origin) || '',
-          userName: (x.accountId && accountById(core, x.accountId)?.login) || '',
-          opId: x.opId,
-        })),
-      )
-    }
-    try {
-      mainLogBase(ph.db, { ops: r.ops, extras: r.extras, logins: team || r.pw.length ? soloLoginsFor(ph) : [], deviceId, now: clock.now() })
-    } catch (e) {
-      log.error('кассы по сети: основа не записана', e)
+    // Пароль — только свой: сотрудник на кассе сменил пароль себе
+    const pw = r.pw.filter((p) => p.id === p.accountId)
+    if (pw.length) soloPeerPasswords(ph, pw)
+    if (team || pw.length) {
+      try {
+        mainLogBase(ph.db, { logins: soloLoginsFor(ph), deviceId, now: clock.now() })
+      } catch (e) {
+        log.error('кассы по сети: учётные записи для касс не записаны', e)
+      }
     }
     const keys = new Set(['products', 'shifts'])
     for (const o of r.ops) for (const d of o.docs || []) if (KIND_KEY_ALL[d.kind]) keys.add(KIND_KEY_ALL[d.kind])
     if (r.extras.some((d) => d.kind === 'supplierpayment')) keys.add('supplierPayments')
     if (r.extras.some((d) => d.kind === 'writeoff')) keys.add('writeoffs')
-    if (team) keys.add('users')
-    if (r.short.length) keys.add('discrepancies')
+    if (team || pw.length) keys.add('users')
+    if (r.short.length || r.notTaken.length) keys.add('discrepancies')
     return [...keys]
   }
 
-  // Касса: записи главного по порядку — операции поправкой, основа — когда до неё дошло
+  // Касса: записи главного по порядку — операции поправкой, основа — когда до неё дошло. Основа,
+  // которая не легла, — ошибка обмена: отметка «докуда получено» не сдвинется, и главный пришлёт её
+  // снова (пропусти её касса — остаток разошёлся бы с главным навсегда)
   function regReceive(ph, entries) {
     const changed = new Set()
     let chunk = []
@@ -1902,27 +2044,35 @@ export function createGateway({
         continue
       }
       flush()
+      let keys
       try {
-        const keys = regApplyBase(ph.db, e, {
+        keys = regApplyBase(ph.db, e, {
           onLogins: (list) => regLogins(ph, list),
           // Логотип ставят на главном — касса берёт его из основы (чеки, экран покупателя)
           onLogo: (l) => keepLogo(ph, l.logo, l.at),
         })
-        for (const k of keys) changed.add(k)
       } catch (err) {
         log.error('касса: основа от главного не легла', err)
+        if (changed.size) send('changed', [...changed])
+        throw Object.assign(new Error('основа от главного не легла'), { code: 'BASE' })
       }
+      for (const k of keys) changed.add(k)
     }
     flush()
     return [...changed]
   }
 
   // Магазин без интернета: база открыта и до входа (запуск программы) — главный отвечает своим
-  // кассам и с экрана входа, касса получает сделанное на главном
+  // кассам и с экрана входа, касса получает сделанное на главном. Главный, поднятый из копии кассы
+  // (или выключенный посреди приёма), принимает чужое, лежащее поправкой, и своё ждущее
   function soloWake() {
     if (appMode() !== 'standalone' || !existsSync(soloFile())) return
     try {
-      openPharmacy(STANDALONE_CODE)
+      const ph = openPharmacy(STANDALONE_CODE)
+      if (!isRegister()) {
+        if (q(ph.db, "SELECT 1 FROM lan_log WHERE kind = 'op' AND state = 'applied' LIMIT 1").get()) mainAccept(ph)
+        if (pendingCount(ph.db) > 0) soloAccept(ph)
+      }
       lanNet?.sync().catch(() => {})
     } catch (e) {
       log.error('магазин без интернета: база магазина не открылась при запуске', e)
@@ -1931,17 +2081,25 @@ export function createGateway({
 
   // Уборка журнала обмена в магазине без интернета. Ничто не «истекает»: чужое принял главный.
   // Убирается старое (lan.mjs, LOG_KEEP_DAYS), что уже получили все: главный — все его кассы,
-  // касса — главный
+  // касса — главный. Касса, молчащая дольше месяца, журнал главного не держит: вернётся —
+  // главный скажет ей подключиться заново (gapFor), и ничего из сделанного на ней не пропадёт
   function soloPrune_lan(ph) {
-    const ids = isRegister() ? [soloMain()?.deviceId].filter(Boolean) : soloPairedList(ph.db).map((r) => r.deviceId)
-    const got = ids.map((id) => lanPeer(ph.db, id)?.sentUpTo ?? 0)
+    const reg = isRegister()
+    const silentFrom = clock.now() - PEER_SILENT_DAYS * 86400000
+    const ids = reg ? [soloMain()?.deviceId].filter(Boolean) : soloPairedList(ph.db).map((r) => r.deviceId)
+    const got = []
+    for (const id of ids) {
+      const p = lanPeer(ph.db, id)
+      if (!reg && !(p?.okAt && Date.parse(p.okAt) >= silentFrom)) continue
+      got.push(p?.sentUpTo ?? 0)
+    }
     const keepAbove = got.length ? Math.min(...got) : lanTopSeq(ph.db)
     lanPrune(ph.db, clock.now(), { expire: false, keepAbove })
   }
 
   // ── Код подключения кассы ──
-  // 8 знаков, 10 минут, одна касса. Только в памяти: закрыли программу — кода нет. Двадцать
-  // неверных попыток — код закрыт (подбор)
+  // 8 знаков, 10 минут, одна касса. Только в памяти: закрыли программу — кода нет. Пять неверных
+  // попыток с одного адреса — с него больше не принимается; пятьдесят всего — код закрыт (подбор)
   const PAIR_MS = 10 * 60 * 1000
   let pairing = null
   const pairOpen = () => (pairing && clock.now() < pairing.until ? pairing : null)
@@ -1949,15 +2107,15 @@ export function createGateway({
     const acc = activeAccount()
     if (!acc || !isSolo(acc)) return { error: MESSAGES.soloUnavailable }
     if (isRegister()) return { error: MESSAGES.pairNotMain }
-    if (!(acc.role === 'founder' || hasPerm(acc, 'settings.devices'))) return { error: 'Недостаточно прав' }
+    if (!(acc.role === 'founder' || hasPerm(acc, 'settings.devices'))) return { error: MESSAGES.noRights }
     const ph = openPharmacy(acc.pharmacyCode)
-    if (!mainKey(ph)) return { error: MESSAGES.noSealing }
+    if (!mainKey(ph)) return { error: MESSAGES.noSealingSolo }
     const code = newPairCode()
-    pairing = { code, keys: pairKeys(code), until: clock.now() + PAIR_MS, fails: 0 }
+    pairing = { code, keys: pairKeys(code), until: clock.now() + PAIR_MS, fails: 0, byIp: new Map() }
     lanNet?.sync().catch(() => {})
     send('status', status())
     log.info('кассы по сети: открыт код подключения')
-    return { ok: true, code: formatPairCode(code), until: new Date(pairing.until).toISOString() }
+    return { ok: true, code: formatPairCode(code), until: new Date(pairing.until).toISOString(), leftMs: PAIR_MS }
   }
   function pairStop() {
     pairing = null
@@ -1966,33 +2124,68 @@ export function createGateway({
     return { ok: true }
   }
 
-  // Главный: касса пришла с верным кодом — база магазина целиком и всё, что кассе надо знать
-  function pairServe({ from, name, host, shopId, entries }) {
+  // Касса подключается заново: что из присланного главному неизвестно. Известное — по номеру
+  // операции (журнал обмена, своя очередь) и по документам (операция, чей документ здесь есть, уже
+  // легла). Правка справочника без документов старше самой старой записи журнала здесь не берётся:
+  // её могли убрать вместе с журналом, а в основе она давно учтена. Сотрудники и роли — только у
+  // главного: их правки из присланного не берутся
+  function recoveryEntries(ph, entries) {
+    const db = ph.db
+    const floor = q(db, 'SELECT MIN(createdAt) AS t FROM lan_log').get()?.t || ''
+    const out = []
+    const seen = new Set()
+    for (const e of entries) {
+      if (e?.kind !== 'op' || typeof e.id !== 'string' || seen.has(e.id)) continue
+      seen.add(e.id)
+      if (q(db, 'SELECT 1 FROM lan_log WHERE id = ?').get(e.id) || q(db, 'SELECT 1 FROM outbox WHERE id = ?').get(e.id)) continue
+      const fx = parseFx(e.body)
+      if (!fx) continue
+      const docs = (fx.docs || []).filter((d) => d && typeof d.kind === 'string' && typeof d.body?.id === 'string')
+      // Смена — единственный документ, который меняют две операции: её закрытие кладётся всегда
+      if (docs.some((d) => d.kind !== 'shift' && q(db, 'SELECT 1 FROM docs WHERE kind = ? AND id = ?').get(d.kind, d.body.id))) continue
+      if ((fx.edits?.rows || []).some((r) => TEAM_TBLS.has(r?.tbl))) continue
+      if (!docs.length && floor && String(e.createdAt || '') < floor) continue
+      out.push(e)
+    }
+    return out
+  }
+
+  // Главный: касса пришла с верным кодом — база магазина целиком и всё, что кассе надо знать.
+  // Касса подключается заново (главный загрузил копию базы, его компьютер заменили, касса долго
+  // молчала): она приносит всё, что у неё есть, — недостающее главный кладёт до снимка
+  function pairServe({ from, host, shopId, entries, schema, fresh }) {
     const ph = pharmacy
     if (!pairOpen() || !soloOpen(ph) || isRegister()) return { error: 'nocode' }
+    // Базы разных версий программы друг к другу не подходят — сначала обновить программу
+    if (schema !== PHARMACY_SCHEMA.length) return { error: 'version' }
     const myShop = getMeta(ph.db, 'shopId') || ''
     if (shopId && shopId !== myShop) return { error: 'othershop' }
     const now = clock.now()
     const at = new Date(now).toISOString()
-    // Касса подключается заново: её операции, которые главный ещё не принял, — сначала принять
-    if (Array.isArray(entries) && entries.length) {
+    if (!fresh && Array.isArray(entries) && entries.length) {
       try {
-        lanReceive(ph.db, entries, { now, gen: lanGen(ph.db) })
-        mainAccept(ph)
+        const take = recoveryEntries(ph, entries)
+        if (take.length) {
+          const r = lanReceive(ph.db, take, { now, gen: lanGen(ph.db) })
+          mainAccept(ph, { declined: r.declined })
+          log.info(`кассы по сети: с подключением кассы получено ${take.length} операций`)
+        }
       } catch (e) {
         log.error('кассы по сети: операции кассы при подключении не приняты', e)
       }
     }
     // Своё неотправленное (его быть не должно: главный принимает сразу) — принять до снимка
     soloAccept(ph)
+    const regKey = randomBytes(32).toString('base64url')
+    const sealedReg = seal(regKey)
+    if (!sealedReg) return { error: 'broken' }
     const list = soloPairedList(ph.db)
     const known = list.find((r) => r.deviceId === from)
     const regName = known?.name || nextRegisterName(list)
     const hostName = String(host || '').slice(0, 60)
-    setSoloPaired(
-      ph.db,
-      known ? list.map((r) => (r.deviceId === from ? { ...r, host: hostName, pairedAt: at } : r)) : [...list, { deviceId: from, name: regName, host: hostName, pairedAt: at }],
-    )
+    const entry = { deviceId: from, name: regName, host: hostName, pairedAt: at, k: sealedReg }
+    setSoloPaired(ph.db, known ? list.map((r) => (r.deviceId === from ? entry : r)) : [...list, entry])
+    ph.regKeys?.clear()
     const topSeq = lanTopSeq(ph.db)
     // Касса получит журнал главного с этого места: всё, что раньше, — уже в снимке
     lanPeerSeen(ph.db, { deviceId: from, name: regName, wide: true, ok: true, now })
@@ -2017,6 +2210,7 @@ export function createGateway({
         epoch: getMeta(ph.db, 'soloEpoch') || '',
         topSeq,
         key: lanKeyOf(ph),
+        regKey,
         name: regName,
         shopName: getMeta(ph.db, 'shopName') || '',
         logins: soloLoginsFor(ph),
@@ -2025,7 +2219,60 @@ export function createGateway({
     }
   }
 
-  // Касса: подключиться к главному по коду (первый запуск — магазина на этом компьютере ещё нет)
+  // Прежняя база магазина — в сторону (папка replaced рядом с базами): подключение заново её не
+  // стирает. Хранятся три последние
+  function moveAside(file) {
+    if (!existsSync(file)) return null
+    const dir = join(dataDir, 'replaced', new Date(clock.now()).toISOString().replace(/[:.]/g, '-'))
+    nodeFs.mkdirSync(dir, { recursive: true })
+    const moved = []
+    try {
+      for (const ext of ['', '-wal', '-shm']) {
+        if (!existsSync(file + ext)) continue
+        renameSync(file + ext, join(dir, basename(file) + ext))
+        moved.push(ext)
+      }
+    } catch (e) {
+      putBack({ dir, moved }, file)
+      throw e
+    }
+    return { dir, moved }
+  }
+  function putBack(aside, file) {
+    if (!aside) return
+    for (const ext of [...aside.moved].reverse()) {
+      try {
+        renameSync(join(aside.dir, basename(file) + ext), file + ext)
+      } catch (e) {
+        log.error('прежняя база магазина не вернулась на место', e)
+      }
+    }
+  }
+  function pruneAside() {
+    try {
+      const root = join(dataDir, 'replaced')
+      const dirs = nodeFs.readdirSync(root).sort()
+      for (const d of dirs.slice(0, Math.max(0, dirs.length - 3))) removeTree(nodeFs, join(root, d))
+    } catch {
+      /* уберётся в следующий раз */
+    }
+  }
+  const dropFile = (file) => {
+    for (const ext of ['', '-wal', '-shm']) {
+      try {
+        if (existsSync(file + ext)) nodeFs.unlinkSync(file + ext)
+      } catch {
+        /* занят — уберётся в следующий раз */
+      }
+    }
+  }
+
+  // Касса: подключиться к главному по коду. Первый запуск (магазина здесь нет или он пуст) и
+  // подключение заново — тогда касса несёт главному всё, что у неё есть. fresh — касса раньше
+  // работала с другим главным (его заводили заново): подключить как новую, ничего не неся.
+  // База главного сперва ложится рядом и проверяется; нынешняя уходит в сторону, а не стирается;
+  // не встала новая — прежняя возвращается на место. Пока касса подключается, записывать в базу
+  // нельзя (request): сделанное в эту минуту пропало бы вместе с заменой базы
   const PAIR_ERRORS = {
     format: 'pairFormat',
     address: 'pairAddress',
@@ -2036,92 +2283,152 @@ export function createGateway({
     big: 'pairBroken',
     broken: 'pairBroken',
     othershop: 'pairOtherShop',
+    version: 'pairVersion',
   }
   let joining = false
   async function soloJoin(raw) {
     if (appMode() !== 'standalone') return { error: MESSAGES.notStandalone }
-    if (joining) return { error: MESSAGES.broken }
-    // Касса подключается заново (главный загрузил копию базы или отключил её): её операции, которые
-    // главный ещё не принял, — с собой: он примет их до того, как снимет базу для кассы
+    if (joining) return { error: MESSAGES.pairBusy }
+    const fresh = raw?.fresh === true
     const again = isRegister() && soloShop()
-    if (!again && soloShop()) return { error: MESSAGES.shopExists }
-    let entries = []
-    if (again) {
-      try {
+    if (!again && soloShop() && !soloEmpty()) return { error: MESSAGES.shopExists }
+    joining = true
+    try {
+      let entries = []
+      if (again && !fresh) {
         const ph = openPharmacy(STANDALONE_CODE)
         lanCatchUp(ph.db, { deviceId, now: clock.now(), fates: false, pwOut: pwOutFor(ph) })
-        entries = regPendingEntries(ph.db)
-      } catch (e) {
-        log.error('касса: свои операции для главного не собраны', e)
-        return { error: MESSAGES.broken }
+        entries = regRecoveryEntries(ph.db, { now: clock.now() })
       }
-    }
-    joining = true
-    let r
-    try {
-      r = await pairRequest({
+      const r = await pairRequest({
         code: String(raw?.code ?? ''),
         address: String(raw?.address ?? ''),
         deviceId,
         name: '',
         host: hostname(),
-        shopId: again ? soloMain()?.shopId || '' : '',
+        shopId: again && !fresh ? soloMain()?.shopId || '' : '',
         entries,
+        schema: PHARMACY_SCHEMA.length,
+        fresh,
         ...(Number.isInteger(lanPorts.udpPort) && lanPorts.udpPort > 0 ? { udpPort: lanPorts.udpPort } : {}),
       })
+      if (r.error) return { error: MESSAGES[PAIR_ERRORS[r.error] || 'pairBroken'] || MESSAGES.pairBroken, code: r.error }
+      const m = r.meta || {}
+      if (typeof m.key !== 'string' || !m.key || typeof m.regKey !== 'string' || !m.regKey || typeof m.main?.deviceId !== 'string' || !Buffer.isBuffer(r.db)) {
+        return { error: MESSAGES.pairBroken }
+      }
+      const sealedKey = seal(m.key)
+      const sealedReg = seal(m.regKey)
+      if (!sealedKey || !sealedReg) return { error: MESSAGES.noSealingSolo }
+      const main = { deviceId: m.main.deviceId, name: String(m.main.name || ''), epoch: String(m.epoch || ''), shopId: String(m.shopId || '') }
+      const file = soloFile()
+      const next = file + '.new'
+      // 1) База главного — рядом с нынешней: открывается, цела и уже знает, что она касса
+      dropFile(next)
+      writeFileSync(next, r.db)
+      let probe = null
+      try {
+        probe = openDb(next, PHARMACY_SCHEMA)
+        if (probe.pragma('quick_check', { simple: true }) !== 'ok') throw new Error('база главного повреждена')
+        regInstallDb(probe, {
+          main: m.main,
+          address: r.address,
+          port: r.port,
+          topSeq: m.topSeq,
+          lanKeySealed: sealedKey,
+          regKeySealed: sealedReg,
+          name: m.name,
+          soloMain: main,
+          now: clock.now(),
+        })
+        probe.pragma('wal_checkpoint(TRUNCATE)')
+      } catch (e) {
+        try {
+          probe?.close()
+        } catch {
+          /* закрыта */
+        }
+        dropFile(next)
+        log.error('касса: база главного не открылась', e)
+        return { error: e instanceof ApiError || /newer|новее/i.test(String(e?.message || '')) ? MESSAGES.pairVersion : MESSAGES.pairBroken }
+      }
+      probe.close()
+      // 2) Нынешняя — в сторону, база главного — на её место
+      const prev = { role: getMeta(core, 'soloRole') || '', main: getMeta(core, 'soloMain') || '' }
+      closePharmacy()
+      let aside = null
+      try {
+        aside = moveAside(file)
+        renameSync(next, file)
+        for (const ext of ['-wal', '-shm']) {
+          try {
+            if (existsSync(next + ext)) nodeFs.unlinkSync(next + ext)
+          } catch {
+            /* пустой журнал проверки — не помеха */
+          }
+        }
+      } catch (e) {
+        putBack(aside, file)
+        log.error('касса: база главного не встала на место', e)
+        return { error: MESSAGES.broken }
+      }
+      // 3) Роль — в общую базу программы; база открывается уже кассой
+      inTx(core, () => {
+        setMeta(core, 'soloRole', 'register')
+        setMeta(core, 'soloMain', JSON.stringify(main))
+      })
+      let ph
+      try {
+        ph = openPharmacy(STANDALONE_CODE)
+      } catch (e) {
+        closePharmacy()
+        dropFile(file)
+        putBack(aside, file)
+        inTx(core, () => {
+          setMeta(core, 'soloRole', prev.role)
+          setMeta(core, 'soloMain', prev.main)
+        })
+        log.error('касса: база главного не открылась на месте', e)
+        return { error: MESSAGES.broken }
+      }
+      ph.lanKey = m.key
+      ph.regKey = m.regKey
+      regLogins(ph, m.logins, m.key)
+      confirmLicence(core, STANDALONE_CODE, { now: licNow(), days: 30 }, sealing)
+      if (!getMeta(core, 'soloSince')) setMeta(core, 'soloSince', String(clock.now()))
+      ph.users.clear()
+      pruneAside()
+      lanNet?.sync().catch(() => {})
+      try {
+        onLogo()
+      } catch {
+        /* экран покупателя не важнее кассы */
+      }
+      // Подключились заново за работой — окно перечитывает всё
+      if (again) {
+        send('changed', [...LOCAL_SECTIONS, 'shop', 'discrepancies'])
+        send('status', status())
+      }
+      log.info(`касса подключена к магазину «${m.shopName || ''}» как ${m.name || ''} (главный ${m.main.name || m.main.deviceId})`)
+      return { ok: true, shopName: String(m.shopName || ''), name: String(m.name || '') }
+    } catch (e) {
+      log.error('касса: подключение не удалось', e)
+      return { error: MESSAGES.broken }
     } finally {
       joining = false
     }
-    if (r.error) return { error: MESSAGES[PAIR_ERRORS[r.error] || 'pairBroken'] || MESSAGES.pairBroken }
-    const m = r.meta || {}
-    if (typeof m.key !== 'string' || !m.key || typeof m.main?.deviceId !== 'string' || !Buffer.isBuffer(r.db)) return { error: MESSAGES.pairBroken }
-    const sealedKey = seal(m.key)
-    if (!sealedKey) return { error: MESSAGES.noSealing }
-    // База главного — файлом магазина этой кассы
-    closePharmacy()
-    const file = soloFile()
-    try {
-      writeFileSync(file + '.new', r.db)
-      for (const ext of ['', '-wal', '-shm']) rmSync(file + ext, { force: true })
-      renameSync(file + '.new', file)
-    } catch (e) {
-      log.error('касса: база главного не записалась', e)
-      return { error: MESSAGES.broken }
-    }
-    let ph
-    try {
-      ph = openPharmacy(STANDALONE_CODE)
-      regInstallDb(ph.db, { main: m.main, address: r.address, port: r.port, topSeq: m.topSeq, lanKeySealed: sealedKey, name: m.name, now: clock.now() })
-      ph.lanKey = m.key
-    } catch (e) {
-      log.error('касса: база главного не открылась', e)
-      return { error: MESSAGES.broken }
-    }
-    setMeta(core, 'soloRole', 'register')
-    setMeta(core, 'soloMain', JSON.stringify({ deviceId: m.main.deviceId, name: String(m.main.name || ''), epoch: String(m.epoch || ''), shopId: String(m.shopId || '') }))
-    regLogins(ph, m.logins, m.key)
-    confirmLicence(core, STANDALONE_CODE, { now: licNow(), days: 30 }, sealing)
-    if (!getMeta(core, 'soloSince')) setMeta(core, 'soloSince', String(clock.now()))
-    ph.users.clear()
-    lanNet?.sync().catch(() => {})
-    // Подключились заново за работой — окно перечитывает всё
-    if (again) {
-      send('changed', [...LOCAL_SECTIONS, 'shop', 'discrepancies'])
-      send('status', status())
-    }
-    log.info(`касса подключена к магазину «${m.shopName || ''}» как ${m.name || ''} (главный ${m.main.name || m.main.deviceId})`)
-    return { ok: true, shopName: String(m.shopName || ''), name: String(m.name || '') }
   }
 
-  // Главный: отключить кассу (её ключ сети больше не принимается)
+  // Главный: отключить кассу — её ключ обмена убирается, говорить с главным ей больше нечем
   function soloUnpair(regId) {
     const acc = activeAccount()
     if (!acc || !isSolo(acc) || isRegister()) return { error: MESSAGES.onMainOnly }
-    if (!(acc.role === 'founder' || hasPerm(acc, 'settings.devices'))) return { error: 'Недостаточно прав' }
+    if (!(acc.role === 'founder' || hasPerm(acc, 'settings.devices'))) return { error: MESSAGES.noRights }
     const ph = openPharmacy(acc.pharmacyCode)
     const list = soloPairedList(ph.db)
     if (!list.some((r) => r.deviceId === regId)) return { error: MESSAGES.notFound }
     setSoloPaired(ph.db, list.filter((r) => r.deviceId !== regId))
+    ph.regKeys?.clear()
     try {
       lanForgetPeer(ph.db, regId)
     } catch {
@@ -2132,26 +2439,32 @@ export function createGateway({
     return { ok: true }
   }
 
-  // Что показать в окне про кассы по сети. На связи — по обмену (lan.mjs: последний обмен не
-  // дольше 20 секунд назад); error — что сказал сосед в последний раз ('epoch' — главный загрузил
-  // копию базы, 'star' — главный отключил эту кассу: подключить заново)
+  // Что показать в окне про кассы по сети. На связи — последний обмен удался и был не дольше
+  // 20 секунд назад (lan.mjs); error — что сказал сосед в последний раз ('epoch' — главный загрузил
+  // копию базы, 'star' — главный отключил эту кассу, 'gone' — касса долго молчала, 'base' — основа
+  // от главного не легла: подключить заново)
   function soloNet() {
     const ph = pharmacy
     if (!soloOpen(ph)) return null
     let live = new Map()
+    let lanError = ''
     try {
-      live = new Map((lanNet?.status().peers || []).map((p) => [p.deviceId, p]))
+      const st = lanNet?.status()
+      live = new Map((st?.peers || []).map((p) => [p.deviceId, p]))
+      lanError = st?.running && !st?.listening ? st?.error || 'listen' : ''
     } catch {
       /* сеть не ответила — покажем, что знает база */
     }
     const seen = new Map(lanPeers(ph.db).map((p) => [p.deviceId, p]))
+    const onLine = (p) => !!p?.online && !p?.error
     if (isRegister()) {
       const m = soloMain()
       const p = m ? live.get(m.deviceId) : null
+      const s = m ? seen.get(m.deviceId) : null
       return {
         role: 'register',
         name: getMeta(ph.db, 'deviceName') || '',
-        main: m ? { name: m.name || '', online: !!p?.online, seenAt: seen.get(m.deviceId)?.okAt || null, error: p?.error || '', address: seen.get(m.deviceId)?.address || '' } : null,
+        main: m ? { name: m.name || '', online: onLine(p), seenAt: s?.okAt || null, error: p?.error || '', address: s?.address || '', port: s?.port || 0 } : null,
         // Своё, что главный ещё не принял
         pending: pendingCount(ph.db),
       }
@@ -2160,11 +2473,17 @@ export function createGateway({
     return {
       role: 'main',
       name: mainName(ph),
-      registers: soloPairedList(ph.db).map((r) => {
-        const peer = live.get(r.deviceId)
-        return { deviceId: r.deviceId, name: r.name, host: r.host || '', pairedAt: r.pairedAt || null, online: !!peer?.online, seenAt: seen.get(r.deviceId)?.okAt || null }
-      }),
-      pairing: p ? { code: formatPairCode(p.code), until: new Date(p.until).toISOString() } : null,
+      lanError,
+      registers: soloPairedList(ph.db).map((r) => ({
+        deviceId: r.deviceId,
+        name: r.name,
+        host: r.host || '',
+        pairedAt: r.pairedAt || null,
+        online: onLine(live.get(r.deviceId)),
+        seenAt: seen.get(r.deviceId)?.okAt || null,
+      })),
+      // Сколько коду осталось — по часам программы: окно считает дальше по своим
+      pairing: p ? { code: formatPairCode(p.code), until: new Date(p.until).toISOString(), leftMs: Math.max(0, p.until - clock.now()) } : null,
       discrepancies: soloDiscrepancies(ph.db).length,
     }
   }
@@ -2173,12 +2492,14 @@ export function createGateway({
     state() {
       const ph = pharmacy
       if (!ph) return null
-      // Магазин без интернета: звезда вокруг главного; часы касс с сервером не сверены (anyTime)
+      // Магазин без интернета: звезда вокруг главного; часы касс с сервером не сверены (anyTime);
+      // у каждой кассы свой ключ обмена (perPeer, keyFor). Главный слушает сеть, пока у магазина
+      // есть ключ: отключённая касса так узнаёт, что её отключили
       if (soloOpen(ph)) {
         const reg = isRegister()
         const m = reg ? soloMain() : null
         const key = lanKeyOf(ph)
-        const enabled = !!key && (reg ? !!m : soloPairedList(ph.db).length > 0 || !!pairOpen())
+        const enabled = !!key && (reg ? !!m && !!regKeyOf(ph) : true)
         return {
           enabled,
           key,
@@ -2187,6 +2508,7 @@ export function createGateway({
           wide: true,
           epoch: reg ? m?.epoch || '' : getMeta(ph.db, 'soloEpoch') || '',
           anyTime: true,
+          perPeer: true,
         }
       }
       const key = lanKeyOf(ph)
@@ -2204,9 +2526,10 @@ export function createGateway({
       const ph = pharmacy
       if (!ph) return { entries: [], upTo: since, more: false }
       if (soloOpen(ph)) {
-        // Своё — уже в журнале (soloAccept); отметок о судьбе нет — принятое кассы узнают из основы
+        // Своё — уже в журнале (soloAccept); отметок о судьбе нет — принятое кассы узнают из основы.
+        // Не принятое главным дальше не идёт
         lanCatchUp(ph.db, { deviceId, now: clock.now(), fates: false, pwOut: pwOutFor(ph) })
-        return lanEntriesSince(ph.db, since, { wide: true })
+        return lanEntriesSince(ph.db, since, { wide: true, skipStates: isRegister() ? null : ['rejected', 'undone'] })
       }
       lanCatchUp(ph.db, { deviceId, now: clock.now() })
       return lanEntriesSince(ph.db, since, { wide })
@@ -2221,8 +2544,9 @@ export function createGateway({
           keys = regReceive(ph, entries)
         } else {
           if (!soloPairedList(ph.db).some((r) => r.deviceId === peerId)) return
-          lanReceive(ph.db, entries, { now: clock.now(), gen: lanGen(ph.db) })
-          keys = mainAccept(ph)
+          const { ok, refused } = fromRegister(peerId, entries)
+          const r = ok.length ? lanReceive(ph.db, ok, { now: clock.now(), gen: lanGen(ph.db) }) : { declined: [] }
+          if (ok.length || refused.length) keys = mainAccept(ph, { refused, declined: r.declined })
         }
         if (keys.length) send('changed', keys)
         lanNet?.kick()
@@ -2267,14 +2591,26 @@ export function createGateway({
       const mine = isRegister() ? soloMain()?.epoch || '' : getMeta(ph.db, 'soloEpoch') || ''
       return !mine || e === mine
     },
-    pairInfo() {
-      const p = pairOpen()
-      return p && soloOpen(pharmacy) && !isRegister() ? p.keys : null
+    // Ключ обмена с этим соседом (perPeer): у кассы — её ключ с главным, у главного — ключ кассы
+    keyFor: (id) => (pharmacy && soloOpen(pharmacy) ? keyForPeer(pharmacy, String(id || '')) : ''),
+    // Главный: журнала, нужного кассе, здесь уже нет (касса молчала дольше месяца) — ей подключиться
+    // заново
+    gapFor(since) {
+      const ph = pharmacy
+      if (!soloOpen(ph) || isRegister()) return false
+      return (Number(since) || 0) + 1 < lanFloor(ph.db)
     },
-    pairFailed() {
+    pairInfo(remote = '') {
+      const p = pairOpen()
+      if (!p || !soloOpen(pharmacy) || isRegister()) return null
+      if ((p.byIp.get(remote) || 0) >= 5) return null
+      return p.keys
+    },
+    pairFailed(remote = '') {
       if (!pairing) return
       pairing.fails += 1
-      if (pairing.fails >= 20) {
+      pairing.byIp.set(remote, (pairing.byIp.get(remote) || 0) + 1)
+      if (pairing.fails >= 50) {
         pairing = null
         log.warn('кассы по сети: код подключения закрыт — слишком много неверных попыток')
         send('status', status())
@@ -2645,6 +2981,8 @@ export function createGateway({
         params: found.params,
         body,
         standalone: standaloneShop,
+        // Касса магазина без интернета (1.7.0): остаток пересчётом меняют на главном
+        register: standaloneShop && isRegister(),
       })
     } catch (e) {
       if (e instanceof ApiError) return refuse(e.status, e.messages || e.message)
@@ -2750,6 +3088,8 @@ export function createGateway({
       return refuse(400, e.message)
     }
     const route = req.path.split('?')[0]
+    // Касса подключается к главному: её база сейчас заменится — записанное в эту минуту пропало бы
+    if (joining && req.method !== 'GET' && route !== '/auth/login') return refuse(409, MESSAGES.pairBusy)
 
     try {
       if (route === '/auth/login' && req.method === 'POST') return await login(req)

@@ -26,6 +26,8 @@ export function SoloKopiya() {
   const backup = st?.backup || {}
   const disk = backup.disk || {}
   const usb = backup.usb || {}
+  // Касса магазина (1.7.0): база магазина — на главном; копии кассы — запасные, загружают копию на главном
+  const register = st?.net?.role === 'register'
 
   const saveTo = async () => {
     setBusy('saveTo')
@@ -53,7 +55,9 @@ export function SoloKopiya() {
     <div className="panel mt" data-tour="set.backup" style={{ maxWidth: 640 }} data-testid="solo-kopiya">
       <h2><span className="h2-title"><span className="ic"><LuDatabaseBackup size={17} /></span>{t('Резервная копия')}</span></h2>
       <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.6, marginBottom: 12 }}>
-        {t('База магазина хранится только на этом компьютере. Раз в неделю сохраняйте копию на флешку и держите флешку не у компьютера: если компьютер сломается, на новом магазин поднимется из этой копии — с товарами, чеками и долгами.')}
+        {register
+          ? t('Это касса магазина: база магазина хранится на главном компьютере, а здесь — её копия. Программа и здесь снимает копии сама; копию этой кассы можно загрузить на новый главный компьютер, если старый сломается.')
+          : t('База магазина хранится только на этом компьютере. Раз в неделю сохраняйте копию на флешку и держите флешку не у компьютера: если компьютер сломается, на новом магазин поднимется из этой копии — с товарами, чеками и долгами.')}
       </p>
       {usb.due && (
         <div className="note warn" style={{ marginBottom: 12 }} data-testid="solo-usb-due">
@@ -81,9 +85,11 @@ export function SoloKopiya() {
         <button className="btn" disabled={!!busy} onClick={saveTo} data-testid="solo-save-to">
           <span className="ic"><LuUsb size={16} /></span> {busy === 'saveTo' ? t('Сохраняем…') : t('Сохранить копию в…')}
         </button>
-        <button className="btn ghost" disabled={!!busy} onClick={() => setRestoring(true)} data-testid="solo-restore-open">
-          <span className="ic"><LuUpload size={16} /></span> {t('Загрузить копию')}
-        </button>
+        {!register && (
+          <button className="btn ghost" disabled={!!busy} onClick={() => setRestoring(true)} data-testid="solo-restore-open">
+            <span className="ic"><LuUpload size={16} /></span> {t('Загрузить копию')}
+          </button>
+        )}
         <button className="btn ghost" disabled={!!busy || disk.running} onClick={diskNow} data-testid="solo-disk-now">
           <span className="ic"><LuHardDrive size={16} /></span> {busy === 'disk' || disk.running ? t('Сохраняем…') : t('Сделать копию на диск сейчас')}
         </button>

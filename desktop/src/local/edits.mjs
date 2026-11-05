@@ -50,6 +50,8 @@ const COLS = {
   team_roles: ['name', 'description', 'system', 'permissions', 'createdAt', 'ord'],
 }
 export const EDIT_TABLES = Object.keys(COLS)
+// Столбцы строк справочников — основа главного компьютера кассам (local/solonet.mjs, 1.7.0)
+export const EDIT_COLS = COLS
 // Виды документов, которые можно править и удалять поправкой
 const DOC_KINDS = new Set(['expense', 'income', 'cashmove', 'supplierreturn', 'supplierpayment', 'arrival', 'inventory'])
 

@@ -9,7 +9,7 @@
 // в журнал (stock_moves) — так, чтобы его можно было проиграть заново. Когда сервер
 // пришлёт свежий остаток, сделанное здесь и ещё не дошедшее до него накладывается
 // поверх: остаток считается по журналу движений, а не перезаписью количества.
-import { bad, inTx, q } from './db.mjs'
+import { bad, getMeta, inTx, q } from './db.mjs'
 import { docState } from './edits.mjs'
 import { D, fromCentsD, toCents } from './money.mjs'
 import { expiryLimit } from './time.mjs'
@@ -120,6 +120,21 @@ export function consume(db, product, units, { skipExpired = false, tolerant = fa
   return { taken, short }
 }
 
+// ── Номер партии, заведённой здесь ──
+// Выводится из номера движения: при проигрывании журнала партия получает тот же номер. На кассе
+// магазина без интернета (1.7.0) — со своей пометкой (meta batchTag, local/solonet.mjs): партии
+// главного компьютера приходят основой со своими номерами «loc-…», и номера своих партий кассы
+// с ними совпадать не должны — иначе основа главного не ляжет (одинаковый номер у разных партий)
+const tagMemo = new WeakMap()
+export function localBatchId(db, seq, n = null) {
+  let tag = tagMemo.get(db)
+  if (tag === undefined) {
+    tag = String(getMeta(db, 'batchTag') || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 12)
+    tagMemo.set(db, tag)
+  }
+  return 'loc-' + (tag ? tag + '-' : '') + seq + (n === null ? '' : '-' + n)
+}
+
 // ── Положить штуки на полку ──
 // Новая партия со своим сроком. Одинаковые срок, цена и приход объединяются,
 // чтобы не плодить десятки партий по одному товару.
@@ -219,7 +234,7 @@ export function applyMove(db, move, { tolerant = false, now } = {}) {
   const batchId = addUnits(db, product.id, move.units, move.costC ?? product.costC, move.expiryDate, move.arrivalId, move.note, {
     // Номер партии выводится из номера движения: при проигрывании журнала она
     // получит тот же самый
-    id: 'loc-' + move.seq,
+    id: localBatchId(db, move.seq),
     createdAt: move.createdAt,
   })
   return { taken: [], short: 0, batchId }
@@ -264,7 +279,7 @@ function editArrival(db, product, move) {
     if (take <= 0) return
     // Номер партии выводится из номера движения и строки: при проигрывании журнала — тот же
     addUnits(db, product.id, take, Number.isInteger(line[1]) ? line[1] : product.costC, line[2] ?? null, move.arrivalId, 'приход изменён', {
-      id: `loc-${move.seq}-${n}`,
+      id: localBatchId(db, move.seq, n),
       createdAt: move.createdAt,
     })
     toPlace -= take

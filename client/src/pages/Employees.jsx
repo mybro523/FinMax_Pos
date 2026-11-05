@@ -199,13 +199,16 @@ export default function Employees() {
       actions={
         <>
           <ExportPechat onExcel={exportExcel} />
-          <button className="btn" data-tour="emp.add" onClick={() => setAdding(true)}>
-            <span className="ic"><LuUserPlus size={16} /></span> {t('Добавить сотрудника')}
-          </button>
+          {!me?.register && (
+            <button className="btn" data-tour="emp.add" onClick={() => setAdding(true)}>
+              <span className="ic"><LuUserPlus size={16} /></span> {t('Добавить сотрудника')}
+            </button>
+          )}
         </>
       }
     >
       <PrintSheet zagolovok={t('Сотрудники')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />
+      {me?.register && <div className="note info" style={{ marginBottom: 12 }}>{t('Сотрудников, их пароли и роли заводят и меняют на главном компьютере магазина.')}</div>}
       <div className="panel" data-tour="emp.list" style={{ padding: 0 }}>
         <div style={{ overflowX: 'auto' }}>
           <table>
@@ -242,6 +245,7 @@ export default function Employees() {
                   <td className="tag-cat">{u.createdAt ? fmtDate(u.createdAt) : '—'}</td>
                   <td>{u.active ? <span className="badge ok">{t('активен')}</span> : <span className="badge debt">{t('заблокирован')}</span>}</td>
                   <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                    {!me?.register && <>
                     <button className="btn ghost sm" data-tour="emp.edit" onClick={() => setEditing(u)} title={t('ФИО, оклад и бонус')}><LuPencil size={14} /> {t('Изменить')}</button>{' '}
                     <button className="btn ghost sm" data-tour="emp.password" onClick={() => resetPw(u)}><LuKeyRound size={14} /> {t('Пароль')}</button>{' '}
                     {u.id !== me?.id && (
@@ -252,6 +256,7 @@ export default function Employees() {
                         )}
                       </>
                     )}
+                    </>}
                   </td>
                 </tr>
               ))}

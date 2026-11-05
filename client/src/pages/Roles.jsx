@@ -172,13 +172,16 @@ export default function Roles() {
       actions={
         <>
           <ExportPechat onExcel={exportExcel} />
-          <button className="btn" data-tour="roles.new" onClick={create}>
-            <span className="ic"><LuPlus size={16} /></span> {t('Новая роль')}
-          </button>
+          {!getUser()?.register && (
+            <button className="btn" data-tour="roles.new" onClick={create}>
+              <span className="ic"><LuPlus size={16} /></span> {t('Новая роль')}
+            </button>
+          )}
         </>
       }
     >
       <PrintSheet zagolovok={t('Роли и права')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />
+      {getUser()?.register && <div className="note info" style={{ marginBottom: 12 }}>{t('Сотрудников, их пароли и роли заводят и меняют на главном компьютере магазина.')}</div>}
       <div className="roles">
         <aside className="panel roles-list" data-tour="roles.list">
           <h2><span className="h2-title"><span className="ic"><LuShieldCheck size={17} /></span>{t('Роли')}</span></h2>
@@ -212,6 +215,7 @@ export default function Roles() {
               </div>
               <div className="roles-editor-actions">
                 {sel.system && <span className="badge transfer">{t('системная')}</span>}
+                {!getUser()?.register && <>
                 {!owner && (
                   <button className="btn ghost sm" onClick={rename} title={t('Переименовать')} aria-label={t('Переименовать')}>
                     <LuPencil size={14} /> {t('Изменить')}
@@ -225,6 +229,7 @@ export default function Roles() {
                 <button className="btn" data-tour="roles.save" onClick={save} disabled={!dirty || saving}>
                   <span className="ic"><LuCheck size={16} /></span> {saving ? t('Сохранение…') : t('Сохранить права')}
                 </button>
+                </>}
               </div>
             </div>
 

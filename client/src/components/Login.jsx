@@ -88,6 +88,13 @@ export default function Login() {
   useEffect(() => {
     refreshSolo()
   }, [refreshSolo])
+  // Касса на экране входа: связь с главным меняется — раз в 10 секунд спрашиваем снова (главный
+  // отключил кассу — появится «Подключить заново»)
+  useEffect(() => {
+    if (solo?.role !== 'register') return undefined
+    const every = setInterval(() => refreshSolo(), 10000)
+    return () => clearInterval(every)
+  }, [solo?.role, refreshSolo])
   const soloMode = solo?.mode === 'standalone'
   // 1.7.0: кода активации нет (codeRequired: false) и способа работы не выбирают (offlineOnly) —
   // программа всегда без интернета. Прежняя основная часть этих полей не знает: как 1.6.0
@@ -103,7 +110,7 @@ export default function Login() {
       : soloMode && codeNeeded && (!solo.activation?.active || soloView === 'renew')
         ? 'activate'
         // 1.7.0: касса магазина подключается к главному (первый запуск или заново)
-        : soloMode && soloView === 'join' && (!solo.shop || solo.role === 'register')
+        : soloMode && soloView === 'join' && (!solo.shop || solo.role === 'register' || solo.empty)
           ? 'join'
         : soloMode && !solo.shop
           ? 'setup'
@@ -154,7 +161,11 @@ export default function Login() {
             <img className="auth-hero-word" src={logoWord} width="1311" height="214" alt="" draggable="false" />
           </div>
           <h2>{t('Касса, склад и смены — в одной системе')}</h2>
-          <p>{t('Продажи, остатки и деньги магазина видны владельцу в любой момент — с компьютера и с телефона.')}</p>
+          <p>
+            {solo?.offlineOnly
+              ? t('Продажи, остатки и деньги магазина — на компьютерах магазина, и без интернета.')
+              : t('Продажи, остатки и деньги магазина видны владельцу в любой момент — с компьютера и с телефона.')}
+          </p>
           <ul className="auth-points">
             {POINTS.map((p) => (
               <li key={p.text}>
@@ -195,14 +206,16 @@ export default function Login() {
         {panel === 'setup' && <SetupCard info={solo} onDone={enterAfterSetup} onJoin={bridge?.standalone?.join ? () => setSoloView('join') : null} />}
         {panel === 'join' && (
           <JoinCard
-            again={!!solo?.shop}
+            again={solo?.role === 'register'}
+            replacing={!!solo?.empty}
             onBack={() => setSoloView('')}
-            onDone={(r) => {
-              setSoloView('')
+            onDone={async (r) => {
               setErr('')
               setPw('')
               setNote(`${t('Касса подключена к магазину')} «${r.shopName || ''}» — ${r.name || ''}. ${t('Войдите логином и паролем, которые выдал владелец.')}`)
-              refreshSolo()
+              // Сначала узнать, что магазин здесь уже есть, — иначе на миг мелькнула бы карточка «Новый магазин»
+              await refreshSolo()
+              setSoloView('')
             }}
           />
         )}
@@ -248,7 +261,15 @@ export default function Login() {
             <span className="ic"><LuLogIn size={17} /></span> {busy ? t('Вход…') : t('Войти')}
           </button>
 
-          {soloMode && <SoloLine info={solo} onReset={() => setSoloView('reset')} onRenew={() => setSoloView('renew')} onRejoin={() => setSoloView('join')} />}
+          {soloMode && (
+            <SoloLine
+              info={solo}
+              onReset={() => setSoloView('reset')}
+              onRenew={() => setSoloView('renew')}
+              onRejoin={() => setSoloView('join')}
+              onJoin={bridge?.standalone?.join ? () => setSoloView('join') : null}
+            />
+          )}
 
           {/* «С интернетом» выбрали по ошибке, а войти ещё никто не успел — выбор можно поменять */}
           {solo && solo.mode === 'cloud' && !solo.cloudAccounts && (

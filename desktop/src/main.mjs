@@ -341,9 +341,11 @@ async function start() {
   const computerRaw = machineId ? computerRawOf(machineId) : null
   const licenceKey = resolveLicenceKey({ packaged: app.isPackaged, env: process.env, built })
   // Работает ли этот компьютер магазином без интернета: копия на диск тогда — каждый день, а
-  // раз в неделю напоминание сохранить копию на флешку (база больше нигде не лежит)
+  // раз в неделю напоминание сохранить копию на флешку (база больше нигде не лежит). Касса магазина
+  // (1.7.0) — не в счёт: база магазина — на главном компьютере, касса держит её копию
   const soloHere = () => {
     try {
+      if (getMeta(core, 'soloRole') === 'register') return false
       return getMeta(core, 'appMode') === 'standalone' && !!core.prepare("SELECT 1 FROM accounts WHERE pharmacyCode = 'local' LIMIT 1").get()
     } catch {
       return false
@@ -683,7 +685,7 @@ async function start() {
   ipcMain.handle('standalone:join', async (event, req) => {
     if (!trusted(event)) return null
     const r = req && typeof req === 'object' ? req : {}
-    return gateway.standalone.join({ code: String(r.code ?? '').slice(0, 40), address: String(r.address ?? '').slice(0, 100) })
+    return gateway.standalone.join({ code: String(r.code ?? '').slice(0, 40), address: String(r.address ?? '').slice(0, 100), fresh: r.fresh === true })
   })
   ipcMain.handle('standalone:pairStart', (event) => (trusted(event) ? gateway.standalone.pairStart() : null))
   ipcMain.handle('standalone:pairStop', (event) => (trusted(event) ? gateway.standalone.pairStop() : null))

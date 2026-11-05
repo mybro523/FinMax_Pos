@@ -28,11 +28,11 @@ import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:cr
 import Database from 'better-sqlite3'
 import { getMeta, inTx, q, setMeta } from './db.mjs'
 import { putDoc } from './docs.mjs'
-import { ackOp, docsOf, touchedBy } from './outbox.mjs'
-import { ackEdits, ADJ, docKnown, EDITABLE_DOC_KINDS } from './edits.mjs'
-import { confirmOp, WIDE_KINDS } from './lan.mjs'
+import { ackOp, docsOf, rejectOp, touchedBy } from './outbox.mjs'
+import { ackEdits, ADJ, docKnown, EDIT_COLS, EDITABLE_DOC_KINDS, replayEdits } from './edits.mjs'
+import { confirmOp, undoPeerOp, WIDE_KINDS } from './lan.mjs'
 import { rebuildStock } from './stock.mjs'
-import { DOC_KEYS, recountDebts } from './snapshot.mjs'
+import { DOC_KEYS, recountDebts, reorderCategories, reorderProducts } from './snapshot.mjs'
 import { foldBase, serverExtras } from './standalone.mjs'
 import { SHEET_TBL } from './sheet.mjs'
 
@@ -118,39 +118,64 @@ export function resolveDiscrepancy(db, id) {
 export const shortKind = (type) => (type === 'writeoff' ? 'writeoff' : type === 'supplier.return' || type === 'supplierreturn' ? 'supreturn' : 'sale')
 
 // ── Главный: операции касс → в принятые ──
-// Все чужие операции, лежащие поправкой (пришли по сети), по порядку прихода. Ответ — принятые
-// операции, документы, которые завёл «сервер», пароли сотрудников, заданные на кассах (pw), и что
-// ушло в минус (short: продано больше, чем было на складе)
+// Все чужие операции, лежащие поправкой (пришли по сети), по порядку прихода. Каждая — своей
+// точкой отката: операцию, которую принять не вышло (повреждена, от другой версии программы),
+// главный снимает, а остальные принимает — одна плохая операция не останавливает приём со всех
+// касс. Не принятые касса отменит у себя (основа называет их в rejected), владелец увидит их на
+// панели. Ответ — принятые операции, документы, которые завёл «сервер», пароли сотрудников,
+// заданные на кассах (pw), что ушло в минус (short: продано больше, чем было на складе) и что не
+// принято (rejected)
 export function mainAcceptPeers(db, { now }) {
   const ops = []
   const extras = []
   const pw = []
   const short = []
+  const rejected = []
   inTx(db, () => {
     const rows = q(db, "SELECT * FROM lan_log WHERE kind = 'op' AND state = 'applied' ORDER BY seq").all()
     if (!rows.length) return
-    // Остаток в минусе — от операций касс, легших поправкой (свои операции главного в минус не уводят)
-    const over = new Map(q(db, 'SELECT id, name, oversold FROM products WHERE oversold > 0').all().map((p) => [p.id, p]))
     const taker = new Map()
     for (const r of rows) {
       const fx = parse(r.body)?.effects || {}
-      serverExtras(db, peerAsOp(r, fx), now, extras)
-      acceptPeer(db, r, fx)
-      ops.push({ id: r.id, type: r.type, docs: (fx.docs || []).filter((d) => d && typeof d.kind === 'string' && d.body && typeof d.body === 'object') })
+      const made = []
+      try {
+        inTx(db, () => {
+          serverExtras(db, peerAsOp(r, fx), now, made)
+          acceptPeer(db, r, fx)
+        })
+      } catch (e) {
+        rejected.push({ id: r.id, type: r.type, origin: r.origin, accountId: r.accountId ?? null, createdAt: r.createdAt, error: String(e?.message || e).slice(0, 200) })
+        continue
+      }
+      extras.push(...made)
+      ops.push({
+        id: r.id,
+        type: r.type,
+        accountId: r.accountId ?? null,
+        origin: r.origin,
+        docs: (fx.docs || []).filter((d) => d && typeof d.kind === 'string' && d.body && typeof d.body === 'object'),
+      })
       for (const e of fx.edits?.rows || []) {
-        if (e?.tbl === 'team_accounts' && typeof e.rowId === 'string' && typeof e.data?.pwLan === 'string') pw.push({ id: e.rowId, pwLan: e.data.pwLan })
+        if (e?.tbl === 'team_accounts' && typeof e.rowId === 'string' && typeof e.data?.pwLan === 'string') pw.push({ id: e.rowId, pwLan: e.data.pwLan, accountId: r.accountId ?? null })
       }
       for (const m of fx.moves || []) {
-        if (m && typeof m.productId === 'string' && Number(m.units) < 0 && over.has(m.productId)) taker.set(m.productId, r)
+        if (m && typeof m.productId === 'string' && Number(m.units) < 0) taker.set(m.productId, r)
       }
     }
-    for (const [pid, p] of over) {
-      const r = taker.get(pid)
-      if (r) short.push({ productId: pid, name: p.name || '', units: p.oversold, opId: r.id, type: r.type, origin: r.origin, accountId: r.accountId ?? null, createdAt: r.createdAt })
+    // Не принятые — назад: их поправки снимаются, остаток и долги — заново без них
+    if (rejected.length) {
+      for (const x of rejected) undoPeerOp(db, x.id, 'rejected')
+      rebuildStock(db)
+      recountDebts(db)
+    }
+    // Остаток в минусе — от операций касс, легших поправкой (свои операции главного в минус не уводят)
+    for (const p of q(db, 'SELECT id, name, oversold FROM products WHERE oversold > 0').all()) {
+      const r = taker.get(p.id)
+      if (r) short.push({ productId: p.id, name: p.name || '', units: p.oversold, opId: r.id, type: r.type, origin: r.origin, accountId: r.accountId ?? null, createdAt: r.createdAt })
     }
     foldBase(db)
   })
-  return { ops, extras, pw, short }
+  return { ops, extras, pw, short, rejected }
 }
 
 // Чужая операция глазами «сервера»: то, что ему нужно для своих записей, — из её документов
@@ -204,19 +229,35 @@ export function ownOpDocs(db, op) {
 // ops — [{ id, docs: [{ kind, body }] }] по порядку приёма; extras — документы «сервера»;
 // logins — учётные записи сотрудников для касс (их пароли — local/solonet: см. gateway)
 // gone — что главный убрал сам, не операцией (удалённые покупатели); lic — новый код активации;
-// logo — логотип магазина ({ logo, at }: его ставят на главном, «Настройки» → «Чек и печать»)
-export function mainLogBase(db, { ops = [], extras = [], logins = [], gone = null, lic = null, logo = null, deviceId, now }) {
+// logo — логотип магазина ({ logo, at }: его ставят на главном, «Настройки» → «Чек и печать»);
+// rejected — операции касс, которые главный не принял ([{ id, error }]); rows — строки
+// справочников и документы, которые правили эти операции, целиком: правки одной строки на главном
+// и на кассе сходятся у всех одинаково (касса кладёт строку главного и проигрывает поверх свои
+// неотправленные правки). Партии — только непустые: основа не растёт с историей магазина.
+// Затронуто много товаров (пересчёт всего склада) — основа идёт несколькими записями по BASE_CHUNK
+// товаров: большая запись застряла бы в сети. Операции названы в последней из них
+const BASE_ROW_TABLES = ['products', 'categories', 'product_types', 'pay_services', 'expense_categories', 'income_categories', 'suppliers']
+const BASE_CHUNK = 800
+// Сколько строк справочников целиком — в одной основе: с фото товаров они тяжёлые. Сверх того
+// правки ложатся у касс как есть (поправками из операций)
+const BASE_ROWS_BYTES = 2_000_000
+const ROW_KEY = {
+  products: 'products', categories: 'categories', product_types: 'productTypes', pay_services: 'payServices',
+  expense_categories: 'expenseCategories', income_categories: 'incomeCategories', suppliers: 'suppliers',
+}
+export function mainLogBase(db, { ops = [], extras = [], logins = [], gone = null, lic = null, logo = null, rejected = [], rows: withRows = false, deviceId, now }) {
   const goneCustomers = Array.isArray(gone?.customers) ? gone.customers.filter((x) => typeof x === 'string') : []
   const withLogo = !!logo && typeof logo === 'object' && typeof logo.logo === 'string'
-  if (!ops.length && !extras.length && !logins.length && !goneCustomers.length && !lic && !withLogo) return null
+  const rejectedList = (Array.isArray(rejected) ? rejected : []).filter((x) => x && typeof x.id === 'string').map((x) => ({ id: x.id, error: String(x.error || '').slice(0, 200) }))
+  if (!ops.length && !extras.length && !logins.length && !goneCustomers.length && !lic && !withLogo && !rejectedList.length) return null
   return inTx(db, () => {
-    const acc = soloAcc(db) + 1
-    setMeta(db, 'soloAcc', String(acc))
     const ids = ops.map((o) => o.id)
     const products = new Set()
     const customers = new Set()
     const suppliers = new Set()
     const shifts = new Set()
+    const edited = new Map()
+    const editedDocs = new Map()
     if (ids.length) {
       const list = ids.map(() => '?').join(', ')
       for (const r of q(db, `SELECT DISTINCT productId FROM stock_moves WHERE opId IN (${list})`).all(...ids)) products.add(r.productId)
@@ -225,10 +266,19 @@ export function mainLogBase(db, { ops = [], extras = [], logins = [], gone = nul
         if (r.target === ADJ.supplierDebt) suppliers.add(r.rowId)
         else shifts.add(r.rowId)
       }
-      for (const r of q(db, `SELECT tbl, rowId FROM row_edits WHERE opId IN (${list})`).all(...ids)) {
+      for (const r of q(db, `SELECT DISTINCT tbl, rowId FROM row_edits WHERE opId IN (${list})`).all(...ids)) {
         if (r.tbl === 'products') products.add(r.rowId)
         else if (r.tbl === 'suppliers') suppliers.add(r.rowId)
         else if (r.tbl === 'customers') customers.add(r.rowId)
+        if (!withRows || typeof r.rowId !== 'string') continue
+        if (BASE_ROW_TABLES.includes(r.tbl)) {
+          if (!edited.has(r.tbl)) edited.set(r.tbl, new Set())
+          edited.get(r.tbl).add(r.rowId)
+        } else if (typeof r.tbl === 'string' && r.tbl.startsWith('doc:') && r.tbl !== SHEET_TBL) {
+          const kind = r.tbl.slice(4)
+          if (!editedDocs.has(kind)) editedDocs.set(kind, new Set())
+          editedDocs.get(kind).add(r.rowId)
+        }
       }
     }
     // Суммы документов уходят в основу без своих поправок (edits.mjs, docKnown): поставщик и
@@ -239,45 +289,92 @@ export function mainLogBase(db, { ops = [], extras = [], logins = [], gone = nul
       if (typeof b.shiftId === 'string') shifts.add(b.shiftId)
       if (typeof b.customerId === 'string') customers.add(b.customerId)
     }
-    const rowsOf = (sql, set) => {
-      if (!set.size) return []
-      const v = [...set].filter((x) => typeof x === 'string')
+    const rowsOf = (sql, values) => {
+      const v = [...values].filter((x) => typeof x === 'string')
       return v.length ? q(db, sql.replace('?*', v.map(() => '?').join(', '))).all(...v) : []
     }
-    const body = {
-      acc,
-      ops: ids,
-      products: rowsOf('SELECT id, sCostC, sExpiry FROM products WHERE id IN (?*)', products),
-      batches: rowsOf('SELECT id, productId, sUnits, costC, expiryDate, arrivalId, note, createdAt FROM batches WHERE productId IN (?*)', products),
-      customers: rowsOf('SELECT id, sDebtC FROM customers WHERE id IN (?*)', customers),
-      suppliers: rowsOf('SELECT id, sDebtC, debtArrivals, openingDebtC FROM suppliers WHERE id IN (?*)', suppliers),
-      docs: [
-        ...extras.map((d) => ({ kind: d.kind, body: d.body, deviceId: null })),
-        ...rowsOf("SELECT body, deviceId FROM docs WHERE kind = 'shift' AND id IN (?*)", shifts).map((r) => ({ kind: 'shift', body: parse(r.body), deviceId: r.deviceId ?? null })),
-      ],
-      logins,
-      ...(goneCustomers.length ? { gone: { customers: goneCustomers } } : {}),
-      ...(typeof lic === 'string' && lic ? { lic } : {}),
-      ...(withLogo ? { logo: { logo: logo.logo, at: typeof logo.at === 'string' ? logo.at : null } } : {}),
+    // Строки справочников целиком
+    const rowsOut = {}
+    const drop = {}
+    let rowBytes = 0
+    for (const [tbl, set] of edited) {
+      const cols = ['id', ...EDIT_COLS[tbl]]
+      for (const id of set) {
+        const row = q(db, `SELECT ${cols.join(', ')} FROM ${tbl} WHERE id = ?`).get(id)
+        if (!row) {
+          ;(drop[tbl] ||= []).push(id)
+          continue
+        }
+        const size = JSON.stringify(row).length
+        if (rowBytes + size > BASE_ROWS_BYTES) continue
+        rowBytes += size
+        ;(rowsOut[tbl] ||= []).push(row)
+      }
     }
-    const wide = body.suppliers.length > 0 || body.docs.some((d) => WIDE_KINDS.has(d.kind)) ? 1 : 0
-    q(
+    const docsOut = [
+      ...extras.map((d) => ({ kind: d.kind, body: d.body, deviceId: null })),
+      ...rowsOf("SELECT body, deviceId FROM docs WHERE kind = 'shift' AND id IN (?*)", shifts).map((r) => ({ kind: 'shift', body: parse(r.body), deviceId: r.deviceId ?? null })),
+    ]
+    const goneDocs = []
+    for (const [kind, set] of editedDocs) {
+      for (const id of set) {
+        const d = q(db, 'SELECT body, deviceId, sync FROM docs WHERE kind = ? AND id = ?').get(kind, id)
+        if (!d || d.sync === 'deleted' || d.sync === 'rejected') goneDocs.push({ kind, id })
+        else docsOut.push({ kind, body: parse(d.body), deviceId: d.deviceId ?? null })
+      }
+    }
+    const prodIds = [...products].filter((x) => typeof x === 'string')
+    const parts = []
+    for (let i = 0; i < prodIds.length; i += BASE_CHUNK) parts.push(prodIds.slice(i, i + BASE_CHUNK))
+    if (!parts.length) parts.push([])
+    const insert = q(
       db,
       `INSERT INTO lan_log (id, kind, origin, opId, type, accountId, createdAt, body, wide, redacted, state)
        VALUES (?, 'base', ?, NULL, '', NULL, ?, ?, ?, 0, 'own')`,
-    ).run('base:' + acc, deviceId, iso(now), JSON.stringify(body), wide)
+    )
+    let acc = soloAcc(db)
+    parts.forEach((part, n) => {
+      acc += 1
+      const last = n === parts.length - 1
+      const stock = {
+        products: rowsOf('SELECT id, sCostC, sExpiry FROM products WHERE id IN (?*)', part),
+        batches: rowsOf('SELECT id, productId, sUnits, costC, expiryDate, arrivalId, note, createdAt FROM batches WHERE productId IN (?*) AND sUnits > 0', part),
+      }
+      const body = !last
+        ? { acc, ops: [], ...stock }
+        : {
+            acc,
+            ops: ids,
+            ...stock,
+            customers: rowsOf('SELECT id, sDebtC FROM customers WHERE id IN (?*)', customers),
+            suppliers: rowsOf('SELECT id, sDebtC, debtArrivals, openingDebtC FROM suppliers WHERE id IN (?*)', suppliers),
+            docs: docsOut,
+            logins,
+            ...(rejectedList.length ? { rejected: rejectedList } : {}),
+            ...(Object.keys(rowsOut).length ? { rows: rowsOut } : {}),
+            ...(Object.keys(drop).length ? { drop } : {}),
+            ...(goneCustomers.length || goneDocs.length ? { gone: { customers: goneCustomers, docs: goneDocs } } : {}),
+            ...(typeof lic === 'string' && lic ? { lic } : {}),
+            ...(withLogo ? { logo: { logo: logo.logo, at: typeof logo.at === 'string' ? logo.at : null } } : {}),
+          }
+      const wide = (body.suppliers || []).length > 0 || (body.docs || []).some((d) => WIDE_KINDS.has(d.kind)) ? 1 : 0
+      insert.run('base:' + acc, deviceId, iso(now), JSON.stringify(body), wide)
+    })
+    setMeta(db, 'soloAcc', String(acc))
     return acc
   })
 }
 
 // ── Касса: основа от главного ──
 // Ответ — какие разделы окна устарели. onLogins — что сделать с учётными записями (их кладёт в
-// общую базу программы gateway: пароли перешифровываются ключом этого компьютера); onLic — с новым
-// кодом активации главного; onLogo — с логотипом магазина ({ logo, at })
+// общую базу программы gateway: пароли перешифровываются ключом этого компьютера) — после записи
+// в базу магазина; onLic — с новым кодом активации главного; onLogo — с логотипом магазина
+// ({ logo, at }). Основа, которая не легла, — ошибка: обмен её не пропустит и пришлёт снова
 export function regApplyBase(db, entry, { onLogins = null, onLic = null, onLogo = null } = {}) {
   const b = parse(entry?.body)
   if (!b || !Number.isInteger(b.acc)) return []
   const changed = new Set()
+  let logins = null
   inTx(db, () => {
     // Эта основа (или более поздняя) уже лежит: запись пришла второй раз
     if (b.acc <= soloAcc(db)) return
@@ -292,6 +389,19 @@ export function regApplyBase(db, entry, { onLogins = null, onLic = null, onLogo 
       }
       if (confirmOp(db, id)) changed.add('products')
     }
+    // Не принятое главным: своё — в «не принято» (его поправки снимаются), чужое — убирается
+    for (const x of Array.isArray(b.rejected) ? b.rejected : []) {
+      if (typeof x?.id !== 'string') continue
+      const own = q(db, "SELECT * FROM outbox WHERE id = ? AND state = 'pending'").get(x.id)
+      if (own) {
+        const op = { ...own, payload: parse(own.payload) || {} }
+        rejectOp(db, op, String(x.error || '').slice(0, 200) || 'Главный компьютер не принял операцию')
+        for (const k of touchedBy(op)) changed.add(k)
+      } else if (undoPeerOp(db, x.id, 'rejected')) {
+        changed.add('products')
+        changed.add('customers')
+      }
+    }
     const upProduct = q(db, 'UPDATE products SET sCostC = ?, sExpiry = ? WHERE id = ?')
     for (const p of Array.isArray(b.products) ? b.products : []) {
       if (typeof p?.id === 'string' && Number.isInteger(p.sCostC)) upProduct.run(p.sCostC, p.sExpiry ?? null, p.id)
@@ -304,6 +414,43 @@ export function regApplyBase(db, entry, { onLogins = null, onLic = null, onLogo 
       putBatch.run(x.id, x.productId, x.sUnits, x.sUnits, Number(x.costC) || 0, x.expiryDate ?? null, x.arrivalId ?? null, String(x.note ?? ''), String(x.createdAt || ''))
     }
     if (pids.size) changed.add('products')
+    // Строки справочников, которые правили принятые операции, — как у главного; свои
+    // неотправленные правки (и чужие, ещё не названные) — поверх них заново
+    const rowTbls = new Set()
+    const rows = b.rows && typeof b.rows === 'object' ? b.rows : {}
+    for (const tbl of BASE_ROW_TABLES) {
+      const list = Array.isArray(rows[tbl]) ? rows[tbl] : []
+      const cols = EDIT_COLS[tbl]
+      for (const row of list) {
+        if (typeof row?.id !== 'string' || !row.id) continue
+        const keys = cols.filter((k) => Object.prototype.hasOwnProperty.call(row, k))
+        if (!keys.length) continue
+        q(
+          db,
+          `INSERT INTO ${tbl} (id, ${keys.join(', ')}) VALUES (?, ${keys.map(() => '?').join(', ')})
+           ON CONFLICT(id) DO UPDATE SET ${keys.map((k) => `${k} = excluded.${k}`).join(', ')}`,
+        ).run(row.id, ...keys.map((k) => row[k] ?? null))
+        rowTbls.add(tbl)
+      }
+    }
+    const drop = b.drop && typeof b.drop === 'object' ? b.drop : {}
+    for (const tbl of BASE_ROW_TABLES) {
+      for (const id of Array.isArray(drop[tbl]) ? drop[tbl] : []) {
+        if (typeof id !== 'string') continue
+        // Своя неотправленная правка этой строки — её судьбу решит главный, когда получит
+        const mine = q(db, "SELECT 1 FROM row_edits e JOIN outbox o ON o.id = e.opId WHERE e.tbl = ? AND e.rowId = ? AND o.state = 'pending' LIMIT 1").get(tbl, id)
+        if (mine) continue
+        q(db, `DELETE FROM ${tbl} WHERE id = ?`).run(id)
+        if (tbl === 'products') q(db, 'DELETE FROM batches WHERE productId = ?').run(id)
+        rowTbls.add(tbl)
+      }
+    }
+    if (rowTbls.size) {
+      replayEdits(db, [...rowTbls])
+      if (rowTbls.has('products')) reorderProducts(db)
+      if (rowTbls.has('categories')) reorderCategories(db)
+      for (const t of rowTbls) changed.add(ROW_KEY[t] || t)
+    }
     // Покупателя удалили на главном: он сам, история его долга и погашения уходят (как
     // standalone.mjs, deleteCustomer)
     for (const id of Array.isArray(b.gone?.customers) ? b.gone.customers : []) {
@@ -313,6 +460,14 @@ export function regApplyBase(db, entry, { onLogins = null, onLic = null, onLogo 
       q(db, "DELETE FROM docs WHERE kind = 'payment' AND json_extract(body, '$.customerId') = ?").run(id)
       changed.add('customers')
       changed.add('payments')
+    }
+    // Документ удалили (правкой кассы, принятой главным): у главного его больше нет
+    for (const d of Array.isArray(b.gone?.docs) ? b.gone.docs : []) {
+      if (typeof d?.kind !== 'string' || typeof d.id !== 'string') continue
+      const here = q(db, 'SELECT sync FROM docs WHERE kind = ? AND id = ?').get(d.kind, d.id)
+      if (!here || !['synced', 'peer', 'deleted'].includes(here.sync)) continue
+      q(db, 'DELETE FROM docs WHERE kind = ? AND id = ?').run(d.kind, d.id)
+      changed.add(KIND_KEY[d.kind] || d.kind)
     }
     const upCustomer = q(db, 'UPDATE customers SET sDebtC = ?, local = 0 WHERE id = ?')
     for (const c of Array.isArray(b.customers) ? b.customers : []) {
@@ -335,7 +490,7 @@ export function regApplyBase(db, entry, { onLogins = null, onLic = null, onLogo 
       changed.add(KIND_KEY[d.kind] || d.kind)
     }
     if (Array.isArray(b.logins) && b.logins.length && onLogins) {
-      onLogins(b.logins)
+      logins = b.logins
       changed.add('users')
     }
     if (typeof b.lic === 'string' && b.lic && onLic) onLic(b.lic)
@@ -347,6 +502,8 @@ export function regApplyBase(db, entry, { onLogins = null, onLic = null, onLogo 
     rebuildStock(db)
     recountDebts(db)
   })
+  // Учётные записи — в общую базу программы, когда основа уже легла
+  if (logins) onLogins(logins)
   return [...changed]
 }
 
@@ -363,7 +520,7 @@ export function shopSnapshot(db) {
   try {
     copy.exec('DELETE FROM outbox; DELETE FROM lan_log; DELETE FROM lan_docs; DELETE FROM lan_peers; DELETE FROM lan_manual;')
     const drop = copy.prepare('DELETE FROM meta WHERE key = ?')
-    for (const key of ['lanKey', 'soloPaired', 'soloDisc', 'restored', 'deviceName', 'needFull', 'lanWide', 'lanDevices']) drop.run(key)
+    for (const key of ['lanKey', 'lanRegKey', 'soloPaired', 'soloDisc', 'restored', 'deviceName', 'needFull', 'lanWide', 'lanDevices', 'soloMain', 'batchTag', 'soloRestoredFrom']) drop.run(key)
     copy
       .prepare("UPDATE row_edits SET data = json_remove(data, '$.pw') WHERE tbl = 'team_accounts' AND json_valid(data) AND json_extract(data, '$.pw') IS NOT NULL")
       .run()
@@ -375,16 +532,24 @@ export function shopSnapshot(db) {
 }
 
 // Касса: база главного легла файлом — служебное этой кассы начинается заново. Главный — её
-// единственный сосед: его журнал она получит с той записи, на которой снята база (topSeq)
-export function regInstallDb(db, { main, address, port, topSeq, lanKeySealed, name, now }) {
+// единственный сосед: его журнал она получит с той записи, на которой база снята (topSeq).
+// soloMain — пометка в самой базе «это касса такого-то главного»: база говорит о себе сама, и
+// оборвись подключение на полпути, программа при следующем запуске знает, чья это база.
+// regKeySealed — ключ обмена этой кассы с главным (свой у каждой кассы: отключённая касса больше
+// не говорит с главным); lanKeySealed — ключ магазина (пароли сотрудников в основе)
+export function regInstallDb(db, { main, address, port, topSeq, lanKeySealed, regKeySealed = null, name, soloMain = null, now }) {
   inTx(db, () => {
     for (const t of ['outbox', 'lan_log', 'lan_docs', 'lan_peers', 'lan_manual']) q(db, `DELETE FROM ${t}`).run()
     // Свои операции кассы пойдут с номерами после снимка: журнал обмена подхватит их с этого места
     const seq = q(db, "SELECT seq FROM sqlite_sequence WHERE name = 'outbox'").get()?.seq || 0
     setMeta(db, 'lanOutboxSeq', String(seq))
     setMeta(db, 'lanKey', lanKeySealed)
+    if (regKeySealed) setMeta(db, 'lanRegKey', regKeySealed)
     setMeta(db, 'deviceName', String(name || '').slice(0, 60))
-    for (const key of ['soloPaired', 'soloDisc', 'restored', 'needFull']) q(db, 'DELETE FROM meta WHERE key = ?').run(key)
+    // Номера своих партий — со своей пометкой (stock.mjs, localBatchId)
+    setMeta(db, 'batchTag', randomBytes(4).toString('hex'))
+    if (soloMain) setMeta(db, 'soloMain', JSON.stringify(soloMain))
+    for (const key of ['soloPaired', 'soloDisc', 'restored', 'needFull', 'soloRestoredFrom']) q(db, 'DELETE FROM meta WHERE key = ?').run(key)
     const at = new Date(now).toISOString()
     q(db, 'INSERT INTO lan_peers (deviceId, name, address, port, sentUpTo, gotUpTo, wide, seenAt, okAt) VALUES (?, ?, ?, ?, 0, ?, 1, ?, ?)').run(
       main.deviceId,
@@ -398,14 +563,30 @@ export function regInstallDb(db, { main, address, port, topSeq, lanKeySealed, na
   })
 }
 
-// Касса подключается заново: свои операции, которые главный ещё не принял, — с собой
-export function regPendingEntries(db) {
+// Пометка «это касса» в самой базе магазина (regInstallDb) — или null
+export function dbSoloMain(db) {
+  try {
+    const v = JSON.parse(getMeta(db, 'soloMain') || 'null')
+    return v && typeof v.deviceId === 'string' && v.deviceId ? v : null
+  } catch {
+    return null
+  }
+}
+
+// Касса подключается заново: всё, что у неё есть из журнала, — главному. Свои операции (и
+// принятые, и ждущие) и чужие, пришедшие от главного: если он загрузил копию базы или его
+// компьютер заменили, недостающее он возьмёт отсюда — и ничего, что успели продать, не пропадёт.
+// Главный сам отбрасывает то, что у него уже есть (gateway, pairServe). Свои операции, ещё не
+// записанные в журнал, туда сначала записывает вызывающий (lanCatchUp)
+export function regRecoveryEntries(db, { now, days = 30 } = {}) {
+  const from = new Date(now - days * 86400000).toISOString()
   return q(
     db,
-    `SELECT l.* FROM lan_log l JOIN outbox o ON o.id = l.id
-     WHERE l.kind = 'op' AND l.state = 'own' AND o.state = 'pending' ORDER BY l.seq`,
+    `SELECT l.* FROM lan_log l WHERE l.kind = 'op' AND l.state IN ('own', 'applied', 'confirmed') AND l.createdAt >= ?
+       AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.id = l.id AND o.state IN ('rejected', 'dismissed'))
+     ORDER BY l.seq`,
   )
-    .all()
+    .all(from)
     .map((r) => ({
       seq: r.seq, id: r.id, kind: r.kind, origin: r.origin, opId: r.opId, type: r.type, accountId: r.accountId,
       createdAt: r.createdAt, body: r.body, wide: r.wide ? 1 : 0, redacted: 0,

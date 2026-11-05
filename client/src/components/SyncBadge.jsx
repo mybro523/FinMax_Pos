@@ -195,6 +195,11 @@ export function RestoreView({ st, onBack }) {
 
   return (
     <div data-testid="restore-view">
+      {solo && st?.net?.role === 'main' && st.net.registers?.length > 0 && (
+        <div className="note warn" style={{ marginBottom: 10 }}>
+          {t('К этому компьютеру подключены кассы. После загрузки копии подключите каждую кассу заново: продажи касс, которых нет в копии, перейдут на главный при подключении.')}
+        </div>
+      )}
       <div className="tag-cat" style={{ marginBottom: 10 }}>
         {solo
           ? t('Выберите копию — копия с флешки находится кнопкой «Выбрать папку…». Программа снимет копию нынешнего состояния, загрузит выбранную и перезапустится — войдите снова.')
@@ -358,7 +363,9 @@ function StatusModal({ st, onClose }) {
         {solo && (
           <>
             <div className={'note ' + (act.active ? (act.warn ? 'warn' : 'info') : 'err')} style={{ marginBottom: 12 }} data-testid="solo-status">
-              {t('Программа без интернета: база магазина хранится на этом компьютере, всё сделанное сохраняется сразу.')}
+              {st?.net?.role === 'register'
+                ? t('Касса магазина без интернета: всё сделанное сохраняется здесь сразу и уходит на главный компьютер, когда он на связи.')
+                : t('Программа без интернета: база магазина хранится на этом компьютере, всё сделанное сохраняется сразу.')}
               {soloMessage(act, t) ? <div style={{ marginTop: 6 }}><b>{soloMessage(act, t)}</b></div> : null}
             </div>
             <Row label={t('Программа работает')} tone={!act.active ? 'bad' : act.warn ? 'warn' : undefined}>{act.forever ? t('без срока') : act.untilHuman ? `${t('до')} ${act.untilHuman}` : '—'}</Row>
@@ -429,9 +436,9 @@ function StatusModal({ st, onClose }) {
         </>}
 
         {/* ── Не принято сервером ── */}
-        {!solo && rejectedCount > 0 && (
+        {(!solo || st?.net?.role === 'register') && rejectedCount > 0 && (
           <div className="sync-section">
-            <h4>{t('Не принято сервером')} <span className="badge low">{rejectedCount}</span></h4>
+            <h4>{solo ? t('Не принято главным компьютером') : t('Не принято сервером')} <span className="badge low">{rejectedCount}</span></h4>
             {!isFounder && <div className="note err">{t('Сервер не принял часть операций этой кассы. Сообщите владельцу — он увидит подробности.')}</div>}
             {isFounder && (
               <div className="tag-cat" style={{ marginBottom: 8 }}>

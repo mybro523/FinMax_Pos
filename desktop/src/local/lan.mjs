@@ -326,13 +326,17 @@ function redactBase(e) {
 // получит от сервера, а застрявшая в сети запись остановила бы весь обмен с ним
 export const LAN_MAX_ENTRY_BYTES = 6_000_000
 
-export function lanEntriesSince(db, since, { wide = false, limit = 200, maxBytes = 1_500_000 } = {}) {
+export function lanEntriesSince(db, since, { wide = false, limit = 200, maxBytes = 1_500_000, skipStates = null } = {}) {
   const rows = q(db, 'SELECT * FROM lan_log WHERE seq > ? ORDER BY seq LIMIT ?').all(Number(since) || 0, limit + 1)
   const entries = []
   let upTo = Number(since) || 0
   let bytes = 0
   let more = rows.length > limit
   for (const r of rows.slice(0, limit)) {
+    if (skipStates && skipStates.includes(r.state)) {
+      upTo = r.seq
+      continue
+    }
     const e = wide ? toWire(r) : redact(toWire(r))
     if (e) {
       // В байтах и как строка внутри сообщения (кавычки удваиваются)
@@ -353,7 +357,17 @@ export function lanEntriesSince(db, since, { wide = false, limit = 200, maxBytes
   return { entries, upTo, more }
 }
 
-export const lanTopSeq = (db) => q(db, 'SELECT COALESCE(MAX(seq), 0) AS n FROM lan_log').get().n
+// Номер последней записи журнала — и уже убранной: номера не повторяются (AUTOINCREMENT)
+export const lanTopSeq = (db) =>
+  Math.max(q(db, 'SELECT COALESCE(MAX(seq), 0) AS n FROM lan_log').get().n, q(db, "SELECT seq FROM sqlite_sequence WHERE name = 'lan_log'").get()?.seq || 0)
+// С какой записи журнал ещё есть целиком: старше — убрано (lanPrune). Сосед, получивший журнал
+// только до записи раньше этой, недостающего уже не получит (магазин без интернета: касса
+// подключается заново, 1.7.0)
+export function lanFloor(db) {
+  const min = q(db, 'SELECT MIN(seq) AS n FROM lan_log').get().n
+  if (Number.isInteger(min)) return min
+  return (q(db, "SELECT seq FROM sqlite_sequence WHERE name = 'lan_log'").get()?.seq || 0) + 1
+}
 
 // ── Чужая операция → в базу ──
 const ID = /^[A-Za-z0-9_:.-]{1,100}$/
@@ -408,7 +422,7 @@ function applyEffects(db, opId, type, fx, changed) {
   // накладываем
   if (type === 'inventory.apply') {
     const sheet = (fx.edits?.rows || []).find((r) => r?.tbl === SHEET_TBL)?.rowId
-    if (typeof sheet === 'string' && sheetShut(db, sheet)) return 'confirmed'
+    if (typeof sheet === 'string' && sheetShut(db, sheet)) return 'sheet'
   }
   addDocs(db, opId, fx.docs, changed)
 
@@ -542,6 +556,8 @@ export function confirmOp(db, opId) {
 }
 
 // ── Сервер отверг чужую операцию (или она так и не дошла) — убираем её совсем ──
+// Магазин без интернета (1.7.0): так же — операцию кассы, которую главный компьютер не принял
+export const undoPeerOp = (db, opId, state = 'rejected') => undoOp(db, opId, state)
 function undoOp(db, opId, state) {
   const row = q(db, "SELECT type, body FROM lan_log WHERE id = ? AND kind = 'op' AND state = 'applied'").get(opId)
   if (!row) return null
@@ -576,7 +592,10 @@ function rebuild(db) {
 export function lanReceive(db, entries, { now, gen }) {
   const changed = new Set()
   let kickSync = false
-  if (!Array.isArray(entries) || !entries.length) return { changed: [], kickSync }
+  // Операции, которые не легли: их документ здесь уже есть ('known') или их лист пересчёта здесь
+  // уже применён ('sheet'). Главному компьютеру магазина без интернета (1.7.0) — назвать их кассе
+  const declined = []
+  if (!Array.isArray(entries) || !entries.length) return { changed: [], kickSync, declined }
   inTx(db, () => {
     let needRebuild = false
     for (const e of entries) {
@@ -618,8 +637,9 @@ export function lanReceive(db, entries, { now, gen }) {
           e.wide ? 1 : 0, e.redacted ? 1 : 0, new Date(now).toISOString(),
         )
         const state = applyEffects(db, e.id, String(e.type || ''), fx, changed)
-        if (state === 'confirmed') {
+        if (state === 'confirmed' || state === 'sheet') {
           q(db, "UPDATE lan_log SET state = 'confirmed' WHERE id = ?").run(e.id)
+          declined.push({ id: e.id, why: state === 'sheet' ? 'sheet' : 'known', origin: e.origin })
           continue
         }
         // Известие о судьбе могло прийти раньше самой операции (через третью кассу)
@@ -645,7 +665,7 @@ export function lanReceive(db, entries, { now, gen }) {
     }
     if (needRebuild) rebuild(db)
   })
-  return { changed: [...changed], kickSync }
+  return { changed: [...changed], kickSync, declined }
 }
 
 // Что сказал сервер о чужой операции, которая лежит у нас поправкой

@@ -82,12 +82,18 @@ export function discrepancyTitle(kind, t) {
   if (kind === 'counted') return t('Операция кассы пришла после пересчёта остатка')
   if (kind === 'debt') return t('Сумма больше долга клиента')
   if (kind === 'supreturn') return t('Поставщику отдали больше, чем было на складе')
+  // Магазин без интернета (1.7.0): касса прислала операцию, которую главный компьютер не принял
+  if (kind === 'notTaken') return t('Операция с кассы не принята главным компьютером')
   return t('Расхождение')
 }
 
 // Подробность: сколько штук или какие цены. money — как печатать деньги
 export function discrepancyDetail(d, t, money = String) {
   if (d.kind === 'edit') return editDetail(noteOf(d), t, money)
+  if (d.kind === 'notTaken') {
+    const why = String(noteOf(d).error || '')
+    return `${t(OP_TYPE[d.opType] || 'Операция')}${why ? ' — ' + t(why) : ''}`
+  }
   if (d.kind === 'barcode') {
     const n = noteOf(d)
     const who = n.other?.name ? `«${n.other.name}»` : ''
@@ -125,8 +131,25 @@ function editDetail(n, t, money) {
   return parts.join('; ') || t('правку сделали в двух местах')
 }
 
+// Виды операций кассы — для расхождения «не принято»
+const OP_TYPE = {
+  sale: 'Продажа',
+  return: 'Возврат',
+  'shift.open': 'Открытие смены',
+  'shift.close': 'Закрытие смены',
+  'cash.move': 'Внесение или изъятие',
+  'customer.create': 'Новый клиент',
+  'debt.pay': 'Погашение долга',
+  writeoff: 'Списание',
+  arrival: 'Приход',
+  expense: 'Расход',
+  income: 'Доход',
+  'user.update': 'Смена пароля',
+}
+
 // Что владельцу с этим делать
 export function discrepancyAdvice(kind, t) {
+  if (kind === 'notTaken') return t('Операция не легла в базу магазина: проверьте её на кассе и, если нужно, проведите заново на главном компьютере.')
   if (kind === 'edit') return t('Проверьте карточку: если осталось не то, что нужно, поправьте её ещё раз.')
   if (kind === 'barcode') {
     return t('Если это один и тот же товар — объедините карточки кнопкой «Объединить». Остаток и история перейдут к основной карточке.')

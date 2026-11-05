@@ -11,7 +11,7 @@ import { refreshDesktopStatus, useDesktopStatus } from '../db/desktopStatus'
 import { useT } from '../lib/i18n'
 import { fmtShort } from '../lib/time'
 import { lanErrorText } from '../lib/lanStatus'
-import { mainProblemText, pairLeft } from '../lib/kassy'
+import { mainProblemText, pairLeft, REJOIN } from '../lib/kassy'
 import { JoinCard } from './BezInterneta'
 import { useDialog, useToast } from './ui'
 
@@ -33,6 +33,14 @@ export default function SoloKassyPanel() {
     return () => clearInterval(every)
   }, [])
   const pairing = net?.pairing
+  // Сколько коду осталось, главный присылает сам: часы окна и программы могут расходиться
+  const [deadline, setDeadline] = useState(0)
+  const leftMs = pairing?.leftMs
+  const pairCode = pairing?.code
+  useEffect(() => {
+    setDeadline(pairCode && Number.isFinite(leftMs) ? Date.now() + leftMs : 0)
+    setNow(Date.now())
+  }, [pairCode, leftMs])
   useEffect(() => {
     if (!pairing) return undefined
     const every = setInterval(() => setNow(Date.now()), 1000)
@@ -79,7 +87,7 @@ export default function SoloKassyPanel() {
         </p>
         <div className="solo-rows">
           <div><span>{t('Эта касса')}</span><b>{net.name || '—'}</b></div>
-          <div><span>{t('Главный компьютер')}</span><b>{m.name || '—'}{m.address ? ` · ${m.address}` : ''}</b></div>
+          <div><span>{t('Главный компьютер')}</span><b>{m.name || t('Главный компьютер')}{m.address ? ` · ${m.address}${m.port && m.port !== 47810 ? ':' + m.port : ''}` : ''}</b></div>
           <div>
             <span>{t('Связь с главным')}</span>
             <b>{m.online ? t('на связи') : m.seenAt ? `${t('последний обмен')} ${fmtShort(m.seenAt)}` : t('нет связи')}</b>
@@ -103,7 +111,7 @@ export default function SoloKassyPanel() {
             <button className="btn ghost" disabled={!!busy} onClick={() => act('now', () => bridge.lan.now())}>
               <span className={'ic' + (busy === 'now' ? ' spin' : '')}><LuRefreshCw size={16} /></span> {busy === 'now' ? t('Обмен…') : t('Обменяться с главным сейчас')}
             </button>
-            <button className={'btn ' + (m.error === 'star' || m.error === 'epoch' ? 'gold' : 'ghost')} disabled={!!busy} onClick={() => setRejoin(true)} data-testid="solo-rejoin">
+            <button className={'btn ' + (REJOIN.has(m.error) ? 'gold' : 'ghost')} disabled={!!busy} onClick={() => setRejoin(true)} data-testid="solo-rejoin">
               <span className="ic"><LuStore size={16} /></span> {t('Подключить заново')}
             </button>
           </div>
@@ -116,7 +124,7 @@ export default function SoloKassyPanel() {
   // ── Главный компьютер ──
   const regs = net.registers || []
   const on = regs.filter((r) => r.online).length
-  const left = pairing ? pairLeft(pairing.until, now) : ''
+  const left = pairing ? pairLeft(deadline, now) : ''
   const unpair = async (r) => {
     const ok = await dialog.confirm({
       title: `${t('Отключить кассу')} «${r.name}»?`,
@@ -159,6 +167,11 @@ export default function SoloKassyPanel() {
         ))}
       </div>
       {regs.length === 0 && !pairing && <div className="tag-cat" style={{ marginBottom: 10 }}>{t('Касс пока нет: магазин работает на одном этом компьютере.')}</div>}
+      {net.lanError && (
+        <div className="note warn" style={{ marginBottom: 12 }}>
+          {t('Входящие подключения на этом компьютере не открылись: кассы не смогут до него дозвониться. Перезапустите программу; если не поможет — проверьте, не занят ли порт другой программой.')}
+        </div>
+      )}
 
       {pairing && left ? (
         <div className="pair-box" data-testid="solo-pair-box">

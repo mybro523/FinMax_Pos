@@ -21,7 +21,9 @@
 //
 // Магазин без интернета (1.7.0): сервера нет, ключ заводит главный компьютер и отдаёт кассе
 // при подключении (см. «Подключение кассы» ниже). Кассы говорят только с главным, главный —
-// только со своими кассами (hub.allow): так у всех один порядок операций.
+// только со своими кассами (hub.allow): так у всех один порядок операций. У каждой кассы свой
+// ключ обмена с главным (hub.keyFor): сообщение тогда начинается с номера отправителя открытым
+// текстом — по нему получатель берёт ключ. Отключил главный кассу — её ключа больше нет.
 import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes, scryptSync } from 'node:crypto'
 import { gunzipSync, gzipSync } from 'node:zlib'
 import { constants as bufferConstants } from 'node:buffer'
@@ -89,8 +91,12 @@ export const PAIR_LEN = 8
 const PAIR_ABC = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
 const PAIR_LOOKALIKE = { O: '0', I: '1', L: '1', А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: '0', Р: 'P', С: 'C', Т: 'T', Х: 'X' }
 const PAIR_PATH = '/lan/v1/pair'
-// Запрос кассы — её неотправленные операции (подключение заново); ответ — вся база магазина
-const PAIR_MAX_REQ = 64 * 1024 * 1024
+// Запрос кассы — её журнал, сжатый (подключение заново); ответ — вся база магазина
+const PAIR_MAX_REQ = 16 * 1024 * 1024
+// Сколько всего байт порт держит в памяти разом и сколько подключений принимает: забитый
+// мусором порт не должен положить кассу
+const MAX_INFLIGHT = 48 * 1024 * 1024
+const MAX_CONNECTIONS = 24
 export const PAIR_MAX_RES = 512 * 1024 * 1024
 const PAIR_MAGIC = Buffer.from('FMXP1')
 // Пока главный собирает базу, касса ждёт без единого байта — дольше обычного обмена
@@ -118,11 +124,31 @@ export function pairKeys(code) {
   const tag = createHmac('sha256', enc).update('finmax-pair-tag-v1').digest('hex').slice(0, 24)
   return { enc, tag }
 }
-// Ответ главного: сведения о магазине и база — двумя шифрованными частями
+// Сообщение со своим ключом у каждого соседа: «FMXK», длина номера, номер, зашифрованное
+const PEER_MAGIC = Buffer.from('FMXK')
+function peerFrame(fromId, sealed) {
+  const id = Buffer.from(String(fromId), 'utf8')
+  return Buffer.concat([PEER_MAGIC, Buffer.from([id.length]), id, sealed])
+}
+function peerUnframe(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 6 || !buf.subarray(0, 4).equals(PEER_MAGIC)) return null
+  const n = buf[4]
+  if (!n || buf.length < 5 + n) return null
+  return { id: buf.subarray(5, 5 + n).toString('utf8'), rest: buf.subarray(5 + n) }
+}
+
+// Ответ главного: сведения о магазине и база — двумя шифрованными частями. Запрос кассы — так же:
+// сведения и её журнал (сжатый)
 function pairFrame(meta, db) {
   const len = Buffer.alloc(4)
   len.writeUInt32BE(meta.length)
   return Buffer.concat([PAIR_MAGIC, len, meta, db])
+}
+function pairUnframe(raw) {
+  if (!Buffer.isBuffer(raw) || raw.length < 9 || !raw.subarray(0, 5).equals(PAIR_MAGIC)) return null
+  const n = raw.readUInt32BE(5)
+  if (raw.length < 9 + n) return null
+  return { meta: raw.subarray(9, 9 + n), rest: raw.subarray(9 + n) }
 }
 
 // HTTP-запрос к соседу: тело — уже зашифрованное сообщение
@@ -235,6 +261,10 @@ export async function pairRequest({
   host = '',
   shopId = '',
   entries = [],
+  // Версия базы этой кассы (число шагов схемы): база главного другой версии ей не подойдёт
+  schema = 0,
+  // Касса раньше работала с другим главным: подключить как новую, ничего не неся
+  fresh = false,
   http = nodeHttp,
   dgram = nodeDgram,
   os = nodeOs,
@@ -255,7 +285,8 @@ export async function pairRequest({
     target = await findMain({ tag: k.tag, deviceId, dgram, os, udpPort, ms: findMs })
     if (!target) return { error: 'notfound' }
   }
-  const body = seal(k.enc, { v: 1, t: 'pair', from: deviceId, name, host, shopId, ts: now(), entries })
+  const z = gzipSync(Buffer.from(JSON.stringify(Array.isArray(entries) ? entries : []), 'utf8'))
+  const body = pairFrame(seal(k.enc, { v: 1, t: 'pair', from: deviceId, name, host, shopId, ts: now(), schema, fresh: !!fresh }), sealRaw(k.enc, z))
   if (body.length > PAIR_MAX_REQ) return { error: 'big' }
   let raw
   try {
@@ -266,18 +297,18 @@ export async function pairRequest({
     if (e?.status === 413) return { error: 'big' }
     return { error: 'connect' }
   }
-  if (raw.length < 9 || !raw.subarray(0, 5).equals(PAIR_MAGIC)) return { error: 'broken' }
-  const n = raw.readUInt32BE(5)
+  const f = pairUnframe(raw)
+  if (!f) return { error: 'broken' }
   let meta
   try {
-    meta = unseal(k.enc, raw.subarray(9, 9 + n))
+    meta = unseal(k.enc, f.meta)
   } catch {
     return { error: 'code' }
   }
   if (!meta?.ok) return { error: typeof meta?.error === 'string' ? meta.error.slice(0, 40) : 'broken' }
   let db
   try {
-    db = gunzipSync(unsealRaw(k.enc, raw.subarray(9 + n)), { maxOutputLength: Math.min(bufferConstants.MAX_LENGTH, 2 * 1024 * 1024 * 1024) })
+    db = gunzipSync(unsealRaw(k.enc, f.rest), { maxOutputLength: Math.min(bufferConstants.MAX_LENGTH, 2 * 1024 * 1024 * 1024) })
   } catch {
     return { error: 'broken' }
   }
@@ -357,8 +388,11 @@ function validMsg(msg, s, nowMs) {
 // Магазин без интернета (1.7.0), всё — по желанию:
 //   allow(deviceId) — с этой кассой можно говорить (звезда: касса — только с главным)
 //   epochOk(epoch) — сосед из того же «поколения» магазина (главный не загружал копию)
-//   pairInfo() → { enc, tag } — у главного открыт код подключения; pairFailed() — неверный код
-//   pairServe({ from, name, host, shopId, entries, address }) → { meta, db } или { error }
+//   pairInfo(address) → { enc, tag } — у главного открыт код подключения (null — нет, или с этого
+//   адреса уже подбирали); pairFailed(address) — неверный код
+//   pairServe({ from, name, host, shopId, entries, schema, fresh, address }) → { meta, db } или { error }
+//   keyFor(deviceId) — ключ обмена с этим соседом (state().perPeer); gapFor(since) — журнала с этого
+//   места здесь уже нет (сосед долго молчал): 410, ему подключиться заново
 export function createLan({
   hub,
   log = { info() {}, warn() {} },
@@ -383,6 +417,8 @@ export function createLan({
   let helloTimer = null
   let kickTimer = null
   let serverError = ''
+  // Сколько байт тел запросов порт держит сейчас
+  let inflightBytes = 0
   const inflight = new Map()
   // Неудачи по адресу: сколько подряд и раньше какого момента не пробовать снова
   const fails = new Map()
@@ -406,48 +442,83 @@ export function createLan({
     }
     return keys
   }
+  // Ключи обмена соседей (perPeer): по их ключу — шифр сообщений
+  const peerKeys = new Map()
+  function encFor(key) {
+    if (!peerKeys.has(key)) {
+      if (peerKeys.size > 64) peerKeys.clear()
+      peerKeys.set(key, lanKeys(key).enc)
+    }
+    return peerKeys.get(key)
+  }
+  const perPeer = (s) => s?.perPeer === true && typeof hub.keyFor === 'function'
 
   // ── Сосед звонит нам ──
   function handleBody(buf, remote) {
     const s = st()
     if (!s || !s.enabled || !s.key) return { code: 503 }
-    const k = ensureKeys(s)
+    let enc = null
+    let claimed = ''
+    if (perPeer(s)) {
+      // Свой ключ у каждого соседа: кто пишет — открытым текстом, ключ — его
+      const f = peerUnframe(buf)
+      if (!f || !ID.test(f.id)) return { code: 400 }
+      const key = hub.keyFor(f.id)
+      // Не своя касса (её отключили на главном, или она чужая)
+      if (!key) return { code: 423 }
+      enc = encFor(key)
+      claimed = f.id
+      buf = f.rest
+    } else enc = ensureKeys(s).enc
     let msg
     try {
-      msg = unseal(k.enc, buf)
+      msg = unseal(enc, buf)
     } catch {
       // Не тот ключ: другой магазин или посторонний
       return { code: 403 }
     }
     const t = now()
     if (!validMsg(msg, s, t)) return { code: 400 }
+    // Назвался одной кассой, а ключ — другой
+    if (claimed && msg.from !== claimed) return { code: 403 }
     // Звоним сами себе (вписали свой же адрес)
     if (msg.from === s.deviceId) return { code: 409 }
     // Магазин без интернета: не своя касса (её отключили на главном) и касса прежнего «поколения»
     if (typeof hub.allow === 'function' && !hub.allow(msg.from)) return { code: 423 }
     if (typeof hub.epochOk === 'function' && !hub.epochOk(msg.e)) return { code: 412 }
+    // Журнала, который ей нужен, здесь уже нет — подключиться заново
+    if (typeof hub.gapFor === 'function' && hub.gapFor(msg.ack)) return { code: 410 }
     hub.peerSeen({ deviceId: msg.from, name: msg.name, address: remote, port: msg.port || 0, wide: !!msg.wide, ok: true, now: t })
     hub.receive(msg.from, msg.entries)
     hub.progress(msg.from, { sentUpTo: msg.ack, gotUpTo: msg.upTo })
     const out = hub.entriesFor(msg.ack, !!msg.wide)
     const reply = { v: 1, t: 'x', from: s.deviceId, name: s.name, wide: !!s.wide, port, ts: t, ack: msg.upTo, entries: out.entries, upTo: out.upTo, more: !!out.more, e: s.epoch || undefined }
-    return { code: 200, body: seal(k.enc, reply) }
+    return { code: 200, body: seal(enc, reply) }
   }
 
   // ── Касса подключается по коду (магазин без интернета) ──
   function handlePair(buf, remote) {
-    const p = typeof hub.pairInfo === 'function' ? hub.pairInfo() : null
+    const p = typeof hub.pairInfo === 'function' ? hub.pairInfo(remote) : null
     if (!p) return { code: 404 }
-    let msg
+    const f = pairUnframe(buf)
+    let msg = null
     try {
-      msg = unseal(p.enc, buf)
+      if (!f) throw new Error('не тот формат')
+      msg = unseal(p.enc, f.meta)
     } catch {
       // Код не тот: считаем — подбирать его по сети не дадут
-      hub.pairFailed?.()
+      hub.pairFailed?.(remote)
       return { code: 403 }
     }
     const t = now()
     if (!msg || msg.v !== 1 || msg.t !== 'pair' || typeof msg.from !== 'string' || !ID.test(msg.from) || !Number.isFinite(Number(msg.ts))) return { code: 400 }
+    let entries = []
+    try {
+      const list = JSON.parse(gunzipSync(unsealRaw(p.enc, f.rest), { maxOutputLength: 256 * 1024 * 1024 }).toString('utf8'))
+      entries = Array.isArray(list) ? list : []
+    } catch {
+      return { code: 400 }
+    }
     const text = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '')
     let r
     try {
@@ -456,7 +527,9 @@ export function createLan({
         name: text(msg.name, 60),
         host: text(msg.host, 60),
         shopId: text(msg.shopId, 64),
-        entries: Array.isArray(msg.entries) ? msg.entries : [],
+        entries,
+        schema: Number.isInteger(msg.schema) ? msg.schema : 0,
+        fresh: msg.fresh === true,
         address: remote,
         at: t,
       })
@@ -476,32 +549,56 @@ export function createLan({
     }
     const pairing = req.url === PAIR_PATH
     const limit = pairing ? PAIR_MAX_REQ : MAX_BODY
+    const remote = cleanAddr(req.socket?.remoteAddress)
+    const refuse = (code) => {
+      res.writeHead(code, { Connection: 'close' })
+      res.end()
+      req.destroy()
+    }
+    // Кода подключения нет — тело не читаем вовсе; заявленное тело больше предела — тоже;
+    // порт и так держит в памяти слишком много — пусть повторят позже
+    if (pairing && !(typeof hub.pairInfo === 'function' && hub.pairInfo(remote))) return refuse(404)
+    const declared = Number(req.headers['content-length'])
+    if (Number.isFinite(declared) && declared > limit) return refuse(413)
+    if (inflightBytes > MAX_INFLIGHT) return refuse(503)
     const chunks = []
     let size = 0
     let tooBig = false
+    let held = 0
+    const release = () => {
+      inflightBytes -= held
+      held = 0
+    }
     req.setTimeout(REQ_TIMEOUT_MS, () => req.destroy())
     req.on('data', (c) => {
       if (tooBig) return
       size += c.length
-      if (size > limit) {
+      if (size > limit || inflightBytes + c.length > MAX_INFLIGHT) {
         tooBig = true
-        res.writeHead(413, { Connection: 'close' })
+        release()
+        res.writeHead(size > limit ? 413 : 503, { Connection: 'close' })
         res.end()
         req.destroy()
-      } else chunks.push(c)
+      } else {
+        chunks.push(c)
+        held += c.length
+        inflightBytes += c.length
+      }
     })
     req.on('end', () => {
       if (tooBig) return
       let r
       try {
-        r = (pairing ? handlePair : handleBody)(Buffer.concat(chunks), cleanAddr(req.socket?.remoteAddress))
+        r = (pairing ? handlePair : handleBody)(Buffer.concat(chunks), remote)
       } catch (e) {
         log.warn('обмен по сети: запрос соседа не обработан', e)
         r = { code: 500 }
       }
+      release()
       res.writeHead(r.code, { 'Content-Type': 'application/octet-stream', Connection: 'close' })
       res.end(r.body)
     })
+    req.on('close', release)
     req.on('error', () => {})
   }
 
@@ -510,6 +607,7 @@ export function createLan({
       let attempt = 0
       const tryListen = () => {
         const srv = http.createServer(onRequest)
+        srv.maxConnections = MAX_CONNECTIONS
         srv.on('error', (e) => {
           if (e?.code === 'EADDRINUSE' && attempt < portTries - 1) {
             attempt++
@@ -542,6 +640,10 @@ export function createLan({
     // Магазин без интернета: главный эту кассу не знает (отключил) или загрузил копию базы
     if (e?.status === 423) return 'star'
     if (e?.status === 412) return 'epoch'
+    // Журнала с нужного места у главного уже нет (касса долго молчала) — подключиться заново
+    if (e?.status === 410) return 'gone'
+    // Основа главного не легла на эту кассу (gateway, regReceive)
+    if (e?.code === 'BASE') return 'base'
     if (e?.status === 503) return 'off'
     if (e?.code === 'ECONNREFUSED') return 'refused'
     if (e?.code === 'ENOTFOUND' || e?.code === 'EAI_AGAIN') return 'notfound'
@@ -558,16 +660,27 @@ export function createLan({
     if (inflight.has(addr)) return inflight.get(addr)
     const f = fails.get(addr)
     if (f && f.until > now() && !target.force) return Promise.resolve(false)
-    const k = ensureKeys(s)
+    // Свой ключ у каждого соседа: без номера соседа (адрес вписан вручную) звонить нечем
+    let enc
+    const framed = perPeer(s)
+    if (framed) {
+      const key = target.deviceId ? hub.keyFor(target.deviceId) : ''
+      if (!key) return Promise.resolve(false)
+      enc = encFor(key)
+    } else enc = ensureKeys(s).enc
+    const k = { enc }
     const job = (async () => {
       for (let round = 0; round < 20; round++) {
         const peer = target.deviceId ? hub.peer(target.deviceId) : null
+        // Журнала, который нужен соседу, здесь уже нет: он позвонит сам и узнает, что подключаться заново
+        if (peer && typeof hub.gapFor === 'function' && hub.gapFor(peer.sentUpTo)) throw Object.assign(new Error('журнала с этого места нет'), { status: 410 })
         const out = peer ? hub.entriesFor(peer.sentUpTo, !!peer.wide) : { entries: [], upTo: 0, more: false }
         const req = {
           v: 1, t: 'x', from: s.deviceId, name: s.name, wide: !!s.wide, port, ts: now(),
           ack: peer ? peer.gotUpTo : 0, entries: out.entries, upTo: peer ? out.upTo : 0, e: s.epoch || undefined,
         }
-        const msg = unseal(k.enc, await post(target.host, target.port, seal(k.enc, req)))
+        const sealed = seal(k.enc, req)
+        const msg = unseal(k.enc, await post(target.host, target.port, framed ? peerFrame(s.deviceId, sealed) : sealed))
         const t = now()
         if (!validMsg(msg, s, t)) throw new Error('сосед ответил непонятно')
         if (msg.from === s.deviceId) throw Object.assign(new Error('это этот же компьютер'), { status: 409 })
@@ -610,10 +723,12 @@ export function createLan({
     const list = []
     const known = now() - KNOWN_DAYS * 86400000
     const byDevice = new Set()
+    // Магазин без интернета (звезда): свой главный и свои кассы — всегда, сколько бы ни молчали
+    const always = perPeer(st())
     for (const p of hub.peers()) {
       if (!p.address || !p.port) continue
       const fresh = (p.okAt && Date.parse(p.okAt) > known) || (p.seenAt && Date.parse(p.seenAt) > known)
-      if (!fresh) continue
+      if (!fresh && !(always && hub.keyFor(p.deviceId))) continue
       list.push({ host: p.address, port: p.port, deviceId: p.deviceId, force })
       byDevice.add(p.deviceId)
     }
@@ -680,7 +795,9 @@ export function createLan({
     // Магазин без интернета: другая касса того же магазина — не наш собеседник (звезда)
     if (typeof hub.allow === 'function' && !hub.allow(m.d)) return
     const address = cleanAddr(rinfo.address)
-    hub.peerSeen({ deviceId: m.d, name: typeof m.n === 'string' ? m.n : '', address, port: m.p, now: now() })
+    // Знакомого соседа новый адрес из одного «привет» не меняет (его подделать легко): адрес
+    // запишется, если обмен по нему удастся
+    if (!hub.peer?.(m.d)) hub.peerSeen({ deviceId: m.d, name: typeof m.n === 'string' ? m.n : '', address, port: m.p, now: now() })
     if (m.t === 'hi') hello('re', { address: rinfo.address, port: rinfo.port })
     exchange({ host: address, port: m.p, deviceId: m.d })
   }

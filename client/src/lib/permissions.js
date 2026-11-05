@@ -121,11 +121,16 @@ export function permissionsOf(user) {
 }
 
 // Достаточно любого из перечисленных прав
+// Касса магазина без интернета (1.7.0): удалить покупателя и пересчитать остаток можно только на
+// главном компьютере — даже владельцу. Кнопок этого на кассе нет
+export const MAIN_ONLY = new Set(['customers.delete', 'inventory.count', 'inventory.apply'])
 export function can(user, ...keys) {
   if (!user) return false
+  const list = user.register ? keys.filter((k) => !MAIN_ONLY.has(k)) : keys
+  if (!list.length) return false
   if (user.role === 'founder') return true
   const own = permissionsOf(user)
-  return keys.some((k) => own.includes(k))
+  return list.some((k) => own.includes(k))
 }
 
 // ── Кассир: касса сразу после входа ──
