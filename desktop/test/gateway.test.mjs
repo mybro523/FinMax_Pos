@@ -1384,6 +1384,66 @@ test('оплата закончилась, пока касса без связи
   assert.deepEqual(stops(t), [], 'объявления про связь нет: дело в оплате')
 })
 
+// ── 1.6.5: дату оплаты не продлить правкой файла базы ──
+// Срока работы без связи больше нет — значит, и потолка «месяц», который раньше ограничивал
+// правку обычных столбцов базы руками. Срок оплаты и состояние подписки касса сверяет с
+// зашифрованной записью: берёт более ранний срок и более строгое состояние
+
+test('1.6.5: срок оплаты, поправленный в файле базы, работу без связи не продлевает', async (tt) => {
+  const t = await loggedIn()
+  tt.after(() => t.gw.close())
+  t.srv.state.online = false
+  t.core.prepare("UPDATE accounts SET paidUntil = '2099-01-01T00:00:00.000Z', subStatus = 'active'").run()
+  t.time.now += 30 * DAY_MS
+  const sale = await sell(t, 1)
+  assert.equal(sale.status, 403)
+  assert.match(sale.data.message, /Подписка закончилась/)
+  // И стёртый срок — тоже
+  t.core.prepare('UPDATE accounts SET paidUntil = NULL').run()
+  assert.equal((await sell(t, 1)).status, 403)
+})
+
+test('1.6.5: сервер приостановил работу — «active», вписанное в файл базы, без связи не помогает', async (tt) => {
+  const t = await loggedIn()
+  tt.after(() => t.gw.close())
+  t.srv.state.pharmacy.status = 'suspended'
+  await t.gw.syncNow()
+  t.srv.state.online = false
+  t.core.prepare("UPDATE accounts SET subStatus = 'active'").run()
+  const sale = await sell(t, 1)
+  assert.equal(sale.status, 403)
+  assert.match(sale.data.message, /приостановлен/)
+})
+
+test('1.6.5: зашифрованную запись о проверке стёрли — без связи работа до проверки; связь вернулась — работа сама', async (tt) => {
+  const t = await loggedIn()
+  tt.after(() => t.gw.close())
+  t.srv.state.online = false
+  t.core.prepare('DELETE FROM licences').run()
+  const products = await t.req('GET', '/products')
+  assert.deepEqual([products.status, products.data.message], [403, MESSAGES.unverified])
+  t.gw.logout()
+  const again = await t.login()
+  assert.deepEqual([again.status, again.data.message], [401, MESSAGES.unverified])
+  // Связь вернулась: вход через сервер — это и есть проверка
+  t.srv.state.online = true
+  assert.equal((await t.login()).status, 201)
+  assert.equal((await sell(t, 1)).status, 201)
+  // А дальше и без связи — как обычно
+  t.srv.state.online = false
+  assert.equal((await sell(t, 1)).status, 201)
+})
+
+test('1.6.5: честная касса — оплату продлили, касса узнала при обмене и работает без связи дальше', async (tt) => {
+  const t = await loggedIn()
+  tt.after(() => t.gw.close())
+  t.srv.state.pharmacy.paidUntil = '2026-12-31T12:00:00.000Z'
+  await t.gw.syncNow()
+  t.srv.state.online = false
+  t.time.now += 40 * DAY_MS
+  assert.equal((await sell(t, 1)).status, 201, 'новый срок — и в обычных столбцах, и в зашифрованной записи')
+})
+
 test('постоянное соединение оборвалось — касса сразу выясняет, есть ли интернет, а не ждёт пяти минут', async (tt) => {
   const t = await loggedIn()
   tt.after(() => t.gw.close())

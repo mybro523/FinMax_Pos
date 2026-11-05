@@ -7,6 +7,9 @@ import { Public } from './auth/decorators'
 // Номер коммита подставляет площадка: свой сервер (deploy/ovh, GIT_COMMIT_SHA) или Railway;
 // при локальном запуске его нет.
 const BUILD = {
+  // НЕ ПЕРЕИМЕНОВЫВАТЬ: по { status: 'ok', service: 'apteka-api' } сайт и программа для Windows
+  // (с 1.6.5) узнают свой сервер, выбирая основной или запасной адрес (client/src/db/apiBase.js,
+  // desktop/src/net.mjs healthProbe). Другое имя — и все кассы сочтут сервер недоступным
   service: 'apteka-api',
   commit: (process.env.GIT_COMMIT_SHA || process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || 'dev',
   startedAt: new Date().toISOString(),

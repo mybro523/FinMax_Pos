@@ -34,7 +34,7 @@ import {
   permissionsOf,
 } from './local/accounts.mjs'
 import { matchFallback, matchLocal, pendingInPeriod } from './local/api.mjs'
-import { confirmLicence, licenceOf, touchLicence } from './local/licence.mjs'
+import { confirmLicence, licenceOf, licenceTerms, sealStatus, touchLicence } from './local/licence.mjs'
 import { ApiError, getMeta, inTx, openDb, q, setMeta } from './local/db.mjs'
 import { getDoc, putDoc } from './local/docs.mjs'
 import { REJECTED_SALE } from './local/ops/return.mjs'
@@ -89,6 +89,9 @@ export const MESSAGES = {
   onlineOnly: 'Этот раздел работает только с интернетом. Касса, склад, инвентаризация, товары, поставщики, расходы, доходы и сотрудники доступны и без него.',
   notSent: 'Эта запись ещё не отправлена на сервер. Изменить или удалить её можно будет после отправки.',
   noOfflineLogin: 'Нет связи с сервером. Под этим именем на этом компьютере ещё не входили — первый вход возможен только с интернетом.',
+  // Сверить оплату не с чем: зашифрованной записи о проверке сервером нет (её стёрли, или
+  // проверки на этом компьютере не было) — работа после проверки (1.6.5, gateway withTerms)
+  unverified: 'Программа не может подтвердить оплату магазина на этом компьютере. Подключите интернет хотя бы на минуту — работа продолжится сразу после проверки. Все чеки сохранены на этом компьютере.',
   suspended: 'Работа магазина приостановлен. Обратитесь к поставщику программы.',
   broken: 'Программа не смогла выполнить действие. Повторите; если не поможет — перезапустите программу.',
   oldSale: 'Этот чек оформлен давно и на кассе не хранится. Возврат по нему возможен только с интернетом.',
@@ -360,6 +363,7 @@ export function createGateway({
           {
             method: 'POST',
             path: '/sync/push',
+            patient: true,
             timeoutMs: pushTimeout(ops),
             headers: asDevice,
             body: {
@@ -378,7 +382,7 @@ export function createGateway({
         // Вошли без интернета, а ключа от прошлого входа нет. Забрать данные нечем;
         // но если сервер уже доступен — просим войти заново, теперь через него
         if (!token) {
-          const probe = await remote({ method: 'GET', path: '/health', timeoutMs: 10000 })
+          const probe = await remote({ method: 'GET', path: '/health', timeoutMs: 10000, patient: true })
           return probe.status === 200 && !probe.foreign ? { status: 401, data: { message: MESSAGES.needLogin } } : { status: 0 }
         }
         const query = new URLSearchParams({
@@ -396,7 +400,7 @@ export function createGateway({
           // придёт целиком и ляжет основой
           ...(getMeta(db, 'teamv') && getMeta(db, 'needFull') !== '1' ? { teamv: getMeta(db, 'teamv') } : {}),
         })
-        return remote({ method: 'GET', path: '/sync/pull?' + query, timeoutMs: SYNC_TIMEOUT_MS, headers: asDevice }, token)
+        return remote({ method: 'GET', path: '/sync/pull?' + query, timeoutMs: SYNC_TIMEOUT_MS, headers: asDevice, patient: true }, token)
       },
       onChanged: (keys) => send('changed', keys),
       onDenied: (res, token) => {
@@ -888,8 +892,13 @@ export function createGateway({
     if (res.status === 403) {
       // Сервер закрыл работу магазина. Запоминаем, чтобы и без связи касса не работала
       const text = String(res.data?.message || '')
-      if (/приостановлен/i.test(text)) setSubscription(core, acc.pharmacyCode, { status: 'suspended' })
-      else if (/Подписка закончилась/.test(text)) setSubscription(core, acc.pharmacyCode, { status: 'expired' })
+      if (/приостановлен/i.test(text)) {
+        setSubscription(core, acc.pharmacyCode, { status: 'suspended' })
+        sealStatus(core, acc.pharmacyCode, 'suspended', sealing)
+      } else if (/Подписка закончилась/.test(text)) {
+        setSubscription(core, acc.pharmacyCode, { status: 'expired' })
+        sealStatus(core, acc.pharmacyCode, 'expired', sealing)
+      }
     }
   }
 
@@ -900,7 +909,12 @@ export function createGateway({
       setSubscription(core, acc.pharmacyCode, { status: user.subscription.status, paidUntil: user.subscription.paidUntil })
       // Сервер ответил про подписку — отметка «последняя связь с сервером» (по ней же
       // держится память часов, см. local/licence.mjs)
-      confirmLicence(core, acc.pharmacyCode, { now: clock.now(), days: user.subscription.offlineDays }, sealing)
+      confirmLicence(
+        core,
+        acc.pharmacyCode,
+        { now: clock.now(), days: user.subscription.offlineDays, paidUntil: user.subscription.paidUntil ?? null, status: user.subscription.status ?? null },
+        sealing,
+      )
     }
     return acc ? accountById(core, acc.id) : null
   }
@@ -912,8 +926,29 @@ export function createGateway({
   // интернета касса работает сколько угодно
   const licence = (acc) => licenceOf(core, acc.pharmacyCode, licNow(), sealing)
 
+  // ── Подписка: обычные столбцы сверяются с зашифрованной записью (1.6.5) ──
+  // Срок оплаты и состояние лежат и в обычных столбцах (accounts), и в зашифрованной записи
+  // (local/licence.mjs) — со слова сервера в оба места. Столбцы можно поправить руками, запись —
+  // нет. Пока срок работы без связи ограничивал такую правку месяцем, этого хватало; с 1.6.5 срока
+  // нет — поэтому срок оплаты берётся более ранний, состояние — более строгое. Записи нет вовсе —
+  // проверки сервером на этом компьютере не было (её пишет любой вход и обмен с интернетом) или её
+  // стёрли: работа — после проверки
+  const STRICT = { suspended: 3, expired: 2, trial: 1, active: 0 }
+  function withTerms(acc) {
+    if (!acc) return acc
+    const t = licenceTerms(core, acc.pharmacyCode, sealing)
+    if (!t) return { ...acc, unverified: true }
+    const plain = Date.parse(acc.paidUntil || '')
+    const sealed = Date.parse(t.paidUntil || '')
+    const paidUntil = Number.isFinite(sealed) && !(plain <= sealed) ? t.paidUntil : acc.paidUntil
+    const subStatus = (STRICT[t.status] ?? -1) > (STRICT[acc.subStatus] ?? -1) ? t.status : acc.subStatus
+    return { ...acc, paidUntil, subStatus }
+  }
+
   function access(acc) {
-    return subscriptionOf(acc, licNow())
+    const t = withTerms(acc)
+    if (t?.unverified) return { status: 'unverified', canWrite: false, warn: true, message: MESSAGES.unverified }
+    return subscriptionOf(t, licNow())
   }
 
   const seal = (text) => {
@@ -1031,24 +1066,28 @@ export function createGateway({
   async function login(req) {
     const name = String(req.body?.name ?? '')
     const password = String(req.body?.password ?? '')
-    const res = await remote(req)
+    let res = await remote(req)
 
     // Сервер не ответил или ответил бедой по дороге — проверяем пароль сами
     if (isLinkFailure(res)) {
       try {
         // Счёт неудачных попыток и срок подписки — по времени срока: за часами компьютера,
         // которым нельзя верить, оно не идёт, и переводом даты запрет на вход не снять
-        const acc = await offlineLogin(core, { name, password }, { now: licNow(), open })
+        const acc = await offlineLogin(core, { name, password }, { now: licNow(), open, terms: withTerms, unverified: MESSAGES.unverified })
         session.activate(acc.id)
         onSession()
         enter(acc)
         log.info(`вход без связи: ${acc.login}`)
-        return reply(201, { token: DESKTOP_TOKEN, user: userView(acc, licNow()) })
+        return reply(201, { token: DESKTOP_TOKEN, user: { ...userView(withTerms(acc), licNow()), subscription: access(acc) } })
       } catch (e) {
         if (!(e instanceof ApiError)) throw e
-        // Человека на этом компьютере не знают — отвечаем как «нет связи», но с объяснением
-        if (e.status === 503) return offline(MESSAGES.noOfflineLogin, !!res.timedOut)
-        return refuse(e.status, e.message)
+        if (e.status !== 503) return refuse(e.status, e.message)
+        // Человека на этом компьютере не знают: без сервера не войти. Если сам вход на сервер не
+        // ходил (сервер недавно молчал или адрес ещё выбирается) — пробуем по-настоящему, с обычным
+        // ожиданием: на медленной связи короткая проверка адреса могла не успеть (net.mjs)
+        if (res.skipped) res = await remote({ ...req, patient: true })
+        // Не вышло и так — отвечаем как «нет связи», но с объяснением
+        if (isLinkFailure(res)) return offline(MESSAGES.noOfflineLogin, !!res.timedOut)
       }
     }
 

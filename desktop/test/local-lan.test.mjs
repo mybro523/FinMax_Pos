@@ -143,13 +143,19 @@ test('сервер отверг продажу соседа — у владел�
   assert.equal(row(b, 'SELECT state FROM lan_log WHERE id = ?', op.id).state, 'rejected')
 })
 
-test('чужая операция, не дошедшая до сервера за две недели, снимается', () => {
+test('1.6.5: магазин месяцами без интернета — чужая продажа держится; снимается только через год', () => {
   const a = shop()
   const b = shop()
   checkout(atA(a), { items: [{ productId: 'nur', qty: 1 }], payment: 'cash' })
   pass(a, A, b)
   assert.equal(units(b), 4)
-  assert.equal(lanPrune(b, NOW + 15 * DAY), true)
+  // Прежде через 15 дней чужая продажа снималась — остаток «возвращался», чек пропадал
+  assert.equal(lanPrune(b, NOW + 15 * DAY), false)
+  assert.equal(lanPrune(b, NOW + 200 * DAY), false)
+  assert.equal(units(b), 4, 'полгода без интернета — продажа соседней кассы на месте')
+  assert.equal(listDocs(b, 'sale').length, 1)
+  // Год — чужое, так и не дошедшее до сервера, снимается
+  assert.equal(lanPrune(b, NOW + 366 * DAY), true)
   assert.equal(units(b), 5)
   assert.equal(listDocs(b, 'sale').length, 0)
 })

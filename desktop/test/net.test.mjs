@@ -363,12 +363,37 @@ test('сервер молчит по обоим адресам — «связи 
   assert.equal((await remote({ method: 'GET', path: '/auth/me' })).status, 0)
   assert.deepEqual(net.calls, [])
 
-  // Прошло 20 секунд, интернет вернулся — адреса спрашиваются снова, запрос проходит
+  // Прошло 20 секунд, интернет вернулся. Запрос окна ответ ждать не заставляет («связи нет»
+  // сразу, касса отвечает сама), а адреса тем временем спрашиваются снова — в фоне
   net.down.clear()
   clock.now += 20000
+  const t1 = Date.now()
+  const asked = await remote({ method: 'GET', path: '/auth/me' })
+  assert.deepEqual([asked.status, asked.skipped], [0, true])
+  assert.ok(Date.now() - t1 < 100, 'окно не ждёт нового выбора')
+  await chooser.failed() // выбор, начатый этим запросом
+  assert.equal(chooser.reachable(), true)
   const back = await remote({ method: 'GET', path: '/auth/me' })
   assert.equal(back.status, 200)
   assert.equal(back.data.from, 'main', 'основной снова отвечает — работа через него')
+  chooser.stop()
+})
+
+test('обмен (запрос самой программы) идёт на сервер, даже если проверка адреса сказала «молчит»: медленная связь', async () => {
+  const net = network()
+  // Проверка адреса не успевает (связь медленная), а настоящий запрос проходит
+  const slow = (url, init = {}) => (url.endsWith('/health') ? Promise.reject(new Error('не успела')) : net.fetchImpl(url, init))
+  const clock = { now: 0 }
+  const chooser = createBaseChooser({ primary: MAIN, fallback: SPARE, probe: healthProbe(slow, 100), now: () => clock.now })
+  const remote = createRemote({ apiUrl: MAIN, fetchImpl: slow, chooser, pickWaitMs: 500 })
+  // Окну — «связи нет» сразу
+  assert.equal((await remote({ method: 'GET', path: '/auth/me' })).status, 0)
+  assert.equal(chooser.reachable(), false)
+  // Обмен пробует по-настоящему — и проходит; сервер снова «доступен» и для окна
+  const sync = await remote({ method: 'GET', path: '/sync/pull', patient: true })
+  assert.equal(sync.status, 200)
+  assert.equal(chooser.reachable(), true)
+  assert.equal((await remote({ method: 'GET', path: '/auth/me' })).status, 200)
   chooser.stop()
 })
 

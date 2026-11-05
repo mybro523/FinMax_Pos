@@ -10,7 +10,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../src/local/db.mjs'
 import { createClock } from '../src/local/clock.mjs'
-import { confirmLicence, lastFloor, lastSeen, licenceOf, offlineDaysOf, OFFLINE_DAYS_DEFAULT, touchLicence } from '../src/local/licence.mjs'
+import { confirmLicence, lastFloor, lastSeen, licenceOf, licenceTerms, offlineDaysOf, OFFLINE_DAYS_DEFAULT, sealStatus, touchLicence } from '../src/local/licence.mjs'
 import { CORE_SCHEMA } from '../src/local/schema.mjs'
 import { fakeSeal } from '../test-support/server.mjs'
 import { DAY, NOW } from '../test-support/pharmacy.mjs'
@@ -163,3 +163,26 @@ test('запись прежней версии программы (без отм
   put(db, fakeSeal.seal(JSON.stringify({ code: 'apteka-1', checkedAt: NOW, seenAt: NOW + 3 * DAY, offlineDays: 7 })))
   assert.deepEqual([lastSeen(db, fakeSeal), lastFloor(db, fakeSeal)], [NOW + 3 * DAY, NOW + 3 * DAY])
 })
+
+// ── 1.6.5: срок оплаты и состояние подписки — в зашифрованной записи ──
+
+test('срок оплаты и состояние подписки лежат в зашифрованной записи и не теряются отметками часов', () => {
+  const db = core()
+  assert.equal(licenceTerms(db, 'apteka-1', fakeSeal), null, 'проверки не было — записи нет')
+  confirmLicence(db, 'apteka-1', { now: NOW, days: 30, paidUntil: '2026-11-01T12:00:00.000Z', status: 'active' }, fakeSeal)
+  assert.deepEqual(licenceTerms(db, 'apteka-1', fakeSeal), { paidUntil: '2026-11-01T12:00:00.000Z', status: 'active' })
+  const raw = stored(db)
+  assert.ok(!raw.includes('2026-11-01'), 'срок оплаты лежит зашифрованным')
+  touchLicence(db, 'apteka-1', NOW + DAY, fakeSeal)
+  assert.deepEqual(licenceTerms(db, 'apteka-1', fakeSeal), { paidUntil: '2026-11-01T12:00:00.000Z', status: 'active' })
+  // Ответ прежней версии сервера (без срока) — срок прежний
+  confirmLicence(db, 'apteka-1', { now: NOW + 2 * DAY, days: 30 }, fakeSeal)
+  assert.equal(licenceTerms(db, 'apteka-1', fakeSeal).paidUntil, '2026-11-01T12:00:00.000Z')
+  // Сервер закрыл работу
+  sealStatus(db, 'apteka-1', 'suspended', fakeSeal)
+  assert.equal(licenceTerms(db, 'apteka-1', fakeSeal).status, 'suspended')
+  // Записи прежней версии программы срок не знают
+  put(db, fakeSeal.seal(JSON.stringify({ code: 'apteka-1', checkedAt: NOW, offlineDays: 7 })))
+  assert.deepEqual(licenceTerms(db, 'apteka-1', fakeSeal), { paidUntil: null, status: null })
+})
+

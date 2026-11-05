@@ -199,3 +199,13 @@ test('1.6.5: программам до 1.6.5 сервер отдаёт 30 дне
     assert.equal(v.subscription.canWrite, true)
   }
 })
+
+test('1.6.5: /health — слово нашего сервера, по нему кассы и сайт выбирают адрес: status ok и service apteka-api', () => {
+  const { AppController } = require('../dist/app.controller')
+  const c = new AppController()
+  for (const v of [c.health(), c.root()]) {
+    assert.equal(v.status, 'ok')
+    assert.equal(v.service, 'apteka-api', 'другое имя — и все кассы 1.6.5 сочтут сервер недоступным')
+  }
+})
+

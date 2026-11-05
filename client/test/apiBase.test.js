@@ -174,3 +174,42 @@ test('stop() снимает проверку основного', async () => {
   c.stop()
   assert.equal(mt.count(), 0)
 })
+
+test('часы ушли назад после выбора — пауза между выборами не растягивается: выбор делается', async () => {
+  let clock = 100000
+  const pr = probes({ [P]: false, [F]: false })
+  const c = createBaseChooser({ primary: P, fallback: F, probe: pr.probe, now: () => clock })
+  await c.ready()
+  assert.equal(c.reachable(), false)
+  pr.calls.length = 0
+  clock -= 86400000 // кассир перевёл часы на сутки назад
+  await c.failed()
+  assert.equal(pr.calls.length, 2, 'адреса спрошены снова, а не через сутки')
+})
+
+test('обычный ответ сервера сильнее проверки: на медленной связи проверка не успела, а запрос прошёл', async () => {
+  const pr = probes({ [P]: false, [F]: false })
+  const c = createBaseChooser({ primary: P, fallback: F, probe: pr.probe })
+  await c.ready()
+  assert.equal(c.reachable(), false)
+  c.answered(F) // не тот адрес, через который идёт работа, — не в счёт
+  assert.equal(c.reachable(), false)
+  c.answered(P)
+  assert.equal(c.reachable(), true)
+})
+
+test('ошибка подписчика не ломает выбор адреса', async () => {
+  const pr = probes({ [P]: false, [F]: true })
+  const mt = manualTimers()
+  const c = createBaseChooser({ primary: P, fallback: F, probe: pr.probe, timers: mt.timers, preferMs: 0 })
+  c.onChange(() => {
+    throw new Error('беда подписчика')
+  })
+  const seen = []
+  c.onChange((b) => seen.push(b))
+  assert.equal(await c.ready(), F)
+  assert.deepEqual(seen, [F], 'второй подписчик узнал о смене')
+  assert.equal(mt.count(), 1, 'проверка основного назначена, несмотря на ошибку первого')
+  c.stop()
+})
+

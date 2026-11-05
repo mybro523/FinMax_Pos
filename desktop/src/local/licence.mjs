@@ -61,9 +61,12 @@ function unpack(stored, cipher) {
 }
 
 // ── Сервер только что подтвердил подписку ──
-// days — сколько дней он разрешает этому магазину работать без связи. Не сказал
-// (ответ на вход у прежней версии сервера) — остаётся прежнее число.
-export function confirmLicence(db, code, { now, days }, cipher) {
+// days — сколько дней он разрешает этому магазину работать без связи (с 1.6.5 ни на что не
+// влияет). paidUntil и status — до какого момента оплачено и что с подпиской, со слова сервера
+// (1.6.5). Те же значения лежат и в обычных столбцах базы (accounts), но их можно поправить
+// руками, а эту запись — нет: касса сверяет одно с другим (gateway.mjs, withTerms). Не сказал
+// (ответ прежней версии сервера) — остаётся прежнее.
+export function confirmLicence(db, code, { now, days, paidUntil, status }, cipher) {
   const before = readLicence(db, code, cipher)
   const record = {
     code,
@@ -73,6 +76,8 @@ export function confirmLicence(db, code, { now, days }, cipher) {
     seenAt: now,
     floorAt: now,
     offlineDays: days === undefined || days === null ? before?.offlineDays ?? OFFLINE_DAYS_DEFAULT : offlineDaysOf(days),
+    paidUntil: paidUntil === undefined ? before?.paidUntil ?? null : paidUntil || null,
+    status: status === undefined ? before?.status ?? null : status || null,
   }
   write(db, record, cipher)
   return record
@@ -100,6 +105,20 @@ export function touchLicence(db, code, now, cipher, floor = now) {
   const r = readLicence(db, code, cipher)
   if (!r || !(now > r.seenAt || floor > r.floorAt)) return
   write(db, { ...r, seenAt: Math.max(r.seenAt, now), floorAt: Math.max(r.floorAt, floor) }, cipher)
+}
+
+// ── Срок оплаты и состояние подписки из зашифрованной записи (1.6.5) ──
+// null — записи нет: проверки на этом компьютере не было, или запись стёрли
+export function licenceTerms(db, code, cipher) {
+  const r = readLicence(db, code, cipher)
+  return r ? { paidUntil: r.paidUntil, status: r.status } : null
+}
+
+// Сервер закрыл работу магазина (ответ 403) — запомнить и в зашифрованной записи: иначе
+// обычный столбец можно было бы вернуть руками
+export function sealStatus(db, code, status, cipher) {
+  const r = readLicence(db, code, cipher)
+  if (r) write(db, { ...r, status }, cipher)
 }
 
 // Самый поздний момент, до которого дожил срок работы без связи, — по всем магазинам
@@ -137,6 +156,9 @@ function readLicence(db, code, cipher) {
     seenAt,
     // Отдельной отметки часов у прежних записей тоже нет: тогда это был один момент
     floorAt: Number.isFinite(r.floorAt) ? Math.max(r.floorAt, r.checkedAt) : seenAt,
+    // У записи прежней версии программы их нет — до первой проверки сервером
+    paidUntil: typeof r.paidUntil === 'string' ? r.paidUntil : null,
+    status: typeof r.status === 'string' ? r.status : null,
   }
 }
 

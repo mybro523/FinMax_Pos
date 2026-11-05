@@ -21,11 +21,15 @@ export const PREFER_MS = 300
 export const RECHECK_MS = 20000
 export const RETURN_MS = 5 * 60 * 1000
 
+// Паузы считаются по секундомеру, а не по часам компьютера: часы переводят (кассир поправил
+// время, Windows сверила его), и пауза «20 секунд» растянулась бы на сутки — а с ней и «связи нет»
+const stopwatch = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now())
+
 export function createBaseChooser({
   primary,
   fallback = '',
   probe,
-  now = () => Date.now(),
+  now = stopwatch,
   preferMs = PREFER_MS,
   recheckMs = RECHECK_MS,
   returnMs = RETURN_MS,
@@ -46,7 +50,15 @@ export function createBaseChooser({
   function setBase(b) {
     const was = base
     base = b
-    if (was !== b) for (const fn of [...listeners]) fn(b)
+    if (was === b) return
+    // Ошибка подписчика не должна ломать сам выбор адреса
+    for (const fn of [...listeners]) {
+      try {
+        fn(b)
+      } catch {
+        /* беда подписчика — не выбора */
+      }
+    }
   }
 
   // Работа идёт через запасной — основной проверяется снова через returnMs
@@ -140,8 +152,16 @@ export function createBaseChooser({
     async failed() {
       if (!fallback) return base
       if (picking) return picking
-      if (now() - lastPick < recheckMs) return base
+      const since = now() - lastPick
+      // Меньше нуля — время пошло назад (секундомер такого не делает, но переданное снаружи
+      // время может): пора выбирать
+      if (since >= 0 && since < recheckMs) return base
       return pick()
+    },
+    // По этому адресу только что ответил наш сервер (обычный запрос, не проверка) — значит,
+    // он доступен, что бы ни показала проверка (на медленной связи она могла не успеть)
+    answered(b) {
+      if (b === base && chosen) reachable = true
     },
     // Сменился адрес — постоянному соединению переоткрыться на новом
     onChange(fn) {

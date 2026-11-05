@@ -24,17 +24,20 @@ const PASS = 'sekret-1'
 // Запасной адрес — тот же сервер под другим именем
 const SPARE = 'https://spare.example/api'
 
-// Провода к серверу: у каждого адреса — «висит» (сбой DNS) или «отказ сразу»
+// Провода к серверу: у каждого адреса — «висит» (сбой DNS: имя ищется долго и не находится —
+// здесь 3 секунды вместо настоящих десяти) или «отказ сразу»
 function wires(srv) {
   const w = { main: '', spare: '', calls: [] }
   const hang = (init) =>
-    new Promise((_, reject) =>
+    new Promise((_, reject) => {
+      const t = setTimeout(() => reject(new TypeError('net::ERR_NAME_NOT_RESOLVED')), 3000)
       init.signal?.addEventListener('abort', () => {
+        clearTimeout(t)
         const e = new Error('aborted')
         e.name = 'AbortError'
         reject(e)
-      }),
-    )
+      })
+    })
   w.fetchImpl = (url, init = {}) => {
     const spare = url.startsWith(SPARE)
     const path = url.slice((spare ? SPARE : API).length)
@@ -126,7 +129,8 @@ test('сервер молчит по обоим адресам — вход по
   assert.equal(r.status, 201, JSON.stringify(r.data))
   assert.ok(took < 1000, 'вход ждал ' + took + ' мс — ожидание выбора адреса ограничено')
 
-  // Выбор закончился: оба молчат. Дальше касса вовсе не ходит на сервер за ответом окну
+  // Выбор закончился: оба молчат. За ответом окну касса на сервер не ходит вовсе (обмен в фоне
+  // пробует сам — вдруг связь просто медленная)
   await p.chooser.ready()
   assert.equal(p.chooser.reachable(), false)
   m.wire.calls.length = 0
@@ -134,7 +138,7 @@ test('сервер молчит по обоим адресам — вход по
   assert.equal((await p.req('GET', '/auth/me')).status, 200)
   assert.equal((await p.req('GET', '/products')).status, 200)
   assert.ok(Date.now() - t1 < 300)
-  assert.deepEqual(m.wire.calls, [], 'пока не пора спросить снова — ни одного запроса в сеть')
+  assert.deepEqual(m.wire.calls.filter((c) => !/\/sync\/|\/health/.test(c)), [], 'за ответом окну — ни одного запроса в сеть')
 })
 
 test('интернета нет вовсе (отказ сразу) — вход без связи тоже мгновенный', async (tt) => {

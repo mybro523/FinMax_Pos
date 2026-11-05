@@ -305,7 +305,9 @@ export const loginSucceeded = (db, login) => throttle.success(db, [nameKey(Strin
 // ── Вход без интернета ──
 // open — расшифровать отпечаток (средствами Windows). Возвращает учётную запись
 // или бросает отказ в том же виде, в каком его дал бы сервер.
-export async function offlineLogin(db, { name, password }, { now, open }) {
+// terms(acc) — подписка, сверенная с зашифрованной записью (gateway.mjs, withTerms); нет —
+// по обычным столбцам. unverified — что сказать, если сверить не с чем (записи нет)
+export async function offlineLogin(db, { name, password }, { now, open, terms, unverified }) {
   const login = String(name || '').trim()
   const nameWait = throttle.retryAfterMs(db, nameKey(login), now)
   const deviceWait = throttle.retryAfterMs(db, DEVICE_KEY, now)
@@ -333,7 +335,9 @@ export async function offlineLogin(db, { name, password }, { now, open }) {
 
   // Пароль верный, но работать магазину нельзя — говорим прямо, как сервер: человек
   // должен понять, что дело не в пароле
-  const sub = subscriptionOf(acc, now)
+  const view = terms ? terms(acc) : acc
+  if (view?.unverified) throw new ApiError(401, unverified || 'Нужна связь с сервером')
+  const sub = subscriptionOf(view, now)
   if (sub?.status === 'suspended') throw new ApiError(401, 'Работа магазина приостановлен. Обратитесь к поставщику программы.')
   if (sub?.status === 'expired') throw new ApiError(401, sub.message)
 
