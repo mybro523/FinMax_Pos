@@ -36,6 +36,7 @@ import { fmtDateTime, chekNomer } from '../lib/time'
 import { normalizeScan } from '../lib/scan'
 import { parseVesEtiketku, productPoVesKodu } from '../lib/vesy'
 import { useT, useLang, translate as tr } from '../lib/i18n'
+import { RegisterAlert } from '../components/SoloKassyPanel'
 import { blockUpdate } from '../lib/version'
 import { sellsBelowCost } from '../lib/pricing'
 import { saleTicket, qtyPriceText } from '../lib/ticket'
@@ -1381,6 +1382,8 @@ export default function Pos() {
   return (
     <Layout fill title={t('Касса')} subtitle={t('Продажа по сканеру штрихкода · упаковками и поштучно')}>
       <div className="kassa-wrap">
+      {/* Магазин без интернета: главный больше не принимает эту кассу (1.7.0) */}
+      <RegisterAlert />
       <div className={'kassa pane-' + pane}>
         {/* ── Сканер и каталог ──
             В разметке стоят первыми: на телефоне поле сканера должно быть сверху

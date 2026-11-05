@@ -15,6 +15,21 @@ import { mainProblemText, pairLeft, REJOIN } from '../lib/kassy'
 import { JoinCard } from './BezInterneta'
 import { useDialog, useToast } from './ui'
 
+// ── На экране кассы: главный компьютер её больше не принимает ──
+// Кассир работает дальше (продажи сохраняются здесь), но должен сказать владельцу: без нового
+// подключения сделанное на кассе на главный не попадёт
+export function RegisterAlert() {
+  const t = useT()
+  const st = useDesktopStatus()
+  const m = st?.net?.role === 'register' ? st.net.main : null
+  if (!m || !REJOIN.has(m.error)) return null
+  return (
+    <div className="note warn" role="status" data-testid="register-alert">
+      {t('Касса отключена от главного компьютера. Продажи сохраняются здесь — скажите владельцу: кассу нужно подключить заново.')}
+    </div>
+  )
+}
+
 export default function SoloKassyPanel() {
   const t = useT()
   const toast = useToast()
