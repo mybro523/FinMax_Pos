@@ -177,12 +177,19 @@ function effectsOf(db, op, pwOut = null) {
     // Упаковку поменяли прямо в приходе (1.5.12) — какой она стала в карточке. Сосед кладёт
     // её раньше движений: средняя цена у него считается уже по новой упаковке. Касса прежней
     // версии этого поля не знает и пропустит его — упаковку ей принесёт сервер
-    // С переводом цен (packScale) — ещё и закупочная с ценой продажи, какими они стали
+    // С переводом цен (packScale) — ещё и закупочная с ценой продажи, какими они стали.
+    // Четвёртым — какой упаковка была до прихода (магазин без интернета: главный сверяет её со
+    // своей, 1.7.0); касса прежней версии лишнего не читает
     const packs = []
     for (const it of p.arrival?.items || []) {
       if (!it?.packChanged) continue
       const row = q(db, 'SELECT unitsPerPack, priceC, costC, sCostC FROM products WHERE id = ?').get(it.productId)
-      if (row) packs.push(it.packScale ? [it.productId, row.unitsPerPack, { priceC: row.priceC, costC: row.costC, sCostC: row.sCostC }] : [it.productId, row.unitsPerPack])
+      if (!row) continue
+      const ed = q(db, "SELECT data FROM row_edits WHERE opId = ? AND tbl = 'products' AND rowId = ? AND action = 'put' ORDER BY seq LIMIT 1").get(op.id, it.productId)
+      const was = Number(parse(ed?.data)?.was?.unitsPerPack)
+      const before = Number.isInteger(was) && was >= 1 ? was : null
+      const scaled = it.packScale ? { priceC: row.priceC, costC: row.costC, sCostC: row.sCostC } : null
+      packs.push(before === null ? (scaled ? [it.productId, row.unitsPerPack, scaled] : [it.productId, row.unitsPerPack]) : [it.productId, row.unitsPerPack, scaled, before])
     }
     if (packs.length) out.packs = packs
   }

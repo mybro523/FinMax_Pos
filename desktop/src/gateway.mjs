@@ -155,7 +155,7 @@ export const MESSAGES = {
   regBadOp: 'Операция с кассы повреждена или изменена — главный компьютер её не принял.',
   regStale: 'Запись поправили на главном компьютере позже — правка с кассы не применена.',
   regOld: 'Касса долго не была на связи: что за это время меняли на главном, не узнать — правка с кассы не применена.',
-  regPack: 'Упаковку или цену товара на главном поменяли позже — приход с другой упаковкой не принят: проведите его на главном компьютере.',
+  regPack: 'Упаковку товара на главном поменяли позже — приход с другой упаковкой не принят: проведите его на главном компьютере.',
   pwOnMain: 'Пароль меняют на главном компьютере магазина — касса получит новый пароль при обмене.',
   noRights: 'Недостаточно прав',
   // Сверить оплату не с чем: зашифрованной записи о проверке сервером нет (её стёрли, или
@@ -1451,12 +1451,14 @@ export function createGateway({
     if (team) teamToCore(ph)
     let done = []
     const extras = []
-    // Своё — сначала в журнал (касса получит операцию; и без касс: подключённая потом касса,
-    // подключаясь заново, сверит с ним свои правки), приём и основа для касс — одной записью на диск
+    // Своё — сначала в журнал (касса получит операцию; и без касс, если они у магазина бывали —
+    // есть ключ сети или «поколение» базы: касса, подключаясь заново, сверит с ним свои правки),
+    // приём и основа для касс — одной записью на диск. Магазин, к которому касс не подключали,
+    // журнала не ведёт
     const net = soloRegisters(ph).length > 0
     try {
       inTx(ph.db, () => {
-        lanCatchUp(ph.db, { deviceId, now: clock.now(), fates: false, pwOut: pwOutFor(ph) })
+        if (net || getMeta(ph.db, 'lanKey') || getMeta(ph.db, 'soloEpoch')) lanCatchUp(ph.db, { deviceId, now: clock.now(), fates: false, pwOut: pwOutFor(ph) })
         done = acceptAll(ph.db, { now: clock.now(), extras })
         markSeen(ph.db, done.map((op) => op.id), clock.now())
         if (net && done.length) {
@@ -2047,7 +2049,8 @@ export function createGateway({
   // конца). skip — операции, которые касса уже видела, хоть они и легли здесь позже (подключение
   // заново: порядок её журнала). Часы касс с главным не сверены — решает порядок журнала. blind —
   // журнал после seen уже убран (касса долго молчала): что меняли, не узнать — вся правка под вопросом
-  function concurrent(ph, r, { seen, origin = null, upTo = null, blind = false, skip = null }) {
+  function concurrent(ph, r, opt) {
+    const { seen, origin = null, upTo = null, blind = false, skip = null } = opt
     const tbl = String(r?.tbl || '')
     const id = String(r?.rowId || '')
     if (!tbl || !id || id === '*' || r.action === 'map' || r.action === 'lines') return null
@@ -2079,9 +2082,8 @@ export function createGateway({
     let moved = false
     if (tbl === 'products') {
       // Цены и упаковка из прихода — не правкой строки, а своими списками операции
-      for (const x of q(ph.db, `SELECT l.id, l.body FROM lan_log l WHERE l.kind = 'op' AND l.type = 'arrival' AND instr(l.body, ?) > 0 AND ${win}`).all(id, ...args)) {
-        if (fresh(x.id)) for (const k of priceKeysOf(parseFx(x.body), id)) keys.add(k)
-      }
+      const fromArrivals = (opt.akeys ? opt.akeys() : arrivalKeysIn(ph, opt)).get(id)
+      if (fromArrivals) for (const k of fromArrivals) keys.add(k)
       if (r.action === 'del') {
         moved = q(ph.db, `SELECT m.opId FROM stock_moves m JOIN lan_log l ON l.id = m.opId WHERE m.productId = ? AND ${win}`)
           .all(id, ...args)
@@ -2090,6 +2092,34 @@ export function createGateway({
     }
     if (!keys.size && !deleted && !moved) return null
     return { keys, deleted, moved, all: false }
+  }
+
+  // Цены и упаковка из приходов в окне журнала (seen, upTo], кроме origin и того, что касса уже
+  // видела: товар → какие столбцы. Тело каждого прихода разбирается один раз (ph.arrivalKeys)
+  function arrivalKeysIn(ph, { seen, origin = null, upTo = null, skip = null }) {
+    const cache = (ph.arrivalKeys ||= new Map())
+    if (cache.size > 20000) cache.clear()
+    const out = new Map()
+    const ids = q(ph.db, "SELECT l.id FROM lan_log l WHERE l.kind = 'op' AND l.type = 'arrival' AND l.seq > ? AND (? IS NULL OR l.seq <= ?) AND (? IS NULL OR l.origin <> ?)")
+      .all(seen, upTo, upTo, origin, origin)
+    for (const { id } of ids) {
+      if (skip?.has(id)) continue
+      let per = cache.get(id)
+      if (!per) {
+        const fx = parseFx(q(ph.db, 'SELECT body FROM lan_log WHERE id = ?').get(id)?.body)
+        per = new Map()
+        for (const list of [fx?.prices, fx?.pieces, fx?.packs]) {
+          for (const e of Array.isArray(list) ? list : []) if (Array.isArray(e) && typeof e[0] === 'string' && !per.has(e[0])) per.set(e[0], priceKeysOf(fx, e[0]))
+        }
+        cache.set(id, per)
+      }
+      for (const [pid, keys] of per) {
+        let acc = out.get(pid)
+        if (!acc) out.set(pid, (acc = new Set()))
+        for (const k of keys) acc.add(k)
+      }
+    }
+    return out
   }
 
   // Какие столбцы товара меняет приход своими списками: цена (prices), цена штуки (pieces),
@@ -2135,6 +2165,8 @@ export function createGateway({
     const touch = []
     const flags = []
     const opt = { seen, origin, upTo, skip, blind: forceBlind || seen + 1 < lanFloor(ph.db) }
+    let akeys = null
+    opt.akeys = () => (akeys ||= arrivalKeysIn(ph, opt))
     const flag = (c, tbl, rowId, now, fields) => {
       const list = oneCost(fields)
       if (!list.length || own) return
@@ -2163,14 +2195,12 @@ export function createGateway({
       const set = { ...r.data.set }
       const was = { ...(r.data.was || {}) }
       const now = EDIT_TBLS.has(r.tbl) ? q(ph.db, `SELECT * FROM ${r.tbl} WHERE id = ?`).get(r.rowId) : null
+      const fields = []
       const disputed = new Set(Object.keys(set).filter((k) => c.all || c.deleted || c.keys.has(k)))
-      // Упаковка и цены, переведённые на неё, — вместе: иначе цена одной упаковки легла бы к другой.
-      // Приход другой упаковкой — целиком или никак: его партии посчитаны в ней
+      // Упаковка и цены, переведённые на неё, — вместе: иначе цена одной упаковки легла бы к другой
       if (r.tbl === 'products' && 'unitsPerPack' in set && PACK_GROUP.some((k) => disputed.has(k))) {
-        if (packArrival(fx, r.rowId)) return { problem: MESSAGES.regPack }
         for (const k of PACK_GROUP) if (k in set) disputed.add(k)
       }
-      const fields = []
       for (const k of disputed) {
         const main = now ? (now[k] ?? null) : null
         // То же значение и там, и там — не спор
@@ -2202,30 +2232,61 @@ export function createGateway({
     const ids = new Set()
     for (const list of [fx.prices, fx.pieces, fx.packs]) for (const x of Array.isArray(list) ? list : []) if (Array.isArray(x) && typeof x[0] === 'string') ids.add(x[0])
     for (const id of ids) {
+      const of = (list) => (Array.isArray(list) ? list.filter((x) => Array.isArray(x) && x[0] === id) : [])
+      const not = (list) => list.filter((x) => !(Array.isArray(x) && x[0] === id))
       const c = concurrent(ph, { tbl: 'products', rowId: id, action: 'put', data: { set: {} } }, opt)
       if (!c) continue
-      const of = (list) => (Array.isArray(list) ? list.filter((x) => Array.isArray(x) && x[0] === id) : [])
+      const now = q(ph.db, 'SELECT * FROM products WHERE id = ?').get(id)
       const prices = of(fx.prices)
       const pieces = of(fx.pieces)
       const packs = of(fx.packs)
+      const fields = []
       const hit = (k) => c.all || c.deleted || c.keys.has(k)
+      // Упаковка из прихода (его партии посчитаны в ней). Ложится, если у главного та же упаковка,
+      // что была на кассе до прихода; цены, переведённые на неё, — от нынешних цен главного (его
+      // поправка цены не теряется). У главного уже эта упаковка — менять нечего. Её сменили на
+      // другую — приход не ложится: его проведут на главном
+      let packDone = false
+      let scaledPrice = null
+      const pk = packs[packs.length - 1]
+      const wasUpp = Number(pk?.[3])
+      if (pk && now && Number.isInteger(wasUpp) && wasUpp >= 1) {
+        const upp = Number(pk[1])
+        const mainUpp = Number(now.unitsPerPack)
+        if (mainUpp === upp) {
+          fx.packs = not(fx.packs)
+          packDone = true
+        } else if (mainUpp === wasUpp) {
+          if (pk[2] && typeof pk[2] === 'object') {
+            const scaled = {}
+            for (const k of ['priceC', 'costC', 'sCostC']) {
+              const v = now[k] === null || now[k] === undefined ? null : Math.round((Number(now[k]) * upp) / wasUpp)
+              if (!sameVal(v, pk[2][k])) fields.push(flagField(k, pk[2][k], v))
+              scaled[k] = v
+            }
+            scaledPrice = scaled.priceC
+            fx.packs = [...not(fx.packs), [id, upp, scaled, wasUpp]]
+          }
+          packDone = true
+        } else if (packArrival(fx, id)) return { problem: MESSAGES.regPack }
+      }
       let drop = {
         prices: prices.length > 0 && hit('priceC'),
         pieces: pieces.length > 0 && hit('pieceC'),
-        packs: packs.length > 0 && (hit('unitsPerPack') || (packs.some((pk) => pk[2]) && ['priceC', 'costC', 'sCostC'].some(hit))),
+        packs: !packDone && packs.length > 0 && (hit('unitsPerPack') || (packs.some((x) => x[2]) && ['priceC', 'costC', 'sCostC'].some(hit))),
       }
-      if (packs.length && (drop.prices || drop.pieces || drop.packs)) {
+      // Упаковка без прежней (сверить не с чем): с приходом — не ложится он весь
+      if (!packDone && packs.length && (drop.prices || drop.pieces || drop.packs)) {
         if (packArrival(fx, id)) return { problem: MESSAGES.regPack }
         drop = { prices: prices.length > 0, pieces: pieces.length > 0, packs: true }
       }
-      if (!drop.prices && !drop.pieces && !drop.packs) continue
-      const now = q(ph.db, 'SELECT * FROM products WHERE id = ?').get(id)
-      const fields = []
+      if (!drop.prices && !drop.pieces && !drop.packs && !fields.length) continue
       const add = (k, v) => {
-        const main = now ? (now[k] ?? null) : null
+        // Цена после сведения упаковки — уже переведённая (её и покажем)
+        const main = k === 'priceC' && scaledPrice !== null ? scaledPrice : now ? (now[k] ?? null) : null
+        if (fields.some((f) => f.field === k)) return
         if (!(now && sameVal(main, v))) fields.push(flagField(k, v, main))
       }
-      const not = (list) => list.filter((x) => !(Array.isArray(x) && x[0] === id))
       if (drop.prices) {
         for (const x of prices) add('priceC', x[1])
         fx.prices = not(fx.prices)
@@ -2432,19 +2493,25 @@ export function createGateway({
           // неё (и правки самого главного тоже). Устаревшее в ней не ложится, молча
           const t = trimConcurrent(ph, fx, { seen: Number(getMeta(ph.db, 'soloEpochSeq')) || 0, upTo, own: true, skip: prior })
           if (t.problem) {
-            log.info(`кассы по сети: своя операция ${e.id}, вернувшаяся с кассой, устарела — не положена`)
-            continue
+            // Правка, устаревшая из-за более поздней здесь, — молча; документ (приход) — владельцу
+            if (!(fx.docs || []).length) {
+              log.info(`кассы по сети: своя операция ${e.id}, вернувшаяся с кассой, устарела — не положена`)
+              continue
+            }
+            res = { problem: t.problem }
           }
-          // Штрихкод, который здесь после копии заняла другая карточка, — как с кассы
-          const clash = barcodeClash(ph, String(e.type || ''), fx.edits?.rows || [])
-          let body = null
-          try {
-            body = JSON.parse(e.body)
-          } catch {
-            continue
+          if (!res) {
+            // Штрихкод, который здесь после копии заняла другая карточка, — как с кассы
+            const clash = barcodeClash(ph, String(e.type || ''), fx.edits?.rows || [])
+            let body = null
+            try {
+              body = JSON.parse(e.body)
+            } catch {
+              continue
+            }
+            body.effects = fx
+            res = { entry: { ...e, body: JSON.stringify(body) }, touch: t.touch, flags: clash ? [clash] : [] }
           }
-          body.effects = fx
-          res = { entry: { ...e, body: JSON.stringify(body) }, touch: t.touch, flags: clash ? [clash] : [] }
         }
       }
       if (!res) res = checkRegisterEntry(ph, e, { upTo, skip: prior })

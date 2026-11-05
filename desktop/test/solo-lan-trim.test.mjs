@@ -4,7 +4,8 @@
 // как на главном; владелец видит в «Расхождениях», что было на кассе. Здесь — случаи, которые
 // нашёл четвёртый круг проверки:
 //   • закупочная цена: не легла правка — не ложится и её движение «закупочная из карточки»;
-//   • приход с новой упаковкой при споре — целиком владельцу (его партии посчитаны в ней);
+//   • приход с новой упаковкой: ложится, если у главного та же упаковка, что была до прихода (цены
+//     переводятся от цен главного); сменили упаковку на главном — приход владельцу;
 //   • правки главного, сделанные, пока к нему не подключена ни одна касса, — тоже «позже»;
 //   • цены из прихода (списки prices/pieces/packs) — так же, как правка карточки, в обе стороны;
 //   • переименование категории: не легло название — товары не переезжают, касса возвращается к главному;
@@ -88,7 +89,7 @@ test('закупочная цена: правка кассы не легла —
   assert.deepEqual(fieldsOf(d), [{ field: 'sCostC', kassa: 400, main: 600 }])
 })
 
-test('приход с новой упаковкой, а цену на главном поменяли позже: приход целиком — владельцу (партии посчитаны в той упаковке)', async (tt) => {
+test('приход с новой упаковкой, а цену на главном поменяли позже: приход ложится, цена главного — переведена на новую упаковку', async (tt) => {
   const time = { now: NOW }
   const { m, p } = await mainShop(time)
   tt.after(() => m.close())
@@ -109,13 +110,91 @@ test('приход с новой упаковкой, а цену на главн
   await swap(r1)
   assert.equal(pending(r1), 0)
   for (const c of [m, r1]) {
-    assert.deepEqual(q(c.db(), 'SELECT unitsPerPack, priceC FROM products WHERE id = ?').get(p.id), { unitsPerPack: 1, priceC: 600 }, c.tag)
-    assert.equal((await c.req('GET', '/products')).data.find((x) => x.id === p.id).stock, 10, `${c.tag}: прихода нет — остаток прежний`)
+    assert.deepEqual(q(c.db(), 'SELECT unitsPerPack, priceC FROM products WHERE id = ?').get(p.id), { unitsPerPack: 10, priceC: 6000 }, c.tag)
+    assert.equal((await c.req('GET', '/products')).data.find((x) => x.id === p.id).stock, 3, `${c.tag}: 10 шт + приход 20 шт = 3 упаковки по 10`)
+  }
+  assert.equal((await discs(m, 'notTaken')).length, 0)
+  assert.deepEqual(fieldsOf((await discs(m, 'soloEdit'))[0]), [{ field: 'priceC', kassa: 5000, main: 6000 }])
+})
+
+test('приход с новой упаковкой, а на главном упаковку сменили на другую: приход — владельцу (партии посчитаны в другой упаковке)', async (tt) => {
+  const time = { now: NOW }
+  const { m, p } = await mainShop(time)
+  tt.after(() => m.close())
+  const sup = (await m.req('POST', '/suppliers', { name: 'Оптовик' })).data
+  const { r: r1 } = await joinRegister(m, time, 'KASSA2')
+  tt.after(() => r1.close())
+  assert.equal((await r1.login()).status, 201)
+  await swap(r1)
+  const a = await r1.req('POST', '/arrivals', {
+    supplierId: sup.id, debt: 0, payMethod: 'cash', paidCash: 0,
+    items: [{ productId: p.id, qty: 2, cost: 30, unitsPerPack: 10, packChanged: true, packScale: true }],
+  })
+  assert.equal(a.status, 201, JSON.stringify(a.data))
+  time.now += MIN10
+  const ch = await m.req('PATCH', `/products/${p.id}`, { unitsPerPack: 5 })
+  assert.equal(ch.status, 200, JSON.stringify(ch.data))
+  await swap(r1)
+  await swap(r1)
+  assert.equal(pending(r1), 0)
+  for (const c of [m, r1]) {
+    assert.equal(q(c.db(), 'SELECT unitsPerPack FROM products WHERE id = ?').get(p.id).unitsPerPack, 5, c.tag)
+    assert.equal(q(c.db(), "SELECT COUNT(*) AS n FROM docs WHERE kind = 'arrival' AND sync NOT IN ('rejected', 'deleted')").get().n, 0, `${c.tag}: прихода нет`)
   }
   const nt = await discs(m, 'notTaken')
   assert.equal(nt.length, 1)
   assert.equal(nt[0].opType, 'arrival')
-  assert.match(JSON.parse(nt[0].note).error, /приход с другой упаковкой не принят/)
+  assert.match(JSON.parse(nt[0].note).error, /Упаковку товара на главном поменяли позже/)
+})
+
+test('касса молчала больше месяца и сделала приход с новой упаковкой (главный товар не трогал): приход ложится', async (tt) => {
+  const time = { now: NOW }
+  const { m, p } = await mainShop(time)
+  tt.after(() => m.close())
+  const sup = (await m.req('POST', '/suppliers', { name: 'Оптовик' })).data
+  const other = (await m.req('POST', '/products', { name: 'Перец', barcode: '4600000000777', price: 7, cost: 4, stock: 5 })).data
+  const { r: r1 } = await joinRegister(m, time, 'KASSA2')
+  tt.after(() => r1.close())
+  assert.equal((await r1.login()).status, 201)
+  await swap(r1)
+  assert.equal(
+    (await r1.req('POST', '/arrivals', { supplierId: sup.id, debt: 0, payMethod: 'cash', paidCash: 0, items: [{ productId: p.id, qty: 2, cost: 30, unitsPerPack: 10, packChanged: true, packScale: true }] })).status,
+    201,
+  )
+  assert.equal((await m.req('PATCH', `/products/${other.id}`, { minStock: 3 })).status, 200)
+  time.now += 40 * 24 * HOUR
+  assert.equal((await m.login()).status, 201)
+  m.gw.tick()
+  await swap(r1)
+  assert.equal(r1.gw.standalone.net().main.error, 'gone')
+  await rejoin(m, r1)
+  assert.deepEqual(q(m.db(), 'SELECT unitsPerPack, priceC FROM products WHERE id = ?').get(p.id), { unitsPerPack: 10, priceC: 5000 })
+  assert.equal((await m.req('GET', '/products')).data.find((x) => x.id === p.id).stock, 3)
+  assert.equal((await discs(m)).length, 0, 'спорить не о чем')
+})
+
+test('подъём из копии: приход самого главного с новой упаковкой возвращается с кассой; цена, поставленная после, — переведена', async (tt) => {
+  const time = { now: NOW }
+  const { m, p } = await mainShop(time)
+  const sup = (await m.req('POST', '/suppliers', { name: 'Оптовик' })).data
+  const dir = copyNow(m)
+  const { r: r1 } = await joinRegister(m, time, 'KASSA2')
+  tt.after(() => r1.close())
+  assert.equal((await r1.login()).status, 201)
+  await swap(r1)
+  assert.equal(
+    (await m.req('POST', '/arrivals', { supplierId: sup.id, debt: 0, payMethod: 'cash', paidCash: 0, items: [{ productId: p.id, qty: 2, cost: 30, unitsPerPack: 10, packChanged: true, packScale: true }] })).status,
+    201,
+  )
+  await swap(r1)
+  await swap(r1)
+  const m2 = await restoredMain(m, dir, time, tt)
+  time.now += MIN10
+  assert.equal((await m2.req('PATCH', `/products/${p.id}`, { price: 6 })).status, 200)
+  await rejoin(m2, r1)
+  assert.equal(q(m2.db(), "SELECT COUNT(*) AS n FROM docs WHERE kind = 'arrival'").get().n, 1, 'приход вернулся')
+  assert.deepEqual(q(m2.db(), 'SELECT unitsPerPack, priceC FROM products WHERE id = ?').get(p.id), { unitsPerPack: 10, priceC: 6000 })
+  assert.equal((await m2.req('GET', '/products')).data.find((x) => x.id === p.id).stock, 3)
 })
 
 test('приход без смены упаковки, цену на главном поменяли позже: приход ложится, цена — главного', async (tt) => {
