@@ -10,6 +10,7 @@ import { badgeOf, opTitle, updateBadgeOf, updateText, versionBadgeOf } from '../
 import { rejectedDetail } from '../lib/rejected'
 import { lanBadgeOf } from '../lib/lanStatus'
 import { soloMessage } from '../lib/aktivaciya'
+import { mainProblemText } from '../lib/kassy'
 import { Modal, useToast } from './ui'
 import LanPanel from './LanPanel'
 
@@ -125,6 +126,7 @@ export function copyErrorText(r, t) {
   if (r?.error === 'safety') return t('Не удалось снять копию нынешнего состояния') + detail
   if (r?.error === 'backup') return t('Копию снять не удалось') + detail
   if (r?.error === 'save') return t('Не получилось сохранить копию') + detail
+  if (r?.error === 'register') return t('Это касса магазина: базу она получает от главного компьютера. Копию загружают на главном.')
   return problemText(r?.error, t) || t('Не получилось. Повторите.')
 }
 
@@ -360,8 +362,21 @@ function StatusModal({ st, onClose }) {
               {soloMessage(act, t) ? <div style={{ marginTop: 6 }}><b>{soloMessage(act, t)}</b></div> : null}
             </div>
             <Row label={t('Программа работает')} tone={!act.active ? 'bad' : act.warn ? 'warn' : undefined}>{act.forever ? t('без срока') : act.untilHuman ? `${t('до')} ${act.untilHuman}` : '—'}</Row>
-            <Row label={t('Касс можно подключить')}>{act.registers || '—'}</Row>
-            <div className="tag-cat" style={{ margin: '6px 0 12px' }}>{t('Новый код активации вводится в «Настройках» → «Профиль».')}</div>
+            {/* 1.7.0: без кода активации — ни счёта касс, ни нового кода */}
+            {!act.free && <Row label={t('Касс можно подключить')}>{act.registers || '—'}</Row>}
+            {!act.free && <div className="tag-cat" style={{ margin: '6px 0 12px' }}>{t('Новый код активации вводится в «Настройках» → «Профиль».')}</div>}
+            {/* Кассы по сети (1.7.0): касса — связь с главным; главный — кассы на связи */}
+            {st?.net?.role === 'register' && (
+              <>
+                <Row label={t('Главный компьютер')} tone={st.net.main?.online ? 'ok' : 'warn'}>{st.net.main?.online ? t('на связи') : t('нет связи')}</Row>
+                <Row label={t('Ждут главного')} tone={st.net.pending > 0 ? 'warn' : 'ok'}>{st.net.pending > 0 ? st.net.pending : t('ничего')}</Row>
+                {mainProblemText(st.net.main?.error, t) && <div className="note warn" style={{ margin: '8px 0' }}>{mainProblemText(st.net.main?.error, t)}</div>}
+              </>
+            )}
+            {st?.net?.role === 'main' && st.net.registers?.length > 0 && (
+              <Row label={t('Кассы на связи')}>{`${st.net.registers.filter((r) => r.online).length} ${t('из')} ${st.net.registers.length}`}</Row>
+            )}
+            <div style={{ marginBottom: 12 }} />
           </>
         )}
         {/* ── Главное: сохранено ли сделанное ── */}

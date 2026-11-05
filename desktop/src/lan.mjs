@@ -716,7 +716,17 @@ export function createLan({
   async function start() {
     running = true
     await startServer()
-    if (!running) return
+    // Пока порт открывался, сеть остановили (stop): открытый порт закрываем сразу
+    if (!running) {
+      try {
+        server?.close()
+      } catch {
+        /* уже закрыт */
+      }
+      server = null
+      port = 0
+      return
+    }
     startUdp()
     tickTimer = timers.every(() => tick(), TICK_MS)
     helloTimer = timers.every(() => hello(), HELLO_MS)

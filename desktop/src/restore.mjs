@@ -28,6 +28,7 @@
 //
 // Что на диске и чем открывать базу, передаётся снаружи — модуль проверяется обычными
 // тестами.
+import { randomUUID } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { copyStamp, copyTime, intactFile } from './backup.mjs'
 
@@ -291,6 +292,9 @@ export function applyRestore({ userData, dataDir, fs, Database, now, schemaMax, 
         put.run('restored', JSON.stringify({ from: ask.at, at: now(), manual: true, foreign: !!identity }))
         // Весь магазин — заново с сервера: копия старая, а на сервере с тех пор всё шло
         put.run('needFull', '1')
+        // Магазин без интернета с кассами (1.7.0): у главного теперь другое «поколение» базы — кассы,
+        // знавшие прежнее, подключаются заново (их несделанное главным он примет при подключении)
+        if (metaOf(db, 'soloEpoch')) put.run('soloEpoch', randomUUID())
         put.run('cursor', '')
         put.run('wcursor', '')
         const hasLan = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'lan_log'").get()

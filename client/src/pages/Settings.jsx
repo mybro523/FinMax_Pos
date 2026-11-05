@@ -23,6 +23,7 @@ import ChekPanel from '../components/ChekPanel'
 import ShopLogoPanel from '../components/ShopLogoPanel'
 import VesyPanel from '../components/VesyPanel'
 import LanPanel from '../components/LanPanel'
+import SoloKassyPanel from '../components/SoloKassyPanel'
 import LitePanel from '../components/LitePanel'
 import SyncBadge from '../components/SyncBadge'
 import { isDesktop } from '../lib/desktop'
@@ -338,7 +339,8 @@ export default function Settings() {
 
           {active === 'ustroystva' && can('settings.devices') && (
             <>
-              {/* Магазин без интернета: кассы и обмен по сети — следующим этапом; сейчас касса одна */}
+              {/* Магазин без интернета (1.7.0): кассы подключаются к главному компьютеру по коду */}
+              {isDesktop && user?.standalone && <SoloKassyPanel />}
               {!user?.standalone && <DevicesPanel />}
               {/* Кассы в одной сети передают друг другу сделанное без интернета — только в программе */}
               {isDesktop && !user?.standalone && <LanPanel manage />}

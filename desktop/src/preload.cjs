@@ -25,6 +25,13 @@ contextBridge.exposeInMainWorld('apteka', {
     activate: (code) => ipcRenderer.invoke('standalone:activate', code),
     setup: (req) => ipcRenderer.invoke('standalone:setup', req),
     reset: (req) => ipcRenderer.invoke('standalone:reset', req),
+    // Кассы по сети (1.7.0): подключить эту кассу к главному по коду; на главном — открыть и
+    // закрыть код подключения, отключить кассу; что с кассами сейчас
+    join: (req) => ipcRenderer.invoke('standalone:join', req),
+    pairStart: () => ipcRenderer.invoke('standalone:pairStart'),
+    pairStop: () => ipcRenderer.invoke('standalone:pairStop'),
+    unpair: (id) => ipcRenderer.invoke('standalone:unpair', id),
+    net: () => ipcRenderer.invoke('standalone:net'),
   },
 
   app: {

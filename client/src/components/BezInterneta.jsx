@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { flushSync } from 'react-dom'
-import { LuArrowLeft, LuCloud, LuCopy, LuHardDrive, LuKeyRound, LuStore, LuTriangleAlert, LuBadgeCheck } from 'react-icons/lu'
+import { LuArrowLeft, LuCloud, LuCopy, LuHardDrive, LuKeyRound, LuLink, LuMonitorSmartphone, LuStore, LuTriangleAlert, LuBadgeCheck } from 'react-icons/lu'
 import { bridge } from '../lib/desktop'
 import { useT } from '../lib/i18n'
 import { CODE_LEN, caretAt, editCode, editEnd, formatCode, normalizeCode, pastedCode, physicalKey, soloMessage } from '../lib/aktivaciya'
+import { formatPair, normalizePair, PAIR_LEN } from '../lib/kassy'
 import { PasswordInput } from './ui'
 
 // ── Магазин без интернета (версия 1.6.0): экраны до входа ──
@@ -214,7 +215,7 @@ export function ActivateCard({ info, onDone, onBack }) {
 }
 
 // ── Магазин и владелец ──
-export function SetupCard({ info, onDone }) {
+export function SetupCard({ info, onDone, onJoin }) {
   const t = useT()
   const [f, setF] = useState({ shopName: '', login: '', password: '', confirm: '' })
   const [err, setErr] = useState('')
@@ -262,6 +263,15 @@ export function SetupCard({ info, onDone }) {
       <button className="btn gold block auth-submit" disabled={busy} data-testid="solo-setup-submit">
         <span className="ic"><LuStore size={17} /></span> {busy ? t('Заводим…') : t('Завести магазин')}
       </button>
+      {/* 1.7.0: второй компьютер магазина — касса: магазин не заводится, база приходит с главного */}
+      {onJoin && (
+        <>
+          <div className="solo-or"><span>{t('или')}</span></div>
+          <button type="button" className="btn ghost block" onClick={onJoin} data-testid="solo-join-open">
+            <span className="ic"><LuMonitorSmartphone size={17} /></span> {t('Это касса магазина — подключить к главному компьютеру')}
+          </button>
+        </>
+      )}
       <p className="tag-cat solo-move-hint" data-testid="solo-move-hint">
         {t('Магазин переезжает со старого компьютера? Заведите его здесь, войдите и загрузите копию с флешки: «Настройки» → «Резервная копия» → «Загрузить копию».')}
       </p>
@@ -324,10 +334,28 @@ export function ResetCard({ info, onDone, onBack }) {
 }
 
 // ── Под формой входа: магазин без интернета, до какого дня, забыли пароль ──
-export function SoloLine({ info, onReset, onRenew }) {
+export function SoloLine({ info, onReset, onRenew, onRejoin }) {
   const t = useT()
   const a = info?.activation || {}
   if (!info?.shop) return null
+  // 1.7.0: касса магазина — связь с главным; пароли и «Забыли пароль?» — на главном
+  if (info.role === 'register') {
+    const m = info.net?.main || {}
+    return (
+      <div className={'solo-line' + (m.error ? ' warn' : '')} data-testid="solo-line">
+        <span>
+          <LuHardDrive size={13} style={{ verticalAlign: '-2px' }} /> {t('Касса магазина')}
+          {m.name ? ` · ${t('главный')}: ${m.name}` : ''}
+        </span>
+        <span className="solo-line-links">
+          {(m.error === 'star' || m.error === 'epoch') && onRejoin && (
+            <button type="button" className="link" onClick={onRejoin} data-testid="solo-rejoin-login">{t('Подключить заново')}</button>
+          )}
+          <span>{t('Забыли пароль — его меняют на главном компьютере')}</span>
+        </span>
+      </div>
+    )
+  }
   // 1.7.0: без кода активации — ни срока, ни счёта касс, ни нового кода; «Забыли пароль?» остаётся
   const code = info?.codeRequired !== false
   return (
@@ -342,6 +370,86 @@ export function SoloLine({ info, onReset, onRenew }) {
         <button type="button" className="link" onClick={onReset} data-testid="solo-forgot">{t('Забыли пароль?')}</button>
       </span>
     </div>
+  )
+}
+
+// ── Касса магазина: подключить к главному компьютеру по коду (1.7.0) ──
+// Главный показывает код из 8 знаков («Настройки» → «Кассы и устройства» → «Подключить кассу»).
+// Касса находит главного в сети сама; не нашла (поиск закрыт брандмауэром или сети разные) —
+// вписывают адрес главного. again — касса подключается заново (из «Настроек»); compact — внутри
+// панели настроек, а не отдельной карточкой
+export function JoinCard({ onDone, onBack, again = false, compact = false }) {
+  const t = useT()
+  const [code, setCode] = useState('')
+  const [address, setAddress] = useState('')
+  const [manual, setManual] = useState(false)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const ready = normalizePair(code).length === PAIR_LEN && (!manual || address.trim())
+  const submit = async (e) => {
+    e.preventDefault()
+    if (busy || !ready) return
+    setErr('')
+    setBusy(true)
+    const r = await solo()?.join({ code: normalizePair(code), address: manual ? address.trim() : '' }).catch(() => null)
+    setBusy(false)
+    if (r?.ok) onDone(r)
+    else setErr(t(r?.error || 'Не получилось. Повторите.'))
+  }
+  return (
+    <form className={compact ? 'solo-join-inline' : 'auth-card solo-card'} onSubmit={submit} data-vkb-lift data-testid="solo-join">
+      {onBack && (
+        <button type="button" className="btn ghost solo-back" onClick={onBack} disabled={busy}>
+          <span className="ic"><LuArrowLeft size={15} /></span> {t('Назад')}
+        </button>
+      )}
+      {compact ? <h3 className="lan-sub">{t('Подключить кассу заново')}</h3> : <h1>{again ? t('Подключить кассу заново') : t('Касса магазина')}</h1>}
+      {!compact && (
+        <p className="auth-sub">
+          {t('Этот компьютер станет кассой магазина: базу он получит от главного компьютера — того, где завели магазин, — и будет работать и без связи с ним.')}
+        </p>
+      )}
+      <p className="tag-cat" style={{ lineHeight: 1.6, marginBottom: 12 }}>
+        {t('На главном компьютере откройте «Настройки» → «Кассы и устройства» и нажмите «Подключить кассу». Введите здесь код, который он покажет. Оба компьютера должны быть в одной сети — кабелем или через роутер.')}
+      </p>
+      <div className="field">
+        <label htmlFor="solo-pair">{t('Код подключения')}</label>
+        <input
+          id="solo-pair"
+          className="solo-code pair-input"
+          value={formatPair(code)}
+          onChange={(e) => setCode(normalizePair(e.target.value))}
+          placeholder="XXXX-XXXX"
+          autoComplete="off"
+          spellCheck={false}
+          autoFocus
+          maxLength={12}
+          disabled={busy}
+          data-testid="solo-pair-input"
+        />
+      </div>
+      {manual ? (
+        <div className="field">
+          <label htmlFor="solo-pair-addr">{t('Адрес главного компьютера')}</label>
+          <input id="solo-pair-addr" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="192.168.1.10" maxLength={100} disabled={busy} />
+          <div className="tag-cat" style={{ marginTop: 4 }}>{t('Адрес виден на главном компьютере: «Настройки» → «Кассы и устройства».')}</div>
+        </div>
+      ) : (
+        <button type="button" className="link" style={{ marginBottom: 12 }} onClick={() => setManual(true)} disabled={busy} data-testid="solo-pair-manual">
+          {t('Главный компьютер не находится? Вписать его адрес')}
+        </button>
+      )}
+      <Problem text={err} />
+      {busy && <div className="note info" style={{ marginBottom: 10 }}>{t('Получаем базу магазина с главного компьютера — это может занять до минуты.')}</div>}
+      <button className={'btn gold' + (compact ? '' : ' block auth-submit')} disabled={busy || !ready} data-testid="solo-join-submit">
+        <span className="ic"><LuLink size={17} /></span> {busy ? t('Подключаем…') : t('Подключить')}
+      </button>
+      {!compact && (
+        <p className="tag-cat solo-move-hint">
+          {t('Если Windows спросит, разрешить ли FinMax POS доступ к сети, отметьте обе галочки — «Частные сети» и «Общедоступные сети» — и нажмите «Разрешить доступ». Кассы, соединённые кабелем напрямую, Windows считает общедоступной сетью.')}
+        </p>
+      )}
+    </form>
   )
 }
 

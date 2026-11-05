@@ -4,13 +4,17 @@
 // обмен с каждой и что пошло не так. Здесь из этого получаются слова. Перевод передаётся
 // снаружи (t), надписи стоят в коде целиком — их перевод стережёт test/i18n.test.js.
 //
-// Файл ни от чего не зависит: его загружают и проверки, без сборщика.
+// Файл загружают и проверки, без сборщика: путь — с расширением.
+
+import { soloNetBadge } from './kassy.js'
 
 // Сколько соседей на связи прямо сейчас
 export const lanOnline = (lan) => (Array.isArray(lan?.peers) ? lan.peers.filter((p) => p.online).length : 0)
 
 // Значок в шапке: только когда обмен по сети включён (у магазина больше одной кассы)
 export function lanBadgeOf(st, t) {
+  // Магазин без интернета (1.7.0): на кассе — связь с главным, на главном — кассы на связи
+  if (st?.standalone) return soloNetBadge(st.net, t)
   const lan = st?.lan
   if (!lan?.enabled) return null
   const n = lanOnline(lan)

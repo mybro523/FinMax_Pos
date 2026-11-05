@@ -203,10 +203,12 @@ export function ownOpDocs(db, op) {
 // ── Главный: основа после приёма → в журнал ──
 // ops — [{ id, docs: [{ kind, body }] }] по порядку приёма; extras — документы «сервера»;
 // logins — учётные записи сотрудников для касс (их пароли — local/solonet: см. gateway)
-// gone — что главный убрал сам, не операцией (удалённые покупатели); lic — новый код активации
-export function mainLogBase(db, { ops = [], extras = [], logins = [], gone = null, lic = null, deviceId, now }) {
+// gone — что главный убрал сам, не операцией (удалённые покупатели); lic — новый код активации;
+// logo — логотип магазина ({ logo, at }: его ставят на главном, «Настройки» → «Чек и печать»)
+export function mainLogBase(db, { ops = [], extras = [], logins = [], gone = null, lic = null, logo = null, deviceId, now }) {
   const goneCustomers = Array.isArray(gone?.customers) ? gone.customers.filter((x) => typeof x === 'string') : []
-  if (!ops.length && !extras.length && !logins.length && !goneCustomers.length && !lic) return null
+  const withLogo = !!logo && typeof logo === 'object' && typeof logo.logo === 'string'
+  if (!ops.length && !extras.length && !logins.length && !goneCustomers.length && !lic && !withLogo) return null
   return inTx(db, () => {
     const acc = soloAcc(db) + 1
     setMeta(db, 'soloAcc', String(acc))
@@ -256,6 +258,7 @@ export function mainLogBase(db, { ops = [], extras = [], logins = [], gone = nul
       logins,
       ...(goneCustomers.length ? { gone: { customers: goneCustomers } } : {}),
       ...(typeof lic === 'string' && lic ? { lic } : {}),
+      ...(withLogo ? { logo: { logo: logo.logo, at: typeof logo.at === 'string' ? logo.at : null } } : {}),
     }
     const wide = body.suppliers.length > 0 || body.docs.some((d) => WIDE_KINDS.has(d.kind)) ? 1 : 0
     q(
@@ -270,8 +273,8 @@ export function mainLogBase(db, { ops = [], extras = [], logins = [], gone = nul
 // ── Касса: основа от главного ──
 // Ответ — какие разделы окна устарели. onLogins — что сделать с учётными записями (их кладёт в
 // общую базу программы gateway: пароли перешифровываются ключом этого компьютера); onLic — с новым
-// кодом активации главного
-export function regApplyBase(db, entry, { onLogins = null, onLic = null } = {}) {
+// кодом активации главного; onLogo — с логотипом магазина ({ logo, at })
+export function regApplyBase(db, entry, { onLogins = null, onLic = null, onLogo = null } = {}) {
   const b = parse(entry?.body)
   if (!b || !Number.isInteger(b.acc)) return []
   const changed = new Set()
@@ -336,6 +339,10 @@ export function regApplyBase(db, entry, { onLogins = null, onLic = null } = {}) 
       changed.add('users')
     }
     if (typeof b.lic === 'string' && b.lic && onLic) onLic(b.lic)
+    if (b.logo && typeof b.logo.logo === 'string' && onLogo) {
+      onLogo({ logo: b.logo.logo, at: typeof b.logo.at === 'string' ? b.logo.at : null })
+      changed.add('shop')
+    }
     setMeta(db, 'soloAcc', String(b.acc))
     rebuildStock(db)
     recountDebts(db)

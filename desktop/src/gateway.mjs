@@ -13,7 +13,9 @@
 //
 // Модуль не знает про Electron: сеть, диск, шифрование и часы ему передают снаружи.
 // Поэтому он целиком проверяется обычными тестами.
-import { existsSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { existsSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { BUSY_MESSAGE } from './backup.mjs'
 import {
@@ -54,7 +56,7 @@ import {
   touchedBy,
 } from './local/outbox.mjs'
 import { PHARMACY_SCHEMA } from './local/schema.mjs'
-import { applyPull, tenantUserOf } from './local/snapshot.mjs'
+import { applyPull, DOC_KEYS, tenantUserOf } from './local/snapshot.mjs'
 import {
   lanAddManual,
   lanAppliedCount,
@@ -74,12 +76,31 @@ import {
   lanPrune,
   lanReceive,
   lanRemoveManual,
+  lanTopSeq,
   lanWideHere,
   waitsForPeer,
 } from './local/lan.mjs'
+import {
+  addDiscrepancies,
+  mainAcceptPeers,
+  mainLogBase,
+  nextRegisterName,
+  ownOpDocs,
+  pwFromLan,
+  pwToLan,
+  regApplyBase,
+  regInstallDb,
+  regPendingEntries,
+  resolveDiscrepancy,
+  setSoloPaired,
+  shopSnapshot,
+  shortKind,
+  soloDiscrepancies,
+  soloPairedList,
+} from './local/solonet.mjs'
 import { checkRequest, createRemote, DESKTOP_TOKEN, isLinkFailure } from './net.mjs'
 import { cleanLogo } from './print/logo.mjs'
-import { parseAddress } from './lan.mjs'
+import { formatPairCode, newPairCode, pairKeys, pairRequest, parseAddress } from './lan.mjs'
 import { createSync } from './sync.mjs'
 import { activate as activateCode, activationState, useResetCode } from './local/activation.mjs'
 import { validKey } from './local/licence-code.mjs'
@@ -97,6 +118,19 @@ export const MESSAGES = {
   noOfflineLogin: 'Нет связи с сервером. Под этим именем на этом компьютере ещё не входили — первый вход возможен только с интернетом.',
   // Логотип в программе (магазин без интернета, 1.7.0)
   badLogo: 'Нужна картинка PNG или JPG не больше 300 КБ',
+  // Кассы по сети без интернета (1.7.0)
+  onMainOnly: 'Это делается на главном компьютере магазина.',
+  noMerge: 'Пока к магазину подключены кассы, карточки товаров не объединяются.',
+  pairFormat: 'Код подключения — 8 знаков. Проверьте, все ли введены.',
+  pairAddress: 'Адрес главного компьютера записан неверно. Пример: 192.168.1.10',
+  pairNotFound:
+    'Главный компьютер не найден в сети. Проверьте, что он включён, программа на нём открыта и код подключения ещё действует. Не помогает — впишите адрес главного компьютера.',
+  pairCode: 'Код подключения неверный или устарел — попросите новый на главном компьютере.',
+  pairNoCode: 'На главном компьютере сейчас нет кода подключения — нажмите там «Подключить кассу» и введите новый код.',
+  pairConnect: 'Не удалось связаться с главным компьютером. Проверьте сеть и брандмауэр Windows на обоих компьютерах.',
+  pairBroken: 'Главный компьютер прислал повреждённые данные. Повторите подключение.',
+  pairOtherShop: 'Эта касса раньше работала в другом магазине — подключить её к этому нельзя.',
+  pairNotMain: 'Этот компьютер — касса магазина, подключить к нему другую кассу нельзя.',
   // Сверить оплату не с чем: зашифрованной записи о проверке сервером нет (её стёрли, или
   // проверки на этом компьютере не было) — работа после проверки (1.6.5, gateway withTerms)
   unverified: 'Программа не может подтвердить оплату магазина на этом компьютере. Подключите интернет хотя бы на минуту — работа продолжится сразу после проверки. Все чеки сохранены на этом компьютере.',
@@ -160,6 +194,9 @@ const LOCAL_SECTIONS = new Set([
   // Сотрудники и роли (1.4.16) — тоже из локальной базы: окно узнает о них после обмена
   'users', 'roles', 'staff',
 ])
+// Вид документа → раздел окна (основа от главного компьютера называет документы видами)
+const KIND_KEY_ALL = Object.fromEntries(Object.entries(DOC_KEYS).map(([key, kind]) => [kind, key]))
+
 // Адреса, после записи по которым список сотрудников надо перенести во вход без интернета
 const TEAM_ROUTE = /^\/(users|roles)(\/[^/]+)?$/
 
@@ -211,6 +248,9 @@ export function createGateway({
   offlineOnly = false,
   // Логотип магазина сменился (1.6.4) — экран покупателя показывает новый сразу
   onLogo = () => {},
+  // Кассы по сети без интернета (1.7.0): порт, на котором главный слушает поиск (udpPort) —
+  // проверки запускают программы на своих портах; обычно — порт по умолчанию (lan.mjs)
+  lanPorts = {},
 }) {
   const deviceId = deviceIdOf(core)
   // Обмен называет серверу ключ кассы: под её номером сервер слушает только того,
@@ -519,6 +559,8 @@ export function createGateway({
         licence: null,
         activation: activation(),
         restored: restoredNote(pharmacy.db),
+        // Кассы по сети (1.7.0): главный — его кассы и код подключения; касса — её главный
+        net: soloNet(),
       }
     }
     const st = pharmacy.sync.state()
@@ -1180,7 +1222,9 @@ export function createGateway({
         log.error('магазин без интернета: база магазина не открылась при входе', e)
       }
     }
-    if (ph) {
+    // Касса магазина (1.7.0): база пришла с главного, учётные записи — тоже (regLogins), и
+    // сверять их не с чем: «переезда» здесь не было
+    if (ph && !isRegister()) {
       // Загружена копия (с другого компьютера или своя прежняя): вход сверяется со списком
       // сотрудников магазина — сначала вход владельца, заведённого здесь, потом лишние входы
       try {
@@ -1318,17 +1362,50 @@ export function createGateway({
   // Сделанное принять сразу — как принял бы сервер. Сотрудники: перенос во вход до приёма (свой
   // пароль, заведение) и после (приём закрепляет пароль) — так же, как при обмене с сервером
   function soloAccept(ph, { team = false } = {}) {
+    // Касса магазина (1.7.0): принимает главный. Своё — в журнал обмена и главному поскорее
+    if (isRegister()) {
+      try {
+        lanCatchUp(ph.db, { deviceId, now: clock.now(), fates: false, pwOut: pwOutFor(ph) })
+      } catch (e) {
+        log.warn('касса: операция не записалась в журнал обмена', e)
+      }
+      lanNet?.kick()
+      send('status', status())
+      return
+    }
     if (team) teamToCore(ph)
     let done = []
+    const extras = []
+    // К главному подключены кассы: своё — сначала в журнал (касса получит операцию), приём и
+    // основа для касс — одной записью на диск
+    const net = soloRegisters(ph).length > 0
     try {
-      done = acceptAll(ph.db, { now: clock.now() })
+      inTx(ph.db, () => {
+        if (net) lanCatchUp(ph.db, { deviceId, now: clock.now(), fates: false, pwOut: pwOutFor(ph) })
+        done = acceptAll(ph.db, { now: clock.now(), extras })
+        if (net && done.length) {
+          mainLogBase(ph.db, { ops: done.map((op) => ({ id: op.id, type: op.type, docs: ownOpDocs(ph.db, op) })), extras, deviceId, now: clock.now() })
+        }
+      })
     } catch (e) {
       // Не принялось — останется в очереди и примется со следующей записью
       log.error('магазин без интернета: операции не приняты', e)
+      done = []
     }
     // Приняты правки сотрудников или ролей (в том числе ждавшие с прошлого раза) — вход по ним
     // закрепляется сейчас: иначе отметка «пароль задан здесь» пережила бы свою операцию
-    if (team || done.some((op) => /^(user|role)\./.test(op.type || ''))) teamToCore(ph)
+    if (team || done.some((op) => /^(user|role)\./.test(op.type || ''))) {
+      teamToCore(ph)
+      // Кассам — новые учётные записи (логины, роли, пароли)
+      if (net) {
+        try {
+          mainLogBase(ph.db, { logins: soloLoginsFor(ph), deviceId, now: clock.now() })
+        } catch (e) {
+          log.error('кассы по сети: учётные записи для касс не записаны', e)
+        }
+      }
+    }
+    if (net && done.length) lanNet?.kick()
     const keys = new Set(done.flatMap((op) => touchedByOp(op)))
     // То, что сервер заводит сам: оплата прихода из кассы, списание недостачи по пересчёту
     if (done.some((op) => op.type === 'arrival')) keys.add('supplierPayments')
@@ -1358,21 +1435,46 @@ export function createGateway({
 
   async function soloRequest(req, acc) {
     const route = req.path.split('?')[0]
+    // Касса магазина (1.7.0): сотрудников и роли заводят и меняют на главном (вход на кассах —
+    // по учётным записям главного); удалить покупателя — тоже там (главный разошлёт)
+    if (isRegister() && req.method !== 'GET' && (TEAM_ROUTE.test(route) || /^\/customers\/[^/]+$/.test(route) && req.method === 'DELETE')) {
+      return refuse(403, MESSAGES.onMainOnly)
+    }
     // Всё, что касса умеет сама, — как всегда; история товара и карточка поставщика — здесь же:
     // у этой кассы все документы за всё время
     const found = matchLocal(req.method, req.path) || matchFallback(req.method, req.path)
     if (found) return local(found, req, acc)
     let m
     if (req.method === 'POST' && (m = /^\/products\/([^/]+)\/merge$/.exec(route))) {
+      if (isRegister() || soloRegisters(pharmacy).length) return refuse(409, MESSAGES.noMerge)
       const fromId = decodeURIComponent(m[1])
       return soloWrite(acc, ['products'], (ph) => mergeProducts(ph.db, fromId, String(req.body?.into ?? ''), { now: clock.now() }), ['products.edit', 'products.delete'])
     }
     if (req.method === 'DELETE' && (m = /^\/customers\/([^/]+)$/.exec(route))) {
       const id = decodeURIComponent(m[1])
-      return soloWrite(acc, ['customers', 'payments', 'shifts'], (ph) => deleteCustomer(ph.db, id), ['customers.delete'])
+      return soloWrite(
+        acc,
+        ['customers', 'payments', 'shifts'],
+        (ph) => {
+          const done = deleteCustomer(ph.db, id)
+          // Кассам — с основой: покупатель, его долг и погашения уходят и у них
+          if (soloRegisters(ph).length) {
+            mainLogBase(ph.db, { gone: { customers: [id] }, deviceId, now: clock.now() })
+            lanNet?.kick()
+          }
+          return done
+        },
+        ['customers.delete'],
+      )
     }
-    // Расхождения бывают только при обмене с сервером; кассы — одна, эта
-    if (req.method === 'GET' && route === '/discrepancies') return reply(200, [])
+    // Расхождения (1.7.0): касса продала без главного больше, чем было на складе — их видит главный
+    if (req.method === 'GET' && route === '/discrepancies') return reply(200, isRegister() || !pharmacy ? [] : soloDiscrepancies(pharmacy.db))
+    if (req.method === 'POST' && (m = /^\/discrepancies\/([^/]+)\/resolve$/.exec(route))) {
+      if (isRegister() || !pharmacy) return refuse(403, MESSAGES.onMainOnly)
+      if (!resolveDiscrepancy(pharmacy.db, decodeURIComponent(m[1]))) return refuse(404, MESSAGES.notFound)
+      send('changed', ['discrepancies'])
+      return reply(200, { ok: true })
+    }
     if (req.method === 'GET' && route === '/sync/devices') return reply(200, [])
     return refuse(404, MESSAGES.soloUnavailable)
   }
@@ -1407,6 +1509,8 @@ export function createGateway({
       throw e
     }
     soloAccept(ph, { team: true })
+    // Касса: новый пароль действует здесь сразу; главный узнает его с операцией (pwLan)
+    if (isRegister()) q(core, 'UPDATE accounts SET verifier = ? WHERE id = ?').run(sealed, acc.id)
     return reply(201, { token: DESKTOP_TOKEN })
   }
 
@@ -1424,7 +1528,29 @@ export function createGateway({
         // 1.7.0: способа работы не выбирают (всегда без интернета); код активации не нужен
         offlineOnly,
         codeRequired: solo.requireCode,
+        // Касса магазина ('register') или главный компьютер (''); что с её главным — для экрана входа
+        role: soloRole(),
+        net: soloShop() ? soloNet() : null,
       }
+    },
+    // Кассы по сети (1.7.0). Подключить кассу — до входа (первый запуск) и после (заново)
+    join(raw) {
+      return soloJoin(raw)
+    },
+    pairStart() {
+      return pairStart()
+    },
+    pairStop() {
+      return pairStop()
+    },
+    unpair(id) {
+      return soloUnpair(String(id ?? ''))
+    },
+    net() {
+      return soloNet()
+    },
+    isRegister() {
+      return appMode() === 'standalone' && isRegister()
     },
     // Выбор при первом запуске. Пока на компьютере никто не входил, его можно поменять
     chooseMode(mode) {
@@ -1490,6 +1616,7 @@ export function createGateway({
     },
     async resetPassword(raw) {
       if (appMode() !== 'standalone') return { error: MESSAGES.notStandalone }
+      if (isRegister()) return { error: MESSAGES.onMainOnly }
       const r = useResetCode(core, { publicKey: solo.publicKey, computerRaw: solo.computerRaw, code: String(raw?.code ?? ''), now: soloNow() })
       if (r.error) return r
       if (!soloShop()) return { error: MESSAGES.noOwner }
@@ -1583,10 +1710,485 @@ export function createGateway({
     }
     lanNet?.kick()
   }
+  // ── Магазин без интернета: кассы по сети (1.7.0) ──
+  // Сервера нет — его роль берёт главный компьютер (local/solonet.mjs): принимает операции касс,
+  // рассылает им основу, выдаёт код подключения. Роль этого компьютера — в общей базе программы:
+  // soloRole 'register' — касса магазина, soloMain — её главный (номер, имя, «поколение» базы,
+  // номер магазина); иначе — главный (или единственный) компьютер
+  const soloRole = () => getMeta(core, 'soloRole') || ''
+  const isRegister = () => soloRole() === 'register'
+  function soloMain() {
+    try {
+      const v = JSON.parse(getMeta(core, 'soloMain') || 'null')
+      return v && typeof v.deviceId === 'string' && v.deviceId ? v : null
+    } catch {
+      return null
+    }
+  }
+  // Открыта база магазина без интернета
+  const soloOpen = (ph) => !!ph && ph.code === STANDALONE_CODE && appMode() === 'standalone'
+  // Кассы главного (по порядку подключения)
+  const soloRegisters = (ph) => (ph && !isRegister() ? soloPairedList(ph.db) : [])
+
+  // Ключ сети магазина: у главного заводится при первом коде подключения (вместе с «поколением»
+  // базы и номером магазина), касса получает его при подключении. Хранится зашифрованным
+  function mainKey(ph) {
+    let key = lanKeyOf(ph)
+    if (!key) {
+      key = randomBytes(32).toString('base64url')
+      const sealed = seal(key)
+      if (!sealed) return ''
+      setMeta(ph.db, 'lanKey', sealed)
+      ph.lanKey = key
+    }
+    if (!getMeta(ph.db, 'soloEpoch')) setMeta(ph.db, 'soloEpoch', newId())
+    if (!getMeta(ph.db, 'shopId')) setMeta(ph.db, 'shopId', newId())
+    return key
+  }
+  const mainName = (ph) => getMeta(ph.db, 'deviceName') || 'Главный компьютер'
+
+  // Отпечаток пароля для соседей: здесь он зашифрован средствами Windows, по сети — ключом магазина
+  const pwOutFor = (ph) => (sealed) => {
+    const key = lanKeyOf(ph)
+    const v = key ? open(sealed) : null
+    return v ? pwToLan(key, v) : null
+  }
+
+  // Учётные записи сотрудников для касс: вход на кассе — теми же логинами и паролями, что на
+  // главном, и без главного (отпечатки — зашифрованы ключом магазина)
+  function soloLoginsFor(ph) {
+    const key = lanKeyOf(ph)
+    return q(core, 'SELECT * FROM accounts WHERE pharmacyCode = ?')
+      .all(STANDALONE_CODE)
+      .map((a) => {
+        const v = key && a.verifier ? open(a.verifier) : null
+        let permissions = []
+        try {
+          const list = JSON.parse(a.permissions || '[]')
+          if (Array.isArray(list)) permissions = list.filter((k) => typeof k === 'string')
+        } catch {
+          permissions = []
+        }
+        return {
+          id: a.id,
+          login: a.login,
+          role: a.role,
+          roleName: a.roleName || '',
+          roleSystem: a.roleSystem || null,
+          permissions,
+          blocked: a.blocked ? 1 : 0,
+          tenantUserId: a.tenantUserId || null,
+          pw: v ? pwToLan(key, v) : null,
+        }
+      })
+  }
+
+  // Касса: учётные записи от главного — во вход этой кассы (пароли — ключом этого компьютера).
+  // Своя смена пароля, которую главный ещё не принял, не перетирается прежним паролем
+  function regLogins(ph, logins, key = lanKeyOf(ph)) {
+    if (!Array.isArray(logins)) return
+    const shopName = String(getMeta(ph.db, 'shopName') || '')
+    const ownPw = new Set(
+      q(
+        ph.db,
+        `SELECT DISTINCT e.rowId FROM row_edits e JOIN outbox o ON o.id = e.opId
+         WHERE o.state = 'pending' AND e.tbl = 'team_accounts' AND json_extract(e.data, '$.pw') IS NOT NULL`,
+      )
+        .all()
+        .map((r) => r.rowId),
+    )
+    const keep = new Set()
+    inTx(core, () => {
+      for (const l of logins) {
+        if (typeof l?.id !== 'string' || !l.id || typeof l.login !== 'string' || !l.login) continue
+        keep.add(l.id)
+        const v = l.pw ? pwFromLan(key, l.pw) : null
+        const sealedPw = v ? seal(v) : null
+        const user = {
+          id: l.id,
+          name: l.login,
+          role: l.role === 'founder' ? 'founder' : 'cashier',
+          roleName: l.roleName || '',
+          roleSystem: l.roleSystem || null,
+          permissions: Array.isArray(l.permissions) ? l.permissions : [],
+          pharmacy: { code: STANDALONE_CODE, name: shopName },
+          subscription: { status: 'active', paidUntil: null },
+        }
+        saveAccount(core, user, { now: clock.now(), ...(ownPw.has(l.id) ? {} : { verifier: sealedPw }) })
+        q(core, 'UPDATE accounts SET blocked = ?, tenantUserId = ? WHERE id = ?').run(l.blocked ? 1 : 0, l.tenantUserId || null, l.id)
+      }
+      for (const a of q(core, 'SELECT id FROM accounts WHERE pharmacyCode = ?').all(STANDALONE_CODE)) {
+        if (keep.has(a.id)) continue
+        q(core, 'DELETE FROM accounts WHERE id = ?').run(a.id)
+        session.drop(a.id)
+      }
+    })
+    if (session.activeId() && !accountById(core, session.activeId())) {
+      session.deactivate()
+      onSession()
+    }
+  }
+
+  // Главный: пароли, заданные на кассах (пришли с их операциями) — во вход главного. С этой минуты
+  // нынешний пароль сотрудника известен здесь (pwLearned): перенос сотрудников во вход его не сотрёт
+  function soloPeerPasswords(ph, list) {
+    const key = lanKeyOf(ph)
+    for (const p of list) {
+      const v = pwFromLan(key, p.pwLan)
+      const sealedPw = v ? seal(v) : null
+      if (!sealedPw) continue
+      q(core, 'UPDATE accounts SET verifier = ?, localPw = NULL, prevVerifier = NULL WHERE id = ? AND pharmacyCode = ?').run(sealedPw, p.id, STANDALONE_CODE)
+      pwLearned(ph.db, p.id)
+    }
+  }
+
+  // Главный: операции касс, пришедшие по сети, — в принятые; основа — в журнал для касс
+  function mainAccept(ph) {
+    let r
+    try {
+      r = mainAcceptPeers(ph.db, { now: clock.now() })
+    } catch (e) {
+      log.error('кассы по сети: операции касс не приняты', e)
+      return []
+    }
+    if (!r.ops.length) return []
+    const team = r.ops.some((o) => /^(user|role)\./.test(o.type || ''))
+    if (team) teamToCore(ph)
+    if (r.pw.length) soloPeerPasswords(ph, r.pw)
+    if (r.short.length) {
+      const regs = new Map(soloPairedList(ph.db).map((x) => [x.deviceId, x.name]))
+      addDiscrepancies(
+        ph.db,
+        r.short.map((x) => ({
+          id: newId(),
+          kind: shortKind(x.type),
+          productId: x.productId,
+          name: x.name,
+          units: x.units,
+          date: x.createdAt,
+          deviceName: regs.get(x.origin) || '',
+          userName: (x.accountId && accountById(core, x.accountId)?.login) || '',
+          opId: x.opId,
+        })),
+      )
+    }
+    try {
+      mainLogBase(ph.db, { ops: r.ops, extras: r.extras, logins: team || r.pw.length ? soloLoginsFor(ph) : [], deviceId, now: clock.now() })
+    } catch (e) {
+      log.error('кассы по сети: основа не записана', e)
+    }
+    const keys = new Set(['products', 'shifts'])
+    for (const o of r.ops) for (const d of o.docs || []) if (KIND_KEY_ALL[d.kind]) keys.add(KIND_KEY_ALL[d.kind])
+    if (r.extras.some((d) => d.kind === 'supplierpayment')) keys.add('supplierPayments')
+    if (r.extras.some((d) => d.kind === 'writeoff')) keys.add('writeoffs')
+    if (team) keys.add('users')
+    if (r.short.length) keys.add('discrepancies')
+    return [...keys]
+  }
+
+  // Касса: записи главного по порядку — операции поправкой, основа — когда до неё дошло
+  function regReceive(ph, entries) {
+    const changed = new Set()
+    let chunk = []
+    const flush = () => {
+      if (!chunk.length) return
+      const r = lanReceive(ph.db, chunk, { now: clock.now(), gen: lanGen(ph.db) })
+      for (const k of r.changed) changed.add(k)
+      chunk = []
+    }
+    for (const e of entries) {
+      if (e?.kind !== 'base') {
+        chunk.push(e)
+        continue
+      }
+      flush()
+      try {
+        const keys = regApplyBase(ph.db, e, {
+          onLogins: (list) => regLogins(ph, list),
+          // Логотип ставят на главном — касса берёт его из основы (чеки, экран покупателя)
+          onLogo: (l) => keepLogo(ph, l.logo, l.at),
+        })
+        for (const k of keys) changed.add(k)
+      } catch (err) {
+        log.error('касса: основа от главного не легла', err)
+      }
+    }
+    flush()
+    return [...changed]
+  }
+
+  // Магазин без интернета: база открыта и до входа (запуск программы) — главный отвечает своим
+  // кассам и с экрана входа, касса получает сделанное на главном
+  function soloWake() {
+    if (appMode() !== 'standalone' || !existsSync(soloFile())) return
+    try {
+      openPharmacy(STANDALONE_CODE)
+      lanNet?.sync().catch(() => {})
+    } catch (e) {
+      log.error('магазин без интернета: база магазина не открылась при запуске', e)
+    }
+  }
+
+  // Уборка журнала обмена в магазине без интернета. Ничто не «истекает»: чужое принял главный.
+  // Убирается старое (lan.mjs, LOG_KEEP_DAYS), что уже получили все: главный — все его кассы,
+  // касса — главный
+  function soloPrune_lan(ph) {
+    const ids = isRegister() ? [soloMain()?.deviceId].filter(Boolean) : soloPairedList(ph.db).map((r) => r.deviceId)
+    const got = ids.map((id) => lanPeer(ph.db, id)?.sentUpTo ?? 0)
+    const keepAbove = got.length ? Math.min(...got) : lanTopSeq(ph.db)
+    lanPrune(ph.db, clock.now(), { expire: false, keepAbove })
+  }
+
+  // ── Код подключения кассы ──
+  // 8 знаков, 10 минут, одна касса. Только в памяти: закрыли программу — кода нет. Двадцать
+  // неверных попыток — код закрыт (подбор)
+  const PAIR_MS = 10 * 60 * 1000
+  let pairing = null
+  const pairOpen = () => (pairing && clock.now() < pairing.until ? pairing : null)
+  function pairStart() {
+    const acc = activeAccount()
+    if (!acc || !isSolo(acc)) return { error: MESSAGES.soloUnavailable }
+    if (isRegister()) return { error: MESSAGES.pairNotMain }
+    if (!(acc.role === 'founder' || hasPerm(acc, 'settings.devices'))) return { error: 'Недостаточно прав' }
+    const ph = openPharmacy(acc.pharmacyCode)
+    if (!mainKey(ph)) return { error: MESSAGES.noSealing }
+    const code = newPairCode()
+    pairing = { code, keys: pairKeys(code), until: clock.now() + PAIR_MS, fails: 0 }
+    lanNet?.sync().catch(() => {})
+    send('status', status())
+    log.info('кассы по сети: открыт код подключения')
+    return { ok: true, code: formatPairCode(code), until: new Date(pairing.until).toISOString() }
+  }
+  function pairStop() {
+    pairing = null
+    lanNet?.sync().catch(() => {})
+    send('status', status())
+    return { ok: true }
+  }
+
+  // Главный: касса пришла с верным кодом — база магазина целиком и всё, что кассе надо знать
+  function pairServe({ from, name, host, shopId, entries }) {
+    const ph = pharmacy
+    if (!pairOpen() || !soloOpen(ph) || isRegister()) return { error: 'nocode' }
+    const myShop = getMeta(ph.db, 'shopId') || ''
+    if (shopId && shopId !== myShop) return { error: 'othershop' }
+    const now = clock.now()
+    const at = new Date(now).toISOString()
+    // Касса подключается заново: её операции, которые главный ещё не принял, — сначала принять
+    if (Array.isArray(entries) && entries.length) {
+      try {
+        lanReceive(ph.db, entries, { now, gen: lanGen(ph.db) })
+        mainAccept(ph)
+      } catch (e) {
+        log.error('кассы по сети: операции кассы при подключении не приняты', e)
+      }
+    }
+    // Своё неотправленное (его быть не должно: главный принимает сразу) — принять до снимка
+    soloAccept(ph)
+    const list = soloPairedList(ph.db)
+    const known = list.find((r) => r.deviceId === from)
+    const regName = known?.name || nextRegisterName(list)
+    const hostName = String(host || '').slice(0, 60)
+    setSoloPaired(
+      ph.db,
+      known ? list.map((r) => (r.deviceId === from ? { ...r, host: hostName, pairedAt: at } : r)) : [...list, { deviceId: from, name: regName, host: hostName, pairedAt: at }],
+    )
+    const topSeq = lanTopSeq(ph.db)
+    // Касса получит журнал главного с этого места: всё, что раньше, — уже в снимке
+    lanPeerSeen(ph.db, { deviceId: from, name: regName, wide: true, ok: true, now })
+    lanPeerProgress(ph.db, from, { sentUpTo: topSeq, gotUpTo: 0 })
+    let db
+    try {
+      db = shopSnapshot(ph.db)
+    } catch (e) {
+      log.error('кассы по сети: снимок базы для кассы не снят', e)
+      return { error: 'broken' }
+    }
+    pairing = null
+    log.info(`кассы по сети: подключена ${regName} (${hostName || from})`)
+    setTimeout(() => {
+      send('status', status())
+      lanNet?.kick()
+    }, 0)
+    return {
+      meta: {
+        main: { deviceId, name: mainName(ph) },
+        shopId: myShop,
+        epoch: getMeta(ph.db, 'soloEpoch') || '',
+        topSeq,
+        key: lanKeyOf(ph),
+        name: regName,
+        shopName: getMeta(ph.db, 'shopName') || '',
+        logins: soloLoginsFor(ph),
+      },
+      db,
+    }
+  }
+
+  // Касса: подключиться к главному по коду (первый запуск — магазина на этом компьютере ещё нет)
+  const PAIR_ERRORS = {
+    format: 'pairFormat',
+    address: 'pairAddress',
+    notfound: 'pairNotFound',
+    code: 'pairCode',
+    nocode: 'pairNoCode',
+    connect: 'pairConnect',
+    big: 'pairBroken',
+    broken: 'pairBroken',
+    othershop: 'pairOtherShop',
+  }
+  let joining = false
+  async function soloJoin(raw) {
+    if (appMode() !== 'standalone') return { error: MESSAGES.notStandalone }
+    if (joining) return { error: MESSAGES.broken }
+    // Касса подключается заново (главный загрузил копию базы или отключил её): её операции, которые
+    // главный ещё не принял, — с собой: он примет их до того, как снимет базу для кассы
+    const again = isRegister() && soloShop()
+    if (!again && soloShop()) return { error: MESSAGES.shopExists }
+    let entries = []
+    if (again) {
+      try {
+        const ph = openPharmacy(STANDALONE_CODE)
+        lanCatchUp(ph.db, { deviceId, now: clock.now(), fates: false, pwOut: pwOutFor(ph) })
+        entries = regPendingEntries(ph.db)
+      } catch (e) {
+        log.error('касса: свои операции для главного не собраны', e)
+        return { error: MESSAGES.broken }
+      }
+    }
+    joining = true
+    let r
+    try {
+      r = await pairRequest({
+        code: String(raw?.code ?? ''),
+        address: String(raw?.address ?? ''),
+        deviceId,
+        name: '',
+        host: hostname(),
+        shopId: again ? soloMain()?.shopId || '' : '',
+        entries,
+        ...(Number.isInteger(lanPorts.udpPort) && lanPorts.udpPort > 0 ? { udpPort: lanPorts.udpPort } : {}),
+      })
+    } finally {
+      joining = false
+    }
+    if (r.error) return { error: MESSAGES[PAIR_ERRORS[r.error] || 'pairBroken'] || MESSAGES.pairBroken }
+    const m = r.meta || {}
+    if (typeof m.key !== 'string' || !m.key || typeof m.main?.deviceId !== 'string' || !Buffer.isBuffer(r.db)) return { error: MESSAGES.pairBroken }
+    const sealedKey = seal(m.key)
+    if (!sealedKey) return { error: MESSAGES.noSealing }
+    // База главного — файлом магазина этой кассы
+    closePharmacy()
+    const file = soloFile()
+    try {
+      writeFileSync(file + '.new', r.db)
+      for (const ext of ['', '-wal', '-shm']) rmSync(file + ext, { force: true })
+      renameSync(file + '.new', file)
+    } catch (e) {
+      log.error('касса: база главного не записалась', e)
+      return { error: MESSAGES.broken }
+    }
+    let ph
+    try {
+      ph = openPharmacy(STANDALONE_CODE)
+      regInstallDb(ph.db, { main: m.main, address: r.address, port: r.port, topSeq: m.topSeq, lanKeySealed: sealedKey, name: m.name, now: clock.now() })
+      ph.lanKey = m.key
+    } catch (e) {
+      log.error('касса: база главного не открылась', e)
+      return { error: MESSAGES.broken }
+    }
+    setMeta(core, 'soloRole', 'register')
+    setMeta(core, 'soloMain', JSON.stringify({ deviceId: m.main.deviceId, name: String(m.main.name || ''), epoch: String(m.epoch || ''), shopId: String(m.shopId || '') }))
+    regLogins(ph, m.logins, m.key)
+    confirmLicence(core, STANDALONE_CODE, { now: licNow(), days: 30 }, sealing)
+    if (!getMeta(core, 'soloSince')) setMeta(core, 'soloSince', String(clock.now()))
+    ph.users.clear()
+    lanNet?.sync().catch(() => {})
+    // Подключились заново за работой — окно перечитывает всё
+    if (again) {
+      send('changed', [...LOCAL_SECTIONS, 'shop', 'discrepancies'])
+      send('status', status())
+    }
+    log.info(`касса подключена к магазину «${m.shopName || ''}» как ${m.name || ''} (главный ${m.main.name || m.main.deviceId})`)
+    return { ok: true, shopName: String(m.shopName || ''), name: String(m.name || '') }
+  }
+
+  // Главный: отключить кассу (её ключ сети больше не принимается)
+  function soloUnpair(regId) {
+    const acc = activeAccount()
+    if (!acc || !isSolo(acc) || isRegister()) return { error: MESSAGES.onMainOnly }
+    if (!(acc.role === 'founder' || hasPerm(acc, 'settings.devices'))) return { error: 'Недостаточно прав' }
+    const ph = openPharmacy(acc.pharmacyCode)
+    const list = soloPairedList(ph.db)
+    if (!list.some((r) => r.deviceId === regId)) return { error: MESSAGES.notFound }
+    setSoloPaired(ph.db, list.filter((r) => r.deviceId !== regId))
+    try {
+      lanForgetPeer(ph.db, regId)
+    } catch {
+      /* соседа могло и не быть */
+    }
+    lanNet?.sync().catch(() => {})
+    send('status', status())
+    return { ok: true }
+  }
+
+  // Что показать в окне про кассы по сети. На связи — по обмену (lan.mjs: последний обмен не
+  // дольше 20 секунд назад); error — что сказал сосед в последний раз ('epoch' — главный загрузил
+  // копию базы, 'star' — главный отключил эту кассу: подключить заново)
+  function soloNet() {
+    const ph = pharmacy
+    if (!soloOpen(ph)) return null
+    let live = new Map()
+    try {
+      live = new Map((lanNet?.status().peers || []).map((p) => [p.deviceId, p]))
+    } catch {
+      /* сеть не ответила — покажем, что знает база */
+    }
+    const seen = new Map(lanPeers(ph.db).map((p) => [p.deviceId, p]))
+    if (isRegister()) {
+      const m = soloMain()
+      const p = m ? live.get(m.deviceId) : null
+      return {
+        role: 'register',
+        name: getMeta(ph.db, 'deviceName') || '',
+        main: m ? { name: m.name || '', online: !!p?.online, seenAt: seen.get(m.deviceId)?.okAt || null, error: p?.error || '', address: seen.get(m.deviceId)?.address || '' } : null,
+        // Своё, что главный ещё не принял
+        pending: pendingCount(ph.db),
+      }
+    }
+    const p = pairOpen()
+    return {
+      role: 'main',
+      name: mainName(ph),
+      registers: soloPairedList(ph.db).map((r) => {
+        const peer = live.get(r.deviceId)
+        return { deviceId: r.deviceId, name: r.name, host: r.host || '', pairedAt: r.pairedAt || null, online: !!peer?.online, seenAt: seen.get(r.deviceId)?.okAt || null }
+      }),
+      pairing: p ? { code: formatPairCode(p.code), until: new Date(p.until).toISOString() } : null,
+      discrepancies: soloDiscrepancies(ph.db).length,
+    }
+  }
+
   const lanHub = {
     state() {
       const ph = pharmacy
       if (!ph) return null
+      // Магазин без интернета: звезда вокруг главного; часы касс с сервером не сверены (anyTime)
+      if (soloOpen(ph)) {
+        const reg = isRegister()
+        const m = reg ? soloMain() : null
+        const key = lanKeyOf(ph)
+        const enabled = !!key && (reg ? !!m : soloPairedList(ph.db).length > 0 || !!pairOpen())
+        return {
+          enabled,
+          key,
+          deviceId,
+          name: reg ? getMeta(ph.db, 'deviceName') || '' : mainName(ph),
+          wide: true,
+          epoch: reg ? m?.epoch || '' : getMeta(ph.db, 'soloEpoch') || '',
+          anyTime: true,
+        }
+      }
       const key = lanKeyOf(ph)
       const wide = lanWideHere(core, ph.code)
       // За кассой начал работать тот, кому видны деньги магазина, — журналы соседей
@@ -1601,12 +2203,32 @@ export function createGateway({
     entriesFor(since, wide) {
       const ph = pharmacy
       if (!ph) return { entries: [], upTo: since, more: false }
+      if (soloOpen(ph)) {
+        // Своё — уже в журнале (soloAccept); отметок о судьбе нет — принятое кассы узнают из основы
+        lanCatchUp(ph.db, { deviceId, now: clock.now(), fates: false, pwOut: pwOutFor(ph) })
+        return lanEntriesSince(ph.db, since, { wide: true })
+      }
       lanCatchUp(ph.db, { deviceId, now: clock.now() })
       return lanEntriesSince(ph.db, since, { wide })
     },
     receive(peerId, entries) {
       const ph = pharmacy
       if (!ph || !Array.isArray(entries) || !entries.length) return
+      if (soloOpen(ph)) {
+        let keys = []
+        if (isRegister()) {
+          if (peerId !== soloMain()?.deviceId) return
+          keys = regReceive(ph, entries)
+        } else {
+          if (!soloPairedList(ph.db).some((r) => r.deviceId === peerId)) return
+          lanReceive(ph.db, entries, { now: clock.now(), gen: lanGen(ph.db) })
+          keys = mainAccept(ph)
+        }
+        if (keys.length) send('changed', keys)
+        lanNet?.kick()
+        send('status', status())
+        return
+      }
       const r = lanReceive(ph.db, entries, { now: clock.now(), gen: lanGen(ph.db) })
       // Сотрудника завели, заблокировали или сменили ему пароль на соседней кассе — вход без
       // интернета здесь тоже по-новому
@@ -1631,6 +2253,34 @@ export function createGateway({
     peerSeen: (p) => pharmacy && lanPeerSeen(pharmacy.db, p),
     manual: () => (pharmacy ? lanManual(pharmacy.db) : []),
     forgetAddress: (id) => pharmacy && q(pharmacy.db, "UPDATE lan_peers SET address = '' WHERE deviceId = ?").run(id),
+    // Магазин без интернета (1.7.0): звезда — касса говорит только с главным, главный — только со
+    // своими кассами; «поколение» базы главного (сменилось — он загрузил копию, кассам подключиться заново)
+    allow(id) {
+      const ph = pharmacy
+      if (!soloOpen(ph)) return true
+      if (isRegister()) return id === soloMain()?.deviceId
+      return soloPairedList(ph.db).some((r) => r.deviceId === id)
+    },
+    epochOk(e) {
+      const ph = pharmacy
+      if (!soloOpen(ph)) return true
+      const mine = isRegister() ? soloMain()?.epoch || '' : getMeta(ph.db, 'soloEpoch') || ''
+      return !mine || e === mine
+    },
+    pairInfo() {
+      const p = pairOpen()
+      return p && soloOpen(pharmacy) && !isRegister() ? p.keys : null
+    },
+    pairFailed() {
+      if (!pairing) return
+      pairing.fails += 1
+      if (pairing.fails >= 20) {
+        pairing = null
+        log.warn('кассы по сети: код подключения закрыт — слишком много неверных попыток')
+        send('status', status())
+      }
+    },
+    pairServe: (req) => pairServe(req),
   }
 
   // ── Вход ──
@@ -1887,6 +2537,7 @@ export function createGateway({
   // здесь та же проверка, что у сервера (cleanLogo). Пустая строка — убрать логотип
   async function setShopLogo(req, acc) {
     if (!isSolo(acc)) return refuse(404, MESSAGES.soloUnavailable)
+    if (isRegister()) return refuse(403, MESSAGES.onMainOnly)
     if (!(acc.role === 'founder' || hasPerm(acc, 'settings.print'))) return refuse(403, 'Недостаточно прав')
     const raw = req.body?.logo
     if (typeof raw !== 'string') return refuse(400, MESSAGES.badLogo)
@@ -1895,6 +2546,15 @@ export function createGateway({
     const ph = openPharmacy(acc.pharmacyCode)
     keepLogo(ph, clean, clean ? new Date(clock.now()).toISOString() : null)
     log.info(clean ? 'логотип магазина поставлен в программе' : 'логотип магазина убран')
+    // Кассам — с основой (local/solonet.mjs, mainLogBase: logo)
+    if (soloRegisters(ph).length) {
+      try {
+        mainLogBase(ph.db, { logo: { logo: storedLogo(ph).logo, at: storedLogo(ph).at }, deviceId, now: clock.now() })
+        lanNet?.kick()
+      } catch (e) {
+        log.error('кассы по сети: логотип для касс не записан', e)
+      }
+    }
     send('changed', ['shop'])
     const now = storedLogo(ph)
     return reply(200, { logo: now.logo, at: now.at })
@@ -2137,6 +2797,7 @@ export function createGateway({
       if (!acc) {
         // Пометка есть, а сотрудника в базе нет (базу стёрли) — входа нет
         if (session.activeId()) session.deactivate()
+        soloWake()
         return false
       }
       try {
@@ -2148,6 +2809,8 @@ export function createGateway({
           session.deactivate()
           return false
         }
+        // Сеть магазина без интернета — сразу (lanHub.state)
+        if (isSolo(acc)) lanNet?.sync().catch(() => {})
         ph.sync.start().catch(() => {})
       } catch (e) {
         // База магазина не открылась: файл занят, диск недоступен, база от более новой
@@ -2317,7 +2980,8 @@ export function createGateway({
       // сервера, а её касса замолчала, снимается (local/lan.mjs)
       if (pharmacy) {
         try {
-          if (lanPrune(pharmacy.db, clock.now())) send('changed', ['products', 'customers', 'sales', 'returns', 'shifts', 'arrivals'])
+          if (soloOpen(pharmacy)) soloPrune_lan(pharmacy)
+          else if (lanPrune(pharmacy.db, clock.now())) send('changed', ['products', 'customers', 'sales', 'returns', 'shifts', 'arrivals'])
         } catch (e) {
           log.warn('обмен по сети: журнал не убран', e)
         }

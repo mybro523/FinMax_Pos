@@ -380,6 +380,8 @@ async function start() {
     standalone: { publicKey: licenceKey, computerRaw, computerCode: computerRaw ? formatComputer(computerRaw) : '' },
     // 1.7.0: все магазины без интернета — компьютер сам переходит на такую работу (config.mjs)
     offlineOnly: OFFLINE_ONLY,
+    // Касса ищет главного компьютера на этом порту (при запуске из исходников проверка задаёт свой)
+    lanPorts: { udpPort: (DEV && Number(process.env.FINMAX_LAN_UDP)) || undefined },
   })
   log.info(`касса ${gateway.deviceId}`)
   if (!licenceKey) log.warn('ключа кодов активации нет — программа без интернета не активируется')
@@ -674,6 +676,19 @@ async function start() {
   ipcMain.handle('standalone:activate', (event, code) => (trusted(event) ? gateway.standalone.activate(String(code ?? '').slice(0, 200)) : null))
   ipcMain.handle('standalone:setup', async (event, req) => (trusted(event) ? gateway.standalone.setupShop(req && typeof req === 'object' ? req : {}) : null))
   ipcMain.handle('standalone:reset', async (event, req) => (trusted(event) ? gateway.standalone.resetPassword(req && typeof req === 'object' ? req : {}) : null))
+  // ── Кассы по сети без интернета (1.7.0) ──
+  // Касса подключается к главному компьютеру по коду, который тот показывает 10 минут: до входа
+  // (первый запуск) и после (подключиться заново). Код на главном открывает только тот, у кого
+  // право на кассы (проверяет шлюз); без кода касса ничего не получит
+  ipcMain.handle('standalone:join', async (event, req) => {
+    if (!trusted(event)) return null
+    const r = req && typeof req === 'object' ? req : {}
+    return gateway.standalone.join({ code: String(r.code ?? '').slice(0, 40), address: String(r.address ?? '').slice(0, 100) })
+  })
+  ipcMain.handle('standalone:pairStart', (event) => (trusted(event) ? gateway.standalone.pairStart() : null))
+  ipcMain.handle('standalone:pairStop', (event) => (trusted(event) ? gateway.standalone.pairStop() : null))
+  ipcMain.handle('standalone:unpair', (event, id) => (trusted(event) ? gateway.standalone.unpair(String(id ?? '').slice(0, 100)) : null))
+  ipcMain.handle('standalone:net', (event) => (trusted(event) ? gateway.standalone.net() : null))
   ipcMain.handle('session:clear', (event) => {
     if (!trusted(event)) return false
     gateway.logout()
@@ -865,6 +880,8 @@ async function start() {
   })
   ipcMain.handle('backup:restore', async (event, req) => {
     if (!trusted(event) || !allowed('settings.backup')) return { ok: false, error: 'rights' }
+    // Касса магазина без интернета получает базу от главного компьютера — копию загружают там
+    if (gateway.standalone.isRegister()) return { ok: false, error: 'register' }
     const shop = gateway.pharmacyFile()
     const chosen = copyChoices.get(String(req?.id || ''))
     if (!shop || !chosen) return { ok: false, error: 'gone' }

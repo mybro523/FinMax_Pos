@@ -2803,3 +2803,11 @@ html.lite .btn:hover, html.lite .btn.gold:hover, html.lite .page-acts .btn:hover
 /* Тень под картинками плиток меню — фильтр на каждой плитке, самое дорогое на главном экране */
 html.lite .hub-tile .hub-pic { filter: none !important; }
 html.lite .hub-tile .hub-name { text-shadow: none !important; }
+
+/* ── Кассы магазина без интернета (1.7.0): код подключения, «или», подключение заново ── */
+.pair-box { border: 1.5px dashed var(--accent); border-radius: 12px; padding: 14px 16px; margin: 4px 0 12px; background: var(--accent-soft); display: grid; gap: 6px; }
+.pair-code { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 40px; font-weight: 700; letter-spacing: 0.12em; color: var(--text); line-height: 1.1; user-select: all; overflow-wrap: anywhere; }
+input.pair-input { font-size: 22px; letter-spacing: 0.14em; text-align: center; }
+.solo-or { display: flex; align-items: center; gap: 10px; margin: 14px 0; color: var(--muted-2); font-size: 12.5px; }
+.solo-or::before, .solo-or::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+.solo-join-inline { border-top: 1px solid var(--border); padding-top: 10px; margin-bottom: 12px; max-width: 520px; }

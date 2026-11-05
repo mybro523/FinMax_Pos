@@ -7,7 +7,7 @@ import WindowButtons from './WindowButtons'
 import VirtualKeyboard, { poleDlyaVvoda } from './VirtualKeyboard'
 import { useT, useLang, setLang, LANGS } from '../lib/i18n'
 import { bridge, isDesktop } from '../lib/desktop'
-import { ActivateCard, ModeChoice, ResetCard, SetupCard, SoloLine } from './BezInterneta'
+import { ActivateCard, JoinCard, ModeChoice, ResetCard, SetupCard, SoloLine } from './BezInterneta'
 import { kassaFirst } from '../lib/permissions'
 import emblem from '../assets/brand/emblem-192.webp'
 import logoEmblem from '../assets/brand/logo-emblem.webp'
@@ -102,6 +102,9 @@ export default function Login() {
       ? 'mode'
       : soloMode && codeNeeded && (!solo.activation?.active || soloView === 'renew')
         ? 'activate'
+        // 1.7.0: касса магазина подключается к главному (первый запуск или заново)
+        : soloMode && soloView === 'join' && (!solo.shop || solo.role === 'register')
+          ? 'join'
         : soloMode && !solo.shop
           ? 'setup'
           : soloMode && soloView === 'reset'
@@ -189,7 +192,20 @@ export default function Login() {
             onBack={soloView === 'renew' ? () => setSoloView('') : !solo?.shop ? () => bridge.standalone.mode('').then(() => refreshSolo()) : null}
           />
         )}
-        {panel === 'setup' && <SetupCard info={solo} onDone={enterAfterSetup} />}
+        {panel === 'setup' && <SetupCard info={solo} onDone={enterAfterSetup} onJoin={bridge?.standalone?.join ? () => setSoloView('join') : null} />}
+        {panel === 'join' && (
+          <JoinCard
+            again={!!solo?.shop}
+            onBack={() => setSoloView('')}
+            onDone={(r) => {
+              setSoloView('')
+              setErr('')
+              setPw('')
+              setNote(`${t('Касса подключена к магазину')} «${r.shopName || ''}» — ${r.name || ''}. ${t('Войдите логином и паролем, которые выдал владелец.')}`)
+              refreshSolo()
+            }}
+          />
+        )}
         {panel === 'reset' && (
           <ResetCard
             info={solo}
@@ -232,7 +248,7 @@ export default function Login() {
             <span className="ic"><LuLogIn size={17} /></span> {busy ? t('Вход…') : t('Войти')}
           </button>
 
-          {soloMode && <SoloLine info={solo} onReset={() => setSoloView('reset')} onRenew={() => setSoloView('renew')} />}
+          {soloMode && <SoloLine info={solo} onReset={() => setSoloView('reset')} onRenew={() => setSoloView('renew')} onRejoin={() => setSoloView('join')} />}
 
           {/* «С интернетом» выбрали по ошибке, а войти ещё никто не успел — выбор можно поменять */}
           {solo && solo.mode === 'cloud' && !solo.cloudAccounts && (
