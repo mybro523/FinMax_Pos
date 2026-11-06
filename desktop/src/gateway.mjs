@@ -112,8 +112,8 @@ import { checkRequest, createRemote, DESKTOP_TOKEN, isLinkFailure } from './net.
 import { cleanLogo } from './print/logo.mjs'
 import { formatPairCode, newPairCode, pairKeys, pairRequest, parseAddress } from './lan.mjs'
 import { createSync } from './sync.mjs'
-import { activate as activateCode, activationState, useResetCode } from './local/activation.mjs'
-import { validKey } from './local/licence-code.mjs'
+import { activate as activateCode, activationState, codeState, trialState, useResetCode } from './local/activation.mjs'
+import { computerRawFromCode, validKey } from './local/licence-code.mjs'
 import { acceptAll, deleteCustomer, isStandaloneDb, mergeProducts, pruneAccepted, setupShopDb, STANDALONE_CODE } from './local/standalone.mjs'
 import { updateUser } from './local/ops/team.mjs'
 import { SUPPLIER_HAS_DEBT, SUPPLIER_HAS_PAYMENTS } from './local/ops/supplierops.mjs'
@@ -175,6 +175,13 @@ export const MESSAGES = {
   samePassword: 'Новый пароль совпадает со старым',
   noPasswordChange: 'Менять пароль вам не разрешено. Пароль меняет владелец в разделе «Сотрудники».',
   notActivated: 'Программа не активирована — введите код активации.',
+  // 1.7.1: срок работы — пробный 14 дней или по коду активации; когда он вышел — только просмотр
+  licExpired: 'Срок работы программы закончился — продажи и изменения остановлены, просмотр и отчёты работают. Введите код активации: «Настройки» → «Профиль».',
+  regLicExpired: 'Срок работы программы магазина закончился — продажи и изменения остановлены, просмотр и отчёты работают. Владелец вводит код активации на главном компьютере, касса получит его сама.',
+  regStopped: 'Касс подключено больше, чем разрешает код активации, — эта касса остановлена. Владелец может отключить лишнюю кассу на главном компьютере или взять код на большее число касс.',
+  codeOnMain: 'Код активации вводят на главном компьютере магазина — кассы получают его сами.',
+  pairLimit: 'Все кассы, которые разрешает код активации, уже подключены. Отключите ненужную кассу или попросите у поставщика код на большее число касс.',
+  pairExpired: 'Срок работы программы закончился — сначала введите код активации.',
   soloTitle: 'Срок работы программы закончился',
   notStandalone: 'Сначала выберите, как будет работать программа.',
   shopExists: 'Магазин на этом компьютере уже заведён — войдите под своим именем.',
@@ -1175,8 +1182,11 @@ export function createGateway({
     }
     const sub = soloAccess()
     const expired = !sub.canWrite
-    if (expired && !closedByLicence) send('suspended', { message: sub.message, title: MESSAGES.soloTitle, standalone: true, until: activation().untilHuman || '' })
-    if (!expired && closedByLicence) send('resumed')
+    // 1.7.1: срок вышел — работа не закрывается: окно перечитывает «кто я» и остаётся в просмотре
+    if (expired !== closedByLicence) {
+      send('licence', { canWrite: !expired, message: sub.message })
+      send('status', status())
+    }
     closedByLicence = expired
   }
 
@@ -1275,15 +1285,116 @@ export function createGateway({
   }
   // Без кода активации (requireCode: false) — работает всегда, без срока и без счёта касс
   const FREE = { active: true, activated: true, expired: false, warn: false, forever: true, until: null, untilHuman: null, endsAt: null, daysLeft: null, registers: null, serial: 0, message: '', free: true }
+
+  // ── Пробный срок (1.7.1) ──
+  // Когда он пошёл: при заведении магазина, а у магазина, заведённого раньше (1.7.0), — с первого
+  // запуска версии с кодами. Помнится дважды: в общей базе программы (зашифровано средствами
+  // Windows) и в базе магазина (уходит с копией: на новом компьютере срок заново не начинается).
+  // Берётся раньшее; недостающее дописывается
+  let trialMemo = null
+  function soloTrialFrom() {
+    if (!soloShop()) return null
+    let ph = null
+    try {
+      ph = openPharmacy(STANDALONE_CODE)
+    } catch {
+      ph = null
+    }
+    if (trialMemo && trialMemo.ph === ph) return trialMemo.from
+    let sealed = NaN
+    try {
+      const stored = getMeta(core, 'soloTrial')
+      sealed = stored ? Number(JSON.parse(open(stored) || 'null')?.from) : NaN
+    } catch {
+      sealed = NaN
+    }
+    const inShop = ph ? Number(getMeta(ph.db, 'trialFrom')) : NaN
+    const known = [sealed, inShop].filter((v) => Number.isFinite(v) && v > 0)
+    const from = known.length ? Math.min(...known) : soloNow()
+    try {
+      if (sealed !== from) {
+        const s = seal(JSON.stringify({ from }))
+        if (s) setMeta(core, 'soloTrial', s)
+      }
+      if (ph && inShop !== from) setMeta(ph.db, 'trialFrom', String(from))
+    } catch (e) {
+      log.warn('пробный срок: отметка не записалась', e)
+    }
+    if (!known.length) log.info(`пробный срок пошёл: ${new Date(from).toISOString()}`)
+    trialMemo = { ph, from }
+    return from
+  }
+
+  // Касса (1.7.1): срок — по коду главного (касса сама проверяет его подпись по коду компьютера
+  // главного) или по его пробному сроку; касса сверх числа касс в коде остановлена. Сведения
+  // приходят с главного при подключении и в основе (lic) и лежат зашифрованными
+  function regLic() {
+    try {
+      const stored = getMeta(core, 'soloLic')
+      const v = stored ? JSON.parse(open(stored) || 'null') : null
+      return v && typeof v === 'object' ? v : null
+    } catch {
+      return null
+    }
+  }
+  function keepRegLic(text) {
+    let v = null
+    try {
+      v = typeof text === 'string' ? JSON.parse(text) : text
+    } catch {
+      v = null
+    }
+    if (!v || typeof v !== 'object') return
+    const lic = {
+      code: typeof v.code === 'string' ? v.code.slice(0, 80) : '',
+      computer: typeof v.computer === 'string' ? v.computer.slice(0, 20) : '',
+      trialFrom: Number.isFinite(Number(v.trialFrom)) && Number(v.trialFrom) > 0 ? Number(v.trialFrom) : null,
+      stopped: Array.isArray(v.stopped) ? v.stopped.filter((x) => typeof x === 'string').slice(0, 100) : [],
+    }
+    const before = activation()
+    const sealedLic = seal(JSON.stringify(lic))
+    if (!sealedLic) return
+    setMeta(core, 'soloLic', sealedLic)
+    const after = activation()
+    if (before.active !== after.active || before.until !== after.until || before.stopped !== after.stopped) {
+      log.info(`касса: срок работы от главного — ${after.active ? (after.forever ? 'без срока' : 'до ' + after.until) : 'закончился'}${after.stopped ? ' (касса сверх кода)' : ''}`)
+      watchLicence()
+      send('status', status())
+    }
+  }
+  function regActivation() {
+    const now = soloNow()
+    const lic = regLic()
+    // Сведения о сроке есть, но не читаются (испорчены или подложены руками) — срок не подтверждён,
+    // пока главный не пришлёт их снова (он присылает их и раз в сутки)
+    if (!lic && getMeta(core, 'soloLic')) {
+      return { active: false, activated: false, expired: true, warn: true, trial: false, register: true, forever: false, until: null, untilHuman: null, endsAt: null, daysLeft: 0, registers: null, serial: 0, message: MESSAGES.regLicExpired }
+    }
+    let a = null
+    if (lic?.code) {
+      const c = codeState({ publicKey: solo.publicKey, computerRaw: computerRawFromCode(lic.computer), code: lic.code, now })
+      if (c.activated) a = { ...c, trial: false }
+    }
+    if (!a) a = trialState({ from: lic?.trialFrom || soloTrialFrom(), now })
+    a = { ...a, register: true }
+    if (a.active && Array.isArray(lic?.stopped) && lic.stopped.includes(deviceId)) return { ...a, active: false, stopped: true, warn: true, message: MESSAGES.regStopped }
+    return a
+  }
   function activation() {
     if (!solo.requireCode) return FREE
-    return activationState(core, { publicKey: solo.publicKey, computerRaw: solo.computerRaw, now: soloNow() })
+    if (appMode() === 'standalone' && isRegister()) return regActivation()
+    const now = soloNow()
+    const a = activationState(core, { publicKey: solo.publicKey, computerRaw: solo.computerRaw, now })
+    if (a.activated) return { ...a, trial: false }
+    return trialState({ from: soloTrialFrom(), now })
   }
-  // Подписка — словами сервера: окно показывает её так же, как подписку магазина с сервером
+  // Подписка — словами сервера: окно показывает её так же, как подписку магазина с сервером.
+  // Срок вышел — только просмотр (local: чтение отвечает, запись — отказ этими словами)
   function soloAccess() {
     const a = activation()
-    if (a.active) return { status: 'active', canWrite: true, warn: !!a.warn, daysLeft: a.daysLeft, paidUntil: a.endsAt, message: a.message || '', standalone: true }
-    return { status: 'expired', canWrite: false, warn: true, daysLeft: 0, paidUntil: a.endsAt ?? null, message: a.message || MESSAGES.notActivated, standalone: true }
+    if (a.active) return { status: 'active', canWrite: true, warn: !!a.warn, daysLeft: a.daysLeft, paidUntil: a.endsAt, message: a.message || '', standalone: true, trial: !!a.trial }
+    const message = a.stopped ? MESSAGES.regStopped : a.register ? MESSAGES.regLicExpired : solo.requireCode ? MESSAGES.licExpired : a.message || MESSAGES.notActivated
+    return { status: 'expired', canWrite: false, readOnly: true, warn: true, daysLeft: 0, paidUntil: a.endsAt ?? null, message, standalone: true, trial: !!a.trial }
   }
   const soloView = (acc) => ({ ...userView(acc, licNow()), subscription: soloAccess(), standalone: true, register: isRegister() })
 
@@ -1647,6 +1758,7 @@ export function createGateway({
     },
     activate(code) {
       if (appMode() !== 'standalone') return { error: MESSAGES.notStandalone }
+      if (isRegister()) return { error: MESSAGES.codeOnMain }
       const now = soloNow()
       const r = activateCode(core, { publicKey: solo.publicKey, computerRaw: solo.computerRaw, code: String(code ?? ''), now })
       if (r.error) return r
@@ -1656,13 +1768,15 @@ export function createGateway({
       log.info(`код активации принят: ${r.forever ? 'навсегда' : 'до ' + r.until}, касс — ${r.registers}`)
       // Срок мог закончиться посреди работы — новый код открывает её сразу
       watchLicence()
+      // Кассам — новый срок и число касс
+      if (pharmacy && soloOpen(pharmacy)) pushLic(pharmacy)
       if (activeAccount()) send('status', status())
-      return { ok: true, activation: r }
+      return { ok: true, activation: activation() }
     },
     async setupShop(raw) {
       if (appMode() !== 'standalone') return { error: MESSAGES.notStandalone }
       const a = activation()
-      if (!a.active) return { error: a.expired ? a.message : MESSAGES.notActivated }
+      if (!a.active) return { error: a.expired ? MESSAGES.licExpired : MESSAGES.notActivated }
       if (soloShop()) return { error: MESSAGES.shopExists }
       const shopName = String(raw?.shopName ?? '').trim().slice(0, 120)
       const login = String(raw?.login ?? '').trim()
@@ -1848,6 +1962,51 @@ export function createGateway({
     if (!getMeta(ph.db, 'shopId')) setMeta(ph.db, 'shopId', newId())
     return key
   }
+  // ── Кассы и код активации (1.7.1) ──
+  // Сколько касс (кроме главного) можно по коду; null — без ограничения (пробный срок, без кода)
+  function regLimit() {
+    const a = activation()
+    if (!solo.requireCode || a.free || a.trial || !a.activated) return null
+    return Math.max(0, (Number(a.registers) || 1) - 1)
+  }
+  // Кассы сверх кода — подключённые последними (порядок списка: подключённая заново остаётся на
+  // своём месте)
+  function stoppedRegs(ph) {
+    const lim = regLimit()
+    return lim === null ? [] : soloPairedList(ph.db).slice(lim).map((r) => r.deviceId)
+  }
+  // Что касса знает о сроке магазина: код главного (касса проверит его подпись сама), код
+  // компьютера главного, начало пробного срока и какие кассы остановлены
+  function licView(ph) {
+    if (!solo.requireCode) return null
+    const a = activation()
+    const row = a.activated && !a.trial ? q(core, 'SELECT code FROM activation WHERE id = 1').get() : null
+    return JSON.stringify({ code: row?.code || '', computer: solo.computerCode, trialFrom: soloTrialFrom(), stopped: stoppedRegs(ph) })
+  }
+  // Кассам — новые сведения о сроке, если они поменялись (код, лишние кассы)
+  function pushLic(ph) {
+    if (!solo.requireCode || isRegister() || !soloRegisters(ph).length) return
+    try {
+      const view = licView(ph)
+      if (!view) return
+      // Поменялось — сразу; нет — раз в сутки (касса, потерявшая сведения, получит их снова)
+      let sent = null
+      try {
+        sent = JSON.parse(getMeta(ph.db, 'soloLicSent') || 'null')
+      } catch {
+        sent = null
+      }
+      if (sent?.view === view && clock.now() - (Number(sent.at) || 0) < 86400000) return
+      inTx(ph.db, () => {
+        mainLogBase(ph.db, { lic: view, deviceId, now: clock.now() })
+        setMeta(ph.db, 'soloLicSent', JSON.stringify({ view, at: clock.now() }))
+      })
+      lanNet?.kick()
+    } catch (e) {
+      log.warn('кассы по сети: сведения о сроке работы кассам не записаны', e)
+    }
+  }
+
   // Номер магазина, ключ сети, кассы и докуда дошёл журнал — ещё и в общей базе программы: база
   // главного, сама поднятая из копии после поломки файла (копия могла быть снята до первой кассы),
   // берёт их отсюда — кассы подключаются заново и приносят недостающее
@@ -2684,6 +2843,8 @@ export function createGateway({
           onLogins: (list) => regLogins(ph, list),
           // Логотип ставят на главном — касса берёт его из основы (чеки, экран покупателя)
           onLogo: (l) => keepLogo(ph, l.logo, l.at),
+          // Новый код активации, пробный срок, лишние кассы — от главного (1.7.1)
+          onLic: (l) => keepRegLic(l),
         })
       } catch (err) {
         log.error('касса: основа от главного не легла', err)
@@ -2748,6 +2909,9 @@ export function createGateway({
     if (isRegister()) return { error: MESSAGES.pairNotMain }
     if (!(acc.role === 'founder' || hasPerm(acc, 'settings.devices'))) return { error: MESSAGES.noRights }
     const ph = openPharmacy(acc.pharmacyCode)
+    if (!activation().active) return { error: MESSAGES.pairExpired }
+    const lim = regLimit()
+    if (lim !== null && soloPairedList(ph.db).length >= lim) return { error: MESSAGES.pairLimit }
     if (!mainKey(ph)) return { error: MESSAGES.noSealingSolo }
     mirrorSolo(ph)
     const code = newPairCode()
@@ -2779,6 +2943,11 @@ export function createGateway({
     const at = new Date(now).toISOString()
     const list = soloPairedList(ph.db)
     const known = list.find((r) => r.deviceId === from)
+    // Срок вышел или все кассы по коду уже подключены — новую не подключаем (подключённая раньше
+    // подключается заново всегда: её место в счёте касс не меняется)
+    if (!activation().active) return { error: 'expired' }
+    const lim = regLimit()
+    if (!known && lim !== null && list.length >= lim) return { error: 'limit' }
     const regName = known?.name || nextRegisterName(list)
     if (!fresh && Array.isArray(entries) && entries.length) {
       // Частями: и запись на диск, и основа для касс — не огромные. Не легло — кассе подключиться
@@ -2852,6 +3021,7 @@ export function createGateway({
         name: regName,
         shopName: getMeta(ph.db, 'shopName') || '',
         logins: soloLoginsFor(ph),
+        lic: licView(ph),
       },
       db,
     }
@@ -2922,6 +3092,8 @@ export function createGateway({
     broken: 'pairBroken',
     othershop: 'pairOtherShop',
     version: 'pairVersion',
+    limit: 'pairLimit',
+    expired: 'pairExpired',
   }
   let joining = false
   async function soloJoin(raw) {
@@ -3034,6 +3206,8 @@ export function createGateway({
       ph.lanKey = m.key
       ph.regKey = m.regKey
       regLogins(ph, m.logins, m.key)
+      // Срок работы — от главного (код и пробный срок магазина)
+      if (m.lic) keepRegLic(m.lic)
       confirmLicence(core, STANDALONE_CODE, { now: licNow(), days: 30 }, sealing)
       if (!getMeta(core, 'soloSince')) setMeta(core, 'soloSince', String(clock.now()))
       ph.users.clear()
@@ -3111,6 +3285,7 @@ export function createGateway({
       }
     }
     const p = pairOpen()
+    const stopped = stoppedRegs(ph)
     return {
       role: 'main',
       name: mainName(ph),
@@ -3123,7 +3298,10 @@ export function createGateway({
         online: onLine(live.get(r.deviceId)),
         seenAt: seen.get(r.deviceId)?.okAt || null,
         error: live.get(r.deviceId)?.error || '',
+        stopped: stopped.includes(r.deviceId),
       })),
+      // Касс по коду активации, кроме главного (null — без ограничения)
+      limit: regLimit(),
       // Сколько коду осталось — по часам программы: окно считает дальше по своим
       pairing: p ? { code: formatPairCode(p.code), until: new Date(p.until).toISOString(), leftMs: Math.max(0, p.until - clock.now()) } : null,
       discrepancies: soloDiscrepancies(ph.db).length,
@@ -3369,10 +3547,7 @@ export function createGateway({
   // считается только слово самого сервера: 401 и 403. Сервер недоступен или отвечает
   // ошибкой — отвечаем по сохранённому, и человек продолжает работать.
   async function me(req, acc) {
-    if (isSolo(acc)) {
-      const view = soloView(accountById(core, acc.id))
-      return closedBySubscription(view.subscription) || reply(200, view)
-    }
+    if (isSolo(acc)) return reply(200, soloView(accountById(core, acc.id)))
     const token = session.tokenOf(acc.id)
     if (token) {
       const res = await remote(req, token)
@@ -3580,7 +3755,10 @@ export function createGateway({
 
   // ── Запрос к локальной базе ──
   async function local(found, req, acc) {
-    const closed = closedBySubscription(access(acc))
+    const sub = access(acc)
+    // Магазин без интернета, срок вышел: смотреть и считать отчёты можно, продавать и менять — нет
+    const readOnly = isSolo(acc) && !sub.canWrite && (req.method === 'GET' || req.method === 'HEAD')
+    const closed = readOnly ? null : closedBySubscription(sub)
     if (closed) return closed
 
     const ph = openPharmacy(acc.pharmacyCode)
@@ -3962,7 +4140,10 @@ export function createGateway({
       // сервера, а её касса замолчала, снимается (local/lan.mjs)
       if (pharmacy) {
         try {
-          if (soloOpen(pharmacy)) soloPrune_lan(pharmacy)
+          if (soloOpen(pharmacy)) {
+            soloPrune_lan(pharmacy)
+            pushLic(pharmacy)
+          }
           else if (lanPrune(pharmacy.db, clock.now())) send('changed', ['products', 'customers', 'sales', 'returns', 'shifts', 'arrivals'])
         } catch (e) {
           log.warn('обмен по сети: журнал не убран', e)

@@ -555,7 +555,7 @@ export function shopSnapshot(db) {
   try {
     copy.exec('DELETE FROM outbox; DELETE FROM lan_log; DELETE FROM lan_docs; DELETE FROM lan_peers; DELETE FROM lan_manual;')
     const drop = copy.prepare('DELETE FROM meta WHERE key = ?')
-    for (const key of ['lanKey', 'lanRegKey', 'soloPaired', 'soloDisc', 'restored', 'deviceName', 'needFull', 'lanWide', 'lanDevices', 'soloMain', 'batchTag', 'soloRestoredFrom', 'soloEpochSeq', 'soloEpochBlind', 'soloFormerMain', 'lanPrunedTop']) drop.run(key)
+    for (const key of ['lanKey', 'lanRegKey', 'soloPaired', 'soloDisc', 'restored', 'deviceName', 'needFull', 'lanWide', 'lanDevices', 'soloMain', 'batchTag', 'soloRestoredFrom', 'soloEpochSeq', 'soloEpochBlind', 'soloFormerMain', 'lanPrunedTop', 'soloLicSent']) drop.run(key)
     copy
       .prepare("UPDATE row_edits SET data = json_remove(data, '$.pw') WHERE tbl = 'team_accounts' AND json_valid(data) AND json_extract(data, '$.pw') IS NOT NULL")
       .run()

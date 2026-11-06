@@ -33,7 +33,7 @@ export const sealOf = (tag) => ({
 
 // Один компьютер магазина: шлюз программы и обмен по сети на свободных портах. Таймеры обмена
 // пустые — обмениваться проверка велит сама (lan.now). Часы — общие для всех компьютеров
-export function computer(tag, { time, udpFind = 0, core: coreDb, dataDir: dir, openFile = null } = {}) {
+export function computer(tag, { time, udpFind = 0, core: coreDb, dataDir: dir, openFile = null, requireCode = false } = {}) {
   const core = coreDb || openDb(':memory:', CORE_SCHEMA)
   const events = []
   const errors = []
@@ -54,7 +54,7 @@ export function computer(tag, { time, udpFind = 0, core: coreDb, dataDir: dir, o
     timers: manualTimers(),
     emit: (type, payload) => events.push({ type, payload }),
     log: { info() {}, warn() {}, error: (...a) => errors.push(a) },
-    standalone: { publicKey: KEYS.publicKey, computerRaw: computerRawOf(machine), computerCode: computerCodeOf(machine), requireCode: false },
+    standalone: { publicKey: KEYS.publicKey, computerRaw: computerRawOf(machine), computerCode: computerCodeOf(machine), requireCode },
     offlineOnly: true,
     lanPorts: { udpPort: udpFind },
     // Открытие базы магазина — как у программы (починка из копии): проверки подменяют его
@@ -77,7 +77,7 @@ export function computer(tag, { time, udpFind = 0, core: coreDb, dataDir: dir, o
     lan.stop()
     gw.close()
   }
-  return { gw, lan, core, events, errors, net, req, login, close, dataDir, db: () => gw.pharmacyDb(), tag }
+  return { gw, lan, core, events, errors, net, req, login, close, dataDir, db: () => gw.pharmacyDb(), tag, pc: computerRawOf(machine) }
 }
 
 // Сеть открыта: и порт обмена, и порт поиска (его открытие — после порта обмена)
@@ -100,8 +100,8 @@ export async function stockOf(c, id) {
 export const pending = (c) => q(c.db(), "SELECT COUNT(*) AS n FROM outbox WHERE state = 'pending'").get().n
 
 // Главный: магазин, владелец, кассир, смена, товар
-export async function mainShop(time) {
-  const m = computer('MAIN', { time })
+export async function mainShop(time, { requireCode = false } = {}) {
+  const m = computer('MAIN', { time, requireCode })
   assert.equal((await m.gw.standalone.setupShop({ shopName: 'Магазин у дома', login: OWNER, password: PASS })).ok, true)
   assert.equal((await m.login()).status, 201)
   assert.equal((await m.req('POST', '/users', { name: KASSIR, password: KASSIR_PASS })).status, 201)
@@ -111,13 +111,13 @@ export async function mainShop(time) {
 }
 
 // Касса подключается к главному по коду: через поиск в сети или по адресу
-export async function joinRegister(m, time, tag, { byAddress = false } = {}) {
+export async function joinRegister(m, time, tag, { byAddress = false, requireCode = false } = {}) {
   const open = m.gw.standalone.pairStart()
   assert.equal(open.ok, true, JSON.stringify(open))
   assert.match(open.code, /^[0-9A-Z]{4}-[0-9A-Z]{4}$/)
   await listening(m)
   assert.ok(m.lan.port() > 0, 'главный слушает сеть, пока открыт код')
-  const r = computer(tag, { time, udpFind: m.lan.udpPort() })
+  const r = computer(tag, { time, udpFind: m.lan.udpPort(), requireCode })
   const info = r.gw.standalone.info()
   assert.equal(info.shop, false)
   assert.equal(info.role, '')

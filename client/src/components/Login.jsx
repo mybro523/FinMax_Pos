@@ -107,7 +107,7 @@ export default function Login() {
       ? 'login'
       : solo.mode === '' && !solo.cloudAccounts && !solo.offlineOnly
       ? 'mode'
-      : soloMode && codeNeeded && (!solo.activation?.active || soloView === 'renew')
+      : soloMode && codeNeeded && soloView === 'renew' && solo.role !== 'register'
         ? 'activate'
         // 1.7.0: касса магазина подключается к главному (первый запуск или заново)
         : soloMode && soloView === 'join' && (!solo.shop || solo.role === 'register' || solo.empty)

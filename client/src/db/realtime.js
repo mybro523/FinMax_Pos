@@ -116,6 +116,12 @@ async function whenSuspended(e) {
   suspendNow(e?.message, e?.title)
 }
 
+// ── Магазин без интернета: срок работы поменялся (1.7.1) ──
+async function whenLicence() {
+  const { refreshMe } = await import('./auth')
+  await refreshMe().catch(() => {})
+}
+
 // ── Сервер принял нас обратно ──
 // Само по себе «подключились» ничего не значит: приостановленный магазин сервер
 // сначала пускает и только потом, сверившись с базой, обрывает. Поэтому снимаем
@@ -147,6 +153,9 @@ function startDesktopRealtime() {
       else if (type === 'subscription') whenSubscription(payload)
       else if (type === 'suspended') whenSuspended(payload)
       else if (type === 'resumed') whenResumed()
+      // Магазин без интернета (1.7.1): срок вышел или новый код принят — «кто я» заново (просмотр
+      // или работа), без выхода из программы
+      else if (type === 'licence') whenLicence()
       // Связь, очередь на отправку, копия базы, обновление — для значка в шапке
       else if (type === 'status') setDesktopStatus(payload)
     })

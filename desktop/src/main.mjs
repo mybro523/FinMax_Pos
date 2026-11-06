@@ -25,7 +25,7 @@ import { io } from 'socket.io-client'
 import { copyTime, createBackups, hostFolderOf, openOrRestore } from './backup.mjs'
 import { chooseDiskFolder, diskDue as diskDueOf, diskLabel, DISK_KEEP, DISK_ROOTS, writeDiskCopy } from './disk-backup.mjs'
 import { createBaseChooser } from './apibase.mjs'
-import { OFFLINE_ONLY, readBuildConfig, resolveApiFallback, resolveApiUrl, resolveLicenceKey, resolveUpdateFeed, serverOrigin } from './config.mjs'
+import { OFFLINE_ONLY, readBuildConfig, REQUIRE_CODE, resolveApiFallback, resolveApiUrl, resolveLicenceKey, resolveUpdateFeed, serverOrigin } from './config.mjs'
 import { machineIdOf, readMachineGuid } from './machine.mjs'
 import { computerRawOf, formatComputer } from './local/licence-code.mjs'
 import { createGateway } from './gateway.mjs'
@@ -379,7 +379,7 @@ async function start() {
     // Логотип магазина сменился — экран покупателя показывает новый сразу (сам экран
     // заводится ниже, поэтому — через переменную)
     onLogo: () => logoChanged(),
-    standalone: { publicKey: licenceKey, computerRaw, computerCode: computerRaw ? formatComputer(computerRaw) : '' },
+    standalone: { publicKey: licenceKey, computerRaw, computerCode: computerRaw ? formatComputer(computerRaw) : '', requireCode: REQUIRE_CODE },
     // 1.7.0: все магазины без интернета — компьютер сам переходит на такую работу (config.mjs)
     offlineOnly: OFFLINE_ONLY,
     // Касса ищет главного компьютера на этом порту (при запуске из исходников проверка задаёт свой)

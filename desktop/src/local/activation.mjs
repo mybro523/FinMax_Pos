@@ -13,6 +13,8 @@ import { dateOfDay, endOfDayMs, FOREVER, readCode, todayDay, validKey } from './
 
 // За сколько дней до конца срока предупреждать
 export const WARN_DAYS = 7
+// Пробный срок без кода (1.7.1): столько дней, считая день, с которого он пошёл
+export const TRIAL_DAYS = 14
 
 export const ACTIVATION_TEXT = {
   noKey: 'Программа собрана без ключа активации — обратитесь к поставщику программы.',
@@ -27,6 +29,8 @@ export const ACTIVATION_TEXT = {
   resetUsed: 'Этот код сброса уже использован — попросите новый.',
   expired: (date) => `Срок работы программы закончился ${date}. Данные магазина сохранены — введите новый код активации.`,
   ends: (date) => `Срок работы программы заканчивается ${date}. Попросите новый код активации у поставщика программы.`,
+  trialExpired: (date) => `Пробный срок закончился ${date}. Данные магазина сохранены — введите код активации.`,
+  trialEnds: (date) => `Пробный срок заканчивается ${date}. Попросите код активации у поставщика программы.`,
 }
 
 // Дата для человека: «01.11.2027»
@@ -51,7 +55,13 @@ function readStored(publicKey, computerRaw, code) {
 export function activationState(core, { publicKey, computerRaw, now }) {
   const r = row(core)
   if (!r || !computerRaw || !validKey(publicKey)) return { active: false, activated: false, expired: false, warn: false }
-  const read = readStored(publicKey, computerRaw, r.code)
+  return codeState({ publicKey, computerRaw, code: r.code, now })
+}
+
+// Что даёт код активации компьютеру computerRaw (касса проверяет так код своего главного, 1.7.1)
+export function codeState({ publicKey, computerRaw, code, now }) {
+  if (!computerRaw || !validKey(publicKey) || !code) return { active: false, activated: false, expired: false, warn: false }
+  const read = readStored(publicKey, computerRaw, code)
   // Код в базе есть, но к этому компьютеру не подходит (базу перенесли) или подделан
   if (!read.ok || read.fields.kind !== 'activate') return { active: false, activated: false, expired: false, warn: false, foreign: true }
   const f = read.fields
@@ -74,6 +84,32 @@ export function activationState(core, { publicKey, computerRaw, now }) {
     registers: f.registers,
     serial: f.serial,
     message: expired ? ACTIVATION_TEXT.expired(human(f.until)) : warn ? ACTIVATION_TEXT.ends(human(f.until)) : '',
+  }
+}
+
+// ── Пробный срок без кода (1.7.1) ──
+// from — когда он пошёл (null — магазина ещё нет: срок не начался). Последний день действует
+// целиком, как у кода. Число касс в пробный срок не ограничено (registers: null)
+export function trialState({ from, now }) {
+  const base = { activated: false, trial: true, forever: false, registers: null, serial: 0 }
+  if (!Number.isFinite(from)) {
+    return { ...base, active: true, expired: false, warn: false, notStarted: true, until: null, untilHuman: null, endsAt: null, daysLeft: TRIAL_DAYS, message: '' }
+  }
+  const last = todayDay(from) + TRIAL_DAYS - 1
+  const today = todayDay(now)
+  const daysLeft = last - today + 1
+  const expired = today > last
+  const warn = !expired && daysLeft <= WARN_DAYS
+  return {
+    ...base,
+    active: !expired,
+    expired,
+    warn,
+    until: dateOfDay(last),
+    untilHuman: human(last),
+    endsAt: new Date(endOfDayMs(last)).toISOString(),
+    daysLeft: expired ? 0 : daysLeft,
+    message: expired ? ACTIVATION_TEXT.trialExpired(human(last)) : warn ? ACTIVATION_TEXT.trialEnds(human(last)) : '',
   }
 }
 

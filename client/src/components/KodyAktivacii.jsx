@@ -33,6 +33,7 @@ export default function KodyAktivacii({ onClose }) {
   const toast = useToast()
   const [f, setF] = useState({ computer: '', kind: 'activate', until: inYear(), forever: false, registers: 1, note: '' })
   const [list, setList] = useState([])
+  const [find, setFind] = useState('')
   const [listErr, setListErr] = useState('')
   const [made, setMade] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -67,7 +68,7 @@ export default function KodyAktivacii({ onClose }) {
     setMade(null)
     const registers = Number(f.registers)
     if (f.kind === 'activate' && !(Number.isInteger(registers) && registers >= 1 && registers <= 50)) {
-      return setErr(t('Сколько касс можно подключить — от 1 до 50'))
+      return setErr(t('Касс всего — от 1 до 50'))
     }
     setBusy(true)
     try {
@@ -115,8 +116,9 @@ export default function KodyAktivacii({ onClose }) {
                 </label>
               </div>
               <div className="field" style={{ flex: 1 }}>
-                <label htmlFor="lic-reg">{t('Сколько касс можно подключить')}</label>
+                <label htmlFor="lic-reg">{t('Касс всего — вместе с главным компьютером')}</label>
                 <input id="lic-reg" type="number" min={1} max={50} step={1} required value={f.registers} onChange={(e) => set('registers', e.target.value)} />
+                <div className="tag-cat" style={{ marginTop: 4 }}>{t('1 — только главный компьютер; 2 — главный и одна касса.')}</div>
               </div>
             </div>
           )}
@@ -145,6 +147,9 @@ export default function KodyAktivacii({ onClose }) {
         )}
 
         <h4 style={{ margin: '18px 0 8px' }}>{t('Выпущенные коды')}</h4>
+        {list.length > 5 && (
+          <input style={{ marginBottom: 10 }} placeholder={t('Найти: код компьютера или заметка')} value={find} onChange={(e) => setFind(e.target.value)} data-testid="licences-find" />
+        )}
         {listErr && <div className="note err">{t('Список кодов не загрузился')}: {listErr}</div>}
         {!list.length && !listErr && <div className="tag-cat">{t('Пока ни одного.')}</div>}
         {!!list.length && (
@@ -159,7 +164,7 @@ export default function KodyAktivacii({ onClose }) {
               </tr>
             </thead>
             <tbody>
-              {list.map((l) => (
+              {list.filter((l) => !find.trim() || `${l.computer} ${l.note || ''}`.toLowerCase().includes(find.trim().toLowerCase())).map((l) => (
                 <tr key={l.id}>
                   <td data-label={t('Когда')}>{fmtShort(l.createdAt)}</td>
                   <td data-label={t('Компьютер')}><b>{l.computer}</b></td>

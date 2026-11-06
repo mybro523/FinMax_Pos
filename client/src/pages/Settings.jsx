@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import {
   LuShoppingCart, LuPackagePlus, LuCreditCard, LuClipboardList, LuTrendingUp, LuServer, LuRefreshCw,
   LuKeyRound, LuUser, LuPalette, LuLanguages, LuSun, LuMoon, LuDatabaseBackup, LuDownload, LuTriangleAlert,
@@ -174,13 +175,19 @@ export default function Settings() {
     { id: 'ustroystva', label: 'Кассы и устройства', Icon: LuMonitorSmartphone, show: can('settings.devices') },
     { id: 'kopiya', label: 'Резервная копия', Icon: LuDatabaseBackup, show: can('settings.backup') },
   ].filter((r) => r.show)
+  const location = useLocation()
   const [razdel, setRazdel] = useState(() => {
+    // Пришли с полосы «Ввести код» (LicenceBanner) — сразу «Профиль»
+    if (location.state?.razdel) return location.state.razdel
     try {
       return localStorage.getItem(RAZDEL_KEY) || 'profil'
     } catch {
       return 'profil'
     }
   })
+  useEffect(() => {
+    if (location.state?.razdel) setRazdel(location.state.razdel)
+  }, [location.state])
   // Права могли сузиться с прошлого раза — чужой раздел не показываем
   const active = razdely.some((r) => r.id === razdel) ? razdel : razdely[0]?.id || 'profil'
   const pick = (id) => {

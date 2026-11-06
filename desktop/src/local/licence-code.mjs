@@ -120,6 +120,14 @@ export function computerRawOf(machineId) {
 }
 export const formatComputer = (raw) => groups(encode32(raw) + check2('FMX-PCC', raw))
 export const computerCodeOf = (machineId) => formatComputer(computerRawOf(machineId))
+// Код компьютера «XXXXX-XXXXX» → его 5 байт (касса проверяет код активации главного по коду
+// компьютера главного, 1.7.1). Опечатка или не код — null
+export function computerRawFromCode(text) {
+  const c = clean32(text)
+  if (c.length !== 10) return null
+  const raw = decode32(c.slice(0, 8), 5)
+  return raw && check2('FMX-PCC', raw) === c.slice(8) ? raw : null
+}
 
 // ── Дни: от 1 января 2026 по Душанбе (UTC+5) ──
 const TZ_MS = 5 * 3600000

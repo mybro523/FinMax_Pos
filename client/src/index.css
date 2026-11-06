@@ -2811,3 +2811,8 @@ input.pair-input { font-size: 22px; letter-spacing: 0.14em; text-align: center; 
 .solo-or { display: flex; align-items: center; gap: 10px; margin: 14px 0; color: var(--muted-2); font-size: 12.5px; }
 .solo-or::before, .solo-or::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
 .solo-join-inline { border-top: 1px solid var(--border); padding-top: 10px; margin-bottom: 12px; max-width: 520px; }
+
+/* 1.7.1: срок работы магазина без интернета — полоса над страницей (LicenceBanner.jsx) */
+.licence-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.licence-banner .licence-banner-text { flex: 1 1 260px; min-width: 0; }
+.licence-banner .btn { flex: 0 0 auto; }

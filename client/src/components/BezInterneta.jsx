@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
+import { refreshMe } from '../db/auth'
 import { flushSync } from 'react-dom'
 import { LuArrowLeft, LuCloud, LuCopy, LuHardDrive, LuKeyRound, LuLink, LuMonitorSmartphone, LuStore, LuTriangleAlert, LuBadgeCheck } from 'react-icons/lu'
 import { bridge } from '../lib/desktop'
 import { useT } from '../lib/i18n'
-import { CODE_LEN, caretAt, editCode, editEnd, formatCode, normalizeCode, pastedCode, physicalKey, soloMessage } from '../lib/aktivaciya'
+import { CODE_LEN, caretAt, editCode, editEnd, formatCode, licLine, normalizeCode, pastedCode, physicalKey, soloMessage } from '../lib/aktivaciya'
 import { REJOIN } from '../lib/kassy'
 import { formatPair, normalizePair, PAIR_LEN } from '../lib/kassy'
 import { PasswordInput } from './ui'
@@ -343,12 +345,14 @@ export function SoloLine({ info, onReset, onRenew, onRejoin, onJoin }) {
   if (info.role === 'register') {
     const m = info.net?.main || {}
     const rejoin = REJOIN.has(m.error)
+    const stop = info.codeRequired !== false && a.active === false
     return (
-      <div className={'solo-line' + (rejoin ? ' warn' : '')} data-testid="solo-line">
+      <div className={'solo-line' + (rejoin || stop ? ' warn' : '')} data-testid="solo-line">
         <span>
           <LuHardDrive size={13} style={{ verticalAlign: '-2px' }} /> {t('Касса магазина')}
           {info.net?.name ? ` · ${info.net.name}` : ''}
           {rejoin ? ` · ${t('Подключите кассу заново')}` : ''}
+          {stop ? ` · ${a.stopped ? t('касса остановлена') : t('срок работы закончился')}` : ''}
         </span>
         <span className="solo-line-links">
           {onRejoin && (
@@ -376,14 +380,14 @@ export function SoloLine({ info, onReset, onRenew, onRejoin, onJoin }) {
   // 1.7.0: без кода активации — ни срока, ни счёта касс, ни нового кода; «Забыли пароль?» остаётся
   const code = info?.codeRequired !== false
   return (
-    <div className={'solo-line' + (code && a.warn ? ' warn' : '')} data-testid="solo-line">
+    <div className={'solo-line' + (code && (a.warn || a.active === false) ? ' warn' : '')} data-testid="solo-line">
       <span>
         <LuHardDrive size={13} style={{ verticalAlign: '-2px' }} /> {t('Без интернета')}
-        {code ? ` · ${a.forever ? t('без срока') : `${t('работает до')} ${a.untilHuman}`}` : ` · ${t('всё на этом компьютере')}`}
+        {code ? ` · ${licLine(a, t)}` : ` · ${t('всё на этом компьютере')}`}
         {code && a.registers ? ` · ${t('касс')}: ${a.registers}` : ''}
       </span>
       <span className="solo-line-links">
-        {code && <button type="button" className="link" onClick={onRenew} data-testid="solo-renew">{t('Ввести новый код')}</button>}
+        {code && <button type="button" className="link" onClick={onRenew} data-testid="solo-renew">{a.activated ? t('Ввести новый код') : t('Ввести код активации')}</button>}
         <button type="button" className="link" onClick={onReset} data-testid="solo-forgot">{t('Забыли пароль?')}</button>
       </span>
     </div>
@@ -510,6 +514,8 @@ export function JoinCard({ onDone, onBack, again = false, compact = false, repla
 // ── «Настройки»: программа без интернета — срок, кассы, код компьютера, новый код ──
 export function ActivationPanel() {
   const t = useT()
+  const location = useLocation()
+  const box = useRef(null)
   const [info, setInfo] = useState(null)
   const [code, setCode] = useState('')
   const [err, setErr] = useState('')
@@ -519,6 +525,13 @@ export function ActivationPanel() {
   useEffect(() => {
     load()
   }, [])
+  // Пришли с полосы «Ввести код» — сразу к полю кода
+  const toCode = location.state?.focus === 'code'
+  useEffect(() => {
+    if (!toCode || !info || !box.current) return
+    box.current.scrollIntoView({ block: 'center' })
+    box.current.querySelector('input')?.focus()
+  }, [toCode, info])
   const a = info?.activation || {}
   const submit = async (e) => {
     e.preventDefault()
@@ -532,17 +545,29 @@ export function ActivationPanel() {
     if (r?.ok) {
       setCode('')
       setOk(r.activation?.forever ? t('Код принят: программа работает без срока.') : `${t('Код принят: программа работает до')} ${r.activation?.untilHuman}.`)
+      // Срок мог кончиться — окно возвращается к работе
+      refreshMe?.().catch(() => {})
       load()
     } else setErr(t(r?.error || 'Не получилось. Повторите.'))
   }
-  // 1.7.0: касса магазина — пароли и код сброса на главном компьютере
-  if (info && info.codeRequired === false && info.role === 'register') {
+  // 1.7.0: касса магазина — пароли и код сброса на главном компьютере; 1.7.1: срок — по коду главного
+  if (info && info.role === 'register') {
+    const code = info.codeRequired !== false
     return (
       <div className="panel mt" style={{ maxWidth: 640 }} data-testid="solo-panel">
         <h2><span className="h2-title"><span className="ic"><LuHardDrive size={17} /></span>{t('Касса магазина')}</span></h2>
-        <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.6, marginBottom: 0 }}>
+        <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.6, marginBottom: code ? 10 : 0 }}>
           {t('База магазина — на главном компьютере, эта касса держит её копию и отправляет туда всё сделанное. Пароли сотрудников меняют на главном; если владелец забудет пароль, код сброса выдают по коду главного компьютера («Настройки» → «Профиль» на главном).')}
         </p>
+        {code && (
+          <>
+            <div className="solo-rows">
+              <div><span>{t('Срок работы')}</span><b className={a.warn || a.active === false ? 'sync-bad' : ''} data-testid="solo-lic-line">{licLine(a, t)}</b></div>
+            </div>
+            {soloMessage(a, t) && <div className={'note ' + (a.active === false ? 'err' : 'warn')} style={{ margin: '10px 0' }}>{soloMessage(a, t)}</div>}
+            <p className="tag-cat" style={{ marginTop: 8 }}>{t('Код активации вводят на главном компьютере магазина — кассы получают его сами.')}</p>
+          </>
+        )}
       </div>
     )
   }
@@ -562,20 +587,21 @@ export function ActivationPanel() {
     )
   }
   return (
-    <div className="panel mt" style={{ maxWidth: 640 }} data-testid="solo-panel">
+    <div className="panel mt" style={{ maxWidth: 640 }} data-testid="solo-panel" ref={box}>
       <h2><span className="h2-title"><span className="ic"><LuHardDrive size={17} /></span>{t('Программа без интернета')}</span></h2>
       <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.6, marginBottom: 10 }}>
         {t('База магазина хранится на этом компьютере. Сохраняйте копию на флешку хотя бы раз в неделю: «Настройки» → «Резервная копия» → «Сохранить копию в…».')}
       </p>
       <div className="solo-rows">
-        <div><span>{t('Работает')}</span><b className={a.warn || a.expired ? 'sync-bad' : ''}>{a.forever ? t('без срока') : a.untilHuman ? `${t('до')} ${a.untilHuman}` : '—'}</b></div>
-        <div><span>{t('Касс можно подключить')}</span><b>{a.registers || '—'}</b></div>
+        <div><span>{t('Работает')}</span><b className={a.warn || a.expired ? 'sync-bad' : ''} data-testid="solo-lic-line">{licLine(a, t)}</b></div>
+        <div><span>{t('Касс всего')}</span><b>{a.trial ? t('без ограничения (пробный срок)') : a.registers ? `${a.registers} — ${t('вместе с главным компьютером')}` : '—'}</b></div>
       </div>
       {soloMessage(a, t) && <div className={'note ' + (a.expired ? 'err' : 'warn')} style={{ margin: '10px 0' }}>{soloMessage(a, t)}</div>}
       <ComputerCode code={info?.computer} />
+      <p className="tag-cat" style={{ marginTop: 8, marginBottom: 12 }}>{t('Сообщите этот код поставщику программы — он выдаст код активации: на какой срок и на сколько касс.')}</p>
       <form onSubmit={submit}>
         <div className="field">
-          <label htmlFor="solo-new-code">{t('Новый код активации')}</label>
+          <label htmlFor="solo-new-code">{a.activated ? t('Новый код активации') : t('Код активации')}</label>
           <CodeInput id="solo-new-code" value={code} onChange={(v) => { setCode(v); setErr(''); setOk('') }} />
         </div>
         <Problem text={err} />

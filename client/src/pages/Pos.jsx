@@ -12,6 +12,8 @@ import KassaCatalog, { LIMIT } from '../components/KassaCatalog'
 import Lightbox from '../components/Lightbox'
 import { useCollection, useFirstLoading, money, db, stockText, realId } from '../db/store'
 import { useAuth, useCan } from '../db/auth'
+import { useDesktopStatus } from '../db/desktopStatus'
+import { soloMessage } from '../lib/aktivaciya'
 import { isVesovoy, kgText, KG, gramsOfKg, edinica, isKg,
   uppOf, isDivisible as isDiv, lineUnits, lineGross, lineNet, pricePerPiece,
   sellableUnits, expiredUnits, hasExpired, stockUnits,
@@ -92,7 +94,9 @@ export default function Pos() {
   // Подписка кончилась и отсрочка вышла: сервер продажу не примет. Показать это
   // до нажатия честнее, чем дать набрать корзину и отказать на оплате — кассир
   // решил бы, что программа сломалась, а покупатель уже стоит у прилавка.
-  const canSell = auth?.subscription ? auth.subscription.canWrite : true
+  const desk = useDesktopStatus()
+  // Магазин без интернета (1.7.1): срок вышел — сразу, не дожидаясь «кто я»
+  const canSell = (auth?.subscription ? auth.subscription.canWrite : true) && desk?.activation?.active !== false
   // ── Смена ──
   // Без открытой смены касса не продаёт: каждый чек обязан войти в отчёт смены. На сайте
   // смена — общая смена сайта, в программе — смена этой кассы (локальная база отдаёт
@@ -1794,8 +1798,10 @@ export default function Pos() {
               </button>
             </div>
             {!canSell && (
-              <div className="note err kassa-stop">
-                {t('Продажи закрыты: подписка не оплачена. Товары и отчёты открыты, копию базы скачать можно.')}
+              <div className="note err kassa-stop" data-testid="kassa-licence-stop">
+                {auth?.standalone
+                  ? soloMessage(desk?.activation, t) || t(auth?.subscription?.message || 'Срок работы программы закончился — продажи и изменения остановлены, просмотр и отчёты работают. Введите код активации: «Настройки» → «Профиль».')
+                  : t('Продажи закрыты: подписка не оплачена. Товары и отчёты открыты, копию базы скачать можно.')}
               </div>
             )}
             {canSell && noShift && (

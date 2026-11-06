@@ -12,6 +12,7 @@ import { can, kassaFirst } from '../lib/permissions'
 import { useT } from '../lib/i18n'
 import { isDesktop } from '../lib/desktop'
 import AppFoot from './AppFoot'
+import LicenceBanner from './LicenceBanner'
 import { BrandWord } from './ui'
 import emblem from '../assets/brand/emblem-64.png'
 
@@ -136,6 +137,8 @@ export default function Layout({ title, subtitle, note, actions, fill, hub, chil
               <div className="pa-btns">{actions}</div>
             </div>
           ) : null}
+          {/* Магазин без интернета: срок работы кончается или кончился (1.7.1) */}
+          {isDesktop && <LicenceBanner />}
           {children}
         </main>
         <AppFoot razdel={!hub} tour={hasTour} />

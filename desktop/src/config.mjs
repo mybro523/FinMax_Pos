@@ -74,6 +74,11 @@ export function resolveApiUrl({ packaged, env = {}, built = {} }) {
 // поставить здесь false
 export const OFFLINE_ONLY = true
 
+// 1.7.1: магазин без интернета работает по коду активации (срок и число касс), выданному
+// владельцем сервиса под код компьютера; без кода — пробный срок 14 дней (local/activation.mjs).
+// Выключить — false: тогда без срока и без счёта касс (как в 1.7.0)
+export const REQUIRE_CODE = true
+
 export const PRIMARY_API = 'https://api.finmaxpos.tj/api'
 export const FALLBACK_API = 'https://vps-04688c58.vps.ovh.net/api'
 

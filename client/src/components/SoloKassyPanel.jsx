@@ -171,7 +171,9 @@ export default function SoloKassyPanel() {
             <div className="lan-peer-main">
               <b>{r.name}</b>
               <div className="tag-cat">
-                {r.error === 'version'
+                {r.stopped
+                  ? <span className="sync-bad">{t('остановлена: касс больше, чем в коде активации')}</span>
+                  : r.error === 'version'
                   ? [r.host, t('другая версия программы — обновите её на этой кассе')].filter(Boolean).join(' · ')
                   : [r.host, r.online ? t('на связи') : r.seenAt ? `${t('последний обмен')} ${fmtShort(r.seenAt)}` : t('ещё не выходила на связь')].filter(Boolean).join(' · ')}
               </div>
@@ -184,6 +186,19 @@ export default function SoloKassyPanel() {
         ))}
       </div>
       {regs.length === 0 && !pairing && <div className="tag-cat" style={{ marginBottom: 10 }}>{t('Касс пока нет: магазин работает на одном этом компьютере.')}</div>}
+      {/* 1.7.1: число касс — по коду активации (вместе с главным); в пробный срок — без ограничения */}
+      {net.limit !== undefined && (
+        <div className="tag-cat" style={{ marginBottom: 10 }} data-testid="solo-kassy-limit">
+          {net.limit === null
+            ? t('Касс можно подключить сколько угодно, пока идёт пробный срок; потом — сколько в коде активации.')
+            : `${t('По коду активации касс всего')}: ${net.limit + 1} — ${t('вместе с главным компьютером')}.`}
+        </div>
+      )}
+      {regs.some((r) => r.stopped) && (
+        <div className="note warn" style={{ marginBottom: 12 }} data-testid="solo-kassy-stopped">
+          {t('Касс подключено больше, чем разрешает код активации: лишние остановлены. Отключите ненужную кассу или попросите у поставщика код на большее число касс.')}
+        </div>
+      )}
       {net.lanError && (
         <div className="note warn" style={{ marginBottom: 12 }}>
           {t('Входящие подключения на этом компьютере не открылись: кассы не смогут до него дозвониться. Перезапустите программу; если не поможет — проверьте, не занят ли порт другой программой.')}
