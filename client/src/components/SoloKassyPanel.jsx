@@ -187,9 +187,9 @@ export default function SoloKassyPanel() {
       </div>
       {regs.length === 0 && !pairing && <div className="tag-cat" style={{ marginBottom: 10 }}>{t('Касс пока нет: магазин работает на одном этом компьютере.')}</div>}
       {/* 1.7.1: число касс — по коду активации (вместе с главным); в пробный срок — без ограничения */}
-      {net.limit !== undefined && (
+      {st?.activation && !st.activation.free && (st.activation.trial || net.limit != null) && (
         <div className="tag-cat" style={{ marginBottom: 10 }} data-testid="solo-kassy-limit">
-          {net.limit === null
+          {st.activation.trial
             ? t('Касс можно подключить сколько угодно, пока идёт пробный срок; потом — сколько в коде активации.')
             : `${t('По коду активации касс всего')}: ${net.limit + 1} — ${t('вместе с главным компьютером')}.`}
         </div>
@@ -213,6 +213,12 @@ export default function SoloKassyPanel() {
             {t('На новой кассе запустите программу, нажмите «Это касса магазина — подключить к главному компьютеру» и введите этот код.')}{' '}
             {t('Код действует ещё')} <b>{left}</b>.
           </div>
+          {/* Срок вышел или все кассы по коду подключены: этим кодом подключится только прежняя касса */}
+          {pairing.onlyKnown && (
+            <div className="note warn" style={{ marginTop: 8 }} data-testid="solo-pair-only-known">
+              {t(pairing.onlyKnown)} {t('Этим кодом можно подключить заново только кассу, которая уже была подключена.')}
+            </div>
+          )}
           <div className="modal-actions" style={{ justifyContent: 'flex-start' }}>
             <button className="btn ghost" disabled={!!busy} onClick={() => act('stop', () => bridge.standalone.pairStop())}>
               <span className="ic"><LuX size={16} /></span> {t('Отменить код')}

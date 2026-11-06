@@ -1061,7 +1061,7 @@ export default function Pos() {
   async function pay() {
     if (paying) return
     if (!canSell) {
-      toast(auth?.subscription?.message || t('Продажи закрыты: подписка не оплачена'), 'err')
+      toast(auth?.standalone ? soloMessage(desk?.activation, t) || t(auth?.subscription?.message || '') : auth?.subscription?.message || t('Продажи закрыты: подписка не оплачена'), 'err')
       return
     }
     // Смены нет — продажи нет: показываем окно, где смену можно открыть

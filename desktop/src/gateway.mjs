@@ -182,6 +182,8 @@ export const MESSAGES = {
   codeOnMain: 'Код активации вводят на главном компьютере магазина — кассы получают его сами.',
   pairLimit: 'Все кассы, которые разрешает код активации, уже подключены. Отключите ненужную кассу или попросите у поставщика код на большее число касс.',
   pairExpired: 'Срок работы программы закончился — сначала введите код активации.',
+  regUnpaired: 'Главный компьютер отключил эту кассу — продажи остановлены. Подключите кассу заново: «Настройки» → «Кассы и устройства».',
+  regLease: 'Касса больше месяца не получала подтверждения срока от главного компьютера — продажи остановлены до связи с ним. Включите главный компьютер и проверьте сеть.',
   soloTitle: 'Срок работы программы закончился',
   notStandalone: 'Сначала выберите, как будет работать программа.',
   shopExists: 'Магазин на этом компьютере уже заведён — войдите под своим именем.',
@@ -1350,6 +1352,11 @@ export function createGateway({
       computer: typeof v.computer === 'string' ? v.computer.slice(0, 20) : '',
       trialFrom: Number.isFinite(Number(v.trialFrom)) && Number(v.trialFrom) > 0 ? Number(v.trialFrom) : null,
       stopped: Array.isArray(v.stopped) ? v.stopped.filter((x) => typeof x === 'string').slice(0, 100) : [],
+      // Время срока главного в момент отправки и когда касса это получила (по её времени срока):
+      // срок на кассе считается по часам главного — переведённые назад часы кассы его не продлят
+      at: Number.isFinite(Number(v.at)) && Number(v.at) > 0 ? Number(v.at) : null,
+      got: licNow(),
+      unpaired: false,
     }
     const before = activation()
     const sealedLic = seal(JSON.stringify(lic))
@@ -1362,9 +1369,39 @@ export function createGateway({
       send('status', status())
     }
   }
-  function regActivation() {
-    const now = soloNow()
+  // Касса: главный ответил «не знаю такую кассу» (её отключили) — запомнить в сведениях о сроке:
+  // касса остановлена, пока её не подключат заново (подключение приносит новые сведения)
+  function regMainError() {
+    try {
+      const m = soloMain()
+      const p = (lanNet?.status()?.peers || []).find((x) => x.deviceId === m?.deviceId)
+      return p?.error || ''
+    } catch {
+      return ''
+    }
+  }
+  function regMarkUnpaired() {
+    if (!isRegister() || regMainError() !== 'star') return
     const lic = regLic()
+    if (!lic || lic.unpaired) return
+    // Сведения только что получены (касса подключилась заново) — отказ главного мог остаться от
+    // прежнего обмена: верим ему, когда он повторится
+    if (lic.got && licNow() - lic.got < 5 * 60000) return
+    const sealedLic = seal(JSON.stringify({ ...lic, unpaired: true }))
+    if (!sealedLic) return
+    setMeta(core, 'soloLic', sealedLic)
+    log.info('касса: главный отключил эту кассу — продажи остановлены до подключения заново')
+    watchLicence()
+    send('status', status())
+  }
+  // Сведения о сроке, по которым касса работает, — не дольше месяца без подтверждения главного
+  const LIC_LEASE_MS = 30 * 86400000
+  function regActivation() {
+    // Время срока кассы (licNow — её часы срока, назад не идут) и по часам главного: его время в
+    // момент отправки плюс прожитое кассой с тех пор — переведённые назад часы кассы срок не продлят
+    const own = licNow()
+    const lic = regLic()
+    const now = lic?.at && lic?.got ? Math.max(soloNow(), lic.at + Math.max(0, own - lic.got)) : soloNow()
     // Сведения о сроке есть, но не читаются (испорчены или подложены руками) — срок не подтверждён,
     // пока главный не пришлёт их снова (он присылает их и раз в сутки)
     if (!lic && getMeta(core, 'soloLic')) {
@@ -1377,7 +1414,10 @@ export function createGateway({
     }
     if (!a) a = trialState({ from: lic?.trialFrom || soloTrialFrom(), now })
     a = { ...a, register: true }
-    if (a.active && Array.isArray(lic?.stopped) && lic.stopped.includes(deviceId)) return { ...a, active: false, stopped: true, warn: true, message: MESSAGES.regStopped }
+    if (!a.active) return a
+    if (Array.isArray(lic?.stopped) && lic.stopped.includes(deviceId)) return { ...a, active: false, stopped: true, warn: true, message: MESSAGES.regStopped }
+    if (lic?.unpaired) return { ...a, active: false, stopped: true, unpaired: true, warn: true, message: MESSAGES.regUnpaired }
+    if (lic?.got && own - lic.got > LIC_LEASE_MS) return { ...a, active: false, stopped: true, lease: true, warn: true, message: MESSAGES.regLease }
     return a
   }
   function activation() {
@@ -1393,7 +1433,7 @@ export function createGateway({
   function soloAccess() {
     const a = activation()
     if (a.active) return { status: 'active', canWrite: true, warn: !!a.warn, daysLeft: a.daysLeft, paidUntil: a.endsAt, message: a.message || '', standalone: true, trial: !!a.trial }
-    const message = a.stopped ? MESSAGES.regStopped : a.register ? MESSAGES.regLicExpired : solo.requireCode ? MESSAGES.licExpired : a.message || MESSAGES.notActivated
+    const message = a.unpaired ? MESSAGES.regUnpaired : a.lease ? MESSAGES.regLease : a.stopped ? MESSAGES.regStopped : a.register ? MESSAGES.regLicExpired : solo.requireCode ? MESSAGES.licExpired : a.message || MESSAGES.notActivated
     return { status: 'expired', canWrite: false, readOnly: true, warn: true, daysLeft: 0, paidUntil: a.endsAt ?? null, message, standalone: true, trial: !!a.trial }
   }
   const soloView = (acc) => ({ ...userView(acc, licNow()), subscription: soloAccess(), standalone: true, register: isRegister() })
@@ -1662,6 +1702,8 @@ export function createGateway({
     if (req.method === 'GET' && route === '/discrepancies') return reply(200, isRegister() || !pharmacy ? [] : soloDiscrepancies(pharmacy.db))
     if (req.method === 'POST' && (m = /^\/discrepancies\/([^/]+)\/resolve$/.exec(route))) {
       if (isRegister() || !pharmacy) return refuse(403, MESSAGES.onMainOnly)
+      const closed = closedBySubscription(access(acc))
+      if (closed) return closed
       if (!resolveDiscrepancy(pharmacy.db, decodeURIComponent(m[1]))) return refuse(404, MESSAGES.notFound)
       send('changed', ['discrepancies'])
       return reply(200, { ok: true })
@@ -1921,7 +1963,8 @@ export function createGateway({
   // номер магазина); иначе — главный (или единственный) компьютер
   // Версия обмена главного и касс: шаги базы магазина и порядок записей. Разные — обмена нет, пока
   // программу не обновят везде (касса работает сама, её операции ждут)
-  const SOLO_VERSION = `${PHARMACY_SCHEMA.length}.1`
+  // .2 — 1.7.1: кассы работают по коду главного (касса 1.7.0 срока и числа касс не знала бы)
+  const SOLO_VERSION = `${PHARMACY_SCHEMA.length}.2`
   const soloRole = () => getMeta(core, 'soloRole') || ''
   const isRegister = () => soloRole() === 'register'
   function soloMain() {
@@ -1977,29 +2020,40 @@ export function createGateway({
   }
   // Что касса знает о сроке магазина: код главного (касса проверит его подпись сама), код
   // компьютера главного, начало пробного срока и какие кассы остановлены
-  function licView(ph) {
+  function licView(ph, { at = true } = {}) {
     if (!solo.requireCode) return null
     const a = activation()
     const row = a.activated && !a.trial ? q(core, 'SELECT code FROM activation WHERE id = 1').get() : null
-    return JSON.stringify({ code: row?.code || '', computer: solo.computerCode, trialFrom: soloTrialFrom(), stopped: stoppedRegs(ph) })
+    const view = { code: row?.code || '', computer: solo.computerCode, trialFrom: soloTrialFrom(), stopped: stoppedRegs(ph) }
+    return JSON.stringify(at ? { ...view, at: soloNow() } : view)
+  }
+  // Новую кассу подключить нельзя (срок вышел или все кассы по коду подключены) — только прежнюю
+  // заново (главный загрузил копию, касса долго молчала): что сказать — pairExpired / pairLimit
+  function pairOnlyKnown(ph) {
+    if (!solo.requireCode) return ''
+    if (!activation().active) return MESSAGES.pairExpired
+    const lim = regLimit()
+    return lim !== null && soloPairedList(ph.db).length >= lim ? MESSAGES.pairLimit : ''
   }
   // Кассам — новые сведения о сроке, если они поменялись (код, лишние кассы)
   function pushLic(ph) {
     if (!solo.requireCode || isRegister() || !soloRegisters(ph).length) return
     try {
-      const view = licView(ph)
-      if (!view) return
-      // Поменялось — сразу; нет — раз в сутки (касса, потерявшая сведения, получит их снова)
+      const key = licView(ph, { at: false })
+      if (!key) return
+      // Поменялось — сразу; нет — раз в сутки: касса, потерявшая сведения, получит их снова, а
+      // подтверждение главного (и его время) кассе нужно не реже раза в месяц
       let sent = null
       try {
         sent = JSON.parse(getMeta(ph.db, 'soloLicSent') || 'null')
       } catch {
         sent = null
       }
-      if (sent?.view === view && clock.now() - (Number(sent.at) || 0) < 86400000) return
+      if (sent?.view === key && clock.now() - (Number(sent.at) || 0) < 86400000) return
+      const view = licView(ph)
       inTx(ph.db, () => {
         mainLogBase(ph.db, { lic: view, deviceId, now: clock.now() })
-        setMeta(ph.db, 'soloLicSent', JSON.stringify({ view, at: clock.now() }))
+        setMeta(ph.db, 'soloLicSent', JSON.stringify({ view: key, at: clock.now() }))
       })
       lanNet?.kick()
     } catch (e) {
@@ -2909,9 +2963,6 @@ export function createGateway({
     if (isRegister()) return { error: MESSAGES.pairNotMain }
     if (!(acc.role === 'founder' || hasPerm(acc, 'settings.devices'))) return { error: MESSAGES.noRights }
     const ph = openPharmacy(acc.pharmacyCode)
-    if (!activation().active) return { error: MESSAGES.pairExpired }
-    const lim = regLimit()
-    if (lim !== null && soloPairedList(ph.db).length >= lim) return { error: MESSAGES.pairLimit }
     if (!mainKey(ph)) return { error: MESSAGES.noSealingSolo }
     mirrorSolo(ph)
     const code = newPairCode()
@@ -2919,7 +2970,7 @@ export function createGateway({
     lanNet?.sync().catch(() => {})
     send('status', status())
     log.info('кассы по сети: открыт код подключения')
-    return { ok: true, code: formatPairCode(code), until: new Date(pairing.until).toISOString(), leftMs: PAIR_MS }
+    return { ok: true, code: formatPairCode(code), until: new Date(pairing.until).toISOString(), leftMs: PAIR_MS, onlyKnown: pairOnlyKnown(ph) }
   }
   function pairStop() {
     pairing = null
@@ -2944,8 +2995,8 @@ export function createGateway({
     const list = soloPairedList(ph.db)
     const known = list.find((r) => r.deviceId === from)
     // Срок вышел или все кассы по коду уже подключены — новую не подключаем (подключённая раньше
-    // подключается заново всегда: её место в счёте касс не меняется)
-    if (!activation().active) return { error: 'expired' }
+    // подключается заново всегда: её место в счёте касс не меняется, её операции нужны главному)
+    if (!known && !activation().active) return { error: 'expired' }
     const lim = regLimit()
     if (!known && lim !== null && list.length >= lim) return { error: 'limit' }
     const regName = known?.name || nextRegisterName(list)
@@ -3303,7 +3354,7 @@ export function createGateway({
       // Касс по коду активации, кроме главного (null — без ограничения)
       limit: regLimit(),
       // Сколько коду осталось — по часам программы: окно считает дальше по своим
-      pairing: p ? { code: formatPairCode(p.code), until: new Date(p.until).toISOString(), leftMs: Math.max(0, p.until - clock.now()) } : null,
+      pairing: p ? { code: formatPairCode(p.code), until: new Date(p.until).toISOString(), leftMs: Math.max(0, p.until - clock.now()), onlyKnown: pairOnlyKnown(ph) } : null,
       discrepancies: soloDiscrepancies(ph.db).length,
     }
   }
@@ -3692,6 +3743,8 @@ export function createGateway({
     if (!isSolo(acc)) return refuse(404, MESSAGES.soloUnavailable)
     if (isRegister()) return refuse(403, MESSAGES.onMainOnly)
     if (!(acc.role === 'founder' || hasPerm(acc, 'settings.print'))) return refuse(403, 'Недостаточно прав')
+    const closed = closedBySubscription(access(acc))
+    if (closed) return closed
     const raw = req.body?.logo
     if (typeof raw !== 'string') return refuse(400, MESSAGES.badLogo)
     const clean = cleanLogo(raw)
@@ -4143,6 +4196,7 @@ export function createGateway({
           if (soloOpen(pharmacy)) {
             soloPrune_lan(pharmacy)
             pushLic(pharmacy)
+            regMarkUnpaired()
           }
           else if (lanPrune(pharmacy.db, clock.now())) send('changed', ['products', 'customers', 'sales', 'returns', 'shifts', 'arrivals'])
         } catch (e) {

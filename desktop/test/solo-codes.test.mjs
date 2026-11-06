@@ -129,8 +129,16 @@ test('кассы: в пробный срок — без ограничения; 
   assert.equal(no.status, 403)
   assert.match(no.data.message, /касса остановлена/)
   assert.equal((await r2.req('GET', '/products')).status, 200, 'смотреть на остановленной кассе можно')
-  // Подключить ещё одну — нельзя
-  assert.equal(m.gw.standalone.pairStart().error, 'Все кассы, которые разрешает код активации, уже подключены. Отключите ненужную кассу или попросите у поставщика код на большее число касс.')
+  // Подключить ещё одну — нельзя (код открывается, но новая касса им не подключится)
+  const open = m.gw.standalone.pairStart()
+  assert.equal(open.ok, true)
+  assert.match(open.onlyKnown, /Все кассы, которые разрешает код активации, уже подключены/)
+  await listening(m)
+  const r3 = computer('KASSA4', { time, udpFind: m.lan.udpPort(), requireCode: true })
+  tt.after(() => r3.close())
+  const res3 = await r3.gw.standalone.join({ code: open.code, address: `127.0.0.1:${m.lan.port()}` })
+  assert.match(res3.error || '', /Все кассы, которые разрешает код активации, уже подключены/)
+  m.gw.standalone.pairStop()
   // Лишнюю отключили — по коду всё сходится; код на 3 кассы — вторая снова работает
   assert.equal(m.gw.standalone.activate(codeFor(m, time, { registers: 3, serial: 2 })).ok, true)
   assert.deepEqual(m.gw.standalone.net().registers.map((x) => x.stopped), [false, false])
@@ -166,7 +174,10 @@ test('кассы работают по коду главного: срок ко�
   const no = await sell(r1, p)
   assert.equal(no.status, 403)
   assert.match(no.data.message, /Владелец вводит код активации на главном компьютере/)
-  assert.equal(m.gw.standalone.pairStart().error, 'Срок работы программы закончился — сначала введите код активации.')
+  // Код подключения открывается — но только для прежней кассы
+  const open = m.gw.standalone.pairStart()
+  assert.match(open.onlyKnown, /Срок работы программы закончился/)
+  m.gw.standalone.pairStop()
   // На главном — новый код; касса получает его с обменом
   assert.equal(m.gw.standalone.activate(codeFor(m, time, { until: FOREVER, registers: 2, serial: 2 })).ok, true)
   await swap(r1)
@@ -238,4 +249,94 @@ test('владелец и кассир входят и после конца с�
   assert.equal((await m.login(KASSIR, KASSIR_PASS)).status, 201)
   assert.equal((await m.req('GET', '/sales?days=60')).data.length, 1)
   assert.equal((await m.req('POST', '/shifts/open', { openingCash: 0 })).status, 403)
+})
+
+test('кассу отключили на главном — она останавливается; подключили заново — работает', async (tt) => {
+  const time = { now: NOW }
+  const { m, p } = await mainShop(time, { requireCode: true })
+  tt.after(() => m.close())
+  assert.equal(m.gw.standalone.activate(codeFor(m, time, { until: FOREVER, registers: 2 })).ok, true)
+  const { r: r1 } = await joinRegister(m, time, 'KASSA2', { requireCode: true })
+  tt.after(() => r1.close())
+  await cashierShift(r1)
+  assert.equal((await sell(r1, p)).status, 201)
+  assert.equal(m.gw.standalone.unpair(r1.gw.deviceId).ok, true)
+  // Главный отвечает «такой кассы нет» — касса верит этому не сразу после получения сведений
+  time.now += 10 * 60000
+  await swap(r1)
+  r1.gw.tick()
+  let a = r1.gw.status().activation
+  assert.deepEqual([a.active, a.unpaired], [false, true])
+  const no = await sell(r1, p)
+  assert.equal(no.status, 403)
+  assert.match(no.data.message, /Главный компьютер отключил эту кассу/)
+  // Отметка «отключена» помнится и без связи
+  r1.lan.stop()
+  assert.equal(r1.gw.status().activation.active, false)
+  // Подключили заново — сведения новые, работает
+  const code = m.gw.standalone.pairStart().code
+  await listening(m)
+  const re = await r1.gw.standalone.join({ code, address: `127.0.0.1:${m.lan.port()}` })
+  assert.equal(re.ok, true, JSON.stringify(re))
+  assert.equal(r1.gw.standalone.info().activation.active, true)
+})
+
+test('касса больше месяца без подтверждения главного — останавливается; связь вернулась — работает', async (tt) => {
+  const time = { now: NOW }
+  const { m, p } = await mainShop(time, { requireCode: true })
+  tt.after(() => m.close())
+  assert.equal(m.gw.standalone.activate(codeFor(m, time, { until: FOREVER, registers: 2 })).ok, true)
+  const { r: r1 } = await joinRegister(m, time, 'KASSA2', { requireCode: true })
+  tt.after(() => r1.close())
+  await cashierShift(r1)
+  time.now += 29 * DAY
+  r1.gw.tick()
+  assert.equal((await sell(r1, p)).status, 201, 'месяц без главного — работает')
+  time.now += 2 * DAY
+  r1.gw.tick()
+  const a = r1.gw.status().activation
+  assert.deepEqual([a.active, a.lease], [false, true])
+  assert.match((await sell(r1, p)).data.message, /больше месяца не получала подтверждения/)
+  // Главный включили: он присылает сведения (раз в сутки), касса снова работает
+  await m.login()
+  m.gw.tick()
+  await swap(r1)
+  assert.equal(r1.gw.status().activation.active, true)
+  assert.equal((await sell(r1, p)).status, 201)
+})
+
+test('часы кассы переведены на год назад — срок на кассе всё равно по часам главного', async (tt) => {
+  const time = { now: NOW }
+  const { m, p } = await mainShop(time, { requireCode: true })
+  tt.after(() => m.close())
+  const behind = {
+    get now() {
+      return time.now - 365 * DAY
+    },
+  }
+  const code = m.gw.standalone.pairStart().code
+  await listening(m)
+  const r1 = computer('KASSA2', { time: behind, udpFind: m.lan.udpPort(), requireCode: true })
+  tt.after(() => r1.close())
+  assert.equal((await r1.gw.standalone.join({ code, address: `127.0.0.1:${m.lan.port()}` })).ok, true)
+  await cashierShift(r1)
+  assert.equal((await sell(r1, p)).status, 201)
+  // Пробный срок главного кончился (15-й день) — на кассе тоже, хоть по её часам прошёл год назад
+  time.now += 15 * DAY
+  r1.gw.tick()
+  const a = r1.gw.status().activation
+  assert.deepEqual([a.active, a.expired], [false, true])
+  assert.equal((await sell(r1, p)).status, 403)
+})
+
+test('срок вышел — логотип и «Разобрался» тоже не меняют (только просмотр)', async (tt) => {
+  const time = { now: NOW }
+  const { m } = await mainShop(time, { requireCode: true })
+  tt.after(() => m.close())
+  time.now += 20 * DAY
+  m.gw.tick()
+  const png = 'data:image/png;base64,' + Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fe0dc5ba0e0000000049454e44ae426082', 'hex').toString('base64')
+  assert.equal((await m.req('POST', '/shop/logo', { logo: png })).status, 403)
+  assert.equal((await m.req('POST', '/discrepancies/x/resolve')).status, 403)
+  assert.equal((await m.req('GET', '/shop/logo')).status, 200)
 })
