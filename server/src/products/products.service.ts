@@ -135,6 +135,24 @@ export class ProductsService {
     return this.prisma.product.findUnique({ where: { barcode } })
   }
 
+  // ── Поставщик каждого товара (1.7.2) ──
+  // Своего поставщика у карточки нет: он виден только по приходам. Для авто-заявки берём
+  // поставщика последнего прихода, где он указан, — за всё время. Имя — нынешнее из
+  // справочника (поставщика могли переименовать), без справочника — снимком из прихода
+  async lastSuppliers() {
+    const rows = await this.prisma.$queryRaw<{ productId: string; supplierId: string | null; supplier: string; date: Date }[]>(Prisma.sql`
+      SELECT DISTINCT ON (i."productId")
+        i."productId" AS "productId", a."supplierId" AS "supplierId",
+        COALESCE(s."name", a."supplier") AS "supplier", a."date" AS "date"
+      FROM "ArrivalItem" i
+      JOIN "Arrival" a ON a."id" = i."arrivalId"
+      LEFT JOIN "Supplier" s ON s."id" = a."supplierId"
+      WHERE i."productId" IS NOT NULL
+        AND (s."id" IS NOT NULL OR btrim(a."supplier") NOT IN ('', '—'))
+      ORDER BY i."productId", a."date" DESC, a."id" DESC`)
+    return rows.map((r) => ({ productId: r.productId, supplierId: r.supplierId, supplier: r.supplier, date: r.date }))
+  }
+
   async create(dto: CreateProductDto) {
     const data = productData(dto)
     try {

@@ -1,9 +1,15 @@
 import { Type } from 'class-transformer'
-import { IsArray, IsInt, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator'
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsInt, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator'
+
+// Сколько товаров можно отобрать сканером в один лист «Выбранные товары»
+export const MAX_PICKED = 10000
 
 export class CreateInventoryDto {
   @IsOptional() @IsString() scope?: string // 'all' или название категории
   @IsOptional() @IsString() note?: string
+  // Лист из отобранных товаров (1.7.2): их id в том порядке, в каком их сканировали.
+  // Есть — scope не смотрится, лист называется «Выбранные товары»
+  @IsOptional() @IsArray() @ArrayMinSize(1) @ArrayMaxSize(MAX_PICKED) @IsString({ each: true }) productIds?: string[]
 }
 
 export class CountItemDto {

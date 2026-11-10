@@ -46,7 +46,7 @@ import { deleteCashMove, deleteExpense, deleteIncome, deleteSupplierReturn, upda
 import { arrivalView, deleteArrival, updateArrival } from './ops/arrivaledit.mjs'
 import { applyInventory, createInventory, deleteInventory, inventoriesList, inventoryOne, saveCounts } from './ops/inventory.mjs'
 import { createRole, createUser, deleteRole, deleteUser, rolesList, staffList, updateRole, updateUser, usersList } from './ops/team.mjs'
-import { productHistory, supplierCard } from './history.mjs'
+import { lastSuppliers, productHistory, supplierCard } from './history.mjs'
 import { DAY_MS } from './time.mjs'
 
 const MAX_DAYS = 3650
@@ -238,12 +238,14 @@ const ROUTES = [
 ]
 
 // ── Сначала сервер, без связи — касса ──
-// История товара и карточка поставщика: у сервера все документы за всё время, а у кассы —
+// История товара, карточка поставщика и поставщики товаров: у сервера все документы за всё время, а у кассы —
 // за последние месяцы. Поэтому на связи отвечает сервер, а без связи — касса, по своим
 // журналам, с пометкой local (окно покажет, что это данные компьютера)
 const FALLBACK = [
   ['GET', /^\/products\/([^/]+)\/history$/, perm(['products.history'], (ctx) => productHistory(ctx.db, ctx.params[0], ctx.query, ctx.now, { complete: !!ctx.standalone }) || notThere('Товар не найден'))],
   ['GET', /^\/suppliers\/([^/]+)$/, perm(['suppliers.view'], (ctx) => supplierCard(ctx.db, ctx.params[0], { complete: !!ctx.standalone }) || notThere('Поставщик не найден'))],
+  // Поставщик каждого товара (авто-заявка, 1.7.2): у сервера — по приходам за всё время
+  ['GET', /^\/products\/suppliers$/, perm(['orders.view'], (ctx) => lastSuppliers(ctx.db))],
 ]
 const notThere = (text) => {
   throw notFound(text)

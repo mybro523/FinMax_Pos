@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common'
-import { Prisma } from '@prisma/client'
+import { Prisma, Product } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { D } from '../common/money'
 import { lockProducts, setUnits, shortageWorth, totalUnits, uppOf } from '../common/stock'
@@ -19,6 +19,10 @@ const CHUNK = 500
 export const SHEET_NOT_FOUND = 'Лист не найден'
 export const SHEET_APPLIED = 'Этот пересчёт уже применён'
 export const SHEET_APPLIED_NO_DELETE = 'Применённый пересчёт удалять нельзя — это история'
+// Лист из товаров, отобранных сканером (1.7.2). Охват хранится этими словами: так его
+// понятно назовут и окна прежних версий, которые просто пишут охват листа как есть
+export const PICKED_SCOPE = 'Выбранные товары'
+export const NO_PICKED_PRODUCTS = 'Отобранных товаров больше нет в базе'
 
 const INCLUDE = { items: true, user: { select: { id: true, name: true } } } as const
 
@@ -59,14 +63,27 @@ export class InventoryService {
     return inv
   }
 
-  // Новый лист пересчёта: все товары или одна категория
+  // Новый лист пересчёта: все товары, одна категория или товары, отобранные сканером
   async create(dto: CreateInventoryDto, userId?: string) {
-    const scope = dto.scope || 'all'
-    const products = await this.prisma.product.findMany({
-      where: scope === 'all' ? {} : { category: scope },
-      orderBy: { name: 'asc' },
-    })
-    if (!products.length) throw new BadRequestException('В этой категории нет товаров')
+    const picked = Array.isArray(dto.productIds) && dto.productIds.length > 0
+    const scope = picked ? PICKED_SCOPE : dto.scope || 'all'
+    let products: Product[]
+    if (picked) {
+      // Строки — в том порядке, в каком товары сканировали; повтор — одной строкой
+      const ids = [...new Set(dto.productIds)]
+      const found = new Map<string, Product>()
+      for (let at = 0; at < ids.length; at += CHUNK) {
+        for (const p of await this.prisma.product.findMany({ where: { id: { in: ids.slice(at, at + CHUNK) } } })) found.set(p.id, p)
+      }
+      products = ids.map((id) => found.get(id)).filter((p): p is Product => !!p)
+      if (!products.length) throw new BadRequestException(NO_PICKED_PRODUCTS)
+    } else {
+      products = await this.prisma.product.findMany({
+        where: scope === 'all' ? {} : { category: scope },
+        orderBy: { name: 'asc' },
+      })
+      if (!products.length) throw new BadRequestException('В этой категории нет товаров')
+    }
 
     // Строки — пачками по CHUNK одним запросом: построчные вставки (вложенное create) на
     // складе в тысячи товаров были бы тысячами записей в журнале изменений для касс

@@ -32,6 +32,9 @@ export const SHEET_NOT_FOUND = 'Лист не найден'
 export const SHEET_APPLIED = 'Этот пересчёт уже применён'
 export const SHEET_APPLIED_NO_DELETE = 'Применённый пересчёт удалять нельзя — это история'
 export const NO_PRODUCTS_IN_SCOPE = 'В этой категории нет товаров'
+// Лист из товаров, отобранных сканером (1.7.2) — как у сервера
+export const PICKED_SCOPE = 'Выбранные товары'
+export const NO_PICKED_PRODUCTS = 'Отобранных товаров больше нет в базе'
 // Сколько строк насчитанного в одном запросе — как у сервера
 const MAX_COUNT_LINES = 20000
 // Лист, заведённый без связи, уходит на сервер и соседним кассам одной записью. На склад
@@ -60,7 +63,7 @@ export function inventoryOne(db, id) {
   return doc ? sheetView(doc.body, pendingEdits(db, id).get(id)) : null
 }
 
-// ── Завести лист: все товары или одна категория ──
+// ── Завести лист: все товары, одна категория или отобранные сканером ──
 // «По учёту» — что лежит на полке этой кассы сейчас
 export function createInventory(ctx, raw) {
   const { db, now } = ctx
@@ -68,8 +71,12 @@ export function createInventory(ctx, raw) {
   const c = checker()
   const scopeAsked = c.str(dto.scope, 'scope', { optional: true })
   const note = c.str(dto.note, 'note', { optional: true })
+  // Товары, отобранные сканером (1.7.2): есть — лист только из них, в порядке сканирования
+  const pickedRaw = dto.productIds === undefined || dto.productIds === null ? null : c.list(dto.productIds, 'productIds', { max: MAX_OFFLINE_LINES })
+  if (pickedRaw) for (const id of pickedRaw) c.str(id, 'productIds')
   c.done()
-  const scope = (scopeAsked || 'all').trim() || 'all'
+  const picked = pickedRaw ? [...new Set(pickedRaw)] : null
+  const scope = picked ? PICKED_SCOPE : (scopeAsked || 'all').trim() || 'all'
   if ((note || '').length > 500) throw bad('Примечание: не длиннее 500 символов')
 
   return inTx(db, () => {
@@ -86,9 +93,13 @@ export function createInventory(ctx, raw) {
         .map((r) => r.id),
     )
     const products = (
-      scope === 'all' ? q(db, 'SELECT * FROM products ORDER BY ord, name').all() : q(db, 'SELECT * FROM products WHERE category = ? ORDER BY ord, name').all(scope)
+      picked
+        ? picked.map((id) => productById(db, id)).filter(Boolean)
+        : scope === 'all'
+          ? q(db, 'SELECT * FROM products ORDER BY ord, name').all()
+          : q(db, 'SELECT * FROM products WHERE category = ? ORDER BY ord, name').all(scope)
     ).filter((p) => !peerMade.has(p.id))
-    if (!products.length) throw bad(NO_PRODUCTS_IN_SCOPE)
+    if (!products.length) throw bad(picked ? NO_PICKED_PRODUCTS : NO_PRODUCTS_IN_SCOPE)
     // Склад больше, чем лист без связи: с интернетом лист заведёт сервер, без него — отказ
     // этими словами (шлюз, __remote)
     if (products.length > MAX_OFFLINE_LINES) return { __remote: true, __offline: TOO_MANY_LINES }

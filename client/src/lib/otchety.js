@@ -156,6 +156,25 @@ export function spisokChekov({ sales, returns = [], from, to }) {
   return { rows, itogo: { cheki: zhivye.length, sum: kop(zhivye.reduce((a, r) => a + r.total, 0)), otmeneno: rows.length - zhivye.length } }
 }
 
+// ── Вид чека — для отбора во вкладке «Чеки» (1.7.2) ──
+// Отменённый (кнопкой «Отмена» в кассе), с возвратом (вернули часть или всё обычным
+// возвратом), без возвратов. Скидка — отдельный признак: чек со скидкой бывает любым из трёх
+export const VIDY_CHEKOV = [
+  { key: '', label: 'Все чеки' },
+  { key: 'chistye', label: 'Без возвратов' },
+  { key: 'vozvrat', label: 'С возвратом' },
+  { key: 'otmena', label: 'Отменённые' },
+  { key: 'skidka', label: 'Со скидкой' },
+]
+export function chekVida(row, vid) {
+  if (!vid) return true
+  if (vid === 'otmena') return !!row?.otmena
+  if (vid === 'vozvrat') return !row?.otmena && num(row?.vozvrat) > 0
+  if (vid === 'chistye') return !row?.otmena && !(num(row?.vozvrat) > 0)
+  if (vid === 'skidka') return num(row?.discount) > 0
+  return true
+}
+
 // Чек подходит под поиск: номер чека (с чёрточкой или без), товар — название или
 // штрихкод (barcodes: id товара → штрихкод), клиент или кассир. Пустой запрос — подходит
 export function chekPodhodit(z, row, nomer, barcodes) {

@@ -1,19 +1,26 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { LuClipboardCheck, LuPlus, LuCircleCheck, LuTriangleAlert, LuTrash2 } from 'react-icons/lu'
+import { LuClipboardCheck, LuPlus, LuCircleCheck, LuTriangleAlert, LuTrash2, LuScanBarcode, LuX } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
 import { getUser } from '../db/auth'
-import { useCollection, money, refresh, db, setCollection } from '../db/store'
+import { useCollection, money, refresh, db, setCollection, stockText } from '../db/store'
 import { api, LONG_TIMEOUT_MS } from '../db/api'
 import { fmtDateTime, serverNow } from '../lib/time'
 import { useT } from '../lib/i18n'
 import { useCategories, categoryNames } from '../lib/categories'
 import NumberInput from '../components/NumberInput'
 import VesInput from '../components/VesInput'
-import { isVesovoy, kgText, splitUnits, edinica } from '../lib/units'
+import { isVesovoy, kgText, splitUnits, edinica, opensPack, unitsText, gramsOfKg } from '../lib/units'
+import ProductPick from './prihod/ProductPick'
+import { beepError } from '../lib/sound'
+import { productByCode } from '../lib/pick'
+import {
+  MAX_PICKED, OTBOR_STARYY_MS, izOtbora, naverh, otborNachat, plusSkan, polyaIzOtbora, poryadokStrok, readOtbor, skanVPole,
+  vOtbor, vOtboreStavim, writeOtbor, zaSkan, zhivyeVOtbore,
+} from '../lib/skanPereschet'
 import {
   MAX_DIGITS, countOf, shownOf, retype, deltaOf, merged, settle, sameCounts, tally,
   readDraft, writeDraft, dropDraft, closeDraft, pruneDrafts,
@@ -35,6 +42,11 @@ import { useCan } from '../db/auth'
 const LOOK_TIMEOUT_MS = 60000
 // Через сколько спросить сервер о листе ещё раз
 const LOOK_AGAIN_MS = 3000
+// «Что пересчитываем» → товары, отобранные сканером (1.7.2). Лист из них сервер называет
+// этими словами (inventory.service, PICKED_SCOPE); они же уходят охватом — сервер прежней
+// версии принял бы их за категорию и отказал «нет товаров», а не завёл бы весь склад
+const PICKED = '__picked'
+const PICKED_SCOPE = 'Выбранные товары'
 const pause = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // Один лист с сервера. wait — «ответь, когда закончится идущее применение».
@@ -93,6 +105,23 @@ export default function Inventory() {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState(null) // чем кончилось применение, если не так, как ждали
   const [scope, setScope] = useState('all')
+  // ── Сканер (1.7.2) ──
+  // Список отбора для листа «Выбранные товары» — у каждого магазина свой, переживает уход
+  // со страницы. Поля «Штрихкод» и «Наименование» — одни на оба места (список отбора и
+  // открытый лист видны не одновременно)
+  const shop = getUser()?.pharmacy?.code || ''
+  const [otbor, setOtborState] = useState(() => readOtbor(shop))
+  const setOtbor = (fn) => {
+    const next = typeof fn === 'function' ? fn(readOtbor(shop)) : fn
+    writeOtbor(shop, next)
+    setOtborState(next)
+  }
+  const otborRows = useMemo(() => zhivyeVOtbore(otbor, products), [otbor, products])
+  const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products])
+  const [pick, setPick] = useState({ code: '', name: '' })
+  const scanRef = useRef(null)
+  const [top, setTop] = useState([]) // строки открытого листа, отсканированные здесь: свежая — первой
+  const [focusRow, setFocusRow] = useState(null) // строка, в чьё поле поставить курсор (весовой товар)
 
   // Открыта ли ещё эта страница: ответ на применение может прийти, когда человек уже ушёл
   const here = useRef(true)
@@ -159,6 +188,10 @@ export default function Inventory() {
 
   // Показать лист: числа с сервера и поверх них — введённое на этом устройстве
   function show(inv) {
+    if (openId.current !== inv.id) {
+      setTop([])
+      setPick({ code: '', name: '' })
+    }
     openId.current = inv.id
     setOpen(inv)
     setTyped(inv.status === 'applied' ? {} : readDraft(inv.id))
@@ -167,6 +200,8 @@ export default function Inventory() {
   function close() {
     openId.current = null
     setOpen(null)
+    setTop([])
+    setPick({ code: '', name: '' })
   }
 
   // Лист оказался применённым — не отсюда или отсюда, но ответ тогда потерялся
@@ -183,14 +218,39 @@ export default function Inventory() {
   }
 
   async function createSheet() {
+    const picked = scope === PICKED
+    // Отобранное сканером — то, что стоит в списке сейчас (без товаров, удалённых с тех пор)
+    const rows = picked ? otborRows : []
+    if (picked && !rows.length) {
+      toast(t('Отсканируйте товары, которые будете пересчитывать'), 'err')
+      scanRef.current?.focus()
+      return
+    }
     setBusy(true)
     try {
       // Пересчёт всего склада — это тысячи строк одним запросом, и на сервере
       // ему отведены минуты. Обычные пятнадцать секунд оборвали бы его на полпути:
       // сотрудник, считавший товар весь день, получил бы «сервер не отвечает»
       // вместо сохранения, а работа на сервере при этом доделалась бы.
-      const inv = await api.post('/inventory', { scope }, { timeout: LONG_TIMEOUT_MS })
+      const body = picked ? { scope: PICKED_SCOPE, productIds: rows.map((r) => r.productId) } : { scope }
+      const inv = await api.post('/inventory', body, { timeout: LONG_TIMEOUT_MS })
       show(inv)
+      if (picked) {
+        // Насчитанное сканером — сразу в «По факту» и на сервер, как «Сохранить черновик»
+        const fields = polyaIzOtbora(inv, rows)
+        if (Object.keys(fields).length) {
+          let next = readDraft(inv.id)
+          for (const item of inv.items) if (fields[item.id] !== undefined) next = retype(next, item, fields[item.id])
+          writeDraft(inv.id, next)
+          setTyped(next)
+          sendDraft(inv, { quiet: true })
+        }
+        // Список отбора стал листом: уходят отправленные товары (пока лист заводился, сканер
+        // заперт, но и пришедшее мимо него не пропадёт)
+        const sent = new Set(rows.map((r) => r.productId))
+        setOtbor((l) => l.filter((r) => !sent.has(r.productId)))
+        setPick({ code: '', name: '' })
+      }
       await load()
       toast(t('Лист пересчёта создан'))
     } catch (e) {
@@ -245,14 +305,138 @@ export default function Inventory() {
 
   const sum = useMemo(() => tally(open ? merged(open, typed) : null, products), [open, typed, products])
 
+  // ── Сканер (1.7.2) ──
+  // После скана курсор возвращается в «Штрихкод»: следующий скан идёт туда же
+  const refocusScan = () => setTimeout(() => scanRef.current?.focus(), 0)
+  // Поле, в которое курсор поставил скан (весовой товар): Enter в нём — обратно к сканеру
+  const skanFocus = useRef(null)
+  // Весовой товар сканом не считают — курсор встаёт в его поле (строка уже наверху)
+  useEffect(() => {
+    if (!focusRow) return
+    const sel = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(focusRow) : focusRow
+    const el = document.querySelector(`[data-inv-row="${sel}"]`)
+    if (el) {
+      skanFocus.current = focusRow
+      el.focus()
+      el.select?.()
+    }
+    setFocusRow(null)
+  }, [focusRow])
+
+  // ── Поля количества и веса ──
+  // Сканер выстрелил, пока курсор в поле количества (весовой товар после скана, правка
+  // руками), — это скан, а не количество: поле возвращается к тому, что в нём было перед
+  // первой цифрой кода, товар считается как со сканера (lib/skanPereschet.js, skanVPole).
+  // Enter после скана весового и в списке отбора — обратно к сканеру; в длинном листе после
+  // правки руками курсор остаётся на месте: прыжок наверх потерял бы строку, на которой
+  // человек стоит.
+  // key — поле (data-inv-row), setRaw — поставить в поле текст (как его набрали бы),
+  // onScan — что делать со сканом, always — Enter всегда ведёт к сканеру.
+  // Перед каждым знаком запоминается текст поля: по нему видно, что было до кода
+  const pole = useRef({ key: null, buf: '', snaps: [] })
+  const poleProps = (key, setRaw, onScan, always = false) => ({
+    'data-inv-row': key,
+    onFocus: () => {
+      pole.current = { key, buf: '', snaps: [] }
+    },
+    onKeyDown: (e) => {
+      if (pole.current.key !== key) pole.current = { key, buf: '', snaps: [] }
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        pole.current.snaps.push(e.currentTarget.value)
+        pole.current.buf += e.key
+        return
+      }
+      if (e.key !== 'Enter') return
+      const { buf, snaps } = pole.current
+      const hit = skanVPole(buf, products, productByCode)
+      const back = always || skanFocus.current === key
+      pole.current = { key, buf: '', snaps: [] }
+      if (hit) {
+        e.preventDefault()
+        setRaw(snaps[snaps.length - hit.len] ?? '')
+        skanFocus.current = null
+        return onScan(hit.product)
+      }
+      if (back) {
+        e.preventDefault()
+        skanFocus.current = null
+        scanRef.current?.focus()
+      }
+    },
+  })
+
+  // Скан в открытом листе: строка товара — наверх, к насчитанному — одна упаковка
+  function skanVListe(p) {
+    setPick({ code: '', name: '' })
+    const item = open.items.find((i) => i.productId === p.id)
+    if (!item) {
+      beepError()
+      toast(`${p.name}: ${t('этого товара нет в листе')}`, 'err')
+      refocusScan()
+      return
+    }
+    setTop((tp) => naverh(tp, item.id))
+    if (open.status === 'applied') return refocusScan()
+    if (zaSkan(p) === null) return setFocusRow(item.id)
+    // Насчитанное — из хранилища, а не из состояния страницы: два скана подряд быстрее
+    // перерисовки, и второй не должен потерять первый
+    type(item, String(plusSkan(countOf(shownOf(item, readDraft(open.id))), p)))
+    refocusScan()
+  }
+
+  // Скан в «Выбранных товарах»: товар — наверх списка, к насчитанному — одна упаковка
+  function skanVOtbor(p) {
+    setPick({ code: '', name: '' })
+    const list = readOtbor(shop)
+    if (!list.some((r) => r.productId === p.id) && list.length >= MAX_PICKED) {
+      beepError()
+      toast(`${t('В одном листе — не больше')} ${MAX_PICKED} ${t('товаров')}`, 'err')
+      return refocusScan()
+    }
+    setOtbor((l) => vOtbor(l, p))
+    if (zaSkan(p) === null) return setFocusRow('pick:' + p.id)
+    refocusScan()
+  }
+
+  // Поля «Штрихкод» и «Наименование» — одни на оба места
+  const skanPolya = (onPick, readOnly = false) => (
+    <div className="inv-scan">
+      <ProductPick
+        readOnly={readOnly}
+        ids={{ code: 'inv-code', name: 'inv-name' }}
+        codeRef={scanRef}
+        products={products}
+        code={pick.code}
+        name={pick.name}
+        chosen={null}
+        onCode={(v) => setPick((f) => ({ ...f, code: v }))}
+        onName={(v) => setPick((f) => ({ ...f, name: v }))}
+        onPick={onPick}
+        // Незнакомый код — поле очищается: следующий скан иначе дописался бы к нему
+        onUnknownCode={(code) => {
+          setPick({ code: '', name: '' })
+          toast(`${t('Товар с таким штрихкодом не найден')}: ${code}`, 'err')
+          refocusScan()
+        }}
+        onUnknownName={() => toast(t('Товар не найден'), 'err')}
+        hint={<><span className="ic"><LuScanBarcode size={16} /></span>{t('Каждый скан — плюс одна упаковка. Весовой товар — введите вес в его поле.')}</>}
+      />
+    </div>
+  )
+
   // Черновик сохраняется мгновенно: сотрудник ходит по полкам и не должен ждать
   // ответа сервера после каждого сохранения. Введённое уже лежит на устройстве; на
   // сервер уходят только строки, изменённые здесь
   function saveDraft() {
-    const id = open.id
+    sendDraft(open)
+  }
+  // sheet — лист, каким его показали (только что созданный ещё не стоит в open);
+  // quiet — без «Пересчёт сохранён»: сохраняет сама страница, а не человек
+  function sendDraft(sheet, { quiet = false } = {}) {
+    const id = sheet.id
     const sent = readDraft(id)
-    const items = deltaOf(open, sent)
-    toast(t('Пересчёт сохранён'))
+    const items = deltaOf(sheet, sent)
+    if (!quiet) toast(t('Пересчёт сохранён'))
     if (!items.length) return
     api.patch(`/inventory/${id}`, { items }, { timeout: LONG_TIMEOUT_MS }).then(
       (saved) => {
@@ -479,18 +663,91 @@ export default function Inventory() {
             {t('Как это работает: создайте лист — система запишет, сколько товара должно быть. Пересчитайте товар на полках и внесите фактические количества. Пока лист не применён, остатки не меняются.')}
           </div>
 
-          <div className="panel" style={{ maxWidth: 560 }}>
+          <div className="panel" style={{ maxWidth: scope === PICKED ? 980 : 560 }}>
             <h2><span className="h2-title"><span className="ic"><LuPlus size={17} /></span>{t('Новый пересчёт')}</span></h2>
-            <div className="field" data-tour="inv.scope">
-              <label>{t('Что пересчитываем')}</label>
-              <select value={scope} onChange={(e) => setScope(e.target.value)}>
+            <div className="field" data-tour="inv.scope" style={{ maxWidth: 520 }}>
+              <label htmlFor="inv-scope">{t('Что пересчитываем')}</label>
+              <select id="inv-scope" data-testid="inv-scope" value={scope} onChange={(e) => setScope(e.target.value)}>
                 <option value="all">{t('Весь склад')}</option>
+                {can('inventory.count') && <option value={PICKED}>{t('Выбранные товары (сканером)')}</option>}
                 {categories.map((c) => <option key={c} value={c}>{t(c)}</option>)}
               </select>
             </div>
-            {can('inventory.count') && <button className="btn" data-tour="inv.create" onClick={createSheet} disabled={busy}>
-              <span className="ic"><LuClipboardCheck size={16} /></span> {t('Создать лист')}
-            </button>}
+            {scope === PICKED && can('inventory.count') && (
+              <>
+                <div data-tour="inv.pick">{skanPolya(skanVOtbor, busy)}</div>
+                {otborRows.length > 0 && otborNachat(shop) > 0 && Date.now() - otborNachat(shop) > OTBOR_STARYY_MS && (
+                  <div className="note warn" style={{ marginBottom: 12 }} data-testid="inv-otbor-old">
+                    {t('Список начат')} {fmtDateTime(new Date(otborNachat(shop)))}. {t('С тех пор товар могли продавать — проверьте числа или очистите список и отсканируйте заново.')}
+                  </div>
+                )}
+                <div className="inv-otbor" data-testid="inv-otbor">
+                  <table>
+                    <thead>
+                      <tr><th>{t('Товар')}</th><th className="num">{t('По системе')}</th><th style={{ width: 170 }}>{t('Насчитано')}</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                      {otborRows.map((r, n) => {
+                        const p = productById.get(r.productId)
+                        const ves = isVesovoy(p)
+                        return (
+                          <tr key={r.productId} className={n === 0 ? 'inv-last' : undefined}>
+                            <td><b>{p.name}</b><div className="tag-cat">{p.barcode}</div></td>
+                            <td className="num">{stockText(p)}</td>
+                            <td>
+                              {ves ? (
+                                <VesInput
+                                  className="disc-input" style={{ width: 110 }} grams={r.units ?? 0} placeholder="—"
+                                  {...poleProps('pick:' + r.productId, (txt) => setOtbor((l) => vOtboreStavim(l, r.productId, txt.trim() === '' ? null : gramsOfKg(txt))), skanVOtbor, true)}
+                                  onGrams={(g) => setOtbor((l) => vOtboreStavim(l, r.productId, g))}
+                                  aria-label={`${t('Насчитано')}: ${p.name}`}
+                                />
+                              ) : (
+                                <NumberInput
+                                  integer className="disc-input" style={{ width: 110 }} value={r.units === null ? '' : String(r.units)} placeholder="—"
+                                  maxLength={MAX_DIGITS}
+                                  {...poleProps('pick:' + r.productId, (txt) => setOtbor((l) => vOtboreStavim(l, r.productId, txt)), skanVOtbor, true)}
+                                  onChange={(e) => setOtbor((l) => vOtboreStavim(l, r.productId, e.target.value))}
+                                  aria-label={`${t('Насчитано')}: ${p.name}`}
+                                />
+                              )}
+                              {/* Сколько это упаковок: «2 уп + 5 шт»; у весового без мешка вес и так в поле */}
+                              {r.units !== null && !(ves && !opensPack(p)) && <div className="tag-cat">{unitsText(r.units, p, t)}</div>}
+                            </td>
+                            <td className="num">
+                              <button className="btn ghost sm icon" onClick={() => setOtbor((l) => izOtbora(l, r.productId))} title={t('Убрать из списка')} aria-label={`${t('Убрать из списка')}: ${p.name}`}><LuX size={15} /></button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                      {otborRows.length === 0 && (
+                        <tr><td colSpan="4" className="empty">{t('Сканируйте товары — они появятся здесь. Повторный скан того же товара прибавит ещё одну упаковку.')}</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+            {can('inventory.count') && (
+              <div className="inv-create">
+                <button className="btn" data-tour="inv.create" data-testid="inv-create" onClick={createSheet} disabled={busy}>
+                  <span className="ic"><LuClipboardCheck size={16} /></span>
+                  {' '}{scope === PICKED && otborRows.length ? `${t('Создать лист')} (${otborRows.length})` : t('Создать лист')}
+                </button>
+                {scope === PICKED && otborRows.length > 0 && (
+                  <button
+                    className="btn ghost"
+                    onClick={async () => {
+                      const ok = await dialog.confirm({ title: t('Очистить список?'), message: t('Отсканированные товары уйдут из списка. На складе ничего не изменится.'), confirmText: t('Очистить') })
+                      if (ok) setOtbor([])
+                    }}
+                    disabled={busy}
+                  >
+                    {t('Очистить список')}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="panel mt" data-tour="inv.list" style={{ padding: 0 }}>
@@ -530,7 +787,7 @@ export default function Inventory() {
         </>
       ) : (
         <>
-          <div className="cards" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 16 }}>
+          <div className="cards four" style={{ marginBottom: 16 }}>
             <div className="metric"><div className="metric-head"><div className="label">{t('Позиций в листе')}</div></div><div className="value">{open.items.length}</div></div>
             <div className="metric"><div className="metric-head"><div className="label">{t('Пересчитано')}</div></div><div className="value">{sum.counted}</div></div>
             <div className="metric"><div className="metric-head"><div className="label">{t('Недостача')}</div></div><div className="value" style={{ color: sum.shortage.length ? 'var(--danger)' : undefined }}>{sum.shortage.length}</div></div>
@@ -539,6 +796,10 @@ export default function Inventory() {
 
           {open.status === 'applied' && (
             <div className="note info" style={{ marginBottom: 12 }}>{t('Этот пересчёт уже применён — данные показаны для истории.')}</div>
+          )}
+
+          {open.status !== 'applied' && can('inventory.count') && (
+            <div className="panel inv-scan-panel" data-tour="inv.scan">{skanPolya(skanVListe)}</div>
           )}
 
           <div className="panel" style={{ padding: 0 }}>
@@ -552,7 +813,7 @@ export default function Inventory() {
                 </tr>
               </thead>
               <tbody>
-                {open.items.map((i) => {
+                {poryadokStrok(open.items, top).map((i) => {
                   const raw = shownOf(i, typed)
                   const actual = countOf(raw)
                   // Весовой товар считается в килограммах: храним граммы, показываем кг
@@ -561,8 +822,8 @@ export default function Inventory() {
                   const diff = actual === null ? null : actual - i.expectedUnits
                   const chislo = (n) => (ves ? `${kgText(n)} ${t(edinica(prod))}` : n)
                   return (
-                    <tr key={i.id}>
-                      <td><b>{i.name}</b></td>
+                    <tr key={i.id} className={top[0] === i.id ? 'inv-last' : undefined}>
+                      <td><b>{i.name}</b>{prod?.barcode && <div className="tag-cat">{prod.barcode}</div>}</td>
                       <td className="num">{chislo(i.expectedUnits)}</td>
                       <td data-tour="inv.fact">
                         {ves ? (
@@ -572,6 +833,7 @@ export default function Inventory() {
                             grams={actual ?? 0}
                             disabled={open.status === 'applied'}
                             placeholder="—"
+                            {...poleProps(i.id, (txt) => type(i, txt.trim() === '' ? '' : String(gramsOfKg(txt))), skanVListe)}
                             onGrams={(g) => type(i, String(g))}
                           />
                         ) : (
@@ -581,9 +843,11 @@ export default function Inventory() {
                             disabled={open.status === 'applied'}
                             placeholder="—"
                             maxLength={MAX_DIGITS}
+                            {...poleProps(i.id, (txt) => type(i, txt), skanVListe)}
                             onChange={(e) => type(i, e.target.value)}
                           />
                         )}
+                        {!ves && opensPack(prod) && actual !== null && <div className="tag-cat">{unitsText(actual, prod, t)}</div>}
                       </td>
                       <td className="num">
                         {diff === null ? <span className="tag-cat">{t('не считали')}</span>

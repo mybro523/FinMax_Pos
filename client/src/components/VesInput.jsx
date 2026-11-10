@@ -14,8 +14,14 @@ export default function VesInput({ grams, onGrams, ...rest }) {
     <NumberInput
       {...rest}
       value={shown}
-      onFocus={() => setDraft(grams ? String(grams / 1000) : '')}
-      onBlur={() => setDraft(null)}
+      onFocus={(e) => {
+        setDraft(grams ? String(grams / 1000) : '')
+        rest.onFocus?.(e)
+      }}
+      onBlur={(e) => {
+        setDraft(null)
+        rest.onBlur?.(e)
+      }}
       onChange={(e) => {
         setDraft(e.target.value)
         onGrams(gramsOfKg(e.target.value))

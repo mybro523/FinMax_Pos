@@ -96,3 +96,28 @@ export function supplierCard(db, id, { complete = false } = {}) {
     .slice(0, 500)
   return { ...supplier, arrivals, payments, local: !complete }
 }
+
+// ── Поставщик каждого товара — по последнему приходу (авто-заявка, 1.7.2) ──
+// Как у сервера (products.service, lastSuppliers): поставщик последнего прихода, где он
+// указан. Имя — нынешнее из справочника, нет в справочнике — снимком из прихода.
+// Приходы на этом компьютере — за полгода (у магазина без интернета — за всё время)
+export function lastSuppliers(db) {
+  const names = new Map(q(db, 'SELECT id, name FROM suppliers').all().map((s) => [s.id, s.name]))
+  const seen = new Map()
+  // listDocs — свежие сверху: первый приход с товаром и поставщиком — последний
+  for (const a of listDocs(db, 'arrival')) {
+    const known = a.supplierId && names.has(a.supplierId)
+    const snap = String(a.supplier || '').trim()
+    if (!known && (!snap || snap === '—')) continue
+    for (const i of a.items || []) {
+      if (!i?.productId || seen.has(i.productId)) continue
+      seen.set(i.productId, {
+        productId: i.productId,
+        supplierId: known ? a.supplierId : null,
+        supplier: known ? names.get(a.supplierId) : snap,
+        date: a.date,
+      })
+    }
+  }
+  return [...seen.values()]
+}

@@ -43,6 +43,7 @@ const FIELDS = {
   refundVia: 'Сервис перевода',
   kind: 'Вид операции',
   supplierId: 'Поставщик',
+  productIds: 'Товары',
 }
 
 const label = (field) => FIELDS[field] || field

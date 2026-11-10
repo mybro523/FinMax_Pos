@@ -60,6 +60,7 @@ const FIELDS: Record<string, string> = {
   openingDebt: 'Начальный долг',
   debt: 'Долг',
   supplierId: 'Поставщик',
+  productIds: 'Товары',
 }
 
 const field = (raw: string) => FIELDS[raw] || raw
@@ -78,6 +79,8 @@ const RULES: { re: RegExp; ru: (m: RegExpMatchArray) => string }[] = [
   { re: /^(\S+) should not be empty$/, ru: (m) => `${field(m[1])}: не может быть пустым` },
   { re: /^(\S+) must be an array$/, ru: (m) => `${field(m[1])}: ожидается список` },
   { re: /^(\S+) must contain at least (\d+) elements$/, ru: (m) => `${field(m[1])}: нужна хотя бы ${m[2]} позиция` },
+  { re: /^(\S+) must contain no more than (\d+) elements$/, ru: (m) => `${field(m[1])}: не больше ${m[2]} в одном документе — разделите на несколько` },
+  { re: /^each value in (\S+) must be a string$/, ru: (m) => `${field(m[1])}: только текст` },
   { re: /^(\S+) must be a valid ISO 8601 date string$/, ru: (m) => `${field(m[1])}: дата в неверном виде` },
   { re: /^(\S+) must be a valid enum value$/, ru: (m) => `${field(m[1])}: недопустимое значение` },
   { re: /^property (\S+) should not exist$/, ru: (m) => `Лишнее поле: ${field(m[1])}` },

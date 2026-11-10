@@ -4,7 +4,7 @@ import {
   LuLayoutDashboard, LuShoppingCart, LuPill, LuPackagePlus,
   LuClipboardList, LuReceipt, LuTrendingUp, LuSettings, LuClock, LuTag, LuCalculator, LuWifiOff,
   LuUsers, LuCalendarClock, LuUndo2, LuTrash2, LuClipboardCheck, LuTriangleAlert,
-  LuGraduationCap, LuHandCoins, LuTruck, LuShieldCheck, LuChartColumn, LuScale, LuCoins,
+  LuGraduationCap, LuHandCoins, LuTruck, LuShieldCheck, LuChartColumn, LuScale, LuCoins, LuInfo,
 } from 'react-icons/lu'
 import { useConnection } from '../db/store'
 import { useAuth, leavePharmacy } from '../db/auth'
@@ -44,7 +44,7 @@ export const NAV = [
   { to: '/supplier-report', label: 'Отчёт поставщиков', Icon: LuScale, perm: 'suppliers.view' },
   { to: '/incomes', label: 'Доходы', Icon: LuCoins, perm: 'incomes.view' },
   { to: '/expenses', label: 'Расходы', Icon: LuHandCoins, perm: 'expenses.view' },
-  { to: '/reports', label: 'Отчёт ОПУ', Icon: LuTrendingUp, perm: 'reports.view' },
+  { to: '/reports', label: 'Отчёт о прибылях и убытках', Icon: LuTrendingUp, perm: 'reports.view' },
   { to: '/employees', label: 'Сотрудники', Icon: LuUsers, owner: true },
   { to: '/roles', label: 'Роли и права', Icon: LuShieldCheck, owner: true },
   // Обучение — не рабочий раздел: в него заходят, когда забыли, как что-то делается
@@ -55,13 +55,16 @@ export const NAV = [
 // Открыт ли раздел этому сотруднику
 export const allowedNav = (user, n) => (n.owner ? user?.role === 'founder' : !n.perm || can(user, n.perm))
 
+// Значок раздела, которого нет в меню (у остальных — значок их плитки)
+const EXTRA_ICONS = { '/about': LuInfo }
+
 // hub — это сам главный экран: у него одного есть шапка с именем системы.
 // fill — раздел сам занимает всю высоту окна и листается внутри себя (касса
 // на широком экране). Остальные разделы растут вниз и листаются страницей.
-// title и subtitle в разделах на экране не пишутся (шапки там нет): title остаётся
-// заголовком для экранного диктора. actions — кнопки раздела, строкой вверху страницы;
-// note — сводка раздела слева от них («Общая задолженность: …»), если без неё цифра
-// пропала бы с экрана вместе с шапкой
+// title — название раздела: с 1.7.2 оно снова видно вверху страницы, крупно и со значком
+// плитки меню, чтобы человек знал, куда зашёл (в кассе — нет: её и так видно, а место
+// вверху нужно корзине). subtitle в разделах не пишется. actions — кнопки раздела, справа
+// в той же строке; note — сводка раздела под названием («Общая задолженность: …»)
 export default function Layout({ title, subtitle, note, actions, fill, hub, children }) {
   const conn = useConnection()
   const user = useAuth()
@@ -89,6 +92,7 @@ export default function Layout({ title, subtitle, note, actions, fill, hub, chil
   // Тур по разделу есть у каждого пункта меню, кроме самого «Обучения»:
   // что у каждого пункта есть урок, стережёт отдельная проверка
   const hasTour = NAV.some((n) => n.to === location.pathname && !n.help)
+  const PageIcon = NAV.find((n) => n.to === location.pathname)?.Icon || EXTRA_ICONS[location.pathname] || null
 
   return (
     <div className={'app' + (hub ? ' app-hub' : '')}>
@@ -128,15 +132,28 @@ export default function Layout({ title, subtitle, note, actions, fill, hub, chil
           </header>
         )}
         <main className="content" key={location.pathname}>
-          {/* Название раздела на экране не пишется, но остаётся заголовком страницы
-              для экранного диктора */}
-          {!hub && <h1 className="sr-only">{title}</h1>}
-          {!hub && (actions || note) ? (
+          {/* Касса: название на экране не пишется, но остаётся заголовком страницы для
+              экранного диктора */}
+          {!hub && fill && <h1 className="sr-only">{title}</h1>}
+          {!hub && fill && (actions || note) ? (
             <div className="page-acts">
               {note && <span className="pa-note" title={note}>{note}</span>}
               <div className="pa-btns">{actions}</div>
             </div>
           ) : null}
+          {/* Остальные разделы: название со значком слева, сводка под ним, кнопки справа */}
+          {!hub && !fill && (
+            <div className="page-acts has-title">
+              <div className="pa-head">
+                {PageIcon && <span className="pa-ic" aria-hidden="true"><PageIcon size={21} /></span>}
+                <div className="pa-tt">
+                  <h1 className="pa-title" data-testid="page-title">{title}</h1>
+                  {note && <div className="pa-note" title={note}>{note}</div>}
+                </div>
+              </div>
+              <div className="pa-btns">{actions}</div>
+            </div>
+          )}
           {/* Магазин без интернета: срок работы кончается или кончился (1.7.1) */}
           {isDesktop && <LicenceBanner />}
           {children}

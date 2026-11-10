@@ -13,7 +13,7 @@ import { getUser, useAuth } from '../db/auth'
 import { fmtDateTime, chekNomer } from '../lib/time'
 import { useT } from '../lib/i18n'
 import { skachatXlsx } from '../lib/excel'
-import { prodazhiPoTovaram, vseProdazhi, spisokChekov, chekPodhodit } from '../lib/otchety'
+import { prodazhiPoTovaram, vseProdazhi, spisokChekov, chekPodhodit, chekVida, VIDY_CHEKOV } from '../lib/otchety'
 import { poiskZapros, tovarPodhodit, shtrihkodyPoId } from '../lib/poisk'
 import { isOtmena, otmenennyeCheki } from '../lib/otmena'
 import { sEdinicami } from '../lib/units'
@@ -73,6 +73,7 @@ export default function SalesReport() {
   const [cat, setCat] = useState('')
   const [cashier, setCashier] = useState('')
   const [pay, setPay] = useState('')
+  const [vid, setVid] = useState('') // вид чека во вкладке «Чеки»: отменённые, с возвратом…
 
   const poTov = useMemo(() => prodazhiPoTovaram({ sales: salesZhivye, products, from: range.from, to: range.to, t }), [salesZhivye, products, range, t])
   const vse = useMemo(() => vseProdazhi({ sales: salesZhivye, products, from: range.from, to: range.to, t }), [salesZhivye, products, range, t])
@@ -107,11 +108,12 @@ export default function SalesReport() {
         (r) =>
           chekPodhodit(z, r, chekNomer(r.date), kody) &&
           (!cashier || r.cashier === cashier) &&
-          (!pay || r.payment === pay),
+          (!pay || r.payment === pay) &&
+          chekVida(r, vid),
       ),
-    [cheki.rows, z, kody, cashier, pay],
+    [cheki.rows, z, kody, cashier, pay, vid],
   )
-  const reset = `${tab}|${q.trim()}|${cat}|${cashier}|${pay}|${period.from}|${period.to}`
+  const reset = `${tab}|${q.trim()}|${cat}|${cashier}|${pay}|${vid}|${period.from}|${period.to}`
   const pgT = usePagination(tovRows, 20, reset)
   const pgV = usePagination(vseRows, 20, reset)
   const pgC = usePagination(chekRows, 20, reset)
@@ -126,11 +128,19 @@ export default function SalesReport() {
   // Итог чеков — без отменённых: продажи не было
   const chekiZhivye = chekRows.filter((r) => !r.otmena)
   const chekItogo = { cheki: chekiZhivye.length, sum: sum(chekiZhivye, 'total') }
+  // Отобраны только отменённые — итог по ним самим: «Чеков: 0» ничего бы не сказал
+  const tolkoOtmena = vid === 'otmena'
+  const otmenaItogo = { cheki: chekRows.length, sum: sum(chekRows, 'total') }
+  const vozvratItogo = sum(chekRows.filter((r) => !r.otmena), 'vozvrat')
+  const vidLabel = VIDY_CHEKOV.find((v) => v.key === vid)?.label || ''
+  const chekItogText = tolkoOtmena
+    ? `${t('Отменено чеков')}: ${otmenaItogo.cheki}`
+    : `${t('Чеков')}: ${chekItogo.cheki}` + (vid === 'vozvrat' ? ` · ${t('Возвращено')}: ${money(vozvratItogo)}` : '')
   const chekMark = (r) => (r.otmena ? t('Отменён') : r.vozvrat > 0 ? `${t('Возврат')} ${money(r.vozvrat)}` : '')
 
   // ── Excel и печать: активная вкладка, с учётом фильтров ──
   // Выбран кассир — он виден и в подзаголовке листа: иначе цифры выглядели бы общими
-  const podzag = periodText(period, t) + (cashier ? ` · ${t('Кассир')}: ${cashier}` : '')
+  const podzag = periodText(period, t) + (cashier ? ` · ${t('Кассир')}: ${cashier}` : '') + (tab === 'cheki' && vid ? ` · ${t(vidLabel)}` : '')
   const ex =
     tab === 'cheki'
       ? {
@@ -151,7 +161,7 @@ export default function SalesReport() {
             pay: payLabel(r.payment, t) + (r.payVia ? ` · ${r.payVia}` : ''), customer: r.customer || '',
             positions: r.positions, total: r.total, mark: chekMark(r),
           })),
-          itogi: { chek: t('Итого'), positions: '', total: chekItogo.sum, mark: `${t('Чеков')}: ${chekItogo.cheki}` },
+          itogi: { chek: t('Итого'), positions: '', total: tolkoOtmena ? otmenaItogo.sum : chekItogo.sum, mark: chekItogText },
         }
       : tab === 'products'
       ? {
@@ -213,7 +223,7 @@ export default function SalesReport() {
 
       <div className="panel" data-tour="sr.table" style={{ padding: 0 }}>
         <StickyBar panel pad="16px 16px 14px">
-          <div className="toolbar">
+          <div className="toolbar tools-wrap">
             <input className="search" data-tour="sr.search" placeholder={tab === 'cheki' ? t('Номер чека, товар или клиент…') : t('Поиск по товару или штрихкоду…')} value={q} onChange={(e) => setQ(e.target.value)} />
             {tab === 'products' && (
               <select value={cat} onChange={(e) => setCat(e.target.value)} aria-label={t('Категория')} style={{ maxWidth: 220 }}>
@@ -229,6 +239,11 @@ export default function SalesReport() {
               <select value={pay} onChange={(e) => setPay(e.target.value)} aria-label={t('Оплата')} style={{ maxWidth: 200 }}>
                 <option value="">{t('Любая оплата')}</option>
                 {Object.entries(PAYMENTS).map(([k, m]) => <option key={k} value={k}>{t(m.label)}</option>)}
+              </select>
+            )}
+            {tab === 'cheki' && (
+              <select value={vid} onChange={(e) => setVid(e.target.value)} aria-label={t('Вид чека')} data-tour="sr.vid" data-testid="sr-vid" style={{ maxWidth: 200 }}>
+                {VIDY_CHEKOV.map((v) => <option key={v.key} value={v.key}>{t(v.label)}</option>)}
               </select>
             )}
             {loading && <span className="tag-cat">{t('загружаем…')}</span>}
@@ -268,14 +283,14 @@ export default function SalesReport() {
                     </td>
                   </tr>
                 ))}
-                {chekRows.length === 0 && <tr><td colSpan="7" className="empty">{loading ? t('Загружаем…') : t('За этот период чеков нет')}</td></tr>}
+                {chekRows.length === 0 && <tr><td colSpan="7" className="empty">{loading ? t('Загружаем…') : vid || z || cashier || pay ? t('Таких чеков за этот период нет') : t('За этот период чеков нет')}</td></tr>}
               </tbody>
               {chekRows.length > 0 && (
                 <tfoot>
                   <tr className="zak-total">
-                    <td colSpan="5">{t('Итого')} · {t('Чеков')}: {chekItogo.cheki}</td>
+                    <td colSpan="5">{t('Итого')} · {chekItogText}</td>
                     <td></td>
-                    <td className="num">{money(chekItogo.sum)}</td>
+                    <td className="num">{money(tolkoOtmena ? otmenaItogo.sum : chekItogo.sum)}</td>
                   </tr>
                 </tfoot>
               )}

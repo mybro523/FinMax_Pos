@@ -29,6 +29,13 @@ export class ProductsController {
     return this.products.findByBarcode(code)
   }
 
+  // Поставщик каждого товара — по последнему приходу (авто-заявка, 1.7.2)
+  @Get('suppliers')
+  @Perm('orders.view')
+  lastSuppliers() {
+    return this.products.lastSuppliers()
+  }
+
   @Post()
   @Perm('products.create')
   create(@Body() dto: CreateProductDto) {

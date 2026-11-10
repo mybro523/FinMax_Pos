@@ -288,12 +288,20 @@ export function resetStore() {
 // Экран закрыли — опрос по ним прекращается: касса не должна каждые 8 секунд тянуть
 // отчёты и журналы только потому, что их один раз открывали за смену.
 export function useCollection(key) {
+  return useCollectionIf(key, true)
+}
+
+// Коллекция, которая нужна экрану не всегда: on = false — пустой список, без запроса и без
+// опроса (журнал приходов в «Авто-заявке» у того, кому он не разрешён: сервер отказывал бы
+// на каждом опросе)
+export function useCollectionIf(key, on) {
   const data = useSyncExternalStore(
     subscribe,
-    () => cache[key] || EMPTY,
-    () => cache[key] || EMPTY,
+    () => (on && cache[key]) || EMPTY,
+    () => (on && cache[key]) || EMPTY,
   )
   useEffect(() => {
+    if (!on) return undefined
     active.set(key, (active.get(key) || 0) + 1)
     ensureLoaded(key)
     return () => {
@@ -301,7 +309,7 @@ export function useCollection(key) {
       if (n <= 0) active.delete(key)
       else active.set(key, n)
     }
-  }, [key])
+  }, [key, on])
   return data
 }
 

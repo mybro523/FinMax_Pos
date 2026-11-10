@@ -54,7 +54,7 @@ function SalesTable({ list }) {
   )
 }
 
-// ── Отчёт ОПУ (прибыли и убытки) ──
+// ── Отчёт о прибылях и убытках (прибыли и убытки) ──
 // Карточки и таблица «Показатель — Сумма» — вид, к которому привыкли владельцы
 // магазинов. Формулы в lib/opu.js; кнопка «Печать» выводит лист с шапкой магазина.
 // ── Модалка карточки ОПУ: из чего сложилось число и как оно считается ──
@@ -262,8 +262,8 @@ function Opu({ onExcelRef }) {
   // Экспорт таблицы ОПУ в Excel — кнопка живёт в шапке раздела
   const opuExcel = () =>
     skachatXlsx({
-      fayl: t('Отчёт ОПУ'),
-      zagolovok: `${apt} — ${t('Отчёт ОПУ')}`,
+      fayl: t('Отчёт о прибылях и убытках'),
+      zagolovok: `${apt} — ${t('Отчёт о прибылях и убытках')}`,
       podzag: `${applied.from} — ${applied.to}`,
       cols: [
         { header: t('Показатель'), key: 'p', width: 32 },
@@ -352,7 +352,7 @@ export default function Reports() {
   const arrivals = useCollection('arrivals')
   const supplierReturns = useCollection('supplierReturns')
   const t = useT()
-  // Вкладки: «Отчёт ОПУ» открывается первой, подробная аналитика — рядом.
+  // Вкладки: «Отчёт о прибылях и убытках» открывается первой, подробная аналитика — рядом.
   // Выбор запоминается: кто живёт в ОПУ, тот в нём и остаётся
   // Экспорт ОПУ собирает сам компонент вкладки — шапка зовёт его через реф
   const opuExcelRef = useRef(() => {})
@@ -616,13 +616,13 @@ export default function Reports() {
   }
 
   return (
-    <Layout title={t('Отчёт ОПУ')} subtitle={t('Продажи, прибыль, выручка и склад')}
+    <Layout title={t('Отчёт о прибылях и убытках')} subtitle={t('Продажи, прибыль, выручка и склад')}
       actions={can('reports.export') && <span data-tour="rep.export" style={{ display: 'inline-flex', gap: 8 }}>
         <ExportPechat onExcel={tab === 'opu' ? opuExcelRef.current : exportExcel} />
       </span>}>
 
       <div className="chips" data-tour="rep.tabs" style={{ marginBottom: 14 }}>
-        <button className={'chip ' + (tab === 'opu' ? 'active' : '')} data-tour="rep.tab-opu" onClick={() => setTab('opu')}>{t('Отчёт ОПУ')}</button>
+        <button className={'chip ' + (tab === 'opu' ? 'active' : '')} data-tour="rep.tab-opu" onClick={() => setTab('opu')}>{t('Отчёт о прибылях и убытках')}</button>
         <button className={'chip ' + (tab === 'detail' ? 'active' : '')} data-tour="rep.tab-detail" onClick={() => setTab('detail')}>{t('Подробно')}</button>
       </div>
 
