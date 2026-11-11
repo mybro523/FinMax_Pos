@@ -2861,7 +2861,7 @@ tr.inv-last > td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
 
 /* ── Ценники как в 1С (1.7.8): лист A4, рамка, пунктир для разрезания ── */
 .cn-page { display: grid; grid-template-columns: repeat(2, 95mm); grid-auto-rows: 55mm; background: #fff; color: #000; }
-.cn-page.small { grid-template-columns: repeat(3, 64mm); grid-auto-rows: 40mm; }
+.cn-page.small { grid-template-columns: repeat(3, 64mm); grid-auto-rows: 55mm; }
 .print-doc .cn-page { break-after: page; page-break-after: always; }
 .print-doc .cn-page:last-child { break-after: auto; page-break-after: auto; }
 .cn { border: 0.3mm dashed #8a94a6; padding: 1.4mm; box-sizing: border-box; overflow: hidden; background: #fff; color: #000; break-inside: avoid; }
@@ -2876,11 +2876,11 @@ tr.inv-last > td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
 .cn-shop { overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
 .cn-page.small .cn { padding: 1mm; }
 .cn-page.small .cn-box { padding: 0.6mm 1mm 0.3mm; }
-.cn-page.small .cn-name { font-size: 10pt; }
-.cn-page.small .cn-sub { font-size: 7.5pt; }
-.cn-page.small .cn-price { font-size: 17pt; }
-.cn-page.small .cn-unit { font-size: 8pt; }
-.cn-page.small .cn-foot { font-size: 5.5pt; }
+.cn-page.small .cn-name { font-size: 12pt; }
+.cn-page.small .cn-sub { font-size: 8.5pt; }
+.cn-page.small .cn-price { font-size: 21pt; }
+.cn-page.small .cn-unit { font-size: 9pt; }
+.cn-page.small .cn-foot { font-size: 6pt; }
 /* Образец на экране */
 .cn-preview { background: var(--soft); border-radius: var(--radius); padding: 12px; overflow: auto; display: flex; justify-content: center; }
 .cn-preview .cn-page { width: max-content; zoom: 1.35; }
