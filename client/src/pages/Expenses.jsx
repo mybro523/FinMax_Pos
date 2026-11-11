@@ -220,9 +220,6 @@ export default function Expenses() {
   return (
     <Layout title={t('Расходы')} subtitle={t('Аренда, зарплата и другие траты магазина')} actions={<ExportPechat onExcel={exportExcel} />}>
       <PrintSheet zagolovok={t('Расходы')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} svodka={exSvodka} />
-      <div className="note info" style={{ marginBottom: 16, maxWidth: 780 }}>
-        {t('Как это работает: вносите сюда всё, на что магазин тратит деньги помимо закупки товара. В «Отчёте о прибылях и убытках» расходы вычитаются из прибыли — получается чистая прибыль.')}
-      </div>
 
       {can('expenses.create') && <div className="panel" style={{ maxWidth: 900 }}>
         <h2><span className="h2-title"><span className="ic"><LuPlus size={17} /></span>{t('Новый расход')}</span></h2>

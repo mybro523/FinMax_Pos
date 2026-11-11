@@ -4,7 +4,7 @@ import { LuLogIn, LuTriangleAlert, LuScanLine, LuBoxes, LuTrendingUp, LuWifiOff,
 import { login } from '../db/auth'
 import { PasswordInput, BrandWord } from './ui'
 import WindowButtons from './WindowButtons'
-import VirtualKeyboard, { poleDlyaVvoda } from './VirtualKeyboard'
+import VirtualKeyboard, { poleDlyaVvoda, useKlavaPoKasaniyu } from './VirtualKeyboard'
 import { useT, useLang, setLang, LANGS } from '../lib/i18n'
 import { bridge, isDesktop } from '../lib/desktop'
 import { ActivateCard, JoinCard, ModeChoice, ResetCard, SetupCard, SoloLine } from './BezInterneta'
@@ -63,6 +63,8 @@ export default function Login() {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [kb, setKb] = useState(false)
+  // Коснулись поля пальцем на моноблоке — клавиатура открывается сама (1.7.4)
+  useKlavaPoKasaniyu(() => setKb(true))
   const navigate = useNavigate()
 
   // ── Магазин без интернета (1.6.0) ──

@@ -87,6 +87,27 @@ const vernutKursor = (el, pos) => {
   }
 }
 
+// ── Клавиатура сама — при касании поля пальцем (1.7.4) ──
+// Сенсорный моноблок у кассы: коснулись поля — клавиатура открылась, кнопку «Клавиатура»
+// искать не надо. Мышь её не открывает: на обычном компьютере есть настоящая клавиатура.
+// Узкий экран (телефон, планшет — уже 1280) — со своей клавиатурой, там наша спрятана
+export const SHIROKIY = '(min-width: 1280px)'
+export function useKlavaPoKasaniyu(onOpen) {
+  const open = useRef(onOpen)
+  open.current = onOpen
+  useEffect(() => {
+    const onDown = (e) => {
+      if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return
+      if (typeof window.matchMedia === 'function' && !window.matchMedia(SHIROKIY).matches) return
+      const el = e.target?.closest?.('input, textarea')
+      if (!godnoe(el) || el.closest('.vkb')) return
+      open.current?.()
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    return () => document.removeEventListener('pointerdown', onDown, true)
+  }, [])
+}
+
 const vidno = (el) => {
   const r = el.getBoundingClientRect()
   return r.width > 0 && r.height > 0

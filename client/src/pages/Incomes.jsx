@@ -121,9 +121,6 @@ export default function Incomes() {
   return (
     <Layout title={t('Доходы')} subtitle={t('Деньги, полученные не от продаж')} actions={<ExportPechat onExcel={exportExcel} />}>
       <PrintSheet zagolovok={t('Доходы')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} svodka={exSvodka} />
-      <div className="note info" style={{ marginBottom: 16, maxWidth: 780 }}>
-        {t('Как это работает: вносите сюда деньги, которые магазин получил не за проданный товар: аренду, услуги, бонусы поставщиков. В «Отчёте о прибылях и убытках» они прибавляются к чистому доходу. Наличные, положенные в кассу, внесите ещё и в «Смене» кнопкой «Внести».')}
-      </div>
 
       {can('incomes.create') && (
         <div className="panel" style={{ maxWidth: 900 }}>

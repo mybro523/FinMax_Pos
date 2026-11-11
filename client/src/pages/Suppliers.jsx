@@ -202,9 +202,6 @@ export default function Suppliers() {
 
       {tab === 'list' && (<>
       <PrintSheet zagolovok={t('Закупки и оплаты поставщикам')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />
-      <div className="note info" style={{ marginBottom: 16, maxWidth: 780 }}>
-        {t('Как это работает: при приходе товара отметьте, сколько оплачено сразу, — остальное станет долгом перед поставщиком. Когда заплатите, запишите оплату здесь. На чистую прибыль долги не влияют: товар уже учтён при продаже.')}
-      </div>
 
       <div className="cards" style={{ marginBottom: 16 }}>
         <div className="metric" data-tour="sup.total">

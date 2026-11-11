@@ -5,7 +5,7 @@ import { useAuth, logout } from '../db/auth'
 import { useT } from '../lib/i18n'
 import { startTour } from '../lib/tur'
 import { kassaFirst } from '../lib/permissions'
-import VirtualKeyboard, { poleDlyaVvoda } from './VirtualKeyboard'
+import VirtualKeyboard, { poleDlyaVvoda, useKlavaPoKasaniyu } from './VirtualKeyboard'
 import WindowButtons from './WindowButtons'
 import KassirMenu from './KassirMenu'
 
@@ -47,6 +47,8 @@ export default function AppFoot({ razdel = false, tour = false }) {
   const { pathname } = useLocation()
   const [kb, setKb] = useState(false)
   const [menu, setMenu] = useState(false)
+  // Коснулись поля пальцем на моноблоке — клавиатура открывается сама (1.7.4)
+  useKlavaPoKasaniyu(() => razdel && setKb(true))
 
   useEffect(() => {
     document.documentElement.classList.add('has-foot')

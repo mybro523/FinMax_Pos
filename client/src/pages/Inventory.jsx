@@ -659,9 +659,6 @@ export default function Inventory() {
       <PrintSheet zagolovok={exList.zagolovok} podzag={exList.podzag} cols={exList.cols} rows={exList.rows} />
       {!open ? (
         <>
-          <div className="note info" style={{ marginBottom: 16, maxWidth: 820 }}>
-            {t('Как это работает: создайте лист — система запишет, сколько товара должно быть. Пересчитайте товар на полках и внесите фактические количества. Пока лист не применён, остатки не меняются.')}
-          </div>
 
           <div className="panel" style={{ maxWidth: scope === PICKED ? 980 : 560 }}>
             <h2><span className="h2-title"><span className="ic"><LuPlus size={17} /></span>{t('Новый пересчёт')}</span></h2>

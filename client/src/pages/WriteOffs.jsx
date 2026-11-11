@@ -274,9 +274,6 @@ export default function WriteOffs() {
   return (
     <Layout title={t('Списание')} subtitle={t('Убрать со склада испорченный или просроченный товар')} actions={<ExportPechat onExcel={exportExcel} />}>
       <PrintSheet zagolovok={t('Списание')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} svodka={exSvodka} />
-      <div className="note info" style={{ marginBottom: 16, maxWidth: 780 }}>
-        {t('Как это работает: найдите товар по названию, штрихкоду или сканером, укажите сколько штук убрать со склада и причину. Система спишет партию с ближайшим сроком годности и посчитает убыток.')}
-      </div>
 
       {can('writeoffs.create') && <div className="panel" style={{ maxWidth: 900 }}>
         <div className="row" style={{ alignItems: 'flex-end' }}>

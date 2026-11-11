@@ -234,9 +234,6 @@ export default function Returns() {
     <Layout title={t('Возврат товара')} subtitle={t('Возврат денег покупателю по чеку')} actions={<ExportPechat onExcel={exportExcel} />}>
       {/* Пока открыт чек возврата, на бумагу идёт он, а не история */}
       {!done && <PrintSheet zagolovok={t('Возвраты')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />}
-      <div className="note info" style={{ marginBottom: 16, maxWidth: 780 }}>
-        {t('Как это работает: найдите чек, укажите сколько штук возвращают и решите по каждому товару — вернуть его в продажу или списать. Деньги вернутся тем же способом, каким платили.')}
-      </div>
 
       {!sale ? (
         // Полоса поиска чека держится, пока виден список найденных чеков: ниже — история
