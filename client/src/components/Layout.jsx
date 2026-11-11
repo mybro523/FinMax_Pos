@@ -44,7 +44,8 @@ export const NAV = [
   { to: '/supplier-report', label: 'Отчёт поставщиков', Icon: LuScale, perm: 'suppliers.view' },
   { to: '/incomes', label: 'Доходы', Icon: LuCoins, perm: 'incomes.view' },
   { to: '/expenses', label: 'Расходы', Icon: LuHandCoins, perm: 'expenses.view' },
-  { to: '/reports', label: 'Отчёт о прибылях и убытках', Icon: LuTrendingUp, perm: 'reports.view' },
+  // На плитке — коротко (1.7.7, просьба владельца); внутри раздела — «Отчёт о прибылях и убытках»
+  { to: '/reports', label: 'Отчёт ОПУ', Icon: LuTrendingUp, perm: 'reports.view' },
   { to: '/employees', label: 'Сотрудники', Icon: LuUsers, owner: true },
   { to: '/roles', label: 'Роли и права', Icon: LuShieldCheck, owner: true },
   // Обучение — не рабочий раздел: в него заходят, когда забыли, как что-то делается
@@ -65,7 +66,8 @@ const EXTRA_ICONS = { '/about': LuInfo }
 // плитки меню, чтобы человек знал, куда зашёл (в кассе — нет: её и так видно, а место
 // вверху нужно корзине). subtitle в разделах не пишется. actions — кнопки раздела, справа
 // в той же строке; note — сводка раздела под названием («Общая задолженность: …»)
-export default function Layout({ title, subtitle, note, actions, fill, hub, children }) {
+// noTitle — раздел без названия вверху (1.7.7: «Приход товара» — по просьбе владельца); кнопки остаются
+export default function Layout({ title, subtitle, note, actions, fill, hub, noTitle = false, children }) {
   const conn = useConnection()
   const user = useAuth()
   const t = useT()
@@ -143,14 +145,21 @@ export default function Layout({ title, subtitle, note, actions, fill, hub, chil
           ) : null}
           {/* Остальные разделы: название со значком слева, сводка под ним, кнопки справа */}
           {!hub && !fill && (
-            <div className="page-acts has-title">
-              <div className="pa-head">
-                {PageIcon && <span className="pa-ic" aria-hidden="true"><PageIcon size={21} /></span>}
-                <div className="pa-tt">
-                  <h1 className="pa-title" data-testid="page-title">{title}</h1>
-                  {note && <div className="pa-note" title={note}>{note}</div>}
+            <div className={'page-acts' + (noTitle ? '' : ' has-title')}>
+              {noTitle ? (
+                <>
+                  <h1 className="sr-only">{title}</h1>
+                  {note && <span className="pa-note" title={note}>{note}</span>}
+                </>
+              ) : (
+                <div className="pa-head">
+                  {PageIcon && <span className="pa-ic" aria-hidden="true"><PageIcon size={21} /></span>}
+                  <div className="pa-tt">
+                    <h1 className="pa-title" data-testid="page-title">{title}</h1>
+                    {note && <div className="pa-note" title={note}>{note}</div>}
+                  </div>
                 </div>
-              </div>
+              )}
               <div className="pa-btns">{actions}</div>
             </div>
           )}

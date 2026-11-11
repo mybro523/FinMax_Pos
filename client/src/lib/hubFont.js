@@ -26,6 +26,8 @@
 // экране 1536×864 надписи 16,5 px вместо 21,5, «КАССА» 24,5 вместо 32; на других экранах — так же
 // на четверть мельче прежнего (1366×768 — 14, 1920×1080 — 21, 1024×768 — 11).
 
+import { shrift } from './shrift.js'
+
 export const LINE = 1.15 // высота строки надписи — как line-height в index.css
 export const FILL = 0.6 // надпись обычной плитки — не выше этой доли её высоты
 export const FILL_GOLD = 0.75 // «КАССА» — одна строка, ей можно выше
@@ -87,7 +89,9 @@ export function lineCount(words, space, fs, w, flt) {
 //   gold  — касса { w, h, words, space } (w — ширина левее тележки) или null.
 // Ответ: { fs, max, gold, badge } — размер надписей, самый крупный возможный (до уменьшения),
 // размер «КАССА», значок (badgeGeom).
-export function hubSizes({ box, tiles, space, gold }) {
+// menu — множитель из «Настройки → Шрифт» (1.7.7): 1 — как было; крупнее не выйдет за плитку —
+// размер всё равно проверяется (fits)
+export function hubSizes({ box, tiles, space, gold, menu = 1 }) {
   const w = box.w * SAFE
   const maxH = box.h * FILL
   const longest = Math.max(1e-6, ...tiles.flatMap((t) => t.words))
@@ -104,7 +108,8 @@ export function hubSizes({ box, tiles, space, gold }) {
   // Доля SCALE от самого крупного, но не мельче READABLE (если столько помещается). Меньший
   // размер проверяется заново: значок в углу не уменьшается вместе с надписью (не мельче 24 px)
   // и при мелкой надписи обтекается ещё и вторая строка
-  let fs = Math.max(Math.floor((max * SCALE) / STEP) * STEP, Math.min(max, READABLE))
+  const want = Math.floor((max * Math.min(1, SCALE * (Number(menu) > 0 ? Number(menu) : 1))) / STEP) * STEP
+  let fs = menu < 1 ? Math.max(want, MIN_FS) : Math.max(want, Math.min(max, READABLE))
   while (fs > MIN_FS && !fits(fs)) fs -= STEP
   fs = Math.max(MIN_FS, fs)
 
@@ -193,7 +198,7 @@ export function fitHub(grid) {
     gold = { w: right - gb.left, h: gb.h, words: words(text).map((x) => emWidth(x, gfont, gls)), space: emWidth(' ', gfont, gls) }
   }
 
-  const r = hubSizes({ box, tiles, space: emWidth(' ', font, ls), gold })
+  const r = hubSizes({ box, tiles, space: emWidth(' ', font, ls), gold, menu: shrift().menu / 100 })
   const vars = {
     '--hub-fs': r.fs + 'px',
     '--hub-fs-gold': r.gold + 'px',

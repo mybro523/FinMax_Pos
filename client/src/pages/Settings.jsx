@@ -4,7 +4,7 @@ import {
   LuShoppingCart, LuPackagePlus, LuCreditCard, LuClipboardList, LuTrendingUp, LuServer, LuRefreshCw,
   LuKeyRound, LuUser, LuPalette, LuLanguages, LuSun, LuMoon, LuDatabaseBackup, LuDownload, LuTriangleAlert,
   LuTags, LuPlus, LuPencil, LuTrash2, LuUpload, LuShapes,
-  LuCalendarClock, LuHandCoins, LuQrCode, LuReceiptText, LuMonitorSmartphone, LuWallet, LuCoins,
+  LuCalendarClock, LuHandCoins, LuQrCode, LuReceiptText, LuMonitorSmartphone, LuWallet, LuCoins, LuType,
 } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { useToast, useDialog, PasswordInput, Modal } from '../components/ui'
@@ -22,6 +22,7 @@ import LabelPrinterPanel from '../components/LabelPrinterPanel'
 import CustomerScreenPanel from '../components/CustomerScreenPanel'
 import PokupatelPanel from '../components/PokupatelPanel'
 import TabloPanel from '../components/TabloPanel'
+import ShriftPanel from '../components/ShriftPanel'
 import ChekPanel from '../components/ChekPanel'
 import ShopLogoPanel from '../components/ShopLogoPanel'
 import VesyPanel from '../components/VesyPanel'
@@ -175,6 +176,8 @@ export default function Settings() {
     { id: 'kategorii', label: 'Категории и типы', Icon: LuTags, show: can('settings.categories') },
     { id: 'dengi', label: 'Деньги', Icon: LuWallet, show: can('settings.expenseCategories') || can('settings.incomeCategories') || can('settings.payServices') },
     { id: 'ustroystva', label: 'Кассы и устройства', Icon: LuMonitorSmartphone, show: can('settings.devices') },
+    // Размер шрифта — настройка этого компьютера, всем (1.7.7)
+    { id: 'shrift', label: 'Шрифт', Icon: LuType, show: true },
     { id: 'kopiya', label: 'Резервная копия', Icon: LuDatabaseBackup, show: can('settings.backup') },
   ].filter((r) => r.show)
   const location = useLocation()
@@ -220,6 +223,7 @@ export default function Settings() {
         </nav>
 
         <div className="set-body">
+          {active === 'shrift' && <ShriftPanel />}
           {active === 'profil' && (
             <>
               {/* Версия, отправка на сервер и кассы в сети (программа для Windows). Раньше —

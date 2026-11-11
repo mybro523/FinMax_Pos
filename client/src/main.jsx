@@ -6,6 +6,7 @@ import App from './App.jsx'
 import { unlockAudio } from './lib/sound'
 import { startVersionWatch } from './lib/version'
 import './lib/theme' // применяет сохранённую тему (светлая/тёмная) при старте
+import './lib/shrift' // размер шрифта этого компьютера (1.7.7) — с первого кадра
 import './lib/lite' // облегчённый вид на слабом компьютере (программа для Windows) — с первого кадра
 import './index.css'
 

@@ -281,7 +281,7 @@ export default function Arrivals() {
   const subtitle = sup ? `${t('Поставщик')}: ${sup.name}` : `${t('Все поставщики')} · ${periodLabel}`
 
   return (
-    <Layout title={t('Приход товара')} subtitle={subtitle} actions={sheet ? <ExportPechat onExcel={exportExcel} /> : null}>
+    <Layout noTitle title={t('Приход товара')} subtitle={subtitle} actions={sheet ? <ExportPechat onExcel={exportExcel} /> : null}>
       {sheet && (
         <PrintSheet
           zagolovok={sheet.zagolovok}

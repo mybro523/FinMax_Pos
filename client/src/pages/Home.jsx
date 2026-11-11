@@ -10,6 +10,7 @@ import { customerLabels, showCustomer } from '../lib/customerScreen'
 import { useTheme, toggleTheme } from '../lib/theme'
 import { isDesktop } from '../lib/desktop'
 import { fitHub, resetHubMeasure } from '../lib/hubFont'
+import { useShrift } from '../lib/shrift'
 import { useCloseApp } from '../components/WindowButtons'
 
 // ── Главный экран ──
@@ -75,7 +76,9 @@ export default function Home() {
   const temaText = theme === 'dark' ? t('Светлая тема') : t('Тёмная тема')
 
   const gridRef = useRef(null)
-  useHubFont(gridRef, NAV.map((n) => t(n.label)).join('|') + '#' + deferred.length + '#' + expiring)
+  // Размер надписей меню из «Настройки → Шрифт» (1.7.7) — пересчёт и при его смене
+  const menuShrift = useShrift().menu
+  useHubFont(gridRef, NAV.map((n) => t(n.label)).join('|') + '#' + deferred.length + '#' + expiring + '#' + menuShrift)
 
   // Экран покупателя (программа для Windows): после входа, при входе в другой магазин и
   // при смене языка — название магазина и «Добро пожаловать». Корзину покажет касса
