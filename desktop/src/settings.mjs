@@ -10,6 +10,7 @@ import { sanitizePrint } from './print/transport.mjs'
 import { sanitizeLabels } from './print/labels.mjs'
 import { sanitizeCustomer } from './customer-screen.mjs'
 import { sanitizeLite } from './lite.mjs'
+import { sanitizeTablo } from './tablo.mjs'
 
 // Папка для копий — только полный путь. Относительный зависел бы от того, откуда
 // запустили программу, и копии оказывались бы каждый раз в новом месте
@@ -34,6 +35,8 @@ export function sanitizeSettings(raw) {
     print: sanitizePrint(v.print),
     labels: sanitizeLabels(v.labels),
     customer: sanitizeCustomer(v.customer),
+    // tablo — маленькое табло покупателя на COM-порту (1.7.6, см. tablo.mjs)
+    tablo: sanitizeTablo(v.tablo),
     lite: sanitizeLite(v.lite),
     gpuSoft: v.gpuSoft === true,
   }

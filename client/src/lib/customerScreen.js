@@ -8,6 +8,7 @@
 //
 // Расширение в пути указано намеренно: файл загружается и проверками, без сборщика.
 import { bridge } from './desktop.js'
+import { tabloOut } from './tabloPort.js'
 
 // ── Сайт: окно покупателя ──
 const CHANNEL = 'finmax-pokupatel'
@@ -62,6 +63,12 @@ export const customerLabels = (t) => ({
 // То же самое второй раз не шлём: касса перерисовывается часто, а покупателю это не нужно
 let last = ''
 export function showCustomer(state) {
+  // Маленькое табло на COM-порту (1.7.6) — то же: сумма и сдача
+  try {
+    tabloOut(state)
+  } catch {
+    /* табло не важнее кассы */
+  }
   const ch = web()
   if (ch) {
     current = state

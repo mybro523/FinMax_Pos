@@ -135,6 +135,13 @@ contextBridge.exposeInMainWorld('apteka', {
   },
   // Экран покупателя (второй экран моноблока): корзина и итог готовыми строками, настройка
   // «где показывать» и проба из «Настроек» (desktop/src/customer-window.mjs)
+  // Маленькое табло покупателя на COM-порту (1.7.6): настройка, список портов, байты
+  tablo: {
+    config: () => ipcRenderer.invoke('tablo:config'),
+    setConfig: (cfg) => ipcRenderer.invoke('tablo:setConfig', cfg),
+    ports: () => ipcRenderer.invoke('tablo:ports'),
+    write: (bytes) => ipcRenderer.invoke('tablo:write', Array.isArray(bytes) ? bytes : Array.from(bytes || [])),
+  },
   customer: {
     update: (state) => ipcRenderer.invoke('customer:update', state),
     config: () => ipcRenderer.invoke('customer:config'),

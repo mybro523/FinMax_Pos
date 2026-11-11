@@ -11,7 +11,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, powerMonitor, protocol, safeStorage, screen, session, shell } from 'electron'
 import Database from 'better-sqlite3'
 import updaterPackage from 'electron-updater'
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import nodeHttp from 'node:http'
@@ -44,6 +44,7 @@ import { layoutTicket, renderTicket } from './print/escpos.mjs'
 import { cleanLogo, logoTarget, monoToBgra, paperDots, toMono } from './print/logo.mjs'
 import { pageRequest, pdfOptions, printerKind, printOptions } from './print/page.mjs'
 import { labelPage, labelPrintOptions, labelSize, rotationOf } from './print/labels.mjs'
+import { createTabloWriter, PORTS_SCRIPT, portsFrom, sanitizeTablo, tabloBytesIn } from './tablo.mjs'
 import { runPowerShell } from './print/powershell.mjs'
 import { checkHost, sendNetwork, sendWindows } from './print/transport.mjs'
 import { isAppUrl, registerAppProtocol, registerScheme, SCREEN_URL, START_URL } from './protocol.mjs'
@@ -1130,6 +1131,42 @@ async function start() {
         resolve(done ? { ok: true } : { ok: false, error: 'Принтер не принял задание. Проверьте, что он включён и подключён.' })
       })
     })
+  })
+
+  // ── Табло покупателя на COM-порту (1.7.6) ──
+  // Байты собирает окно (client/src/lib/tablo.js) из того же, что идёт на экран покупателя;
+  // здесь — настройка этого компьютера и запись в порт (tablo.mjs)
+  const tabloWrite = createTabloWriter({
+    runMode: (port, args) =>
+      new Promise((resolve) => {
+        execFile('mode.com', args, { windowsHide: true, timeout: 5000 }, () => resolve())
+      }),
+    openPort: async (path, buf) => {
+      const fh = await fs.promises.open(path, 'w')
+      try {
+        await Promise.race([fh.write(buf), new Promise((_, no) => setTimeout(() => no(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })), 3000))])
+      } finally {
+        await fh.close().catch(() => {})
+      }
+    },
+  })
+  ipcMain.handle('tablo:config', (event) => (trusted(event) && gateway.activeRole() ? settings.get().tablo : null))
+  ipcMain.handle('tablo:setConfig', (event, cfg) => {
+    if (!trusted(event) || !allowed('settings.devices')) return null
+    return settings.set({ tablo: sanitizeTablo(cfg) }).tablo
+  })
+  ipcMain.handle('tablo:ports', async (event) => {
+    if (!trusted(event) || !gateway.activeRole()) return []
+    const r = await runPowerShell({ spawn, script: PORTS_SCRIPT, timeoutMs: 10000 })
+    return portsFrom(r.stdout)
+  })
+  ipcMain.handle('tablo:write', async (event, raw) => {
+    if (!trusted(event) || !gateway.activeRole()) return { ok: false, error: 'Требуется вход в систему' }
+    const buf = tabloBytesIn(raw)
+    if (!buf) return { ok: false, error: 'Неверные данные для табло.' }
+    const r = await tabloWrite(settings.get().tablo, buf)
+    if (!r.ok) log.warn('табло: ' + r.error)
+    return r
   })
 
   // ── Выгрузка в Excel ──

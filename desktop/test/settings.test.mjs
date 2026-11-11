@@ -27,9 +27,9 @@ function disk(initial) {
 const FOLDER = process.platform === 'win32' ? 'D:\\Копии магазина' : '/mnt/kopii'
 
 test('нет файла, мусор в файле, чужие поля — настройки по умолчанию', () => {
-  assert.deepEqual(createSettings({ file: 'settings.json', fs: disk() }).get(), { backupDir: '', version: '', print: PRINT_DEFAULTS, labels: { ...LABEL_DEFAULTS }, customer: { mode: 'auto', display: '' }, lite: 'auto', gpuSoft: false })
+  assert.deepEqual(createSettings({ file: 'settings.json', fs: disk() }).get(), { backupDir: '', version: '', print: PRINT_DEFAULTS, labels: { ...LABEL_DEFAULTS }, customer: { mode: 'auto', display: '' }, tablo: { vid: 'off', baud: 2400, port: '' }, lite: 'auto', gpuSoft: false })
   assert.deepEqual(core(createSettings({ file: 'settings.json', fs: disk('{не json') }).get()), { backupDir: '', version: '' })
-  assert.deepEqual(sanitizeSettings({ backupDir: 42, version: ['1.0.0'], print: 'мусор', customer: 'мусор', lishnee: true }), { backupDir: '', version: '', print: PRINT_DEFAULTS, labels: { ...LABEL_DEFAULTS }, customer: { mode: 'auto', display: '' }, lite: 'auto', gpuSoft: false })
+  assert.deepEqual(sanitizeSettings({ backupDir: 42, version: ['1.0.0'], print: 'мусор', customer: 'мусор', lishnee: true }), { backupDir: '', version: '', print: PRINT_DEFAULTS, labels: { ...LABEL_DEFAULTS }, customer: { mode: 'auto', display: '' }, tablo: { vid: 'off', baud: 2400, port: '' }, lite: 'auto', gpuSoft: false })
   assert.deepEqual(core(sanitizeSettings(null)), { backupDir: '', version: '' })
 })
 

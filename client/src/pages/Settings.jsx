@@ -21,6 +21,7 @@ import PrintPanel from '../components/PrintPanel'
 import LabelPrinterPanel from '../components/LabelPrinterPanel'
 import CustomerScreenPanel from '../components/CustomerScreenPanel'
 import PokupatelPanel from '../components/PokupatelPanel'
+import TabloPanel from '../components/TabloPanel'
 import ChekPanel from '../components/ChekPanel'
 import ShopLogoPanel from '../components/ShopLogoPanel'
 import VesyPanel from '../components/VesyPanel'
@@ -366,6 +367,8 @@ export default function Settings() {
               {isDesktop && <LitePanel />}
               {/* Экран покупателя на сайте (1.7.5): второй экран моноблока — окном браузера */}
               {!isDesktop && <PokupatelPanel />}
+              {/* Маленькое табло покупателя на COM-порту (1.7.6) — и на сайте, и в программе */}
+              <TabloPanel />
             </>
           )}
 
