@@ -80,6 +80,8 @@ function PrintPreview({ req, onClose }) {
   const roll = kind === 'sticker'
   // Размер наклейки, мм: страницы предпросмотра, PDF и задания — ровно его
   const size = roll ? req.size : undefined
+  // Поворот наклейки (0/90/180/270): при 90° и 270° страница «стоя» — её размер считает программа
+  const rot = roll ? req.rot || 0 : 0
   // Повернуть можно лист раздела и лист этикеток; чек и наклейка — по размеру бумаги
   const canRotate = kind === 'sheet' || kind === 'opu' || kind === 'labels'
   const doc = useMemo(() => activeDoc(printRoot()), [])
@@ -149,7 +151,7 @@ function PrintPreview({ req, onClose }) {
     ;(async () => {
       try {
         if (!doc) throw new Error('Здесь нечего печатать.')
-        const r = await bridge.print.preview({ landscape: canRotate && landscape, roll, size })
+        const r = await bridge.print.preview({ landscape: canRotate && landscape, roll, size, rot })
         if (!r?.ok) throw new Error(r?.error || 'Не получилось подготовить страницы. Повторите.')
         const pdfjs = await loadPdfjs()
         const pdf = await pdfjs.getDocument({ data: r.pdf, isEvalSupported: false }).promise
@@ -231,7 +233,7 @@ function PrintPreview({ req, onClose }) {
       const n = Math.max(1, Math.min(99, Math.trunc(Number(copies) || 1)))
       const r = lentaW
         ? await bridge.print.raw({ ticket: req.ticket, printer, width: lentaW, copies: n })
-        : await bridge.print.page({ printer, landscape: canRotate && landscape, copies: n, roll, size })
+        : await bridge.print.page({ printer, landscape: canRotate && landscape, copies: n, roll, size, rot })
       if (!r?.ok) throw new Error(r?.error || 'Не удалось отправить задание на принтер.')
       toast(t('Отправлено на принтер'))
       onClose()
@@ -246,7 +248,7 @@ function PrintPreview({ req, onClose }) {
     if (busy) return
     setBusy('pdf')
     try {
-      const r = await bridge.print.pdf({ landscape: canRotate && landscape, roll, size, name: pdfName(title || t('Печать')) })
+      const r = await bridge.print.pdf({ landscape: canRotate && landscape, roll, size, rot, name: pdfName(title || t('Печать')) })
       if (r?.canceled) return
       if (!r?.ok) throw new Error(r?.error || 'Не получилось. Повторите.')
       toast(t('PDF сохранён'))

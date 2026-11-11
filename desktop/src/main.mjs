@@ -43,7 +43,7 @@ import { LITE_ARG, liteState, sanitizeLite } from './lite.mjs'
 import { layoutTicket, renderTicket } from './print/escpos.mjs'
 import { cleanLogo, logoTarget, monoToBgra, paperDots, toMono } from './print/logo.mjs'
 import { pageRequest, pdfOptions, printerKind, printOptions } from './print/page.mjs'
-import { labelPrintOptions, labelSize } from './print/labels.mjs'
+import { labelPage, labelPrintOptions, labelSize, rotationOf } from './print/labels.mjs'
 import { runPowerShell } from './print/powershell.mjs'
 import { checkHost, sendNetwork, sendWindows } from './print/transport.mjs'
 import { isAppUrl, registerAppProtocol, registerScheme, SCREEN_URL, START_URL } from './protocol.mjs'
@@ -1120,7 +1120,10 @@ async function start() {
     if (Array.isArray(list) && !list.some((p) => p?.name === cfg.printer)) return { ok: false, error: 'Принтер с таким именем в Windows не найден.' }
     // Старый движок (Windows 7 и 8): на принтере, который сохраняет файл, печать без окна зависает
     if (LEGACY && printerKind(list, cfg.printer) === 'file') return { ok: false, error: 'Этот принтер не печатает на бумаге, а сохраняет файл. Выберите принтер этикеток.' }
-    const size = labelSize(req, cfg)
+    // Страница — наклейка, при повороте на 90° и 270° — «стоя»: поворот присылает окно (он же
+    // в настройке; окно рисовало по ней), нет его — из настройки
+    const rot = req && req.rot !== undefined ? rotationOf(req.rot) : rotationOf(cfg.rot, cfg.flip)
+    const size = labelPage(labelSize(req, cfg), rot)
     return await new Promise((resolve) => {
       win.webContents.print(labelPrintOptions({ printer: cfg.printer, ...size }), (done, reason) => {
         if (!done) log.warn(`наклейки не напечатаны (${cfg.printer}, ${size.w}×${size.h} мм): ${reason || ''}`)

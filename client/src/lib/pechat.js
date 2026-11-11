@@ -68,13 +68,14 @@ export async function pechatTicket(ticket, { system = () => window.print(), b = 
 // размера наклейки, без экрана печати. Иначе — экран печати программы с предпросмотром
 // (сайт — окно печати браузера). size — размер наклейки, мм; cfg — настройка принтера,
 // по которой окно нарисовало наклейки (печатать надо ровно по ней). Не вышло — ошибка словами
-export async function pechatNakleyki(size, { cfg, system = () => window.print(), b = bridge } = {}) {
+// rot — поворот наклейки на бумаге (0/90/180/270): при 90° и 270° страница «стоя»
+export async function pechatNakleyki(size, { cfg, rot = 0, system = () => window.print(), b = bridge } = {}) {
   if (b?.labels) {
     const c = cfg !== undefined ? cfg : await labelConfig()
     if (labelPrinterOf(c)) {
       let r = null
       try {
-        r = await b.labels.print({ w: size?.w, h: size?.h })
+        r = await b.labels.print({ w: size?.w, h: size?.h, rot })
       } catch {
         r = null
       }
@@ -82,7 +83,7 @@ export async function pechatNakleyki(size, { cfg, system = () => window.print(),
       return 'printer'
     }
   }
-  return pechat({ kind: 'sticker', size }, { system, b })
+  return pechat({ kind: 'sticker', size, rot }, { system, b })
 }
 
 // ── Какой документ печатается ──

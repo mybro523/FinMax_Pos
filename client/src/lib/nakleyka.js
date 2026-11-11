@@ -38,6 +38,23 @@ export function sizeOf(v) {
   return { w: Math.min(L.wMax, Math.max(L.wMin, halfMm(w))), h: Math.min(L.hMax, Math.max(L.hMin, halfMm(h))) }
 }
 
+// ── Поворот наклейки на бумаге (1.7.3) ──
+// 0° — как на экране: наклейка лежит горизонтально, бумага в драйвере — ширина × высота
+// наклейки. 180° — вверх ногами (принтер выдаёт наклейки «головой вперёд»). 90° и 270° —
+// для принтера, у которого бумага в драйвере задана наоборот (высота × ширина): страница
+// становится «стоя», рисунок на ней повёрнут, и наклейка всё равно читается горизонтально.
+// По умолчанию — 0°. Прежняя настройка «перевернуть» (flip) — это 180°
+export const POVOROTY = [0, 90, 180, 270]
+export const rotOf = (rot, flip = false) => {
+  const r = Number(rot)
+  return POVOROTY.includes(r) ? r : flip === true ? 180 : 0
+}
+// Страница (бумага) для наклейки размера size при повороте rot, мм
+export function pageOf(size, rot = 0) {
+  const s = sizeOf(size)
+  return rotOf(rot) % 180 ? { w: s.h, h: s.w } : s
+}
+
 // Какой из ходовых размеров выбран ('custom' — свой)
 export const sizeId = (s) => NAKLEYKA_SIZES.find((x) => x.w === Number(s?.w) && x.h === Number(s?.h))?.id || 'custom'
 
@@ -110,8 +127,12 @@ export function fitText(text, { widthMm, lines = 1, maxPt, minPt, measure = appr
 // товара нет кода, 'badcode' — в коде знаки, которых нет в штрихкодах (русские буквы),
 // 'toolong' — код не помещается по ширине наклейки, 'toolow' — по высоте
 const PX_PER_MM = 96 / 25.4
-export function nakleykaPlan(size, { name = '', price = '', code = '', dpi = 203, measure = approxMeasure, dx = 0, dy = 0, flip = false } = {}) {
+export function nakleykaPlan(size, { name = '', price = '', code = '', dpi = 203, measure = approxMeasure, dx = 0, dy = 0, flip = false, rot } = {}) {
   const { w, h } = sizeOf(size)
+  const turn = rotOf(rot, flip)
+  // Страница: при 90° и 270° — высота × ширина наклейки
+  const pageW = turn % 180 ? h : w
+  const pageH = turn % 180 ? w : h
   const big = h >= 35
   const mid = h >= 25
   const gap = mid ? 0.7 : 0.5
@@ -122,8 +143,8 @@ export function nakleykaPlan(size, { name = '', price = '', code = '', dpi = 203
   // 7/8 теряет так до 0,4 мм), и наклейка ровно в страницу переносилась бы на вторую, оставляя
   // пустую наклейку. Рисунок наклейки (components/Nakleyka.jsx) — целое число точек экрана,
   // его край ещё до 0,26 мм ближе
-  const boxW = Math.floor((w - 0.6) / dot) * dot
-  const boxH = h - 0.6
+  const boxW = Math.floor((pageW - 0.6) / dot) * dot
+  const boxH = pageH - 0.6
   const vbW = Math.floor(boxW * PX_PER_MM) / PX_PER_MM
   const vbH = Math.floor(boxH * PX_PER_MM) / PX_PER_MM
   // Сдвиг — целыми точками принтера. Поворот — вокруг середины наклейки, взятой так, что её
@@ -132,11 +153,32 @@ export function nakleykaPlan(size, { name = '', price = '', code = '', dpi = 203
   const sy = Math.round((Number(dy) || 0) / dot) * dot
   const cx = (Math.round(w / dot) * dot) / 2
   const cy = h / 2
-  // Где содержимое после сдвига и поворота остаётся внутри рисунка. С той стороны, куда сдвиг
-  // уводит содержимое, поля шире: иначе край цены или кода срезало бы
-  const safe = flip
-    ? { x0: 2 * cx + sx - vbW, x1: 2 * cx + sx, y0: 2 * cy + sy - vbH, y1: 2 * cy + sy }
-    : { x0: -sx, x1: vbW - sx, y0: -sy, y1: vbH - sy }
+  // Повёрнутая на 90° наклейка: её левый край идёт вдоль верха страницы, верх — вдоль правого
+  // края (сдвиг страницы на высоту наклейки); на 270° — наоборот. Сдвиг на ширину — целыми
+  // точками: полосы кода и повёрнутые ложатся на точки принтера
+  const wDot = Math.round(w / dot) * dot
+  // Где содержимое после сдвига и поворота остаётся внутри рисунка (в мм наклейки). С той
+  // стороны, куда сдвиг уводит содержимое, поля шире: иначе край цены или кода срезало бы
+  const safe =
+    turn === 180
+      ? { x0: 2 * cx + sx - vbW, x1: 2 * cx + sx, y0: 2 * cy + sy - vbH, y1: 2 * cy + sy }
+      : turn === 90
+        ? { x0: -sy, x1: vbH - sy, y0: h + sx - vbW, y1: h + sx }
+        : turn === 270
+          ? { x0: wDot + sy - vbH, x1: wDot + sy, y0: -sx, y1: vbW - sx }
+          : { x0: -sx, x1: vbW - sx, y0: -sy, y1: vbH - sy }
+  // Как содержимое наклейки ложится на страницу: сначала поворот, потом сдвиг
+  const r3 = (v) => Math.round(v * 1000) / 1000
+  const transform =
+    turn === 180
+      ? `translate(${r3(sx)} ${r3(sy)}) rotate(180 ${r3(cx)} ${r3(cy)})`
+      : turn === 90
+        ? `translate(${r3(sx + h)} ${r3(sy)}) rotate(90)`
+        : turn === 270
+          ? `translate(${r3(sx)} ${r3(sy + wDot)}) rotate(-90)`
+          : sx || sy
+            ? `translate(${r3(sx)} ${r3(sy)})`
+            : ''
   const KEEP = 0.3 // не ближе к краю рисунка
   const baseX = w >= 50 ? 2 : 1.4
   const baseY = big ? 1.5 : 1.1
@@ -226,7 +268,11 @@ export function nakleykaPlan(size, { name = '', price = '', code = '', dpi = 203
     dot,
     sx,
     sy,
-    flip: !!flip,
+    flip: turn === 180,
+    rot: turn,
+    pageW,
+    pageH,
+    transform,
     cx,
     cy,
     // rows — строки названия, как их напечатать; text — цена (не влезла и при самом мелком
@@ -281,6 +327,23 @@ export function razvernut(rows, max = MAX_TOTAL) {
 }
 
 export const totalOf = (rows) => rows.reduce((s, r) => s + copiesOf(r?.count), 0)
+
+// Поворот на сайте (и в программе, пока принтер этикеток не выбран) — тоже в этом браузере
+const ROT_KEY = 'apteka_nakleyka_povorot'
+export function savedRot() {
+  try {
+    return rotOf(localStorage.getItem(ROT_KEY))
+  } catch {
+    return 0
+  }
+}
+export function saveRot(r) {
+  try {
+    localStorage.setItem(ROT_KEY, String(rotOf(r)))
+  } catch {
+    /* не запомнилось — не страшно */
+  }
+}
 
 // Настройка «размер наклейки» на сайте (и в программе, пока принтер этикеток не выбран)
 // помнится в этом браузере: это удобство, а не данные магазина

@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { LuMinus, LuPlus, LuTag } from 'react-icons/lu'
 import { bridge } from '../lib/desktop'
 import { forgetLabelConfig } from '../lib/print'
-import { sizeText } from '../lib/nakleyka'
+import { pageOf, rotOf, sizeText } from '../lib/nakleyka'
 import { translate as tr, useT } from '../lib/i18n'
 import { useToast } from './ui'
-import { NakleykiDoc, NakleykaPreview, SizePicker, stickerFrom, stickerOf } from './Nakleyka'
+import { NakleykiDoc, NakleykaPreview, PovorotPicker, SizePicker, stickerFrom, stickerOf } from './Nakleyka'
 
 // ── Принтер этикеток (программа для Windows) ──
 // Наклейки со штрихкодом печатаются на нём сразу, без экрана печати: из окна товара,
@@ -67,14 +67,14 @@ export default function LabelPrinterPanel() {
 
   const size = cfg ? { w: cfg.w, h: cfg.h } : { w: 58, h: 40 }
   const obrazec = useMemo(
-    () => (cfg ? firstFitting(OBRAZEC_CODES, (code) => stickerOf({ name: t('Пример товара'), price: 25.5, barcode: code }, { w: cfg.w, h: cfg.h }, cfg.dpi, { dx: cfg.dx, dy: cfg.dy, flip: cfg.flip })) : null),
-    [cfg?.w, cfg?.h, cfg?.dpi, cfg?.dx, cfg?.dy, cfg?.flip, t], // eslint-disable-line react-hooks/exhaustive-deps
+    () => (cfg ? firstFitting(OBRAZEC_CODES, (code) => stickerOf({ name: t('Пример товара'), price: 25.5, barcode: code }, { w: cfg.w, h: cfg.h }, cfg.dpi, { dx: cfg.dx, dy: cfg.dy, rot: rotOf(cfg.rot, cfg.flip) })) : null),
+    [cfg?.w, cfg?.h, cfg?.dpi, cfg?.dx, cfg?.dy, cfg?.rot, cfg?.flip, t], // eslint-disable-line react-hooks/exhaustive-deps
   )
   // Пробные наклейки: две, с рамкой по краю, на них — размер и номер
   const probaItems = useMemo(() => {
     if (!proba) return []
     const s = { w: proba.w, h: proba.h }
-    const shift = { dx: proba.dx, dy: proba.dy, flip: proba.flip }
+    const shift = { dx: proba.dx, dy: proba.dy, rot: rotOf(proba.rot, proba.flip) }
     return [1, 2].map((k) => ({ key: 'proba' + k, data: firstFitting(PROBA_CODES, (code) => stickerFrom({ name: `${tr('Пробная наклейка')} ${k} ${tr('из')} 2`, price: sizeText(s), code }, s, proba.dpi, shift)) }))
   }, [proba])
 
@@ -86,7 +86,7 @@ export default function LabelPrinterPanel() {
     let alive = true
     ;(async () => {
       try {
-        const r = await bridge.labels.print({ w: proba.w, h: proba.h })
+        const r = await bridge.labels.print({ w: proba.w, h: proba.h, rot: rotOf(proba.rot, proba.flip) })
         if (r?.ok) toast(t('Пробные наклейки отправлены на принтер'))
         else toast(tr(r?.error || 'Не удалось отправить задание на принтер.'), 'err')
       } catch {
@@ -186,10 +186,12 @@ export default function LabelPrinterPanel() {
             <Sdvig label={t('Сдвиг вправо')} value={cfg.dx} onChange={(v) => set({ dx: v })} less={t('Левее')} more={t('Правее')} testid="label-dx" />
             <Sdvig label={t('Сдвиг вниз')} value={cfg.dy} onChange={(v) => set({ dy: v })} less={t('Выше')} more={t('Ниже')} testid="label-dy" />
           </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, margin: '2px 0 8px' }}>
-            <input type="checkbox" checked={!!cfg.flip} onChange={(e) => set({ flip: e.target.checked })} style={{ width: 16, height: 16 }} data-testid="label-flip" />
-            {t('Перевернуть наклейку (если выходит вверх ногами)')}
-          </label>
+          {/* Поворот (1.7.3): 0° — горизонтально, как на экране; 180° — если выходит вверх ногами;
+              90° и 270° — если в драйвере бумага задана наоборот (высота × ширина) */}
+          <PovorotPicker value={rotOf(cfg.rot, cfg.flip)} onChange={(r) => set({ rot: r, flip: r === 180 })} testid="label-rot" />
+          <div className="tag-cat" style={{ margin: '-4px 0 8px' }}>
+            {t('Обычно — 0°. Вверх ногами — 180°. Если в настройках принтера бумага задана наоборот')} ({sizeText(pageOf(size, 90))}) — 90°.
+          </div>
         </div>
         {obrazec && <NakleykaPreview data={obrazec} frame zoom={1.3} />}
       </div>
@@ -204,7 +206,7 @@ export default function LabelPrinterPanel() {
         <button className="btn ghost" disabled={!!busy} onClick={probe} data-testid="label-test">{busy === 'test' ? t('Печатаем…') : t('Пробная наклейка')}</button>
       </div>
 
-      {proba && <NakleykiDoc items={probaItems} size={{ w: proba.w, h: proba.h }} frame title={t('Пробная наклейка')} />}
+      {proba && <NakleykiDoc items={probaItems} frame title={t('Пробная наклейка')} />}
     </div>
   )
 }

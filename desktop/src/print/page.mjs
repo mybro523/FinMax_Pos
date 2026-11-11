@@ -7,7 +7,7 @@
 // Предпросмотр и печать обязаны совпадать, поэтому PDF для предпросмотра и задание
 // на принтер собираются из одних и тех же значений: лист A4 (или наклейка своего
 // размера), ориентация, фон печатается. Поля и номера страниц задают стили печатного слоя.
-import { labelSize, pageMicrons } from './labels.mjs'
+import { labelPage, labelSize, pageMicrons, rotationOf } from './labels.mjs'
 
 // Наклейка на принтере этикеток — по умолчанию 58 × 40 мм; размер присылает окно
 export const STICKER_MM = { width: 58, height: 40 }
@@ -23,7 +23,8 @@ export function pageRequest(req) {
     landscape: !roll && req?.landscape === true,
     roll,
     copies: Math.max(1, Math.min(99, Math.trunc(Number(req?.copies) || 1))),
-    ...(roll ? { size: labelSize(req?.size, { w: STICKER_MM.width, h: STICKER_MM.height }) } : {}),
+    // size — страница: наклейка, при повороте на 90° и 270° — «стоя» (высота × ширина)
+    ...(roll ? { size: labelPage(labelSize(req?.size, { w: STICKER_MM.width, h: STICKER_MM.height }), rotationOf(req?.rot)) } : {}),
   }
 }
 

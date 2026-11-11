@@ -2,8 +2,8 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { LuPrinter, LuTag } from 'react-icons/lu'
 import { Modal, useToast } from './ui'
 import NumberInput from './NumberInput'
-import { NakleykiDoc, NakleykaPreview, SizePicker, stickerOf } from './Nakleyka'
-import { MAX_TOTAL, PROBLEM_TEXT, copiesOf, nakleekNaStroku, razvernut, savedSize, saveSize, sizeText, totalOf } from '../lib/nakleyka'
+import { NakleykiDoc, NakleykaPreview, PovorotPicker, SizePicker, stickerOf } from './Nakleyka'
+import { MAX_TOTAL, PROBLEM_TEXT, copiesOf, nakleekNaStroku, pageOf, razvernut, rotOf, savedRot, saveRot, savedSize, saveSize, sizeText, totalOf } from '../lib/nakleyka'
 import { labelConfig, labelPrinterOf } from '../lib/print'
 import { pechatNakleyki } from '../lib/pechat'
 import { fmtDateTime } from '../lib/time'
@@ -23,6 +23,7 @@ export default function PrihodNakleyki({ arrival, products, onClose }) {
   // нельзя: наклейки нарисованы бы по размеру из памяти браузера), null — её нет (сайт)
   const [cfg, setCfg] = useState(isDesktop ? undefined : null)
   const [size, setSize] = useState(savedSize)
+  const [rotSite, setRotSite] = useState(savedRot)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -62,7 +63,10 @@ export default function PrihodNakleyki({ arrival, products, onClose }) {
     if (Object.keys(patch).length) setCounts((c) => ({ ...patch, ...c }))
   }, [lines])
 
-  const shift = printer ? { dx: cfg.dx, dy: cfg.dy, flip: cfg.flip } : {}
+  // Поворот: из настройки принтера этикеток, без неё — выбранный здесь (по умолчанию 0°)
+  const rot = printer ? rotOf(cfg.rot, cfg.flip) : rotSite
+  const shift = printer ? { dx: cfg.dx, dy: cfg.dy, rot } : { rot }
+  const page = pageOf(useSize, rot)
   const rows = useMemo(
     () =>
       lines.map((l) => {
@@ -70,7 +74,7 @@ export default function PrihodNakleyki({ arrival, products, onClose }) {
         const problem = !l.product ? 'gone' : data.plan.problem
         return { ...l, data, problem, count: problem ? 0 : copiesOf(counts[l.key]) }
       }),
-    [lines, counts, useSize.w, useSize.h, dpi, shift.dx, shift.dy, shift.flip], // eslint-disable-line react-hooks/exhaustive-deps
+    [lines, counts, useSize.w, useSize.h, dpi, shift.dx, shift.dy, shift.rot], // eslint-disable-line react-hooks/exhaustive-deps
   )
   const total = totalOf(rows)
   const later = useDeferredValue(rows)
@@ -83,13 +87,17 @@ export default function PrihodNakleyki({ arrival, products, onClose }) {
     setSize(s)
     saveSize(s)
   }
+  const chooseRot = (r) => {
+    setRotSite(r)
+    saveRot(r)
+  }
 
   async function doPrint() {
     if (busy || behind || !ready) return
     if (total < 1) return toast(t('Укажите, сколько наклеек напечатать'), 'err')
     setBusy(true)
     try {
-      const where = await pechatNakleyki(useSize, { cfg })
+      const where = await pechatNakleyki(useSize, { cfg, rot })
       if (where === 'printer') toast(`${t('Отправлено на принтер этикеток')}: ${Math.min(total, MAX_TOTAL)}`)
     } catch (e) {
       toast(tr(e.message), 'err')
@@ -109,16 +117,17 @@ export default function PrihodNakleyki({ arrival, products, onClose }) {
         <div className="lp-side">
           {printer ? (
             <div className="note info" data-testid="lp-printer">
-              {t('Принтер этикеток')}: <b>{printer}</b> · {sizeText(useSize)}
-              <div className="tag-cat">{t('Принтер и размер наклейки меняются в «Настройки → Чек и печать».')}</div>
+              {t('Принтер этикеток')}: <b>{printer}</b> · {sizeText(useSize)} · {t('поворот')} {rot}°
+              <div className="tag-cat">{t('Принтер, размер и поворот наклейки меняются в «Настройки → Чек и печать».')}</div>
             </div>
           ) : (
             <>
               <SizePicker value={size} onChange={chooseSize} />
-              <div className="tag-cat" style={{ marginBottom: 10 }}>
+              <PovorotPicker value={rotSite} onChange={chooseRot} testid="lp-rot" />
+              <div className="tag-cat" style={{ marginBottom: 10 }} data-testid="lp-hint">
                 {isDesktop
                   ? t('Чтобы наклейки печатались сразу, без экрана печати, выберите принтер этикеток в «Настройки → Чек и печать».')
-                  : t('В окне печати выберите принтер этикеток и бумагу того же размера.')}
+                  : `${t('В окне печати выберите принтер этикеток, бумагу')} ${sizeText(page)}, ${t('поля — «Нет», масштаб — 100 %.')}`}
               </div>
             </>
           )}
@@ -168,7 +177,7 @@ export default function PrihodNakleyki({ arrival, products, onClose }) {
       </div>
       {total > MAX_TOTAL && <div className="note warn">{t('За один раз печатается не больше 2000 наклеек — остальные напечатайте следующим разом.')}</div>}
 
-      <NakleykiDoc items={items} size={useSize} title={`${t('Этикетки на приход')} — ${arrival.supplier || fmtDateTime(arrival.date)}`} />
+      <NakleykiDoc items={items} title={`${t('Этикетки на приход')} — ${arrival.supplier || fmtDateTime(arrival.date)}`} />
 
       <div className="modal-actions">
         <button className="btn ghost" onClick={onClose}>{t('Закрыть')}</button>

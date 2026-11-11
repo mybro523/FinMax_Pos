@@ -232,3 +232,58 @@ test('наклейки подряд: каждая копия — своя, вс�
   assert.equal(copiesOf('2.7'), 2)
   assert.equal(copiesOf(100000), 999)
 })
+
+// ── Поворот на бумаге (1.7.3) ──
+// По умолчанию 0°: наклейка горизонтально, страница — ширина × высота наклейки (без
+// «альбомного» листа и поворота драйвером). 90° и 270° — страница «стоя», рисунок повёрнут
+test('поворот: по умолчанию 0°, прежнее «перевернуть» — 180°, страница при 90°/270° — стоя', async () => {
+  const { nakleykaPlan, pageOf, rotOf } = await import('../src/lib/nakleyka.js')
+  assert.equal(rotOf(undefined), 0)
+  assert.equal(rotOf('90'), 90)
+  assert.equal(rotOf(45), 0)
+  assert.equal(rotOf(undefined, true), 180)
+  assert.deepEqual(pageOf({ w: 58, h: 40 }, 0), { w: 58, h: 40 })
+  assert.deepEqual(pageOf({ w: 58, h: 40 }, 90), { w: 40, h: 58 })
+  assert.deepEqual(pageOf({ w: 30, h: 20 }, 270), { w: 20, h: 30 })
+  const plain = nakleykaPlan({ w: 58, h: 40 }, { name: 'Аспирин', price: '10 сомони', code: '4870204010060' })
+  assert.equal(plain.rot, 0)
+  assert.equal(plain.transform, '')
+  assert.deepEqual([plain.pageW, plain.pageH], [58, 40])
+  assert.ok(plain.boxW < 58 && plain.boxH < 40)
+  const old = nakleykaPlan({ w: 58, h: 40 }, { code: '4870204010060', flip: true })
+  assert.equal(old.rot, 180)
+  assert.match(old.transform, /rotate\(180 /)
+})
+
+test('поворот 90° и 270°: всё содержимое на странице, полосы кода — на точках принтера', async () => {
+  const { nakleykaPlan } = await import('../src/lib/nakleyka.js')
+  for (const rot of [90, 270]) {
+    for (const size of [{ w: 58, h: 40 }, { w: 40, h: 30 }, { w: 30, h: 20 }]) {
+      for (const [dx, dy] of [[0, 0], [1.5, -1], [-2, 2]]) {
+        const p = nakleykaPlan(size, { name: 'Активированный уголь №10', price: '10 сомони', code: '4870204010060', dx, dy, rot })
+        assert.equal(p.problem, '', `${rot} ${size.w}×${size.h}`)
+        assert.deepEqual([p.pageW, p.pageH], [size.h, size.w])
+        // Рисунок — на странице «стоя»
+        assert.ok(p.vbW <= size.h - 0.6 + 1e-9 && p.vbH <= size.w - 0.6 + 1e-9)
+        // Точки наклейки (углы содержимого) после поворота и сдвига — внутри рисунка
+        const m = p.transform.match(/translate\(([-\d.]+) ([-\d.]+)\) rotate\((-?90)\)/)
+        assert.ok(m, p.transform)
+        const [tx, ty, a] = [Number(m[1]), Number(m[2]), Number(m[3])]
+        const toPage = (x, y) => (a === 90 ? [tx - y, ty + x] : [tx + y, ty - x])
+        const bc = p.barcode
+        const pts = [
+          [p.pad.l, p.pad.t], [size.w - p.pad.r, p.pad.t], [p.pad.l, size.h - p.pad.b], [size.w - p.pad.r, size.h - p.pad.b],
+          [bc.left + bc.model.quietL * bc.module, bc.top], [bc.left + bc.width - bc.model.quietR * bc.module, bc.top + bc.height],
+        ]
+        for (const [x, y] of pts) {
+          const [px, py] = toPage(x, y)
+          assert.ok(px >= -1e-6 && px <= p.vbW + 1e-6 && py >= -1e-6 && py <= p.vbH + 1e-6, `${rot} ${size.w}×${size.h} ${dx},${dy}: (${x},${y}) → (${px},${py})`)
+        }
+        // Полосы кода идут поперёк страницы: их край (по ширине наклейки) — целые точки
+        // (сдвиг в рисунке записан до тысячной мм — это сотая доля точки)
+        const edge = toPage(bc.left, 0)[1]
+        assert.ok(Math.abs(edge / p.dot - Math.round(edge / p.dot)) < 0.01, `край кода ${edge}`)
+      }
+    }
+  }
+})

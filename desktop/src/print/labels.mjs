@@ -11,7 +11,7 @@
 //
 // Модуль не зависит от Electron — его можно проверить.
 
-export const LABEL_DEFAULTS = Object.freeze({ printer: '', w: 58, h: 40, dpi: 203, dx: 0, dy: 0, flip: false })
+export const LABEL_DEFAULTS = Object.freeze({ printer: '', w: 58, h: 40, dpi: 203, dx: 0, dy: 0, flip: false, rot: 0 })
 // Пределы — те же, что у окна (client/src/lib/nakleyka.js, SIZE_LIMITS)
 export const LABEL_LIMITS = Object.freeze({ wMin: 25, wMax: 110, hMin: 20, hMax: 150, shift: 10 })
 
@@ -23,6 +23,14 @@ function number(v, { lo, hi, by, def }) {
   const n = Number(v)
   return Number.isFinite(n) ? clamp(step(n, by), lo, hi) : def
 }
+
+// Поворот наклейки на бумаге (1.7.3): 0 — горизонтально, как на экране (по умолчанию);
+// 180 — вверх ногами; 90 и 270 — бумага в драйвере задана наоборот, страница «стоя».
+// Прежняя настройка flip — это 180
+export const ROTATIONS = Object.freeze([0, 90, 180, 270])
+export const rotationOf = (rot, flip = false) => (ROTATIONS.includes(Number(rot)) ? Number(rot) : flip === true ? 180 : 0)
+// Страница (бумага) для наклейки: при 90 и 270 — высота × ширина
+export const labelPage = (size, rot) => (rotationOf(rot) % 180 ? { w: size.h, h: size.w } : { w: size.w, h: size.h })
 
 // Размер наклейки: ширина и высота, мм, с точностью до полмиллиметра
 export function labelSize(v, fallback = LABEL_DEFAULTS) {
@@ -36,11 +44,13 @@ export function labelSize(v, fallback = LABEL_DEFAULTS) {
 // printer — имя принтера в Windows (пусто — не выбран, наклейки идут через экран печати);
 // w, h — размер наклейки, мм; dpi — точек на дюйм у принтера (203 или 300): под него
 // подгоняется ширина полосок штрихкода; dx, dy — сдвиг наклейки, мм (вправо и вниз;
-// поправить, если принтер кладёт её чуть мимо); flip — перевернуть на 180°
+// поправить, если принтер кладёт её чуть мимо); rot — поворот на бумаге (0/90/180/270);
+// flip — прежнее «перевернуть на 180°» (пишется вместе с rot: его читают окна прежних версий)
 export function sanitizeLabels(raw) {
   const v = raw && typeof raw === 'object' ? raw : {}
   const L = LABEL_LIMITS
   const size = labelSize(v)
+  const rot = rotationOf(v.rot, v.flip)
   return {
     printer: typeof v.printer === 'string' ? v.printer.slice(0, 220) : '',
     w: size.w,
@@ -48,7 +58,8 @@ export function sanitizeLabels(raw) {
     dpi: Number(v.dpi) === 300 ? 300 : 203,
     dx: number(v.dx, { lo: -L.shift, hi: L.shift, by: 0.1, def: 0 }),
     dy: number(v.dy, { lo: -L.shift, hi: L.shift, by: 0.1, def: 0 }),
-    flip: v.flip === true,
+    flip: rot === 180,
+    rot,
   }
 }
 

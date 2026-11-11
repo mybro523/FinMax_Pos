@@ -3,9 +3,9 @@ import { LuPrinter, LuTag } from 'react-icons/lu'
 import { Modal, useToast } from './ui'
 import PrintDoc from './PrintDoc'
 import NumberInput from './NumberInput'
-import { NakleykiDoc, NakleykaPreview, SizePicker, stickerOf } from './Nakleyka'
+import { NakleykiDoc, NakleykaPreview, PovorotPicker, SizePicker, stickerOf } from './Nakleyka'
 import { barcodeModel, barcodeSvg, moduleFor, modulesOf } from '../lib/barcode'
-import { PROBLEM_TEXT, copiesOf, nakleykaName, razvernut, savedSize, saveSize, sizeText } from '../lib/nakleyka'
+import { PROBLEM_TEXT, copiesOf, nakleykaName, pageOf, razvernut, rotOf, savedRot, saveRot, savedSize, saveSize, sizeText } from '../lib/nakleyka'
 import { labelConfig, labelPrinterOf } from '../lib/print'
 import { pechat, pechatNakleyki } from '../lib/pechat'
 import { money } from '../db/store'
@@ -45,6 +45,7 @@ export default function LabelPrint({ product, onClose }) {
   // нельзя: наклейки нарисованы бы по размеру из памяти браузера), null — её нет (сайт)
   const [cfg, setCfg] = useState(isDesktop ? undefined : null)
   const [size, setSize] = useState(savedSize)
+  const [rotSite, setRotSite] = useState(savedRot)
   const [copies, setCopies] = useState('1')
   const [a4count, setA4count] = useState('12')
   const [busy, setBusy] = useState(false)
@@ -62,9 +63,12 @@ export default function LabelPrint({ product, onClose }) {
   const useSize = printer ? { w: cfg.w, h: cfg.h } : size
   const dpi = printer ? cfg.dpi : 203
 
-  // Сдвиг и поворот из настройки принтера этикеток — их учитывает раскладка
-  const shift = printer ? { dx: cfg.dx, dy: cfg.dy, flip: cfg.flip } : {}
-  const data = useMemo(() => stickerOf(product, useSize, dpi, shift), [product, useSize.w, useSize.h, dpi, shift.dx, shift.dy, shift.flip]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Сдвиг и поворот из настройки принтера этикеток — их учитывает раскладка. Без принтера —
+  // поворот, выбранный здесь (по умолчанию 0°: горизонтально, как на экране)
+  const rot = printer ? rotOf(cfg.rot, cfg.flip) : rotSite
+  const shift = printer ? { dx: cfg.dx, dy: cfg.dy, rot } : { rot }
+  const page = pageOf(useSize, rot)
+  const data = useMemo(() => stickerOf(product, useSize, dpi, shift), [product, useSize.w, useSize.h, dpi, shift.dx, shift.dy, shift.rot]) // eslint-disable-line react-hooks/exhaustive-deps
   const n = copiesOf(copies)
   // Сотня наклеек в печатном слое перерисовывается не на каждую набранную цифру
   const nLater = useDeferredValue(n)
@@ -88,6 +92,10 @@ export default function LabelPrint({ product, onClose }) {
     setSize(s)
     saveSize(s)
   }
+  const chooseRot = (r) => {
+    setRotSite(r)
+    saveRot(r)
+  }
 
   const problem = vid === 'roll' ? data.plan.problem : product.barcode ? (a4svg ? '' : barcodeModel(product.barcode) ? 'toolong' : 'badcode') : 'nocode'
 
@@ -98,7 +106,7 @@ export default function LabelPrint({ product, onClose }) {
     if (behind || !ready) return
     setBusy(true)
     try {
-      const where = await pechatNakleyki(useSize, { cfg })
+      const where = await pechatNakleyki(useSize, { cfg, rot })
       if (where === 'printer') toast(`${t('Отправлено на принтер этикеток')}: ${n}`)
     } catch (e) {
       toast(tr(e.message), 'err')
@@ -144,16 +152,17 @@ export default function LabelPrint({ product, onClose }) {
           <div className="lp-side">
             {printer ? (
               <div className="note info" data-testid="lp-printer">
-                {t('Принтер этикеток')}: <b>{printer}</b> · {sizeText(useSize)}
-                <div className="tag-cat">{t('Принтер и размер наклейки меняются в «Настройки → Чек и печать».')}</div>
+                {t('Принтер этикеток')}: <b>{printer}</b> · {sizeText(useSize)} · {t('поворот')} {rot}°
+                <div className="tag-cat">{t('Принтер, размер и поворот наклейки меняются в «Настройки → Чек и печать».')}</div>
               </div>
             ) : (
               <>
                 <SizePicker value={size} onChange={chooseSize} />
-                <div className="tag-cat" style={{ marginBottom: 10 }}>
+                <PovorotPicker value={rotSite} onChange={chooseRot} testid="lp-rot" />
+                <div className="tag-cat" style={{ marginBottom: 10 }} data-testid="lp-hint">
                   {isDesktop
                     ? t('Чтобы наклейки печатались сразу, без экрана печати, выберите принтер этикеток в «Настройки → Чек и печать».')
-                    : t('В окне печати выберите принтер этикеток и бумагу того же размера.')}
+                    : `${t('В окне печати выберите принтер этикеток, бумагу')} ${sizeText(page)}, ${t('поля — «Нет», масштаб — 100 %.')}`}
                 </div>
               </>
             )}
@@ -176,7 +185,7 @@ export default function LabelPrint({ product, onClose }) {
       )}
 
       {/* На бумагу — из печатного слоя: наклейки страницами своего размера или лист A4 */}
-      {!problem && vid === 'roll' && <NakleykiDoc items={items} size={useSize} title={title} />}
+      {!problem && vid === 'roll' && <NakleykiDoc items={items} title={title} />}
       {!problem && vid === 'a4' && (
         <PrintDoc prio={2} kind="labels" title={title}>
           {sheet}

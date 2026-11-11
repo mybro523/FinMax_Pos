@@ -2,9 +2,8 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import PrintDoc from './PrintDoc'
 import NumberInput from './NumberInput'
 import { barcodeInner } from '../lib/barcode'
-import { MM_PER_PT, NAKLEYKA_SIZES, SIZE_LIMITS, nakleykaName, nakleykaPlan, sizeId, sizeOf, sizeText } from '../lib/nakleyka'
+import { MM_PER_PT, NAKLEYKA_SIZES, POVOROTY, SIZE_LIMITS, nakleykaName, nakleykaPlan, rotOf, sizeId, sizeOf, sizeText } from '../lib/nakleyka'
 import { money } from '../db/store'
-import { isDesktop } from '../lib/desktop'
 import { useT } from '../lib/i18n'
 
 // ── Наклейка со штрихкодом: на экране и на бумаге ──
@@ -54,8 +53,8 @@ function stickerSvg(plan, { frame = false }) {
   const pxW = Math.round(plan.vbW * PX_PER_MM)
   const pxH = Math.round(plan.vbH * PX_PER_MM)
   const { sx, sy } = plan
-  // Сначала поворот вокруг середины наклейки, потом сдвиг — как их задала раскладка
-  const move = [sx || sy ? `translate(${r3(sx)} ${r3(sy)})` : '', plan.flip ? `rotate(180 ${r3(plan.cx)} ${r3(plan.cy)})` : ''].filter(Boolean).join(' ')
+  // Поворот и сдвиг — как их задала раскладка (lib/nakleyka.js): наклейка на странице
+  const move = plan.transform
   const xc = r3(plan.xc)
   let body = ''
   // Рамка пробной наклейки — в 1,4 мм от краёв плюс сдвиг: её не срезает ни при каком
@@ -94,10 +93,11 @@ function stickerSvg(plan, { frame = false }) {
   )
 }
 
-// Всё для наклейки: строки и раскладка. shift — { dx, dy, flip } из настройки принтера
-// этикеток: раскладка оставляет место с той стороны, куда сдвиг уводит содержимое
+// Всё для наклейки: строки и раскладка. shift — { dx, dy, rot } из настройки принтера
+// этикеток (rot — поворот 0/90/180/270; прежнее flip — 180): раскладка оставляет место с
+// той стороны, куда сдвиг уводит содержимое
 export function stickerFrom({ name = '', price = '', code = '' }, size, dpi = 203, shift = {}) {
-  const plan = nakleykaPlan(size, { name, price, code, dpi, measure: canvasMeasure, dx: shift.dx, dy: shift.dy, flip: shift.flip })
+  const plan = nakleykaPlan(size, { name, price, code, dpi, measure: canvasMeasure, dx: shift.dx, dy: shift.dy, flip: shift.flip, rot: shift.rot })
   return { name, price, code: String(code ?? '').trim(), plan }
 }
 
@@ -128,16 +128,18 @@ export function NakleykaPreview({ data, frame, zoom = 1.6 }) {
 
 // Наклейки на бумагу: каждая — своя страница ровно размера наклейки, без полей.
 // items — [{ key, data }].
-// Размер страницы в программе задаёт задание на принтер (точно, в микронах): размер из
-// стилей движок округлил бы до пункта и чуть растянул бы наклейку под бумагу — полоски
-// съехали бы с точек принтера. На сайте размер из стилей нужен окну печати браузера.
+// Размер страницы стилями НЕ задаётся (1.7.3). В программе его задаёт задание на принтер
+// (точно, в микронах): размер из стилей движок округлил бы до пункта и чуть растянул бы
+// наклейку под бумагу — полоски съехали бы с точек принтера. На сайте страница — бумага,
+// выбранная в окне печати (наклейка из драйвера принтера). Размер 58×40 из стилей Chrome
+// понимал как «альбомный» лист и просил драйвер повернуть его — принтер этикеток клал
+// наклейку боком, на две наклейки, а в поля добавлял колонтитулы с адресом сайта.
 // Поля нулевые и у страниц без имени: старый движок (программа для Windows 7 и 8) правила
 // именованной страницы (@page sticker) не применяет и взял бы поля обычного листа —
 // 12 мм, — разрезав наклейку на полоски. Пока наклейки на печати, другого не печатают
 const NO_BOXES = '@top-center { content: none } @bottom-left { content: none } @bottom-right { content: none }'
-export function NakleykiDoc({ items, size, frame = false, title = '' }) {
-  const s = sizeOf(size)
-  const rule = `${isDesktop ? '' : `size: ${s.w}mm ${s.h}mm; `}margin: 0; ${NO_BOXES}`
+export function NakleykiDoc({ items, frame = false, title = '' }) {
+  const rule = `margin: 0; ${NO_BOXES}`
   return (
     <PrintDoc prio={2} kind="sticker" title={title}>
       <style>{`@page { ${rule} } @page sticker { ${rule} }`}</style>
@@ -145,6 +147,24 @@ export function NakleykiDoc({ items, size, frame = false, title = '' }) {
         <Nakleyka key={it.key} data={it.data} frame={frame} />
       ))}
     </PrintDoc>
+  )
+}
+
+// ── Поворот наклейки на бумаге (1.7.3): 0° — как на экране, горизонтально ──
+export function PovorotPicker({ value, onChange, testid = 'nk-rot' }) {
+  const t = useT()
+  const r = rotOf(value)
+  return (
+    <div className="field" data-testid={testid}>
+      <label>{t('Поворот на бумаге')}</label>
+      <div className="chips">
+        {POVOROTY.map((x) => (
+          <button key={x} type="button" className={'chip' + (r === x ? ' active' : '')} data-rot={x} onClick={() => onChange(x)}>
+            {x}°{x === 0 ? ` · ${t('как на экране')}` : ''}
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 
