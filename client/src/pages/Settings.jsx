@@ -20,6 +20,7 @@ import DevicesPanel from '../components/DevicesPanel'
 import PrintPanel from '../components/PrintPanel'
 import LabelPrinterPanel from '../components/LabelPrinterPanel'
 import CustomerScreenPanel from '../components/CustomerScreenPanel'
+import PokupatelPanel from '../components/PokupatelPanel'
 import ChekPanel from '../components/ChekPanel'
 import ShopLogoPanel from '../components/ShopLogoPanel'
 import VesyPanel from '../components/VesyPanel'
@@ -363,6 +364,8 @@ export default function Settings() {
               <VesyPanel />
               {/* Облегчённый вид для слабого компьютера — только в программе */}
               {isDesktop && <LitePanel />}
+              {/* Экран покупателя на сайте (1.7.5): второй экран моноблока — окном браузера */}
+              {!isDesktop && <PokupatelPanel />}
             </>
           )}
 

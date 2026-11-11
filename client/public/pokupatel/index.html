@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FinMax POS — экран покупателя</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="customer.css">
+<script src="web-bridge.js"></script>
+<script src="customer.js" defer></script>
+</head>
+<body>
+  <!-- Экран покупателя на сайте (1.7.5): то же, что в программе для Windows (desktop/src/screen —
+       customer.css и customer.js скопированы оттуда без изменений). Что показать, присылает
+       вкладка кассы через BroadcastChannel (web-bridge.js) -->
+  <main id="screen" class="screen" data-view="idle">
+    <!-- Название магазина — крупно по центру; пока покупателя нет, оно и так во весь экран -->
+    <header class="bar" id="bar" hidden>
+      <div class="bar-shop" id="bar-shop"></div>
+      <span class="bar-test" id="bar-test" hidden></span>
+    </header>
+
+    <section class="view view-idle" aria-live="polite">
+      <!-- Логотип магазина (1.6.4) — если владелец сервиса его поставил -->
+      <img class="idle-logo" id="idle-logo" alt="" hidden>
+      <div class="idle-shop" id="idle-shop"></div>
+      <div class="idle-welcome" id="idle-welcome">Добро пожаловать</div>
+    </section>
+
+    <section class="view view-cart">
+      <div class="items-wrap" id="items-wrap">
+        <ol class="items" id="items"></ol>
+      </div>
+      <footer class="sums">
+        <div class="sum-row sum-disc" id="disc-row" hidden>
+          <span id="disc-label">Скидка</span>
+          <b id="disc"></b>
+        </div>
+        <div class="sum-row sum-total">
+          <span id="total-label">Итого</span>
+          <b id="total"></b>
+        </div>
+      </footer>
+    </section>
+
+    <section class="view view-thanks" aria-live="polite">
+      <div class="thanks" id="thanks">Спасибо за покупку!</div>
+      <div class="thanks-row"><span id="thanks-total-label">Итого</span><b id="thanks-total"></b></div>
+      <div class="thanks-row thanks-change" id="change-row" hidden><span id="change-label">Сдача</span><b id="change"></b></div>
+    </section>
+  </main>
+</body>
+</html>
