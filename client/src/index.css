@@ -2859,29 +2859,26 @@ tr.inv-last > td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
   .inv-otbor { max-height: none; }
 }
 
-/* ── Ценники как в 1С (1.7.8): лист A4, рамка, пунктир для разрезания ── */
-.cn-page { display: grid; grid-template-columns: repeat(2, 95mm); grid-auto-rows: 55mm; background: #fff; color: #000; }
-.cn-page.small { grid-template-columns: repeat(3, 64mm); grid-auto-rows: 55mm; }
+/* ── Ценники как в 1С (1.7.8; вид как образец 1С — 1.7.11): лист A4, толстая рамка, серая шапка ──
+   Сетка и размер ценника задаются из Cenniki.jsx (стиль страницы); --k — масштаб шрифта */
+.cn-page { display: grid; grid-template-columns: repeat(2, 95mm); grid-auto-rows: 55mm; background: #fff; color: #000; --k: 1; }
 .print-doc .cn-page { break-after: page; page-break-after: always; }
 .print-doc .cn-page:last-child { break-after: auto; page-break-after: auto; }
-.cn { border: 0.3mm dashed #8a94a6; padding: 1.4mm; box-sizing: border-box; overflow: hidden; background: #fff; color: #000; break-inside: avoid; }
-.cn-box { border: 0.4mm solid #000; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; padding: 1mm 1.6mm 0.6mm; font-family: Arial, Helvetica, sans-serif; overflow: hidden; }
-.cn-name { font-weight: 700; font-size: 13pt; line-height: 1.12; text-align: center; max-height: 2.3em; overflow: hidden; }
-.cn-sub { font-size: 9pt; text-align: center; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cn-bc { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; min-height: 0; line-height: 0; }
-.cn-bc svg { display: block; }
-.cn-price { font-weight: 700; font-size: 24pt; line-height: 1.15; text-align: center; border-top: 0.3mm solid #000; white-space: nowrap; }
-.cn-unit { font-size: 10pt; font-weight: 400; }
-.cn-foot { display: flex; justify-content: space-between; gap: 2mm; font-size: 6.5pt; line-height: 1.4; border-top: 0.3mm solid #000; white-space: nowrap; }
-.cn-shop { overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
-.cn-page.small .cn { padding: 1mm; }
-.cn-page.small .cn-box { padding: 0.6mm 1mm 0.3mm; }
-.cn-page.small .cn-name { font-size: 12pt; }
-.cn-page.small .cn-sub { font-size: 8.5pt; }
-.cn-page.small .cn-price { font-size: 21pt; }
-.cn-page.small .cn-unit { font-size: 9pt; }
-.cn-page.small .cn-foot { font-size: 6pt; }
-/* Образец на экране */
+.cn { padding: calc(1.2mm * min(1, var(--k))); box-sizing: border-box; overflow: hidden; background: #fff; color: #000; break-inside: avoid; page-break-inside: avoid; }
+.cn-box { border: 0.6mm solid #000; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; font-family: Arial, Helvetica, sans-serif; overflow: hidden; }
+.cn-head { flex: none; background: #d9d9d9; border-bottom: 0.5mm solid #000; text-align: center; font-size: calc(10pt * var(--k)); line-height: 1.3; padding: calc(0.4mm * var(--k)) 1.5mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.cn-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: calc(0.5mm * var(--k)) calc(1.8mm * min(1, var(--k))) calc(0.6mm * var(--k)); }
+.cn-lbl { flex: none; font-size: calc(8pt * var(--k)); line-height: 1.15; }
+.cn-name { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; text-align: center; font-weight: 700; font-size: calc(14pt * var(--k)); line-height: 1.1; overflow: hidden; }
+.cn-name > span { max-height: 2.2em; overflow: hidden; }
+.cn-row { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 2mm; font-size: calc(8.5pt * var(--k)); line-height: 1.25; white-space: nowrap; }
+.cn-row > span { overflow: hidden; text-overflow: ellipsis; }
+.cn-price { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: calc(34pt * var(--k)); line-height: 1; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; }
+.cn-sub { flex: none; text-align: center; font-weight: 700; font-size: calc(9pt * var(--k)); line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cn-foot { flex: none; display: flex; align-items: flex-end; gap: 2mm; font-size: calc(7pt * var(--k)); line-height: 1.3; white-space: nowrap; }
+.cn-sign { flex: 1 1 auto; min-width: 0; display: flex; align-items: flex-end; overflow: hidden; }
+.cn-line { flex: 1 1 auto; min-width: 4mm; border-bottom: 0.3mm solid #000; margin: 0 0 0.6mm 1mm; }
+
 .cn-preview { background: var(--soft); border-radius: var(--radius); padding: 12px; overflow: auto; display: flex; justify-content: center; }
 .cn-preview .cn-page { width: max-content; zoom: 1.35; }
 .cn-rows { max-height: 34vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
