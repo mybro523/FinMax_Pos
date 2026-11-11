@@ -4,6 +4,7 @@ import { Modal, useToast } from './ui'
 import PrintDoc from './PrintDoc'
 import NumberInput from './NumberInput'
 import { NakleykiDoc, NakleykaPreview, PovorotPicker, SizePicker, stickerOf } from './Nakleyka'
+import { CennikiDoc, CennikPreview, RazmerCennika, useRazmerCennika } from './Cenniki'
 import { barcodeModel, barcodeSvg, moduleFor, modulesOf } from '../lib/barcode'
 import { PROBLEM_TEXT, copiesOf, nakleykaName, pageOf, razvernut, rotOf, savedRot, saveRot, savedSize, saveSize, sizeText } from '../lib/nakleyka'
 import { labelConfig, labelPrinterOf } from '../lib/print'
@@ -24,7 +25,8 @@ import { translate as tr, useT } from '../lib/i18n'
 const VID_KEY = 'apteka_etiketki_vid'
 function savedVid() {
   try {
-    return localStorage.getItem(VID_KEY) === 'a4' ? 'a4' : 'roll'
+    const v = localStorage.getItem(VID_KEY)
+    return v === 'a4' || v === 'cennik' ? v : 'roll'
   } catch {
     return 'roll'
   }
@@ -48,6 +50,9 @@ export default function LabelPrint({ product, onClose }) {
   const [rotSite, setRotSite] = useState(savedRot)
   const [copies, setCopies] = useState('1')
   const [a4count, setA4count] = useState('12')
+  // Ценник как в 1С (1.7.8): размер и сколько
+  const [razmerCn, setRazmerCn] = useRazmerCennika()
+  const [cnCount, setCnCount] = useState('1')
   const [busy, setBusy] = useState(false)
 
   // Принтер этикеток этого компьютера (только в программе)
@@ -97,11 +102,12 @@ export default function LabelPrint({ product, onClose }) {
     saveRot(r)
   }
 
-  const problem = vid === 'roll' ? data.plan.problem : product.barcode ? (a4svg ? '' : barcodeModel(product.barcode) ? 'toolong' : 'badcode') : 'nocode'
+  // Ценник печатается и без штрихкода (полосок тогда нет): цена на полке нужна всегда
+  const problem = vid === 'cennik' ? '' : vid === 'roll' ? data.plan.problem : product.barcode ? (a4svg ? '' : barcodeModel(product.barcode) ? 'toolong' : 'badcode') : 'nocode'
 
   async function doPrint() {
     if (busy || problem) return
-    if (vid === 'a4') return pechat({ kind: 'labels' })
+    if (vid === 'a4' || vid === 'cennik') return pechat({ kind: 'labels' })
     if (n < 1) return toast(t('Укажите, сколько наклеек напечатать'), 'err')
     if (behind || !ready) return
     setBusy(true)
@@ -134,6 +140,9 @@ export default function LabelPrint({ product, onClose }) {
         <button type="button" className={'chip ' + (vid === 'a4' ? 'active' : '')} onClick={() => chooseVid('a4')} data-testid="lp-a4">
           {t('Лист A4')}
         </button>
+        <button type="button" className={'chip ' + (vid === 'cennik' ? 'active' : '')} onClick={() => chooseVid('cennik')} data-testid="lp-cennik">
+          {t('Ценник')}
+        </button>
       </div>
 
       {problem ? (
@@ -147,7 +156,16 @@ export default function LabelPrint({ product, onClose }) {
         </>
       ) : null}
 
-      {vid === 'roll' ? (
+      {vid === 'cennik' ? (
+        <>
+          <RazmerCennika value={razmerCn} onChange={setRazmerCn} />
+          <div className="field" style={{ maxWidth: 200 }}>
+            <label htmlFor="cn-count">{t('Сколько ценников')}</label>
+            <NumberInput id="cn-count" integer value={cnCount} onChange={(e) => setCnCount(e.target.value)} data-testid="cn-count" />
+          </div>
+          <CennikPreview product={product} razmer={razmerCn} />
+        </>
+      ) : vid === 'roll' ? (
         <div className="lp-roll">
           <div className="lp-side">
             {printer ? (
@@ -186,6 +204,7 @@ export default function LabelPrint({ product, onClose }) {
 
       {/* На бумагу — из печатного слоя: наклейки страницами своего размера или лист A4 */}
       {!problem && vid === 'roll' && <NakleykiDoc items={items} title={title} />}
+      {vid === 'cennik' && <CennikiDoc rows={[{ product, count: cnCount }]} razmer={razmerCn} title={t('Ценники') + ' — ' + (nakleykaName(product) || product.name)} />}
       {!problem && vid === 'a4' && (
         <PrintDoc prio={2} kind="labels" title={title}>
           {sheet}
@@ -194,7 +213,7 @@ export default function LabelPrint({ product, onClose }) {
 
       <div className="modal-actions">
         <button className="btn ghost" onClick={onClose}>{t('Закрыть')}</button>
-        <button className="btn" onClick={doPrint} disabled={busy || !!problem || (vid === 'roll' && (n < 1 || behind || !ready))} data-testid="lp-print">
+        <button className="btn" onClick={doPrint} disabled={busy || !!problem || (vid === 'roll' && (n < 1 || behind || !ready)) || (vid === 'cennik' && !(Number(cnCount) > 0))} data-testid="lp-print">
           <span className="ic"><LuPrinter size={16} /></span> {busy ? t('Печать…') : t('Печать')}
         </button>
       </div>

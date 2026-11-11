@@ -1,5 +1,5 @@
 import { useState, useMemo, lazy, Suspense } from 'react'
-import { LuPlus, LuPencil, LuTrash2, LuTag, LuHistory } from 'react-icons/lu'
+import { LuPlus, LuPencil, LuTrash2, LuTag, LuHistory, LuReceiptText } from 'react-icons/lu'
 import ProductHistory from '../components/ProductHistory'
 import Layout from '../components/Layout'
 import StickyBar from '../components/StickyBar'
@@ -23,6 +23,7 @@ import { isVesovoy, stockUnits, stockValue } from '../lib/units'
 
 // Печать этикеток нужна редко — грузим по требованию, чтобы не утяжелять страницу
 const LabelPrint = lazy(() => import('../components/LabelPrint'))
+const CennikiModal = lazy(() => import('../components/Cenniki'))
 
 // Поля карточки живут в общем компоненте: ту же форму показывает касса, когда
 // сканер поймал незнакомый штрихкод. Раньше это были два разных куска кода, и они
@@ -45,6 +46,16 @@ export default function Products() {
   const [cat, setCat] = useState('Все')
   const [edit, setEdit] = useState(null) // объект формы или null
   const [labelFor, setLabelFor] = useState(null) // товар, для которого печатаем этикетки
+  // Отмеченные галочками — для ценников сразу на несколько товаров (1.7.8)
+  const [sel, setSel] = useState(() => new Set())
+  const [cenniki, setCenniki] = useState(false)
+  const toggle = (id) =>
+    setSel((s) => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
   const [historyFor, setHistoryFor] = useState(null) // товар, чью историю движения смотрим
   const [foto, setFoto] = useState(null) // товар, чьё фото смотрим на весь экран
 
@@ -171,6 +182,11 @@ export default function Products() {
       note={`${products.length} ${t('наименований · склад на')} ${money(totalValue)}`}
       actions={<>
         <ExportPechat onExcel={exportExcel} />
+        {can('products.labels') && sel.size > 0 && (
+          <button className="btn ghost" onClick={() => setCenniki(true)} data-testid="prod-cenniki">
+            <span className="ic"><LuReceiptText size={16} /></span> {t('Ценники')} ({sel.size})
+          </button>
+        )}
         {can('products.create') && <button className="btn" data-tour="prod.add" onClick={() => setEdit({ ...empty })}><span className="ic"><LuPlus size={16} /></span> {t('Добавить товар')}</button>}
       </>}
     >
@@ -191,6 +207,18 @@ export default function Products() {
         <table>
           <thead>
             <tr>
+              {can('products.labels') && (
+                <th style={{ width: 36 }}>
+                  <input
+                    type="checkbox"
+                    aria-label={t('Отметить все')}
+                    title={t('Отметить все')}
+                    data-testid="prod-sel-all"
+                    checked={filtered.length > 0 && filtered.every((p) => sel.has(p.id))}
+                    onChange={(e) => setSel(e.target.checked ? new Set(filtered.map((p) => p.id)) : new Set())}
+                  />
+                </th>
+              )}
               <th>{t('Наименование')}</th><th>{t('Штрихкод')}</th><th>{t('Категория')}</th>
               <th className="num">{t('Продажа')}</th><th className="num">{t('Остаток')}</th><th>{t('Годен до')}</th><th></th>
             </tr>
@@ -200,6 +228,11 @@ export default function Products() {
               const e = expiryStatus(p)
               return (
                 <tr key={p.id}>
+                  {can('products.labels') && (
+                    <td>
+                      <input type="checkbox" checked={sel.has(p.id)} onChange={() => toggle(p.id)} aria-label={t('Отметить') + ': ' + p.name} data-testid="prod-sel" />
+                    </td>
+                  )}
                   <td>
                     <span className="prod-name-cell">
                       {p.image && <img className="foto-mini" src={p.image} alt="" onClick={() => setFoto(p)} />}
@@ -237,7 +270,7 @@ export default function Products() {
                 </tr>
               )
             })}
-            {filtered.length === 0 && <tr><td colSpan="7" className="empty">{t('Ничего не найдено')}</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan="8" className="empty">{t('Ничего не найдено')}</td></tr>}
           </tbody>
         </table>
         <Pagination {...pg} />
@@ -258,6 +291,11 @@ export default function Products() {
 
       {foto && <Lightbox src={foto.image} alt={foto.name} onClose={() => setFoto(null)} />}
 
+      {cenniki && (
+        <Suspense fallback={null}>
+          <CennikiModal products={products.filter((p) => sel.has(p.id))} onClose={() => setCenniki(false)} />
+        </Suspense>
+      )}
       {labelFor && (
         <Suspense fallback={null}>
           <LabelPrint product={labelFor} onClose={() => setLabelFor(null)} />

@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { LuTrash2, LuPencil, LuList, LuPackagePlus, LuWallet, LuChartColumn, LuSearch, LuRotateCcw, LuUndo2, LuTag } from 'react-icons/lu'
+import { LuTrash2, LuPencil, LuList, LuPackagePlus, LuWallet, LuChartColumn, LuSearch, LuRotateCcw, LuUndo2, LuTag, LuReceiptText } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import StickyBar from '../components/StickyBar'
 import { isVesovoy, uppOf, gramsOfKg, kgText, edinica, isDivisible } from '../lib/units'
@@ -26,6 +26,7 @@ import Balance, { useBalance } from './prihod/Balance'
 import Reports, { useReports } from './prihod/Reports'
 import ReturnTab, { REFUNDS } from './prihod/ReturnTab'
 import PrihodNakleyki from '../components/PrihodNakleyki'
+import CennikiModal from '../components/Cenniki'
 
 // ── Приход товара ──
 // Один экран, как в привычных программах приёмки: слева — поставщики, сверху — период
@@ -131,6 +132,7 @@ export default function Arrivals() {
   const [view, setView] = useState(null)
   const [edit, setEdit] = useState(null) // приход, загруженный для правки
   const [labelsFor, setLabelsFor] = useState(null) // приход, на товары которого печатаем наклейки
+  const [cennikiFor, setCennikiFor] = useState(null) // приход, на товары которого печатаем ценники (1.7.8)
   const [busy, setBusy] = useState(false)
 
   // Для правки нужен не тот приход, что лежит в списке, а подробный: с ним
@@ -397,6 +399,17 @@ export default function Arrivals() {
             setLabelsFor(view)
             setView(null)
           }}
+          onCenniki={() => {
+            setCennikiFor(view)
+            setView(null)
+          }}
+        />
+      )}
+      {cennikiFor && (
+        <CennikiModal
+          title={t('Ценники на приход') + ' — ' + (cennikiFor.supplier || fmtDateTime(cennikiFor.date))}
+          products={[...new Set((cennikiFor.items || []).map((i) => i.productId))].map((id) => products.find((p) => p.id === id)).filter(Boolean)}
+          onClose={() => setCennikiFor(null)}
         />
       )}
 
@@ -471,7 +484,7 @@ function PeriodBar({ value, onChange, loading }) {
 }
 
 // ── Приход · подробно ──
-function ArrivalDetails({ a, products, sposob, busy, canEdit, canLabels, onClose, onEdit, onDelete, onLabels }) {
+function ArrivalDetails({ a, products, sposob, busy, canEdit, canLabels, onClose, onEdit, onDelete, onLabels, onCenniki }) {
   const t = useT()
   const items = a.items || []
   const withDisc = items.some((i) => num(i.discount) > 0)
@@ -533,6 +546,11 @@ function ArrivalDetails({ a, products, sposob, busy, canEdit, canLabels, onClose
             {canLabels && (
               <button className="btn ghost" onClick={onLabels} disabled={busy || !(a.items || []).length} data-testid="arr-labels">
                 <span className="ic"><LuTag size={16} /></span> {t('Этикетки')}
+              </button>
+            )}
+            {canLabels && (
+              <button className="btn ghost" onClick={onCenniki} disabled={busy || !(a.items || []).length} data-testid="arr-cenniki">
+                <span className="ic"><LuReceiptText size={16} /></span> {t('Ценники')}
               </button>
             )}
             {canEdit && (
