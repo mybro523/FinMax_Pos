@@ -2878,6 +2878,11 @@ tr.inv-last > td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
 .cn-foot { flex: none; display: flex; align-items: flex-end; gap: 2mm; font-size: calc(7pt * var(--k)); line-height: 1.3; white-space: nowrap; }
 .cn-sign { flex: 1 1 auto; min-width: 0; display: flex; align-items: flex-end; overflow: hidden; }
 .cn-line { flex: 1 1 auto; min-width: 4mm; border-bottom: 0.3mm solid #000; margin: 0 0 0.6mm 1mm; }
+/* Ценник на принтере этикеток (1.7.12): блок наклейки .nk, внутри — ценник размером наклейки,
+   повёрнутый и сдвинутый как наклейки со штрихкодом */
+.cn-nk-in { position: absolute; left: 0; top: 0; transform-origin: 0 0; line-height: normal; background: #fff; color: #000; }
+.cn-nk-in > .cn { width: 100%; height: 100%; }
+.cn-nk-zoom { line-height: 0; box-shadow: 0 0 0 1px var(--border); border-radius: 2px; background: #fff; }
 
 .cn-preview { background: var(--soft); border-radius: var(--radius); padding: 12px; overflow: auto; display: flex; justify-content: center; }
 .cn-preview .cn-page { width: max-content; zoom: 1.35; }

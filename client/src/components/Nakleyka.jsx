@@ -139,13 +139,23 @@ export function NakleykaPreview({ data, frame, zoom = 1.6 }) {
 // 12 мм, — разрезав наклейку на полоски. Пока наклейки на печати, другого не печатают
 const NO_BOXES = '@top-center { content: none } @bottom-left { content: none } @bottom-right { content: none }'
 export function NakleykiDoc({ items, frame = false, title = '' }) {
+  return (
+    <StickerPages title={title}>
+      {items.map((it) => (
+        <Nakleyka key={it.key} data={it.data} frame={frame} />
+      ))}
+    </StickerPages>
+  )
+}
+
+// Страницы-наклейки с любым содержимым (наклейки со штрихкодом, ценники на принтере
+// этикеток — 1.7.12): каждая — блок .nk своего размера
+export function StickerPages({ title = '', children }) {
   const rule = `margin: 0; ${NO_BOXES}`
   return (
     <PrintDoc prio={2} kind="sticker" title={title}>
       <style>{`@page { ${rule} } @page sticker { ${rule} }`}</style>
-      {items.map((it) => (
-        <Nakleyka key={it.key} data={it.data} frame={frame} />
-      ))}
+      {children}
     </PrintDoc>
   )
 }

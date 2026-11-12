@@ -4,7 +4,7 @@ import { Modal, useToast } from './ui'
 import PrintDoc from './PrintDoc'
 import NumberInput from './NumberInput'
 import { NakleykiDoc, NakleykaPreview, PovorotPicker, SizePicker, stickerOf } from './Nakleyka'
-import { CennikiDoc, CennikPreview, RazmerCennika, useRazmerCennika } from './Cenniki'
+import { CennikiDoc, CennikPreview, RazmerCennika, formatOf, pechatCennikov, useRazmerCennika } from './Cenniki'
 import { barcodeModel, barcodeSvg, moduleFor, modulesOf } from '../lib/barcode'
 import { PROBLEM_TEXT, copiesOf, nakleykaName, pageOf, razvernut, rotOf, savedRot, saveRot, savedSize, saveSize, sizeText } from '../lib/nakleyka'
 import { labelConfig, labelPrinterOf } from '../lib/print'
@@ -73,6 +73,9 @@ export default function LabelPrint({ product, onClose }) {
   const rot = printer ? rotOf(cfg.rot, cfg.flip) : rotSite
   const shift = printer ? { dx: cfg.dx, dy: cfg.dy, rot } : { rot }
   const page = pageOf(useSize, rot)
+  // Ценник на принтере этикеток (1.7.12) — тот же размер, поворот и сдвиг, что у наклеек
+  const nkCn = { ready, cfg, printer, size: useSize, rot, dx: printer ? cfg.dx : 0, dy: printer ? cfg.dy : 0 }
+  const cnNk = formatOf(razmerCn).kuda === 'nk'
   const data = useMemo(() => stickerOf(product, useSize, dpi, shift), [product, useSize.w, useSize.h, dpi, shift.dx, shift.dy, shift.rot]) // eslint-disable-line react-hooks/exhaustive-deps
   const n = copiesOf(copies)
   // Сотня наклеек в печатном слое перерисовывается не на каждую набранную цифру
@@ -107,7 +110,21 @@ export default function LabelPrint({ product, onClose }) {
 
   async function doPrint() {
     if (busy || problem) return
-    if (vid === 'a4' || vid === 'cennik') return pechat({ kind: 'labels' })
+    if (vid === 'a4') return pechat({ kind: 'labels' })
+    if (vid === 'cennik') {
+      if (!cnNk) return pechat({ kind: 'labels' })
+      if (!ready) return
+      setBusy(true)
+      try {
+        const where = await pechatCennikov(razmerCn, nkCn)
+        if (where === 'printer') toast(`${t('Отправлено на принтер этикеток')}: ${Math.min(500, Number(cnCount) || 0)}`)
+      } catch (e) {
+        toast(tr(e.message), 'err')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
     if (n < 1) return toast(t('Укажите, сколько наклеек напечатать'), 'err')
     if (behind || !ready) return
     setBusy(true)
@@ -158,12 +175,12 @@ export default function LabelPrint({ product, onClose }) {
 
       {vid === 'cennik' ? (
         <>
-          <RazmerCennika value={razmerCn} onChange={setRazmerCn} />
+          <RazmerCennika value={razmerCn} onChange={setRazmerCn} nk={nkCn} />
           <div className="field" style={{ maxWidth: 200 }}>
             <label htmlFor="cn-count">{t('Сколько ценников')}</label>
             <NumberInput id="cn-count" integer value={cnCount} onChange={(e) => setCnCount(e.target.value)} data-testid="cn-count" />
           </div>
-          <CennikPreview product={product} razmer={razmerCn} />
+          <CennikPreview product={product} razmer={razmerCn} nk={nkCn} />
         </>
       ) : vid === 'roll' ? (
         <div className="lp-roll">
@@ -204,7 +221,7 @@ export default function LabelPrint({ product, onClose }) {
 
       {/* На бумагу — из печатного слоя: наклейки страницами своего размера или лист A4 */}
       {!problem && vid === 'roll' && <NakleykiDoc items={items} title={title} />}
-      {vid === 'cennik' && <CennikiDoc rows={[{ product, count: cnCount }]} razmer={razmerCn} title={t('Ценники') + ' — ' + (nakleykaName(product) || product.name)} />}
+      {vid === 'cennik' && <CennikiDoc rows={[{ product, count: cnCount }]} razmer={razmerCn} nk={nkCn} title={t('Ценники') + ' — ' + (nakleykaName(product) || product.name)} />}
       {!problem && vid === 'a4' && (
         <PrintDoc prio={2} kind="labels" title={title}>
           {sheet}
@@ -213,7 +230,7 @@ export default function LabelPrint({ product, onClose }) {
 
       <div className="modal-actions">
         <button className="btn ghost" onClick={onClose}>{t('Закрыть')}</button>
-        <button className="btn" onClick={doPrint} disabled={busy || !!problem || (vid === 'roll' && (n < 1 || behind || !ready)) || (vid === 'cennik' && !(Number(cnCount) > 0))} data-testid="lp-print">
+        <button className="btn" onClick={doPrint} disabled={busy || !!problem || (vid === 'roll' && (n < 1 || behind || !ready)) || (vid === 'cennik' && (!(Number(cnCount) > 0) || (cnNk && !ready)))} data-testid="lp-print">
           <span className="ic"><LuPrinter size={16} /></span> {busy ? t('Печать…') : t('Печать')}
         </button>
       </div>
