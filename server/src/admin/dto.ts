@@ -1,4 +1,4 @@
-import { IsBoolean, IsDateString, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, Min, MinLength } from 'class-validator'
+import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, Min, MinLength } from 'class-validator'
 
 export class CreatePharmacyDto {
   // Код: латиница, цифры и дефис. Проверку по существу делает сервис — здесь только
@@ -22,6 +22,14 @@ export class CreatePharmacyDto {
 
   // Логотип магазина — data URL картинки (проверяет src/admin/logo.ts). Нет — чек без логотипа
   @IsOptional() @IsString() logo?: string
+
+  // Товары из Excel клиента (admin/import-products.ts проверяет каждую строку)
+  @IsOptional() @IsArray() @ArrayMaxSize(50000) products?: any[]
+}
+
+// Дозагрузка товаров из Excel в уже заведённый магазин
+export class ImportProductsDto {
+  @IsArray() @ArrayMaxSize(50000) products: any[]
 }
 
 export class ExtendPharmacyDto {

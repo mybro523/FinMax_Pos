@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestj
 import { PharmaciesService } from './pharmacies.service'
 import { SummaryService } from './summary.service'
 import { CurrentUser, Roles, ServiceWide } from '../auth/decorators'
-import { CreatePharmacyDto, ExtendPharmacyDto, UpdatePharmacyDto } from './dto'
+import { CreatePharmacyDto, ExtendPharmacyDto, ImportProductsDto, UpdatePharmacyDto } from './dto'
 
 // ── Панель управления ──
 // Разделы владельца сервиса: список магазинов-клиентов и заведение новых. Продление,
@@ -84,6 +84,12 @@ export class AdminController {
 
   // Продление подписки. Деньги принимаются вживую, здесь остаётся запись о том,
   // за что и на сколько продлили.
+  // Дозагрузка товаров из Excel в заведённый магазин (товары с тем же штрихкодом не трогаются)
+  @Post(':id/products')
+  importProducts(@Param('id') id: string, @Body() dto: ImportProductsDto, @CurrentUser() u: any) {
+    return this.pharmacies.importProducts(id, dto.products, u?.sub)
+  }
+
   @Post(':id/extend')
   extend(@Param('id') id: string, @Body() dto: ExtendPharmacyDto, @CurrentUser() u: any) {
     return this.pharmacies.extend(id, dto, u?.sub)

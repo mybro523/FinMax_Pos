@@ -17,6 +17,7 @@ import { EventsGateway } from '../events/events.gateway'
 import { AccountCache } from './account-cache.service'
 import { SubscriptionWatchService } from './subscription-watch.service'
 import { checkLogo } from './logo'
+import { importProducts } from './import-products'
 
 export interface NewPharmacy {
   code: string
@@ -34,6 +35,8 @@ export interface NewPharmacy {
   ownerPassword?: string
   // Заполнить демонстрационными товарами и продажами — для показа программы
   demo?: boolean
+  // Товары из Excel клиента — заводятся вместе с магазином (admin/import-products.ts)
+  products?: unknown[]
   // Логотип магазина — data URL картинки (src/admin/logo.ts). Нет — чеки без логотипа
   logo?: string
 }
@@ -192,6 +195,9 @@ export class PharmaciesService {
       await this.schemas.ensureSchema(schemaName)
       await this.schemas.migrate(schemaName)
       await this.bootstrap(schemaName, !!dto.demo)
+      // Товары из Excel — до владельца: сорвётся загрузка — магазин убирается целиком, как при
+      // любой другой ошибке заведения, а не остаётся полупустым
+      const imported = Array.isArray(dto.products) && dto.products.length ? await this.importIn(schemaName, dto.products) : null
 
       // Владелец магазина — тем же кодом, что и обычный сотрудник: запись в две базы
       // с бронью логина написана один раз, и второй её копии быть не должно
@@ -209,7 +215,7 @@ export class PharmaciesService {
       this.events.toService('pharmacies', { code })
       // Пароль возвращаем отдельно от самого магазина: он не хранится и в списке
       // магазинов его больше не будет
-      return { ...ready, ownerLogin, ownerPassword }
+      return { ...ready, ownerLogin, ownerPassword, imported }
     } catch (e: any) {
       // Убираем за собой в обратном порядке. Ошибку уборки глотаем: показать надо
       // ту, из-за которой всё сорвалось, а не ту, что случилась при отступлении.
@@ -579,6 +585,27 @@ export class PharmaciesService {
     this.log.warn(`Магазин «${ph.name}» (${ph.code}) удалена вместе со схемой ${ph.schemaName}: ${scale}`)
     this.events.toService('pharmacies', { code: ph.code })
     return { ok: true }
+  }
+
+  // ── Товары из Excel в уже заведённый магазин ──
+  // Товары с тем же штрихкодом не трогаются — дозагрузка добавляет только новые
+  async importProducts(id: string, items: unknown[], byAccountId?: string) {
+    const ph = await this.admin.pharmacy.findUnique({ where: { id } })
+    if (!ph) throw new NotFoundException('Магазин не найден')
+    if (!Array.isArray(items) || !items.length) throw new BadRequestException('В файле нет товаров')
+    const r = await this.importIn(ph.schemaName, items)
+    await this.log_(byAccountId, ph, 'products.import', `Товары из Excel: заведено ${r.created}, уже были ${r.existed}, отброшено ${r.dropped}`)
+    this.log.log(`Магазин ${ph.code}: товары из Excel — заведено ${r.created}, уже были ${r.existed}`)
+    return r
+  }
+
+  // Загрузка в схеме магазина; новые категории товаров — сразу в справочник
+  private importIn(schema: string, items: unknown[]) {
+    return runInTenant(schema, async () => {
+      const r = await importProducts(this.prisma, items)
+      if (r.created) await this.categories.ensureSeeded()
+      return r
+    })
   }
 
   // ── Стартовая настройка чистого магазина ──

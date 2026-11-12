@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react
 import {
   LuPlus, LuLogOut, LuRefreshCw, LuTriangleAlert, LuKeyRound,
   LuBanknote, LuPause, LuPlay, LuLogIn, LuScrollText, LuTrash2, LuPencil, LuCheck,
-  LuPhone, LuSettings, LuSun, LuMoon,
+  LuPhone, LuSettings, LuSun, LuMoon, LuFileSpreadsheet,
 } from 'react-icons/lu'
 import { Modal, useToast, useDialog } from '../components/ui'
 import NumberInput from '../components/NumberInput'
@@ -16,6 +16,7 @@ import { useT, useLang, setLang, LANGS } from '../lib/i18n'
 import { useTheme, setTheme } from '../lib/theme'
 import emblem from '../assets/brand/emblem-64.png'
 import LogoField from '../components/LogoField'
+import TovaryIzExcel from '../components/TovaryIzExcel'
 
 // Библиотека диаграмм весит около 370 КБ — грузим её после того, как показаны
 // числа и список магазинов
@@ -121,6 +122,8 @@ const emptyPay = { months: '1', amount: '', method: 'cash', note: '' }
 const emptyNew = {
   code: '', name: '', ownerName: '', phone: '', city: '',
   trialDays: '14', ownerLogin: '', ownerPassword: '', demo: false, logo: '',
+  // Товары из Excel клиента (components/TovaryIzExcel.jsx) — разобранный файл или null
+  tovary: null,
 }
 
 export default function Admin() {
@@ -237,10 +240,12 @@ export default function Admin() {
       demo: form.demo || undefined,
       // Логотип — уже уменьшенной картинкой (lib/logoImage.js); не выбран — магазин без логотипа
       logo: form.logo || undefined,
+      // Товары из Excel — готовым списком (свой код товарам без штрихкода уже дан)
+      products: form.tovary?.items?.length ? form.tovary.items : undefined,
     }
 
     setForm(null)
-    const mark = { key: 'new_' + Date.now(), code: body.code, name: body.name, city: body.city, demo: !!body.demo }
+    const mark = { key: 'new_' + Date.now(), code: body.code, name: body.name, city: body.city, demo: !!body.demo, tovary: body.products?.length || 0 }
     setPending((list) => [mark, ...list])
 
     api
@@ -291,7 +296,7 @@ export default function Admin() {
         <td className="tag-cat num" data-label={t('Принёс')}>—</td>
         <td className="cell-state" data-label={t('Состояние')}>
           <span className="badge low">
-            {p.demo ? t('заводится с демо-данными…') : t('заводится…')}
+            {p.tovary ? `${t('заводится с товарами')} (${p.tovary.toLocaleString('ru-RU')})…` : p.demo ? t('заводится с демо-данными…') : t('заводится…')}
           </span>
         </td>
       </tr>
@@ -475,6 +480,12 @@ export default function Admin() {
               <div className="m-value sm" style={{ letterSpacing: 1 }}>{created.ownerPassword}</div>
             </div>
           </div>
+          {created.imported && (
+            <div className="note info" style={{ marginBottom: 16 }} data-testid="created-imported">
+              {t('Товаров из Excel заведено')}: <b>{created.imported.created.toLocaleString('ru-RU')}</b>
+              {created.imported.dropped ? ` · ${t('отброшено')}: ${created.imported.dropped}` : ''}
+            </div>
+          )}
           <div className="modal-actions">
             <button className="btn" onClick={() => setCreated(null)}>{t('Записал')}</button>
           </div>
@@ -562,10 +573,13 @@ function NewPharmacy({ form, setForm, onStart, toast, t }) {
           <input value={form.ownerPassword} onChange={(e) => set('ownerPassword', e.target.value)} placeholder={t('придумается сам')} /></div>
       </div>
 
-      <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14, marginBottom: 16 }}>
-        <input type="checkbox" checked={form.demo} onChange={(e) => set('demo', e.target.checked)} />
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14, marginBottom: 16, opacity: form.tovary ? 0.5 : 1 }}>
+        <input type="checkbox" checked={form.demo && !form.tovary} disabled={!!form.tovary} onChange={(e) => set('demo', e.target.checked)} />
         {t('Заполнить демонстрационными товарами и продажами')}
       </label>
+
+      {/* Товары клиента из его Excel — по желанию. С ними демо-товары не нужны: смешались бы */}
+      <TovaryIzExcel value={form.tovary} onChange={(v) => setForm((f) => f && { ...f, tovary: v, demo: v ? false : f.demo })} t={t} />
 
       <div className="note info" style={{ marginBottom: 14, fontSize: 12.5 }}>
         {t('Заведение занимает около полуминуты — окно закроется сразу, работа пойдёт в фоне. Логин и пароль появятся, когда магазин будет готов.')}
@@ -603,6 +617,8 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
   const [busy, setBusy] = useState(false)
   const [pay, setPay] = useState(null)
   const [edit, setEdit] = useState(null)
+  // Дозагрузка товаров из Excel: { tovary: разобранный файл, busy }
+  const [zagruzka, setZagruzka] = useState(null)
   // Картинка логотипа в «Изменить магазин» ещё готовится
   const [logoBusy, setLogoBusy] = useState(false)
   // Логотип магазина: undefined — ещё грузится, '' — логотипа нет. Картинка лежит отдельно
@@ -637,6 +653,22 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
   // ── Счётчики отдельным запросом ──
   // За ними надо идти в схему самого магазина, и если тот давно не работал —
   // подключение к ней открывается заново. Держать из-за этого весь экран нельзя.
+  async function zagruzit() {
+    const items = zagruzka?.tovary?.items
+    if (!items?.length) return
+    setZagruzka((z) => ({ ...z, busy: true }))
+    try {
+      const r = await api.post(`/admin/pharmacies/${id}/products`, { products: items }, { timeout: LONG_TIMEOUT_MS })
+      setZagruzka(null)
+      toast(`${t('Товары загружены')}: ${r.created.toLocaleString('ru-RU')}${r.existed ? ` · ${t('уже были в магазине')}: ${r.existed}` : ''}`)
+      loadUsage()
+      onChanged?.()
+    } catch (e) {
+      setZagruzka((z) => z && { ...z, busy: false })
+      toast(`${t('Товары не загрузились')}: ${e.message}`, 'err')
+    }
+  }
+
   const loadUsage = useCallback(async () => {
     try {
       const u = await api.get(`/admin/pharmacies/${id}/usage`)
@@ -809,6 +841,9 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
         >
           <span className="ic"><LuPencil size={16} /></span> {t('Изменить')}
         </button>
+        <button className="btn ghost" onClick={() => setZagruzka({ tovary: null, busy: false })} disabled={busy} data-testid="card-excel">
+          <span className="ic"><LuFileSpreadsheet size={16} /></span> {t('Товары из Excel')}
+        </button>
         <button className="btn ghost" onClick={removeIt} disabled={busy} style={{ marginLeft: 'auto', color: 'var(--danger)' }}>
           <span className="ic"><LuTrash2 size={16} /></span> {t('Удалить')}
         </button>
@@ -938,6 +973,21 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
               }
             >
               {busy ? t('Продлеваем…') : t('Продлить')}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {zagruzka && (
+        <Modal className="admin-modal" title={t('Товары из Excel')} onClose={() => !zagruzka.busy && setZagruzka(null)}>
+          <div className="note info" style={{ marginBottom: 12 }}>
+            {t('Товары добавятся в магазин. Товары с тем же штрихкодом, что уже есть в магазине, не трогаются.')}
+          </div>
+          <TovaryIzExcel value={zagruzka.tovary} onChange={(v) => setZagruzka((z) => z && { ...z, tovary: v })} disabled={zagruzka.busy} t={t} />
+          <div className="modal-actions">
+            <button className="btn ghost" onClick={() => setZagruzka(null)} disabled={zagruzka.busy}>{t('Отмена')}</button>
+            <button className="btn" onClick={zagruzit} disabled={zagruzka.busy || !zagruzka.tovary?.items?.length} data-testid="card-excel-go">
+              {zagruzka.busy ? t('Загружаем…') : t('Загрузить')}
             </button>
           </div>
         </Modal>
