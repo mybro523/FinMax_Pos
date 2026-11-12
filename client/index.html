@@ -11,10 +11,14 @@
     <!-- Цвет строки браузера на телефоне — под тему: светлая и глубокий синий -->
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f3f5fa" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a1230" />
-    <!-- Inter — аккуратный профессиональный шрифт; при офлайне откатывается на системный -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <!-- inter:start — шрифт Inter (SIL OFL 1.1) со своего сайта, а не у Google: страница не ждёт
+         чужой сервер. Один переменный файл на набор букв (толщины 400–700), браузер берёт только
+         нужные наборы; кириллица и латиница качаются сразу, cyrillic-ext (таджикские ӣ ӯ ҳ ҷ қ ғ)
+         — когда встретится. Программа для Windows этот блок заменяет своим шрифтом (vite.config.js) -->
+    <link rel="preload" href="/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/fonts/inter.css" />
+    <!-- inter:end -->
     <title>FinMax POS — касса и склад торговли</title>
   </head>
   <body>

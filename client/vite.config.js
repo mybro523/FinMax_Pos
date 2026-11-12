@@ -45,21 +45,17 @@ function preconnectApi() {
 }
 
 // ── Шрифт для программы Windows ──
-// Сайт берёт шрифт Inter у Google. Программе так нельзя: она обязана выглядеть
-// одинаково и без интернета, а окну программы выход в сеть закрыт вовсе.
-// Поэтому в её сборке ссылки на Google заменяются одной ссылкой на шрифт,
-// который лежит внутри самой программы (его отдаёт desktop/src/protocol.mjs).
+// Сайт берёт шрифт Inter со своего адреса (/fonts, блок inter:start…inter:end в index.html).
+// Программа обязана выглядеть одинаково и без интернета, а свой шрифт у неё лежит внутри
+// (его отдаёт desktop/src/protocol.mjs) — в её сборке этот блок заменяется одной ссылкой
+// на него. Блока нет — сборка останавливается: программа осталась бы без шрифта
 function localFonts() {
   return {
     name: 'local-fonts',
     transformIndexHtml(html) {
-      return html
-        .replace(/\s*<!--[^>]*Inter[^>]*-->/, '')
-        .replace(/\s*<link rel="preconnect" href="https:\/\/fonts\.[^>]*>/g, '')
-        .replace(
-          /<link href="https:\/\/fonts\.googleapis\.com[^>]*>/,
-          '<link rel="stylesheet" href="./_fonts/inter.css" />',
-        )
+      const re = /[ \t]*<!-- inter:start[\s\S]*?<!-- inter:end -->/
+      if (!re.test(html)) throw new Error('index.html: нет блока шрифта inter:start…inter:end')
+      return html.replace(re, '    <link rel="stylesheet" href="./_fonts/inter.css" />')
     },
   }
 }
