@@ -45,6 +45,8 @@ export class CreateArrivalDto {
   @IsOptional() @IsNumber() @Min(0) @Max(MAX_MONEY) paidCash?: number
   // Из какой открытой смены берутся деньги; не задано — смена сайта
   @IsOptional() @IsString() @MaxLength(64) shiftId?: string
+  // Куда пришёл товар (1.8.0): в магазин (как прежде) или на свой склад
+  @IsOptional() @IsIn(['shop', 'sklad']) place?: string
 
   @IsArray()
   @ArrayMinSize(1)

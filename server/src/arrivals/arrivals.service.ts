@@ -12,6 +12,7 @@ import { periodFilter, PeriodQuery, MAX_ROWS } from '../common/period'
 import { lockSupplier } from '../suppliers/suppliers.service'
 import { forgetStamps, same, stamp } from '../common/stamps'
 import { CreateArrivalDto, UpdateArrivalDto } from './dto'
+import { addToSklad } from '../sklad/sklad.service'
 
 type Tx = Prisma.TransactionClient
 
@@ -63,7 +64,11 @@ export class ArrivalsService {
     const ids = [...new Set(arrival.items.map((i) => i.productId).filter(Boolean) as string[])]
     const products = await this.prisma.product.findMany({ where: { id: { in: ids } } })
     const byId = new Map(products.map((p) => [p.id, p]))
-    const batches = await this.prisma.batch.findMany({ where: { arrivalId: id } })
+    // Приход на склад (1.8.0) лежит партиями склада: «осталось» — сколько ещё на складе
+    const batches =
+      arrival.place === 'sklad'
+        ? await this.prisma.skladBatch.findMany({ where: { arrivalId: id } })
+        : await this.prisma.batch.findMany({ where: { arrivalId: id } })
 
     // Остаток считаем по товару, а не по строке: один товар может стоять
     // в приходе дважды (две партии с разными сроками), и партии тогда
@@ -121,6 +126,9 @@ export class ArrivalsService {
 
   async create(dto: CreateArrivalDto, userId?: string) {
     const { supplier, items } = dto
+    // Приход на свой склад (1.8.0): магазин не меняется — ни остаток, ни средняя закупочная.
+    // Поставщик, долг, оплата из кассы, новая цена продажи и смена упаковки — как у обычного
+    const toSklad = dto.place === 'sklad'
 
     return this.prisma.$transaction(async (tx) => {
       const ids = [...new Set(items.map((i) => i.productId))]
@@ -175,6 +183,7 @@ export class ArrivalsService {
       // закупочную цену не меняет и правку цены, сделанную на кассе без связи, не перекрывает
       const costMoved = new Set<string>()
       for (const [pid, a] of agg) {
+        if (toSklad) break
         const p = byId.get(pid)!
         const weighted = weightedPackCost({
           stock: p.stock,
@@ -231,6 +240,7 @@ export class ArrivalsService {
           supplierId: sup.supplierId,
           debt: sup.debt,
           payMethod: ['cash', 'own', 'card', 'debt'].includes(dto.payMethod || '') ? dto.payMethod! : '',
+          place: toSklad ? 'sklad' : 'shop',
           userId: userId ?? null,
           total,
           items: { create: arrivalItems },
@@ -269,7 +279,10 @@ export class ArrivalsService {
       for (let n = 0; n < arrivalItems.length; n++) {
         const it = arrivalItems[n]
         const p = byId.get(it.productId)!
-        await addUnits(tx, it.productId, this.unitsOf(it, it.unitsPerPack), costInPack(it.cost, it.unitsPerPack, uppOf(p)), expiryByIndex[n], arrival.id)
+        const units = this.unitsOf(it, it.unitsPerPack)
+        const cost = costInPack(it.cost, it.unitsPerPack, uppOf(p))
+        if (toSklad) await addToSklad(tx, it.productId, units, cost, expiryByIndex[n], arrival.id)
+        else await addUnits(tx, it.productId, units, cost, expiryByIndex[n], arrival.id)
       }
 
       return arrival
@@ -340,6 +353,8 @@ export async function applyPackChanges(
       data.cost = costInPack(p.cost, was, upp)
       data.price = costInPack(p.price, was, upp)
       await tx.$executeRaw(Prisma.sql`UPDATE "Batch" SET "cost" = ROUND("cost" * ${upp}::numeric / ${was}::numeric, 2) WHERE "productId" = ${pid}`)
+      // Партии склада (1.8.0) хранят цену за ту же упаковку — переводятся так же
+      await tx.$executeRaw(Prisma.sql`UPDATE "SkladBatch" SET "cost" = ROUND("cost" * ${upp}::numeric / ${was}::numeric, 2) WHERE "productId" = ${pid}`)
       scaled.add(pid)
     }
     await tx.product.update({ where: { id: pid }, data })
@@ -385,9 +400,13 @@ const editUpp = (l: { unitsPerPack?: number | null }, p: { unit?: string | null;
 // правила — у метода update выше
 // at — когда правили (у кассы без связи — момент на кассе): по нему решается, чья правка
 // новее, если приход правили и там, и тут (common/stamps.ts)
+export const SKLAD_ARRIVAL_NO_EDIT = 'Приход на склад не правится — удалите его и проведите заново'
+export const SKLAD_ARRIVAL_SPENT = 'Часть товара этого прихода уже ушла со склада — удалить приход нельзя'
+
 export async function updateArrivalIn(tx: Tx, id: string, dto: UpdateArrivalDto, at: Date = new Date()) {
   const arrival = await tx.arrival.findUnique({ where: { id }, include: { items: true } })
   if (!arrival) throw new BadRequestException('Приход не найден')
+  if (arrival.place === 'sklad') throw new BadRequestException(SKLAD_ARRIVAL_NO_EDIT)
 
   const byLineId = new Map(arrival.items.map((i) => [i.id, i]))
   const lines = dto.items.filter((l) => byLineId.has(l.id))
@@ -561,7 +580,18 @@ export async function removeArrivalIn(tx: Tx, id: string, at: Date = new Date())
   const products = await tx.product.findMany({ where: { id: { in: ids } } })
   const byId = new Map(products.map((p) => [p.id, p]))
 
+  // Приход на склад (1.8.0): магазин он не трогал. Удалить можно, пока его товар целиком
+  // лежит на складе: перенесённое в магазин уже смешалось с остатком зала
+  if (arrival.place === 'sklad') {
+    const rows = await tx.skladBatch.findMany({ where: { arrivalId: id } })
+    const left = rows.reduce((s, r) => s + r.units, 0)
+    const brought = arrival.items.reduce((s, it) => s + unitsOfLine(it, it.unitsPerPack || uppOf(byId.get(it.productId || '') || {})), 0)
+    if (left < brought) throw new BadRequestException(SKLAD_ARRIVAL_SPENT)
+    await tx.skladBatch.deleteMany({ where: { arrivalId: id } })
+  }
+
   for (const pid of ids) {
+    if (arrival.place === 'sklad') break
     const p = byId.get(pid)
     await tx.batch.deleteMany({ where: { arrivalId: id, productId: pid } })
     await syncProduct(tx, pid)

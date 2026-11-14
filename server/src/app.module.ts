@@ -23,6 +23,7 @@ import { ExpiryModule } from './expiry/expiry.module'
 import { SyncModule } from './sync/sync.module'
 import { ExpensesModule } from './expenses/expenses.module'
 import { IncomesModule } from './incomes/incomes.module'
+import { SkladModule } from './sklad/sklad.module'
 import { SupplierReturnsModule } from './supplier-returns/supplier-returns.module'
 import { SuppliersModule } from './suppliers/suppliers.module'
 import { PayServicesModule } from './payservices/pay-services.module'
@@ -60,6 +61,7 @@ import { AppController } from './app.controller'
     ExpiryModule,
     ExpensesModule,
     IncomesModule,
+    SkladModule,
     SupplierReturnsModule,
     SuppliersModule,
     PayServicesModule,

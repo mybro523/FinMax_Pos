@@ -131,10 +131,10 @@ test('метки в цикле меню на месте', () => {
   assert.ok(home.includes("data-tour={'nav:' + n.to}"), 'у плиток меню пропала метка тура')
 })
 
-test('порядок плиток меню — как попросил владелец (6 × 4, касса на две клетки)', () => {
+test('порядок плиток меню — как попросил владелец (5 × 5 с «Складом», касса на две клетки)', () => {
   assert.deepEqual(адресаМеню(), [
     '/dashboard', '/pos', '/shift', '/debts', '/discounts', '/deferred', '/sales-report', '/arrivals',
-    '/products', '/returns', '/writeoffs', '/expiry', '/inventory', '/orders', '/suppliers',
+    '/products', '/sklad', '/returns', '/writeoffs', '/expiry', '/inventory', '/orders', '/suppliers',
     '/supplier-report', '/incomes', '/expenses', '/reports', '/employees', '/roles', '/obuchenie', '/settings',
   ])
 })

@@ -1584,6 +1584,13 @@ input.pn-count { width: 84px; text-align: right; }
 
 /* ── Приход: чем заплатили ── */
 .arr-pay { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; }
+/* ── Склад (1.8.0): количество «уп + шт» в строке таблицы ── */
+.sklad-qty { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.sklad-qty label { display: inline-flex; align-items: center; gap: 4px; margin: 0; font-size: 13px; color: var(--muted); }
+.sklad-qty input { width: 76px; padding: 6px 8px; text-align: right; }
+/* «Свой склад» в колонке поставщиков — отдельной строкой, синим */
+.prh-side-btn.sklad { color: var(--blue); font-weight: 700; }
+.prh-side-btn.sklad.active { color: var(--blue); }
 .arr-pay-btn {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   padding: 10px 8px; border: 1px solid var(--border-strong); border-radius: 10px;
@@ -1939,7 +1946,8 @@ input.pn-count { width: 84px; text-align: right; }
 .app-hub .main { height: 100vh; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 @supports (height: 100dvh) { .app-hub .main { height: 100dvh; } }
 .app-hub .topbar { flex: 0 0 auto; }
-.hub-grid { display: grid; gap: 12px; grid-template-columns: repeat(6, minmax(0, 1fr)); grid-template-rows: repeat(4, minmax(0, 1fr)); }
+/* 1.8.0: 24 раздела + касса на две клетки = 5 × 5 */
+.hub-grid { display: grid; gap: 12px; grid-template-columns: repeat(5, minmax(0, 1fr)); grid-template-rows: repeat(5, minmax(0, 1fr)); }
 .hub-tile {
   --hub-pt: 14px; --hub-px: 12px; --hub-pb: 12px;
   position: relative; display: flex; flex-direction: column; align-items: flex-start; overflow: hidden;
@@ -1978,6 +1986,8 @@ input.pn-count { width: 84px; text-align: right; }
 .hub-tile.off { background: var(--track); border-color: var(--border-strong); color: var(--muted-2); box-shadow: none; cursor: not-allowed; }
 .hub-tile.off .hub-name { text-shadow: none; }
 .hub-tile.off .hub-pic { filter: grayscale(1) opacity(0.45); }
+/* Плитка без картинки Icons8 (Склад): её значок — золотом, тем же размером и местом */
+.hub-tile .hub-pic.hub-pic-ic { color: var(--gold); stroke-width: 1.6; }
 .hub-tile.off:hover { background: var(--track); box-shadow: none; border-color: var(--border-strong); }
 .hub-tile.off:hover .hub-pic { transform: none; }
 /* Цифра в углу (отложенные штрихкоды, сроки годности) стоит в самой надписи, справа: текст
@@ -2010,9 +2020,9 @@ input.pn-count { width: 84px; text-align: right; }
 }
 /* Окно ниже 520 px — плиткам не сжаться в нечитаемое: ряды постоянной высоты, меню листается */
 @media (min-width: 601px) and (max-height: 520px) {
-  .app-hub .hub-grid { grid-template-rows: repeat(4, 104px); }
+  .app-hub .hub-grid { grid-template-rows: repeat(5, 104px); }
 }
-/* Узкий экран (планшет стоя): та же сетка 6×4, но поля плиток и зазоры меньше. Слова и тут
+/* Узкий экран (планшет стоя): та же сетка 5×5, но поля плиток и зазоры меньше. Слова и тут
    целиком — размер считается под самое длинное слово */
 @media (min-width: 601px) and (max-width: 900px) {
   .app-hub .content { padding: 12px; }

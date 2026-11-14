@@ -25,8 +25,15 @@ import { uppOf } from '../units.mjs'
 const at = (now) => new Date(now).toISOString()
 const unitsOfLine = (it, upp) => (it.qty || 0) * upp + Math.max(0, Math.trunc(it.pieces || 0))
 
-// Партии прихода на полке этой кассы — серверные и заведённые здесь
-const batchesOf = (db, arrivalId) => q(db, 'SELECT productId, units, expiryDate FROM batches WHERE arrivalId = ?').all(arrivalId)
+// Партии прихода на полке этой кассы — серверные и заведённые здесь. У прихода на склад
+// (1.8.0) — его партии на складе
+const batchesOf = (db, arrivalId, place = 'shop') =>
+  q(db, `SELECT productId, units, expiryDate FROM ${place === 'sklad' ? 'sklad_batches' : 'batches'} WHERE arrivalId = ?`).all(arrivalId)
+
+// ── Приход на склад (1.8.0) ── Не правится: удаляют и проводят заново (как у сервера)
+export const SKLAD_ARRIVAL_EDIT = 'Приход на склад не правится — удалите его и проведите заново'
+export const SKLAD_ARRIVAL_GONE = 'Часть товара этого прихода уже ушла со склада — удалить приход нельзя'
+const isSklad = (a) => a?.place === 'sklad'
 
 // ── Один приход для окна правки ──
 // Как у сервера (findOne): сколько от каждой строки ещё лежит на полке, сколько уже
@@ -36,7 +43,7 @@ export function arrivalView(db, id) {
   const doc = liveDoc(db, 'arrival', id)
   if (!doc) return null
   const a = doc.body
-  const batches = batchesOf(db, id)
+  const batches = batchesOf(db, id, a.place)
   const left = new Map()
   const expiry = new Map()
   for (const b of batches) {
@@ -95,6 +102,7 @@ export function updateArrival(ctx, id, raw) {
     const doc = liveDoc(db, 'arrival', id)
     if (!doc) throw bad('Приход не найден')
     const a = doc.body
+    if (isSklad(a)) throw bad(SKLAD_ARRIVAL_EDIT)
     const byLineId = new Map((a.items || []).map((i) => [i.id, i]))
     const lines = items.filter((l) => byLineId.has(l.id))
     if (!lines.length) throw bad('Строки прихода не найдены')
@@ -206,8 +214,25 @@ export function deleteArrival(ctx, id) {
     if (!doc) throw bad('Приход не найден')
     const a = doc.body
     const opId = newId()
-    for (const pid of [...new Set((a.items || []).map((i) => i.productId).filter(Boolean))]) {
-      if (productById(db, pid)) move(db, { opId, productId: pid, kind: 'arrival-undo', units: 0, arrivalId: id }, { now })
+    const pids = [...new Set((a.items || []).map((i) => i.productId).filter(Boolean))]
+    if (isSklad(a)) {
+      // Приход на склад удаляется, только пока его товар целиком лежит на складе: перенесённое
+      // в магазин уже на полке и в средней закупочной
+      const left = new Map()
+      for (const b of batchesOf(db, id, 'sklad')) left.set(b.productId, (left.get(b.productId) || 0) + b.units)
+      for (const pid of pids) {
+        const p = productById(db, pid)
+        if (!p) continue
+        const brought = a.items.filter((i) => i.productId === pid).reduce((s, i) => s + unitsOfLine(i, i.unitsPerPack || lineUpp({}, p)), 0)
+        if ((left.get(pid) || 0) < brought) throw bad(SKLAD_ARRIVAL_GONE)
+      }
+      for (const pid of pids) {
+        if (productById(db, pid)) move(db, { opId, productId: pid, kind: 'sklad-undo', units: 0, arrivalId: id }, { now })
+      }
+    } else {
+      for (const pid of pids) {
+        if (productById(db, pid)) move(db, { opId, productId: pid, kind: 'arrival-undo', units: 0, arrivalId: id }, { now })
+      }
     }
     const was = recordDocEdit(db, { opId, kind: 'arrival', body: a, del: true, now })
     // Неоплаченная часть удалённого прихода долгом больше не числится. У заведённого здесь

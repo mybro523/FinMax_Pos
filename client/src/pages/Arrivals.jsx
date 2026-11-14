@@ -1,12 +1,13 @@
 import { useState, useMemo, useEffect } from 'react'
-import { LuTrash2, LuPencil, LuList, LuPackagePlus, LuWallet, LuChartColumn, LuSearch, LuRotateCcw, LuUndo2, LuTag, LuReceiptText } from 'react-icons/lu'
+import { LuTrash2, LuPencil, LuList, LuPackagePlus, LuWallet, LuChartColumn, LuSearch, LuRotateCcw, LuUndo2, LuTag, LuReceiptText, LuWarehouse } from 'react-icons/lu'
+import { useLocation, useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout'
 import StickyBar from '../components/StickyBar'
 import { isVesovoy, uppOf, gramsOfKg, kgText, edinica, isDivisible } from '../lib/units'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { presetPeriod, periodRange, periodText, useDeepPeriod } from '../components/Period'
-import { useCollection, money } from '../db/store'
+import { useCollection, useCollectionIf, money } from '../db/store'
 import { getArrival, updateArrival, deleteArrival } from '../db/ops'
 import { useCan, getUser } from '../db/auth'
 import { fmtDateTime } from '../lib/time'
@@ -27,6 +28,8 @@ import Reports, { useReports } from './prihod/Reports'
 import ReturnTab, { REFUNDS } from './prihod/ReturnTab'
 import PrihodNakleyki from '../components/PrihodNakleyki'
 import CennikiModal from '../components/Cenniki'
+import { PerenosForm } from '../components/SkladPerenos'
+import { skladPoTovaram } from '../lib/sklad'
 
 // ── Приход товара ──
 // Один экран, как в привычных программах приёмки: слева — поставщики, сверху — период
@@ -82,6 +85,21 @@ export default function Arrivals() {
   const paymentsCached = useCollection('supplierPayments')
   const returnsCached = useCollection('supplierReturns')
   const supView = can('suppliers.view')
+  // Склад (1.8.0): «Свой склад» слева — перенос со склада в магазин
+  const skladMove = can('sklad.view') && can('sklad.move')
+  const skladBatches = useCollectionIf('skladBatches', skladMove)
+  const skladRows = useMemo(() => (skladMove ? skladPoTovaram(skladBatches, products) : []), [skladMove, skladBatches, products])
+  const svoySklad = skladMove && !!st.svoySklad
+  // «Склад → Приход на склад» открывает новое поступление с «Куда: Склад» (?kuda=sklad)
+  const location = useLocation()
+  const navigate = useNavigate()
+  useEffect(() => {
+    const kuda = new URLSearchParams(location.search).get('kuda')
+    if (kuda !== 'sklad') return
+    if (can('arrivals.create')) setPrihod({ tab: 'new', kuda: 'sklad', svoySklad: false })
+    navigate('/arrivals', { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search])
 
   // ── Период сверху — общий для всех вкладок ──
   const period = st.period || presetPeriod('month')
@@ -155,7 +173,9 @@ export default function Arrivals() {
       title: t('Удалить приход?'),
       message:
         `${t('Поставщик')}: ${a.supplier} · ${money(a.total)} · ${позиций} ${t('поз.')}\n` +
-        t('Со склада снимется всё, что от этого прихода ещё не продано, а закупочная цена товаров пересчитается по оставшимся партиям. Проданное останется в чеках как есть.'),
+        (a.place === 'sklad'
+          ? t('Товар этого прихода уберётся со склада, долг поставщику и оплата из кассы откатятся. Если часть уже перенесли в магазин — удалить нельзя.')
+          : t('Со склада снимется всё, что от этого прихода ещё не продано, а закупочная цена товаров пересчитается по оставшимся партиям. Проданное останется в чеках как есть.')),
       danger: true,
       confirmText: t('Удалить'),
     })
@@ -298,9 +318,11 @@ export default function Arrivals() {
       <div className="prh">
         <SupplierColumn
           suppliers={suppliers}
-          value={st.supplierId}
+          value={svoySklad ? '' : st.supplierId}
+          svoySklad={svoySklad}
+          onSvoySklad={skladMove ? () => setPrihod({ svoySklad: !st.svoySklad }) : null}
           onChange={(id) => {
-            setPrihod({ supplierId: id })
+            setPrihod({ supplierId: id, svoySklad: false })
             // Поставщика выбрали — дальше сканируют товар: курсор в «Штрихкод» открытой
             // формы. Иначе он остался бы на кнопке поставщика, и Enter от сканера снял бы
             // выбор. На телефоне не трогаем: там фокус в поле открывает клавиатуру
@@ -314,6 +336,16 @@ export default function Arrivals() {
         />
 
         <div className="prh-main">
+          {svoySklad ? (
+            <div className="panel" data-testid="svoy-sklad-panel">
+              <h2><span className="h2-title"><span className="ic"><LuWarehouse size={17} /></span>{t('Приход со своего склада')}</span></h2>
+              <p style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.6, margin: '0 0 12px' }}>
+                {t('Товар переносится со склада в магазин — по той же закупочной цене и сроку. Денег и долгов перенос не создаёт.')}
+              </p>
+              <PerenosForm rows={skladRows} onDone={() => setPrihod({ svoySklad: false, tab: 'journal' })} onCancel={() => setPrihod({ svoySklad: false })} />
+            </div>
+          ) : (
+          <>
           <PeriodBar value={period} onChange={setPeriod} loading={loading} />
 
           <div className="prh-tabs" role="tablist" data-tour="arr.tabs">
@@ -349,6 +381,7 @@ export default function Arrivals() {
                         <td data-label={t('Дата')} style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(a.date)}</td>
                         <td className="cell-main">
                           <b>{a.supplier}</b>
+                          {a.place === 'sklad' && <div className="tag-cat" data-testid="arr-na-sklad" style={{ color: 'var(--blue)' }}><LuWarehouse size={12} style={{ verticalAlign: '-2px' }} /> {t('на склад')}</div>}
                           {num(a.debt) > 0 && <div className="tag-cat" style={{ color: 'var(--danger)' }}>{t('в долг')} {money(a.debt)}</div>}
                           {a.payMethod === 'cash' && <div className="tag-cat">{t('оплачен из кассы')}</div>}
                           {a.payMethod === 'own' && <div className="tag-cat">{t('наличными')}</div>}
@@ -381,6 +414,8 @@ export default function Arrivals() {
           )}
 
           {tab === 'reports' && <Reports rep={rep} suppliers={suppliers} loading={loading} periodLabel={sup ? `${periodLabel} · ${sup.name}` : periodLabel} />}
+          </>
+          )}
         </div>
       </div>
 
@@ -494,6 +529,11 @@ function ArrivalDetails({ a, products, sposob, busy, canEdit, canLabels, onClose
         {a.supplier} · {fmtDateTime(a.date)} · {t('Оплата')}: {sposob(a)}
         {a.user?.name ? ` · ${t('Принял')}: ${a.user.name}` : ''}
       </div>
+      {a.place === 'sklad' && (
+        <div className="note info" style={{ marginBottom: 12 }}>
+          {t('Приход на склад: товар лежит на складе, в магазин его переносят из раздела «Склад». Такой приход не правится — удалите его и проведите заново.')}
+        </div>
+      )}
       <div className="table-scroll">
         <table>
           <thead>
@@ -553,7 +593,7 @@ function ArrivalDetails({ a, products, sposob, busy, canEdit, canLabels, onClose
                 <span className="ic"><LuReceiptText size={16} /></span> {t('Ценники')}
               </button>
             )}
-            {canEdit && (
+            {canEdit && a.place !== 'sklad' && (
               <button className="btn" onClick={onEdit} disabled={busy}>
                 <span className="ic"><LuPencil size={16} /></span> {t('Изменить')}
               </button>

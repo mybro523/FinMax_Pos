@@ -36,10 +36,13 @@ import {
   parseSale,
   parseShiftClose,
   parseShiftOpen,
+  parseSkladEdit,
+  parseSkladToShop,
   parseSupplierReturn,
   parseWriteOff,
   when,
 } from './payload'
+import { addToSklad, skladEditIn, skladToShopIn, SKLAD_WITH_USER } from '../sklad/sklad.service'
 import { PushDto, PushOpDto } from './dto'
 import { mark, sinceOf } from './cursor'
 import { applyEdit, EDIT_TYPES, EditKit, loadAliases, rewriteAliases } from './edits'
@@ -138,7 +141,7 @@ const TOUCHES: Record<OpType, string[]> = {
   sale: ['sales', 'products', 'customers'],
   return: ['returns', 'products', 'sales', 'customers', 'writeoffs'],
   writeoff: ['writeoffs', 'products'],
-  arrival: ['arrivals', 'products'],
+  arrival: ['arrivals', 'products', 'skladBatches'],
   'shift.open': ['shifts'],
   'shift.close': ['shifts', 'sales'],
   'debt.pay': ['customers', 'payments'],
@@ -151,6 +154,9 @@ const TOUCHES: Record<OpType, string[]> = {
   income: ['incomes'],
   // Возврат поставщику: склад, долг поставщика, деньги «в кассу» — в смене
   'supplier.return': ['supplierReturns', 'products', 'suppliers', 'shifts'],
+  // Склад (1.8.0): перенос кладёт товар в магазин, правка меняет только склад
+  'sklad.toShop': ['skladBatches', 'skladMoves', 'products'],
+  'sklad.edit': ['skladBatches', 'skladMoves'],
   // ── Справочники и правки документов без связи ──
   // Заведённый товар убирает свой штрихкод из «отложенных»
   'product.create': ['products', 'deferred'],
@@ -182,7 +188,7 @@ const TOUCHES: Record<OpType, string[]> = {
   'income.delete': ['incomes'],
   'cashMove.delete': ['cashMoves', 'shifts'],
   'arrival.update': ['arrivals', 'products', 'suppliers'],
-  'arrival.delete': ['arrivals', 'products', 'suppliers'],
+  'arrival.delete': ['arrivals', 'products', 'suppliers', 'skladBatches'],
   'inventory.create': ['inventories'],
   'inventory.count': ['inventories'],
   'inventory.apply': ['inventories', 'products', 'writeoffs'],
@@ -472,6 +478,10 @@ export class SyncService {
         return this.applyIncome(tx, parseIncome(payload), ctx)
       case 'supplier.return':
         return this.applySupplierReturn(tx, parseSupplierReturn(payload), ctx)
+      case 'sklad.toShop':
+        return this.applySkladToShop(tx, parseSkladToShop(payload), ctx)
+      case 'sklad.edit':
+        return this.applySkladEdit(tx, parseSkladEdit(payload), ctx)
       default:
         // Сотрудники и роли (1.4.16) — в базе панели
         if (TEAM_TYPES.has(type)) return applyTeam(tx, type, payload, ctx, this.kit, this.team)
@@ -1091,9 +1101,12 @@ export class SyncService {
     for (const [n, it] of p.items.entries()) {
       if (unitsOf(it, lineUpps[n]) > MAX_UNITS) throw new Reject('В приходе слишком большое количество')
     }
+    // Приход на свой склад (1.8.0): магазин не меняется — ни остаток, ни средняя закупочная,
+    // и пересчёт зала его не касается
+    const toSklad = p.place === 'sklad'
     // Остаток этих товаров пересчитали уже после прихода: привезённое лежало на полке
     // и в пересчёт попало. Документ остаётся, а класть товар второй раз нельзя
-    const counted = await this.countsAfter(tx, ids, p.date)
+    const counted = toSklad ? new Map<string, Count>() : await this.countsAfter(tx, ids, p.date)
     for (const [productId, a] of agg) {
       const count = counted.get(productId)
       if (!count) continue
@@ -1110,6 +1123,7 @@ export class SyncService {
     for (const pid of packMoved) await stamp(tx, 'Product', pid, ['unitsPerPack', ...(packScaled.has(pid) ? ['cost', 'price'] : [])], p.date)
 
     for (const [productId, a] of agg) {
+      if (toSklad) break
       if (counted.has(productId)) continue
       const product = byId.get(productId)!
       const weighted = weightedPackCost({
@@ -1168,6 +1182,7 @@ export class SyncService {
         supplierId,
         debt,
         payMethod: p.payMethod || '',
+        place: toSklad ? 'sklad' : 'shop',
         userId: ctx.tenantUserId,
         total,
         items: {
@@ -1202,7 +1217,9 @@ export class SyncService {
     for (const [n, it] of p.items.entries()) {
       if (counted.has(it.productId)) continue
       // Партия — с ценой за упаковку товара (после смены упаковки — за новую)
-      await addUnits(tx, it.productId, unitsOf(it, lineUpps[n]), costInPack(it.cost, lineUpps[n], uppOf(byId.get(it.productId)!)), it.expiryDate, p.id)
+      const cost = costInPack(it.cost, lineUpps[n], uppOf(byId.get(it.productId)!))
+      if (toSklad) await addToSklad(tx, it.productId, unitsOf(it, lineUpps[n]), cost, it.expiryDate, p.id)
+      else await addUnits(tx, it.productId, unitsOf(it, lineUpps[n]), cost, it.expiryDate, p.id)
     }
     return p.id
   }
@@ -1307,6 +1324,26 @@ export class SyncService {
       data: { id: p.id, date: p.date, category: p.category, amount: D(p.amount), note: p.note, userId: ctx.tenantUserId },
     })
     return p.id
+  }
+
+  // ── Склад (1.8.0) ──
+  // Перенос в магазин сделан на кассе, возможно без связи: товар уже переложили руками.
+  // Отказать задним числом нельзя — берём со склада сколько есть (sklad.service, tolerant).
+  // Документ получает id кассы: касса и сервер видят одну и ту же запись
+  private async applySkladToShop(tx: Tx, p: ReturnType<typeof parseSkladToShop>, ctx: Ctx): Promise<string> {
+    const move = await skladToShopIn(tx, { id: p.id, clientId: p.id, date: p.date, note: p.note, items: p.items }, ctx.tenantUserId, { tolerant: true, at: p.date })
+    return move.id
+  }
+
+  // Правка остатка склада с кассы: остаток уже такой — документа нет (не отказ)
+  private async applySkladEdit(tx: Tx, p: ReturnType<typeof parseSkladEdit>, ctx: Ctx): Promise<string | null> {
+    const move = await skladEditIn(
+      tx,
+      { id: p.id, clientId: p.id, date: p.date, note: p.note, productId: p.productId, units: p.units, cost: p.cost, expiryDate: p.expiryDate },
+      ctx.tenantUserId,
+      { quiet: true },
+    )
+    return move?.id ?? null
   }
 
   // ── Возврат товара поставщику ──
@@ -1618,6 +1655,10 @@ export class SyncService {
       cashMoves: all(await tx.cashMove.findMany({ where: { date: { gte: journalFrom } }, include: userOnly, orderBy: { date: 'desc' } })),
       // Возвраты поставщикам — как приходы: всем, журнал в программе читается по праву на приход
       supplierReturns: all(await tx.supplierReturn.findMany({ where: { date: { gte: journalFrom } }, include: { items: true, user: { select: { id: true, name: true } } }, orderBy: { date: 'desc' } })),
+      // Склад (1.8.0) — всем кассам, как партии магазина: приход «Свой склад» и панель
+      // показывают остатки склада и без связи. Движения — за срок журналов
+      skladBatches: all(await tx.skladBatch.findMany({ where: { units: { gt: 0 } } })),
+      skladMoves: all(await tx.skladMove.findMany({ where: { date: { gte: journalFrom } }, include: SKLAD_WITH_USER, orderBy: { date: 'desc' } })),
       // Листы пересчёта (1.4.15): незаконченные — все, применённые — за срок журналов.
       // Всем кассам, как карточки товаров (см. pullScope)
       inventories: all(
@@ -1696,6 +1737,9 @@ export class SyncService {
       payServices: await load('PayService', (part) => tx.payService.findMany({ where: inIds(part) })),
       cashMoves: await load('CashMove', (part) => tx.cashMove.findMany({ where: inIds(part), include: userOnly })),
       supplierReturns: await load('SupplierReturn', (part) => tx.supplierReturn.findMany({ where: inIds(part), include: { items: true, user: { select: { id: true, name: true } } } })),
+      // Склад (1.8.0): пустая партия удаляется — касса получает её в списке на удаление
+      skladBatches: await load('SkladBatch', (part) => tx.skladBatch.findMany({ where: inIds(part) })),
+      skladMoves: await load('SkladMove', (part) => tx.skladMove.findMany({ where: inIds(part), include: SKLAD_WITH_USER })),
       // Изменение строки листа записано в журнал номером самого листа (миграция 20261024)
       // Лист за пределами окна (давний применённый) уходит из ответа как удалённый: касса его
       // и так убирает по сроку, а качать его заново целиком незачем

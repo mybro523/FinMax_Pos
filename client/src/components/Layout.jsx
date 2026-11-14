@@ -4,7 +4,7 @@ import {
   LuLayoutDashboard, LuShoppingCart, LuPill, LuPackagePlus,
   LuClipboardList, LuReceipt, LuTrendingUp, LuSettings, LuClock, LuTag, LuCalculator, LuWifiOff,
   LuUsers, LuCalendarClock, LuUndo2, LuTrash2, LuClipboardCheck, LuTriangleAlert,
-  LuGraduationCap, LuHandCoins, LuTruck, LuShieldCheck, LuChartColumn, LuScale, LuCoins, LuInfo,
+  LuGraduationCap, LuHandCoins, LuTruck, LuShieldCheck, LuChartColumn, LuScale, LuCoins, LuInfo, LuWarehouse,
 } from 'react-icons/lu'
 import { useConnection } from '../db/store'
 import { useAuth, leavePharmacy } from '../db/auth'
@@ -24,7 +24,9 @@ import emblem from '../assets/brand/emblem-64.png'
 // perm — право, без которого раздел закрыт (плитка серая, адрес уводит на главный
 // экран). owner — только владелец магазина. main — главное действие, золотая плитка.
 // Порядок — как попросил владелец магазина (1.5.5), слева направо и сверху вниз: сетка
-// меню — 6 колонок × 4 ряда, касса занимает две клетки, и 23 раздела встают в неё ровно
+// меню — 6 колонок × 4 ряда, касса занимает две клетки, и 23 раздела встают в неё ровно.
+// 1.8.0: добавился «Склад» — сетка 5 × 5 (24 раздела, касса — две клетки), тоже ровно.
+// noPic — у раздела нет объёмной картинки Icons8: на плитке его значок
 export const NAV = [
   { to: '/dashboard', label: 'Панель управления', Icon: LuLayoutDashboard, perm: 'dashboard.view' },
   { to: '/pos', label: 'Касса', Icon: LuShoppingCart, perm: 'pos.sell', main: true },
@@ -35,6 +37,7 @@ export const NAV = [
   { to: '/sales-report', label: 'Отчёт продажи', Icon: LuChartColumn, perm: 'reports.view' },
   { to: '/arrivals', label: 'Приход товара', Icon: LuPackagePlus, perm: 'arrivals.view' },
   { to: '/products', label: 'Товары', Icon: LuPill, perm: 'products.view' },
+  { to: '/sklad', label: 'Склад', Icon: LuWarehouse, perm: 'sklad.view', noPic: true },
   { to: '/returns', label: 'Возврат товара', Icon: LuUndo2, perm: 'returns.view' },
   { to: '/writeoffs', label: 'Списание', Icon: LuTrash2, perm: 'writeoffs.view' },
   { to: '/expiry', label: 'Срок годности', Icon: LuCalendarClock, perm: 'expiry.view', expiryBadge: true },

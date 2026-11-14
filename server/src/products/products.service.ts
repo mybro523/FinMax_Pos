@@ -311,6 +311,8 @@ export class ProductsService {
       await tx.supplierReturnItem.updateMany(move)
       await tx.inventoryItem.updateMany(move)
       await tx.stockEdit.updateMany(move)
+      // Склад (1.8.0): партии склада лишней карточки — тоже к основной (иначе удалятся каскадом)
+      await tx.skladBatch.updateMany(move)
       // Журнал движений партий — тоже: партии перешли к основной, их прошлые движения с ними
       await tx.stockMove.updateMany(move)
       // Отметки пересчёта лишней карточки не переносим намеренно: её пересчёт не учитывал

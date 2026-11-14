@@ -161,7 +161,11 @@ export default function Home() {
                     {/* Объёмная картинка раздела (Icons8 «3D Fluency», 100 px — размер бесплатной
                         лицензии, ссылка на Icons8 стоит внизу «О компании»): раздел узнаётся по
                         картинке, а не по надписи */}
-                    <img className="hub-pic" src={`/menu/${n.to.slice(1)}.png`} alt="" width="100" height="100" loading="lazy" draggable="false" />
+                    {n.noPic ? (
+                      <n.Icon className="hub-pic hub-pic-ic" aria-hidden="true" />
+                    ) : (
+                      <img className="hub-pic" src={`/menu/${n.to.slice(1)}.png`} alt="" width="100" height="100" loading="lazy" draggable="false" />
+                    )}
                     {!ok && <span className="hub-lock" aria-hidden="true"><LuLock size={14} /></span>}
                   </>
                 )

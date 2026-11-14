@@ -374,6 +374,8 @@ export function mainLogBase(db, { ops = [], extras = [], logins = [], gone = nul
       const stock = {
         products: rowsOf('SELECT id, sCostC, sExpiry FROM products WHERE id IN (?*)', part),
         batches: rowsOf('SELECT id, productId, sUnits, costC, expiryDate, arrivalId, note, createdAt FROM batches WHERE productId IN (?*) AND sUnits > 0', part),
+        // Склад (1.8.0) — партии склада тех же товаров: движения склада идут тем же журналом
+        skladBatches: rowsOf('SELECT id, productId, sUnits, costC, expiryDate, arrivalId, createdAt FROM sklad_batches WHERE productId IN (?*) AND sUnits > 0', part),
       }
       const body = !last
         ? { acc, ops: [], ...stock }
@@ -448,6 +450,17 @@ export function regApplyBase(db, entry, { onLogins = null, onLic = null, onLogo 
       if (typeof x?.id !== 'string' || !pids.has(x.productId) || !Number.isInteger(x.sUnits)) continue
       putBatch.run(x.id, x.productId, x.sUnits, x.sUnits, Number(x.costC) || 0, x.expiryDate ?? null, x.arrivalId ?? null, String(x.note ?? ''), String(x.createdAt || ''))
     }
+    // Склад (1.8.0): партии склада тех же товаров — как у главного. Основа прежней версии их не
+    // несёт (нет поля) — склад кассы тогда не трогаем
+    if (Array.isArray(b.skladBatches)) {
+      for (const pid of pids) q(db, 'DELETE FROM sklad_batches WHERE productId = ?').run(pid)
+      const putSklad = q(db, 'INSERT OR REPLACE INTO sklad_batches (id, productId, units, sUnits, costC, expiryDate, arrivalId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      for (const x of b.skladBatches) {
+        if (typeof x?.id !== 'string' || !pids.has(x.productId) || !Number.isInteger(x.sUnits)) continue
+        putSklad.run(x.id, x.productId, x.sUnits, x.sUnits, Number(x.costC) || 0, x.expiryDate ?? null, x.arrivalId ?? null, String(x.createdAt || ''))
+      }
+      if (pids.size) changed.add('skladBatches')
+    }
     if (pids.size) changed.add('products')
     // Строки справочников, которые правили принятые операции, — как у главного; свои
     // неотправленные правки (и чужие, ещё не названные) — поверх них заново
@@ -476,7 +489,10 @@ export function regApplyBase(db, entry, { onLogins = null, onLic = null, onLogo 
         const mine = q(db, "SELECT 1 FROM row_edits e JOIN outbox o ON o.id = e.opId WHERE e.tbl = ? AND e.rowId = ? AND o.state = 'pending' LIMIT 1").get(tbl, id)
         if (mine) continue
         q(db, `DELETE FROM ${tbl} WHERE id = ?`).run(id)
-        if (tbl === 'products') q(db, 'DELETE FROM batches WHERE productId = ?').run(id)
+        if (tbl === 'products') {
+          q(db, 'DELETE FROM batches WHERE productId = ?').run(id)
+          q(db, 'DELETE FROM sklad_batches WHERE productId = ?').run(id)
+        }
         rowTbls.add(tbl)
       }
     }

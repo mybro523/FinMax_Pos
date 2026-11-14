@@ -21,6 +21,7 @@ import { createCustomer, payDebt } from './ops/customer.mjs'
 import { addDeferred, removeDeferred } from './ops/deferred.mjs'
 import { cashSources, createExpense, expenseCategoriesList } from './ops/expense.mjs'
 import { createIncome, incomeCategoriesList } from './ops/income.mjs'
+import { skladEdit, skladList, skladToShop } from './ops/sklad.mjs'
 import { createCashMove } from './ops/cash.mjs'
 import { suppliersDebts, payServicesList, suppliersList } from './suppliers.mjs'
 import { createReturn } from './ops/return.mjs'
@@ -157,6 +158,10 @@ const ROUTES = [
   // Доходы — деньги магазина: по тем же правам, что на сервере
   ['GET', /^\/incomes$/, perm(['incomes.view', 'reports.view'], journal('income'))],
   ['GET', /^\/income-categories$/, perm(['incomes.view', 'incomes.create', 'settings.incomeCategories'], (ctx) => incomeCategoriesList(ctx.db))],
+  // Склад (1.8.0): партии склада — по тем же правам, что у сервера (панель и приход тоже видят
+  // остаток склада); журнал движений — разделу склада
+  ['GET', /^\/sklad$/, perm(['sklad.view', 'sklad.move', 'dashboard.view', 'arrivals.view', 'arrivals.create'], (ctx) => skladList(ctx.db))],
+  ['GET', /^\/sklad\/moves$/, perm(['sklad.view', 'sklad.move'], journal('skladmove'))],
   // Поставщики нужны приходу — всем; долги в них видит только владелец
   ['GET', /^\/suppliers$/, (ctx) => suppliersList(ctx.db, hasPerm(ctx.user, 'suppliers.view'))],
   // Сводка «кому сколько должны» — с учётом своих непосланных приходов в долг
@@ -173,6 +178,8 @@ const ROUTES = [
   ['POST', /^\/writeoffs$/, perm(['writeoffs.create'], (ctx) => createWriteOff(ctx, ctx.body))],
   ['POST', /^\/expenses$/, perm(['expenses.create'], (ctx) => createExpense(ctx, ctx.body))],
   ['POST', /^\/incomes$/, perm(['incomes.create'], (ctx) => createIncome(ctx, ctx.body))],
+  ['POST', /^\/sklad\/to-shop$/, perm(['sklad.move'], (ctx) => skladToShop(ctx, ctx.body))],
+  ['POST', /^\/sklad\/edit$/, perm(['sklad.move'], (ctx) => skladEdit(ctx, ctx.body))],
   ['POST', /^\/shifts\/open$/, perm(['shift.open'], (ctx) => openShift(ctx, ctx.body))],
   ['POST', /^\/shifts\/cash$/, perm(['shift.cash'], (ctx) => createCashMove(ctx, ctx.body))],
   ['POST', /^\/shifts\/close$/, perm(['shift.open'], (ctx) => closeShift(ctx, ctx.body))],

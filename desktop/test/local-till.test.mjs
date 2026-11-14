@@ -259,7 +259,7 @@ test('приход в долг: поставщик из справочника, 
   const second = ops(db).filter((o) => o.type === 'arrival')[0]
   rejectOp(db, second, 'Недостаточно прав')
   assert.equal(debtOf(db, 'sup-2'), 0)
-  assert.deepEqual(touchedBy(second), ['arrivals', 'products', 'suppliers'])
+  assert.deepEqual(touchedBy(second), ['arrivals', 'products', 'suppliers', 'skladBatches'])
 })
 
 // ── Справочники с сервера и обновление программы ──

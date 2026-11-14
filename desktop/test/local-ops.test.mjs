@@ -473,7 +473,7 @@ test('приход: партия со сроком, средневзвешенн
       ['Бинт', 10, 5, true],
     ],
   )
-  assert.deepEqual(Object.keys(arrival), ['id', 'date', 'supplier', 'supplierId', 'debt', 'payMethod', 'paidCash', 'shiftId', 'userId', 'user', 'total', 'items'])
+  assert.deepEqual(Object.keys(arrival), ['id', 'date', 'place', 'supplier', 'supplierId', 'debt', 'payMethod', 'paidCash', 'shiftId', 'userId', 'user', 'total', 'items'])
 
   const list = productsList(db, NOW)
   const par = list.find((p) => p.id === 'par')

@@ -30,7 +30,7 @@ export const isStandaloneDb = (db) => getMeta(db, 'standalone') === '1'
 export const ALL_PERMISSIONS = [
   'pos.sell', 'pos.discount', 'pos.debt', 'pos.defer', 'returns.view', 'returns.create', 'discounts.view', 'products.view',
   'products.create', 'products.edit', 'products.delete', 'products.history', 'products.labels', 'arrivals.view', 'arrivals.create',
-  'arrivals.edit', 'arrivals.debt', 'arrivals.return', 'expiry.view', 'writeoffs.view', 'writeoffs.create', 'inventory.view',
+  'arrivals.edit', 'arrivals.debt', 'arrivals.return', 'sklad.view', 'sklad.move', 'expiry.view', 'writeoffs.view', 'writeoffs.create', 'inventory.view',
   'inventory.count', 'inventory.apply', 'deferred.view', 'deferred.manage', 'orders.view', 'dashboard.view', 'shift.view',
   'shift.open', 'shift.cash', 'shift.others', 'shift.closeAny', 'debts.view', 'debts.pay', 'customers.create', 'customers.delete',
   'suppliers.view', 'suppliers.edit', 'suppliers.pay', 'suppliers.delete', 'expenses.view', 'expenses.create', 'expenses.edit',
@@ -136,6 +136,8 @@ export function acceptAll(db, { now, extras = null }) {
 // Пересборка остатка (stock.mjs) после этого даёт ровно то, что сейчас на полке
 export function foldBase(db) {
   q(db, 'UPDATE batches SET sUnits = units').run()
+  // Склад (1.8.0) — так же: партии склада «как знает сервер»
+  q(db, 'UPDATE sklad_batches SET sUnits = units').run()
   q(db, 'UPDATE products SET sCostC = costC, sExpiry = expiryDate, oversold = 0').run()
   q(db, 'UPDATE customers SET sDebtC = debtC, local = 0').run()
   q(db, 'UPDATE stock_moves SET synced = 1 WHERE synced = 0').run()
@@ -222,7 +224,7 @@ export const MERGE_TEXT = {
   notFound: 'Товар не найден',
   upp: (a, b) => `Штук в упаковке у карточек разное (${a} и ${b}) — сначала поправьте карточку`,
 }
-const DOC_ITEM_KINDS = ['sale', 'return', 'arrival', 'writeoff', 'supplierreturn', 'inventory']
+const DOC_ITEM_KINDS = ['sale', 'return', 'arrival', 'writeoff', 'supplierreturn', 'inventory', 'skladmove']
 export function mergeProducts(db, fromId, intoId, { now }) {
   if (!fromId || !intoId || fromId === intoId) throw bad(MERGE_TEXT.same)
   return inTx(db, () => {
@@ -231,6 +233,7 @@ export function mergeProducts(db, fromId, intoId, { now }) {
     if (!from || !into) throw notFound(MERGE_TEXT.notFound)
     if (uppOf(from) !== uppOf(into)) throw bad(MERGE_TEXT.upp(uppOf(from), uppOf(into)))
     q(db, 'UPDATE batches SET productId = ? WHERE productId = ?').run(intoId, fromId)
+    q(db, 'UPDATE sklad_batches SET productId = ? WHERE productId = ?').run(intoId, fromId)
     q(db, 'UPDATE stock_moves SET productId = ? WHERE productId = ?').run(intoId, fromId)
     // Строки документов — номер товара в теле документа
     const like = '%' + fromId + '%'

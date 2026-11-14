@@ -201,6 +201,8 @@ export function applyMove(db, move, { tolerant = false, now } = {}) {
   if (move.kind === 'arrival-undo') return undoArrival(db, product, move.arrivalId)
   // Правка прихода — как у сервера, по партиям этой кассы на момент, когда движение ложится
   if (move.kind === 'arrival-edit') return editArrival(db, product, move)
+  // ── Склад (1.8.0): отдельный запас, полка его не видит ──
+  if (SKLAD_KINDS.has(move.kind)) return applySkladMove(db, product, move, { tolerant, now })
   // Остаток, вписанный в карточку, больше прежнего: излишек — в партию с самым дальним
   // сроком, как у сервера (setUnits). Партий нет — новая
   if (move.kind === 'count' && move.units > 0) {
@@ -400,6 +402,9 @@ export function rebuildStock(db) {
   return inTx(db, () => {
     q(db, 'DELETE FROM batches WHERE sUnits IS NULL').run()
     q(db, 'UPDATE batches SET units = sUnits').run()
+    // Склад (1.8.0) — так же: партии сервера, поверх свои движения склада из того же журнала
+    q(db, 'DELETE FROM sklad_batches WHERE sUnits IS NULL').run()
+    q(db, 'UPDATE sklad_batches SET units = sUnits').run()
     q(db, 'UPDATE products SET costC = sCostC, expiryDate = sExpiry, oversold = 0').run()
     const moves = q(db, 'SELECT * FROM stock_moves WHERE synced = 0 ORDER BY seq').all()
     const counted = countedSince(db, moves)
@@ -413,4 +418,116 @@ export function rebuildStock(db) {
     }
     return moves.length
   })
+}
+
+// ── Склад магазина (версия 1.8.0) ──
+// Отдельный запас рядом с полкой. Партии склада (sklad_batches) устроены как партии полки:
+// штуки, цена упаковки, срок, units — с учётом сделанного здесь, sUnits — по словам сервера.
+// Продажа, сроки, списание и пересчёт их не видят. Движения склада идут в общем журнале
+// stock_moves своими видами — и проигрываются поверх свежих данных сервера так же:
+//   sklad-in   — пришло на склад (приход на склад, прибавка остатка): units > 0, цена, срок, приход;
+//   sklad-out  — снято со склада (убавка остатка): units < 0;
+//   sklad-ship — перенос в магазин: units < 0 со склада, а всё взятое — на полку партиями с теми
+//                же ценой и сроком; средняя закупочная товара сдвигается, как от прихода;
+//   sklad-undo — удаление прихода на склад: его партии на складе обнуляются.
+// Порядок снятия — как у полки: ближайший срок первым, без срока — последними, при равных —
+// заведённые раньше (как у сервера: server/src/sklad)
+export const SKLAD_KINDS = new Set(['sklad-in', 'sklad-out', 'sklad-ship', 'sklad-undo'])
+
+const liveSklad = (db, productId) => q(db, `SELECT * FROM sklad_batches WHERE productId = ? AND units > 0 ${FEFO}`).all(productId)
+
+// Сколько штук товара лежит на складе
+export const skladUnitsOf = (db, productId) =>
+  q(db, 'SELECT COALESCE(SUM(units), 0) AS u FROM sklad_batches WHERE productId = ? AND units > 0').get(productId).u
+
+// Номер партии склада, заведённой здесь: как у полки, из номера движения — со своей буквой
+export const skladBatchId = (db, seq, n = null) => 's' + localBatchId(db, seq, n)
+
+// Отказ — слово в слово как у сервера (SKLAD-CONTRACT)
+export const skladShort = (name, have) => `На складе не хватает: ${name} (есть ${have} шт)`
+
+function takeSklad(db, product, units, { tolerant = false } = {}) {
+  if (!(units > 0)) return { taken: [], short: 0 }
+  const live = liveSklad(db, product.id)
+  const have = live.reduce((s, b) => s + b.units, 0)
+  if (have < units && !tolerant) throw bad(skladShort(product.name || 'товар', have))
+  const taken = []
+  let left = Math.min(units, have)
+  for (const b of live) {
+    if (left <= 0) break
+    const take = Math.min(left, b.units)
+    q(db, 'UPDATE sklad_batches SET units = units - ? WHERE id = ?').run(take, b.id)
+    taken.push({ batchId: b.id, units: take, costC: b.costC, expiryDate: b.expiryDate })
+    left -= take
+  }
+  return { taken, short: Math.max(0, units - have) }
+}
+
+// Положить на склад: одинаковые цена, срок и приход объединяются в одну партию (как addUnits)
+function addSklad(db, productId, units, costC, expiryDate, arrivalId, { id, createdAt }) {
+  if (!(units > 0)) return null
+  const exp = expiryDate ?? null
+  const arr = arrivalId ?? null
+  const same = q(db, 'SELECT id FROM sklad_batches WHERE productId = ? AND costC = ? AND expiryDate IS ? AND arrivalId IS ? LIMIT 1').get(productId, costC, exp, arr)
+  if (same) {
+    q(db, 'UPDATE sklad_batches SET units = units + ? WHERE id = ?').run(units, same.id)
+    return same.id
+  }
+  q(db, 'INSERT INTO sklad_batches (id, productId, units, sUnits, costC, expiryDate, arrivalId, createdAt) VALUES (?, ?, ?, NULL, ?, ?, ?, ?)').run(
+    id,
+    productId,
+    units,
+    costC,
+    exp,
+    arr,
+    createdAt,
+  )
+  return id
+}
+
+// Взятое со склада — на полку: сначала средняя закупочная (от остатка ДО этой части, как у
+// прихода), затем партия с ценой и сроком части
+function toShelf(db, productId, part, { id, createdAt, now }) {
+  const p = productById(db, productId)
+  if (!p) return
+  const upp = uppOf(p)
+  const { units } = unitsOf(db, productId, now)
+  const cost = weightedPackCost({
+    stock: Math.floor(units / upp),
+    looseUnits: units % upp,
+    unitsPerPack: upp,
+    cost: fromCentsD(p.costC),
+    addPacks: Number(D(part.units).div(upp)),
+    addValue: fromCentsD(part.costC).times(part.units).div(upp),
+  })
+  q(db, 'UPDATE products SET costC = ? WHERE id = ?').run(toCents(cost), productId)
+  addUnits(db, productId, part.units, part.costC, part.expiryDate ?? null, null, 'со склада', { id, createdAt })
+}
+
+function applySkladMove(db, product, move, { tolerant = false, now } = {}) {
+  if (move.kind === 'sklad-in') {
+    const costC = Number.isInteger(move.costC) ? move.costC : product.costC
+    const batchId = addSklad(db, product.id, move.units, costC, move.expiryDate ?? null, move.arrivalId ?? null, {
+      id: skladBatchId(db, move.seq),
+      createdAt: move.createdAt,
+    })
+    return { taken: [], short: 0, batchId }
+  }
+  if (move.kind === 'sklad-out') return takeSklad(db, product, -move.units, { tolerant })
+  if (move.kind === 'sklad-ship') {
+    const r = takeSklad(db, product, -move.units, { tolerant })
+    // Номер партии на полке выводится из номера движения и части: при проигрывании — тот же
+    r.taken.forEach((t, n) => toShelf(db, product.id, t, { id: localBatchId(db, move.seq, n), createdAt: move.createdAt, now }))
+    return r
+  }
+  if (move.kind === 'sklad-undo') {
+    const taken = []
+    if (!move.arrivalId) return { taken, short: 0 }
+    for (const b of q(db, 'SELECT * FROM sklad_batches WHERE productId = ? AND arrivalId = ? AND units > 0').all(product.id, move.arrivalId)) {
+      q(db, 'UPDATE sklad_batches SET units = 0 WHERE id = ?').run(b.id)
+      taken.push({ batchId: b.id, units: b.units, costC: b.costC, expiryDate: b.expiryDate })
+    }
+    return { taken, short: 0 }
+  }
+  return { taken: [], short: 0 }
 }

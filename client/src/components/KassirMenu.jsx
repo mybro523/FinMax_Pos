@@ -39,7 +39,11 @@ export default function KassirMenu({ onClose }) {
             aria-current={n.to === pathname ? 'page' : undefined}
             onClick={() => go(n.to)}
           >
-            <img className="km-pic" src={`/menu/${n.to.slice(1)}.png`} alt="" width="40" height="40" draggable="false" />
+            {n.noPic ? (
+              <n.Icon className="km-pic" size={40} aria-hidden="true" style={{ color: 'var(--gold)' }} />
+            ) : (
+              <img className="km-pic" src={`/menu/${n.to.slice(1)}.png`} alt="" width="40" height="40" draggable="false" />
+            )}
             <span className="km-name">{t(n.label)}</span>
           </button>
         ))}

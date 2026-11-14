@@ -227,6 +227,8 @@ const LOCAL_SECTIONS = new Set([
   'products', 'categories', 'customers', 'deferred', 'shifts', 'sales', 'returns', 'arrivals', 'writeoffs', 'payments',
   'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'productTypes',
   'incomes', 'incomeCategories', 'supplierReturns', 'inventories',
+  // Склад (1.8.0): партии склада и журнал его движений
+  'skladBatches', 'skladMoves',
   // Сотрудники и роли (1.4.16) — тоже из локальной базы: окно узнает о них после обмена
   'users', 'roles', 'staff',
 ])
@@ -2243,6 +2245,9 @@ export function createGateway({
     'supplier.delete': { p: ['suppliers.delete'], tbls: ['suppliers'] },
     'supplier.pay': { p: ['suppliers.pay'], docs: ['supplierpayment'] },
     'supplierPayment.delete': { p: ['suppliers.pay'], edoc: 'supplierpayment' },
+    // Склад (1.8.0): перенос в магазин и правка остатка склада
+    'sklad.toShop': { p: ['sklad.move'], docs: ['skladmove'] },
+    'sklad.edit': { p: ['sklad.move'], docs: ['skladmove'] },
   }
   // Таблицы справочников, чьи строки касса правит (для расхождения «правку сделали и там, и там»)
   const EDIT_TBLS = new Set(['products', 'categories', 'product_types', 'pay_services', 'expense_categories', 'income_categories', 'suppliers'])

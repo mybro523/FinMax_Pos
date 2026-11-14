@@ -27,6 +27,8 @@ export function createArrival(ctx, raw) {
   // Чем заплатили и сколько из этого — деньгами из ящика кассы
   const payMethod = c.oneOf(dto.payMethod ?? '', 'payMethod', ['', 'cash', 'own', 'card', 'debt'])
   const paidCashAsked = c.num(dto.paidCash, 'paidCash', { optional: true, max: MAX_MONEY })
+  // Куда пришёл товар (1.8.0): в магазин (на полку) или на склад магазина
+  const place = c.oneOf(dto.place ?? 'shop', 'place', ['shop', 'sklad'])
   const items = c.list(dto.items, 'items').map((it, n) => ({
     productId: c.str(it?.productId, `items.${n}.productId`),
     // Целые упаковки (у весового товара без мешка — килограммы); ноль допустим при pieces > 0
@@ -158,6 +160,13 @@ export function createArrival(ctx, raw) {
 
     lines.forEach((l, n) => {
       const p = byId.get(l.productId)
+      // ── Приход на склад (1.8.0) ── Каждая строка — партия склада со своими ценой и сроком.
+      // Средняя закупочная товара не меняется и на полку ничего не ложится: товар попадёт в
+      // магазин переносом со склада (ops/sklad.mjs) — тогда и сдвинет закупочную
+      if (place === 'sklad') {
+        move(db, { opId, productId: l.productId, kind: 'sklad-in', units: l.units, costC: costCInPack(toCents(l.cost), l.upp, uppOf(p)), expiryDate: expiry[n], arrivalId }, { now })
+        return
+      }
       // Пересчёт средней цены — один раз на товар, перед первой его партией:
       // цена считается от остатка ДО прихода
       const first = !weighed.has(l.productId)
@@ -186,6 +195,7 @@ export function createArrival(ctx, raw) {
     const body = {
       id: arrivalId,
       date: new Date(now).toISOString(),
+      place,
       supplier: sup?.name || supplier || '—',
       supplierId: sup?.id ?? null,
       debt,

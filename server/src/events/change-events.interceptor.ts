@@ -12,7 +12,10 @@ const RULES: { test: RegExp; keys: string[] }[] = [
   { test: /^\/products/, keys: ['products'] },
   { test: /^\/sales/, keys: ['sales', 'products', 'customers'] },
   // Приход в долг меняет и долг поставщика
-  { test: /^\/arrivals/, keys: ['arrivals', 'products', 'suppliers'] },
+  // Приход на склад (1.8.0) меняет и склад
+  { test: /^\/arrivals/, keys: ['arrivals', 'products', 'suppliers', 'skladBatches'] },
+  // Склад (1.8.0): перенос кладёт товар в магазин, правка меняет склад
+  { test: /^\/sklad/, keys: ['skladBatches', 'skladMoves', 'products'] },
   // Оплата поставщику из кассы меняет и ожидаемые наличные в смене
   { test: /^\/suppliers/, keys: ['suppliers', 'supplierPayments', 'shifts'] },
   { test: /^\/supplier-payments/, keys: ['supplierPayments', 'suppliers', 'shifts'] },
@@ -49,6 +52,7 @@ const RULES: { test: RegExp; keys: string[] }[] = [
     keys: [
       'products', 'sales', 'arrivals', 'customers', 'deferred', 'shifts', 'payments', 'returns', 'writeoffs', 'expenses', 'expenseCategories',
       'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'productTypes', 'incomes', 'incomeCategories', 'supplierReturns',
+      'skladBatches', 'skladMoves',
     ],
   },
 ]

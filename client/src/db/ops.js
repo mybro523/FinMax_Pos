@@ -170,8 +170,11 @@ export function checkout({ items, payment, payVia, customer }) {
 // Провести приход. items: [{productId, name, qty, cost, expiryDate}] — мгновенно, сверка с сервером.
 // Срок годности необязателен; если указан — он задаёт
 // партию, из которой продажа спишет товар первым. Без него партия просто без срока.
-// supplierId и debt — поставщик из справочника и неоплаченная часть (долг перед ним)
-export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash, shiftId, items }) {
+// supplierId и debt — поставщик из справочника и неоплаченная часть (долг перед ним).
+// place (1.8.0): 'sklad' — приход на склад: товар ложится на склад, а не в магазин,
+// средняя закупочная товара не меняется (сервер заводит партии склада)
+export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash, shiftId, items, place }) {
+  const naSklad = place === 'sklad'
   // Товар мог быть заведён только что и ещё не получить настоящий номер — см. realId
   items = items.map((i) => (i.productId ? { ...i, productId: realId(i.productId) } : i))
   if (!items.length) throw new Error('Добавьте хотя бы один товар')
@@ -210,9 +213,11 @@ export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash
     payMethod: payMethod || '',
     total,
     items: arrItems,
+    ...(naSklad ? { place: 'sklad' } : {}),
   }
 
-  setCollection('products', prevP.map((p) => {
+  // На склад — остаток магазина не меняется: партии склада придут с сервера следом
+  if (!naSklad) setCollection('products', prevP.map((p) => {
     const it = arrItems.find((i) => i.productId === p.id)
     if (!it) return p
     // Упаковку поменяли в приходе (1.5.12) — карточка сразу с ней; у дробного не меньше
@@ -235,6 +240,7 @@ export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash
   return api
     .post('/arrivals', {
       supplier,
+      ...(naSklad ? { place: 'sklad' } : {}),
       ...(supplierId ? { supplierId, debt: Math.max(0, Number(debt) || 0) } : {}),
       ...(payMethod ? { payMethod } : {}),
       // Оплаченная из ящика часть: сервер запишет оплату поставщику из этой смены
@@ -257,7 +263,7 @@ export function receiveArrival({ supplier, supplierId, debt, payMethod, paidCash
       setCollection('arrivals', db.get('arrivals').map((a) => (a.id === tempArrival.id ? arrival : a)))
       // Себестоимость пересчитана средневзвешенно на сервере — подтянем точные значения.
       // Приход в долг изменил долг поставщика, оплата из кассы — деньги смены
-      refresh('products', 'suppliers', ...(Number(paidCash) > 0 ? ['shifts', 'supplierPayments'] : []))
+      refresh('products', 'suppliers', ...(naSklad ? ['skladBatches'] : []), ...(Number(paidCash) > 0 ? ['shifts', 'supplierPayments'] : []))
     })
     .catch((e) => {
       setCollection('products', prevP)
@@ -306,12 +312,63 @@ export function deleteArrival(id) {
   beginMutate(['products', 'arrivals'])
   return api
     .del(`/arrivals/${real}`)
-    .then(() => refresh('products', 'suppliers'))
+    .then(() => refresh('products', 'suppliers', 'skladBatches'))
     .catch((e) => {
       setCollection('arrivals', prevA)
       throw e
     })
     .finally(() => endMutate(['products', 'arrivals']))
+}
+
+// ── Склад (1.8.0) ──
+// Перенос со склада в магазин и правка остатка склада. Ответа сервера ждём: остаток
+// магазина и средняя закупочная считаются по партиям склада, которых здесь нет.
+// Ключ повтора — короткий обрыв связи переигрывается без второго переноса.
+// items: [{ productId, units }] — штуки (уп × штук в упаковке + штуки)
+export async function skladToShop(items, note = '') {
+  const list = (items || [])
+    .map((i) => ({ productId: realId(i.productId), units: Math.max(0, Math.round(Number(i.units) || 0)) }))
+    .filter((i) => i.units > 0)
+  if (!list.length) throw new Error('Добавьте хотя бы один товар')
+  beginMutate(['skladBatches', 'skladMoves', 'products'])
+  try {
+    const move = await postWithRetry('/sklad/to-shop', { clientId: skladKey(), items: list, ...(note ? { note: String(note).trim() } : {}) })
+    if (move?.id) setCollection('skladMoves', [move, ...db.get('skladMoves').filter((m) => m.id !== move.id)])
+    return move
+  } finally {
+    endMutate(['skladBatches', 'skladMoves', 'products'])
+    refresh('skladBatches', 'skladMoves', 'products')
+  }
+}
+
+// Поставить остаток склада товара = units (штук). cost — закупочная за упаковку для
+// прибавки (нет — нынешняя закупочная товара), expiryDate — срок прибавленной партии
+export async function skladEdit({ productId, units, cost, expiryDate, note }) {
+  const body = {
+    clientId: skladKey(),
+    productId: realId(productId),
+    units: Math.max(0, Math.round(Number(units) || 0)),
+    ...(Number(cost) > 0 ? { cost: Math.round(Number(cost) * 100) / 100 } : {}),
+    ...(expiryDate ? { expiryDate } : {}),
+    ...(note ? { note: String(note).trim() } : {}),
+  }
+  beginMutate(['skladBatches', 'skladMoves'])
+  try {
+    const move = await postWithRetry('/sklad/edit', body)
+    if (move?.id) setCollection('skladMoves', [move, ...db.get('skladMoves').filter((m) => m.id !== move.id)])
+    return move
+  } finally {
+    endMutate(['skladBatches', 'skladMoves'])
+    refresh('skladBatches', 'skladMoves')
+  }
+}
+
+const skladKey = () => {
+  try {
+    return 'skl_' + crypto.randomUUID()
+  } catch {
+    return 'skl_' + uid() + uid()
+  }
 }
 
 // ── Возврат товара поставщику ──

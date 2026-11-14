@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { LuLayers, LuPlus, LuSearch } from 'react-icons/lu'
+import { LuLayers, LuPlus, LuSearch, LuWarehouse } from 'react-icons/lu'
 import { money } from '../../db/store'
 import { useT } from '../../lib/i18n'
 import { n2 } from '../../lib/prihod'
@@ -9,7 +9,9 @@ import { addSupplier } from './SupplierPick'
 // Выбрали поставщика — все вкладки показывают только его, и новый приход оформляется
 // на него. «Все поступления» — снять выбор. У кого есть долг — красным, с суммой
 // (долги видит только тот, кому разрешены поставщики: остальным сервер их не отдаёт)
-export default function SupplierColumn({ suppliers, value, onChange, showDebt, canAdd, dialog, toast }) {
+// «Свой склад» (1.8.0) — первым пунктом: приход со своего склада, то есть перенос
+// товара со склада в магазин (onSvoySklad; нет права — пункта нет)
+export default function SupplierColumn({ suppliers, value, onChange, showDebt, canAdd, dialog, toast, svoySklad = false, onSvoySklad = null }) {
   const t = useT()
   const [q, setQ] = useState('')
   const list = useMemo(() => {
@@ -25,7 +27,12 @@ export default function SupplierColumn({ suppliers, value, onChange, showDebt, c
 
   return (
     <aside className="prh-side" data-tour="arr.side" aria-label={t('Поставщики')}>
-      <button type="button" className={'prh-side-btn' + (!value ? ' active' : '')} onClick={() => onChange('')}>
+      {onSvoySklad && (
+        <button type="button" className={'prh-side-btn sklad' + (svoySklad ? ' active' : '')} data-testid="svoy-sklad" aria-pressed={svoySklad} onClick={onSvoySklad}>
+          <LuWarehouse size={16} /> {t('Свой склад')}
+        </button>
+      )}
+      <button type="button" className={'prh-side-btn' + (!value && !svoySklad ? ' active' : '')} onClick={() => onChange('')}>
         <LuLayers size={16} /> {t('Все поступления')}
       </button>
       {canAdd && (

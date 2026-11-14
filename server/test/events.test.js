@@ -14,7 +14,8 @@ test('продажа задевает чеки, склад и долги', () =>
 })
 
 test('приход задевает поставки, склад и долг поставщика', () => {
-  assert.deepEqual(collectionsFor('POST', '/api/arrivals'), ['arrivals', 'products', 'suppliers'])
+  // …и свой склад (1.8.0): приход «Куда: Склад» кладёт товар туда
+  assert.deepEqual(collectionsFor('POST', '/api/arrivals'), ['arrivals', 'products', 'suppliers', 'skladBatches'])
 })
 
 test('деньги в смене: оплата поставщику, внесение и изъятие задевают и саму смену', () => {

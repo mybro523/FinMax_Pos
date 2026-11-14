@@ -40,6 +40,7 @@ import { setCustomerLogo } from './lib/customerScreen'
 import { startTour, obucheniePokazano, OBSHIY } from './lib/tur'
 const WriteOffs = lazy(() => import('./pages/WriteOffs'))
 const Inventory = lazy(() => import('./pages/Inventory'))
+const Sklad = lazy(() => import('./pages/Sklad'))
 const Expenses = lazy(() => import('./pages/Expenses'))
 const Incomes = lazy(() => import('./pages/Incomes'))
 const About = lazy(() => import('./pages/About'))
@@ -218,6 +219,7 @@ function AuthedApp({ user }) {
           <Route path="/returns" element={guarded('returns.view', <Returns />)} />
           <Route path="/writeoffs" element={guarded('writeoffs.view', <WriteOffs />)} />
           <Route path="/inventory" element={guarded('inventory.view', <Inventory />)} />
+          <Route path="/sklad" element={guarded('sklad.view', <Sklad />)} />
           <Route path="/shift" element={guarded('shift.view', <Shift />)} />
           <Route path="/debts" element={guarded('debts.view', <Debts />)} />
           <Route path="/discounts" element={guarded('discounts.view', <Discounts />)} />

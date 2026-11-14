@@ -1,7 +1,7 @@
 import { useMemo, useState, lazy, Suspense } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  LuWallet, LuTrendingUp, LuBoxes, LuReceipt, LuTruck, LuShoppingCart, LuChevronRight, LuBanknote,
+  LuWallet, LuTrendingUp, LuBoxes, LuReceipt, LuTruck, LuShoppingCart, LuChevronRight, LuBanknote, LuWarehouse, LuLayers,
 } from 'react-icons/lu'
 
 // Диаграммы — самая тяжёлая часть страницы, поэтому грузятся отдельно и уже
@@ -10,12 +10,13 @@ const DashboardCharts = lazy(() => import('../components/DashboardCharts'))
 import Layout from '../components/Layout'
 import Metric from '../components/Metric'
 import Discrepancies from '../components/Discrepancies'
-import { ChekiOkno } from '../components/Cheki'
+import { ChekiOkno, RasshifrovkaOkno } from '../components/Cheki'
 import { Modal, PayBadge, PAYMENTS } from '../components/ui'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
-import { useCollection, money, stockText } from '../db/store'
-import { isDivisible, stockUnits, stockValue, stockCost as stockCostOf, pricePerPiece, lineUnits, lineGross, pieceLabel } from '../lib/units'
+import { useCollection, useCollectionIf, money, stockText } from '../db/store'
+import { isDivisible, stockUnits, stockValue, stockCost as stockCostOf, pricePerPiece, lineUnits, lineGross, pieceLabel, unitsText } from '../lib/units'
+import { skladPoTovaram, skladItogo } from '../lib/sklad'
 import { dayKey, lastNDayKeys, fmtShort, fmtDayMonth, startOfDay } from '../lib/time'
 import { expiringProducts } from '../lib/expiry'
 import { periodFinance } from '../lib/finance'
@@ -70,6 +71,11 @@ export default function Dashboard() {
   const writeOffs = useCollection('writeoffs')
   const t = useT()
   const can = useCan()
+  // Склад (1.8.0): партии склада — только тому, кому раздел разрешён
+  const skladOn = can('sklad.view')
+  const skladBatches = useCollectionIf('skladBatches', skladOn)
+  const skladRows = useMemo(() => (skladOn ? skladPoTovaram(skladBatches, products) : []), [skladOn, skladBatches, products])
+  const sklad = useMemo(() => skladItogo(skladRows), [skladRows])
   const [modal, setModal] = useState(null)
   const close = () => setModal(null)
 
@@ -213,7 +219,7 @@ export default function Dashboard() {
     }
     if (modal.type === 'stock') {
       return (
-        <Modal wide title={t('Склад — детали')} onClose={close}>
+        <Modal wide title={t('Остаток в магазине — детали')} onClose={close}>
           <div className="mini-cards">
             <MC label={t('Стоимость')} v={money(stats.stockValue)} />
             <MC label={t('Наименований')} v={products.length} />
@@ -331,20 +337,25 @@ export default function Dashboard() {
     // Куда ушли деньги: сверху то, где их заморожено больше всего. Владелец
     // открывает эту таблицу, когда денег нет, а товар вроде бы есть
     if (modal.type === 'invested') {
-      const list = [...products].filter((p) => stockCostOf(p) > 0).sort((a, b) => stockCostOf(b) - stockCostOf(a))
+      const naSklade = new Map(skladRows.map((r) => [r.productId, r]))
+      const vlozheno = (p) => stockCostOf(p) + (naSklade.get(p.id)?.cost || 0)
+      const list = [...products].filter((p) => vlozheno(p) > 0).sort((a, b) => vlozheno(b) - vlozheno(a))
       return (
         <Modal wide title={t('Вложено в товар — по товарам')} onClose={close}>
           <div className="mini-cards">
-            <MC label={t('Вложено')} v={money(stats.stockCost)} />
-            <MC label={t('Выручу за всё')} v={money(stats.stockValue)} />
-            <MC label={t('Будущая прибыль')} v={money(stats.stockValue - stats.stockCost)} color="var(--green)" />
+            <MC label={t('Вложено')} v={money(stats.stockCost + sklad.cost)} />
+            {skladOn && <MC label={t('В магазине')} v={money(stats.stockCost)} />}
+            {skladOn && <MC label={t('На складе')} v={money(sklad.cost)} />}
+            <MC label={t('Выручу за всё')} v={money(stats.stockValue + sklad.value)} />
+            <MC label={t('Будущая прибыль')} v={money(stats.stockValue + sklad.value - stats.stockCost - sklad.cost)} color="var(--green)" />
           </div>
           <div style={{ maxHeight: '48vh', overflow: 'auto' }}>
             <table>
               <thead>
                 <tr>
                   <th>{t('Товар')}</th>
-                  <th className="num">{t('Остаток')}</th>
+                  <th className="num">{skladOn ? t('В магазине') : t('Остаток')}</th>
+                  {skladOn && <th className="num">{t('На складе')}</th>}
                   <th className="num">{t('Закуп.')}</th>
                   <th className="num">{t('Вложено')}</th>
                 </tr>
@@ -354,11 +365,12 @@ export default function Dashboard() {
                   <tr key={p.id}>
                     <td><b>{p.name}</b>{p.dosage ? <span className="tag-cat"> · {p.dosage}</span> : null}</td>
                     <td className="num">{stockText(p)}</td>
+                    {skladOn && <td className="num">{naSklade.get(p.id) ? unitsText(naSklade.get(p.id).units, p, t) : '—'}</td>}
                     <td className="num">{money(p.cost || 0)}</td>
-                    <td className="num"><b>{money(stockCostOf(p))}</b></td>
+                    <td className="num"><b>{money(vlozheno(p))}</b></td>
                   </tr>
                 ))}
-                {list.length === 0 && <tr><td colSpan="4" className="empty">{t('Нет товаров')}</td></tr>}
+                {list.length === 0 && <tr><td colSpan={skladOn ? 5 : 4} className="empty">{t('Нет товаров')}</td></tr>}
               </tbody>
             </table>
           </div>
@@ -366,6 +378,54 @@ export default function Dashboard() {
             {t('Закупочная — средняя по всем поставкам этого товара: продавая упаковку, не узнать, из какой она партии.')}
           </div>
         </Modal>
+      )
+    }
+    // ── Склад (1.8.0): что лежит на складе и на сколько ──
+    if (modal.type === 'sklad') {
+      return (
+        <Modal wide title={t('Остаток на складе — по товарам')} onClose={close}>
+          <div className="mini-cards">
+            <MC label={t('По цене продажи')} v={money(sklad.value)} />
+            <MC label={t('По закупке')} v={money(sklad.cost)} />
+            <MC label={t('Наименований')} v={sklad.tovarov} />
+          </div>
+          <div style={{ maxHeight: '48vh', overflow: 'auto' }}>
+            <table data-testid="dash-sklad-okno">
+              <thead><tr><th>{t('Товар')}</th><th className="num">{t('На складе')}</th><th className="num">{t('По закупке')}</th><th className="num">{t('По цене продажи')}</th></tr></thead>
+              <tbody>
+                {[...skladRows].sort((a, b) => b.value - a.value).map((r) => (
+                  <tr key={r.productId}>
+                    <td><b>{r.product.name}</b>{r.product.dosage ? <span className="tag-cat"> · {r.product.dosage}</span> : null}</td>
+                    <td className="num">{unitsText(r.units, r.product, t)}</td>
+                    <td className="num">{money(r.cost)}</td>
+                    <td className="num"><b>{money(r.value)}</b></td>
+                  </tr>
+                ))}
+                {!skladRows.length && <tr><td colSpan="4" className="empty">{t('На складе пока пусто')}</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <div className="modal-actions">
+            <Link to="/sklad" className="btn ghost" onClick={close}>{t('Открыть склад')}</Link>
+            <button className="btn" onClick={close}>{t('Закрыть')}</button>
+          </div>
+        </Modal>
+      )
+    }
+    if (modal.type === 'vsego') {
+      return (
+        <RasshifrovkaOkno
+          title={t('Всего товара')}
+          Icon={LuLayers}
+          note={t('Товар в магазине и на складе вместе: по цене продажи и по закупке.')}
+          rows={[
+            { k: t('В магазине'), sub: `${t('по закупке')} ${money(stats.stockCost)}`, v: money(stats.stockValue) },
+            { k: t('На складе'), sub: `${t('по закупке')} ${money(sklad.cost)}`, v: money(sklad.value) },
+            { k: t('По закупке — всего'), v: money(stats.stockCost + sklad.cost) },
+          ]}
+          itog={{ k: t('Всего по цене продажи'), v: money(stats.stockValue + sklad.value) }}
+          onClose={close}
+        />
       )
     }
     if (modal.type === 'positions') {
@@ -438,8 +498,14 @@ export default function Dashboard() {
     { k: `— ${t('В долг')}`, sum: kop(stats.todayByPay.debt) },
     { k: t('Прибыль за сегодня'), sum: kop(stats.profitToday) },
     { k: t('Списано за сегодня'), sum: kop(f.writeOffCost), cnt: f.writeOffCount || '' },
-    { k: t('Остаток на складе (по цене продажи)'), sum: kop(stats.stockValue), cnt: stats.stockUnits },
-    { k: t('Вложено в товар (по закупочной)'), sum: kop(stats.stockCost) },
+    { k: t('Остаток в магазине (по цене продажи)'), sum: kop(stats.stockValue), cnt: stats.stockUnits },
+    ...(skladOn
+      ? [
+          { k: t('Остаток на складе (по цене продажи)'), sum: kop(sklad.value), cnt: sklad.tovarov },
+          { k: t('Всего товара (по цене продажи)'), sum: kop(stats.stockValue + sklad.value) },
+        ]
+      : []),
+    { k: t('Вложено в товар (по закупочной)'), sum: kop(stats.stockCost + sklad.cost) },
     { k: t('Средняя маржа склада, %'), cnt: stats.margin },
     { k: t('Долги клиентов'), sum: kop(stats.debtTotal), cnt: stats.debtors.length },
     { k: t('Долги поставщикам'), sum: kop(stats.supplierDebt), cnt: stats.creditors.length },
@@ -535,13 +601,22 @@ export default function Dashboard() {
             у меня добра», хотя половина этой суммы ещё не заработана. Поэтому
             у обеих подписано, по какой цене считается: без подписи два разных
             числа про один склад выглядят как ошибка. */}
-        <Metric tour="dash.invested" testid="card-dash-invested" label={t('Вложено в товар')} value={money(stats.stockCost)} Icon={LuBanknote} tint="accent"
-          sub={t('по закупочной цене')} onClick={() => setModal({ type: 'invested' })} />
-        <Metric tour="dash.stock" testid="card-dash-stock" label={t('Остаток на складе')} value={money(stats.stockValue)} Icon={LuBoxes} tint="blue"
+        <Metric tour="dash.invested" testid="card-dash-invested" label={t('Вложено в товар')} value={money(stats.stockCost + sklad.cost)} Icon={LuBanknote} tint="accent"
+          sub={skladOn ? `${t('по закупке')} · ${t('магазин')} ${money(stats.stockCost)} · ${t('склад')} ${money(sklad.cost)}` : t('по закупочной цене')} onClick={() => setModal({ type: 'invested' })} />
+        <Metric tour="dash.stock" testid="card-dash-stock" label={t('Остаток в магазине')} value={money(stats.stockValue)} Icon={LuBoxes} tint="blue"
           sub={stats.lowList.length
             ? `${stats.stockUnits} ${t('уп')} · ${stats.lowList.length} ${t('заканчивается')}`
             : `${stats.stockUnits} ${t('уп')} · ${t('по цене продажи')}`}
           warn={stats.lowList.length > 0} onClick={() => setModal({ type: 'stock' })} />
+        {/* Склад (1.8.0): отдельный запас и всё вместе — только тому, кому склад разрешён */}
+        {skladOn && (
+          <Metric testid="card-dash-sklad" label={t('Остаток на складе')} value={money(sklad.value)} Icon={LuWarehouse} tint="blue"
+            sub={`${t('по закупке')} ${money(sklad.cost)} · ${t('по цене продажи')}`} onClick={() => setModal({ type: 'sklad' })} />
+        )}
+        {skladOn && (
+          <Metric testid="card-dash-vsego" label={t('Всего товара')} value={money(stats.stockValue + sklad.value)} Icon={LuLayers} tint="green"
+            sub={`${t('магазин + склад')} · ${t('по закупке')} ${money(stats.stockCost + sklad.cost)}`} onClick={() => setModal({ type: 'vsego' })} />
+        )}
         <Metric tour="dash.debts" testid="card-dash-debts" label={t('Долги клиентов')} value={money(stats.debtTotal)} Icon={LuReceipt} tint={stats.debtTotal > 0 ? 'danger' : 'accent'}
           sub={stats.debtors.length ? `${stats.debtors.length} ${t('клиент(ов) с долгом')}` : t('долгов нет')} onClick={() => setModal({ type: 'debts' })} />
         <Metric tour="dash.suppliers" testid="card-dash-suppliers" label={t('Долги поставщикам')} value={money(stats.supplierDebt)} Icon={LuTruck} tint={stats.supplierDebt > 0 ? 'danger' : 'accent'}

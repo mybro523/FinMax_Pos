@@ -23,7 +23,8 @@ import { forgetCountedAfter } from '../common/counted'
 // 6 — типы товаров, ФИО/оклад/бонус сотрудников, кому выдана зарплата
 // 7 — доходы вне продаж и их статьи
 // 8 — возвраты товара поставщикам
-const FORMAT = 8
+// 9 — свой склад: партии склада и его движения (1.8.0)
+const FORMAT = 9
 
 @Injectable()
 export class BackupService {
@@ -34,6 +35,7 @@ export class BackupService {
     const [
       products, customers, sales, arrivals, shifts, payments, users, deferred, returns, writeOffs, batches, inventories, categories, expenses, expenseCategories,
       suppliers, supplierPayments, cashMoves, payServices, stockEdits, productTypes, incomes, incomeCategories, supplierReturns,
+      skladBatches, skladMoves,
     ] = await Promise.all([
         this.prisma.product.findMany(),
         this.prisma.customer.findMany(),
@@ -70,6 +72,10 @@ export class BackupService {
         // Возвраты поставщикам — товар ушёл, долг или деньги вернулись: без них после
         // восстановления не сошлись бы ни склад, ни долги поставщикам
         this.prisma.supplierReturn.findMany({ include: { items: true } }),
+        // Свой склад (1.8.0) — товар магазина, просто не в зале: без него после
+        // восстановления пропал бы весь запас склада
+        this.prisma.skladBatch.findMany(),
+        this.prisma.skladMove.findMany(),
       ])
 
     return {
@@ -87,10 +93,12 @@ export class BackupService {
         incomes: incomes.length,
         suppliers: suppliers.length,
         supplierReturns: supplierReturns.length,
+        skladBatches: skladBatches.length,
       },
       data: {
         categories, products, customers, sales, arrivals, shifts, payments, users, deferred, returns, writeOffs, batches, inventories, expenses, expenseCategories,
         suppliers, supplierPayments, cashMoves, payServices, stockEdits, productTypes, incomes, incomeCategories, supplierReturns,
+        skladBatches, skladMoves,
       },
     }
   }
@@ -128,6 +136,9 @@ export class BackupService {
       await tx.supplierPayment.deleteMany({})
       await tx.cashMove.deleteMany({})
       await tx.stockEdit.deleteMany({})
+      // Склад (1.8.0) — так же: копия, снятая до его появления, отменяет и его
+      await tx.skladMove.deleteMany({})
+      await tx.skladBatch.deleteMany({})
       await tx.batch.deleteMany({})
       await tx.deferredBarcode.deleteMany({})
       await tx.shift.deleteMany({})
@@ -296,6 +307,15 @@ export class BackupService {
       for (const r of d.supplierReturns || []) {
         const { items, user, supplierRef, ...ret } = r
         await tx.supplierReturn.create({ data: { ...ret, userId: ref(ret.userId), items: { create: strip(items, ['returnId']) } } })
+      }
+      // ── Свой склад (1.8.0) ── партии — только у товаров, что есть в копии
+      if (d.skladBatches?.length) {
+        const known = new Set((d.products || []).map((p: any) => p.id))
+        const rows = strip(d.skladBatches, ['product']).filter((b: any) => known.has(b.productId))
+        if (rows.length) await tx.skladBatch.createMany({ data: rows })
+      }
+      if (d.skladMoves?.length) {
+        await tx.skladMove.createMany({ data: strip(d.skladMoves, ['user']).map((m: any) => ({ ...m, userId: ref(m.userId), items: m.items ?? [] })) })
       }
     }, TX_LONG)
 

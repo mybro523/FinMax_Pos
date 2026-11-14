@@ -127,6 +127,10 @@ export function docsOf(op) {
       return [['supplierpayment', p.payment?.id]]
     case 'inventory.create':
       return [['inventory', p.inventory?.id]]
+    // Склад (1.8.0): перенос в магазин и правка остатка — документ движения склада
+    case 'sklad.toShop':
+    case 'sklad.edit':
+      return [['skladmove', p.id]]
     default:
       // Правка или удаление документа: он назван в самой операции
       return DOC_EDIT_OPS.has(op.type) && p.ref?.kind && p.ref?.id ? [[p.ref.kind, p.ref.id]] : []
@@ -213,6 +217,8 @@ export function ackOp(db, op, fate = null) {
     // Списание сервер принял, но документа не завёл: остаток пересчитали раньше, чем
     // оно дошло, или списывать было уже нечего. В журнале кассы ему оставаться незачем
     if (op.type === 'writeoff' && noDoc && p.writeOff?.id) q(db, "DELETE FROM docs WHERE kind = 'writeoff' AND id = ?").run(p.writeOff.id)
+    // Правка остатка склада (1.8.0): у сервера остаток уже был таким — документа он не завёл
+    if (op.type === 'sklad.edit' && noDoc && p.id) q(db, "DELETE FROM docs WHERE kind = 'skladmove' AND id = ?").run(p.id)
     // Остаток и долг пересчитаются при ближайшем обмене — от того, что знает сервер.
     // Обычно его ответ и так приносит товар с этой операцией внутри. Но сервер мог
     // принять операцию, не тронув остаток (его пересчитали раньше, чем она дошла):
@@ -403,6 +409,20 @@ export function describeOp(op, find = () => null) {
       const e = p.income || {}
       return { sum: e.amount ?? null, title: e.category || '', detail: { category: e.category || '', note: e.note || '', date: e.date || '' } }
     }
+    // ── Склад (1.8.0) ──
+    case 'sklad.toShop': {
+      const d = find('skladmove', p.id) || {}
+      return {
+        sum: d.total ?? null,
+        title: names(d.items),
+        detail: { note: p.note || '', lines: lines(d.items, (i) => ({ name: i.name, units: i.units, cost: i.cost, expiry: i.expiryDate || null })) },
+      }
+    }
+    case 'sklad.edit': {
+      const d = find('skladmove', p.id) || {}
+      const line = (Array.isArray(d.items) ? d.items[0] : null) || {}
+      return { sum: d.total ?? null, title: line.name || '', detail: { units: p.units ?? null, diff: p.diff ?? null, note: p.note || '' } }
+    }
     case 'supplier.return': {
       const r = p.ret || {}
       return {
@@ -537,8 +557,8 @@ const TOUCHES = {
   sale: ['sales', 'products', 'customers', 'shifts'],
   return: ['returns', 'products', 'sales', 'customers', 'writeoffs', 'shifts'],
   writeoff: ['writeoffs', 'products'],
-  // Приход в долг меняет и долг поставщика
-  arrival: ['arrivals', 'products', 'suppliers'],
+  // Приход в долг меняет и долг поставщика; приход на склад (1.8.0) — склад
+  arrival: ['arrivals', 'products', 'suppliers', 'skladBatches'],
   'shift.open': ['shifts'],
   'shift.close': ['shifts'],
   'debt.pay': ['customers', 'payments', 'shifts'],
@@ -579,7 +599,10 @@ const TOUCHES = {
   'income.delete': ['incomes'],
   'cashMove.delete': ['cashMoves', 'shifts'],
   'arrival.update': ['arrivals', 'products', 'suppliers'],
-  'arrival.delete': ['arrivals', 'products', 'suppliers'],
+  'arrival.delete': ['arrivals', 'products', 'suppliers', 'skladBatches'],
+  // Склад (1.8.0): перенос в магазин двигает и полку
+  'sklad.toShop': ['skladBatches', 'skladMoves', 'products'],
+  'sklad.edit': ['skladBatches', 'skladMoves'],
   // Инвентаризация: применение двигает склад, недостачу оформит списанием сервер
   'inventory.create': ['inventories'],
   'inventory.count': ['inventories'],

@@ -42,6 +42,9 @@ export const OP_TYPES = [
   'cash.move',
   'income',
   'supplier.return',
+  // ── Склад (1.8.0) ──
+  'sklad.toShop',
+  'sklad.edit',
   // ── Справочники и правки документов без связи (версия 1.4.14) ──
   'product.create',
   'product.update',
@@ -316,7 +319,41 @@ export function parseArrival(p: any, now?: number) {
     payMethod: oneOf(a.payMethod ?? '', ['', 'cash', 'own', 'card', 'debt'] as const, 'способ оплаты'),
     paidCash,
     shiftId: idOrNull(a.shiftId, 'смена'),
+    // Куда пришёл товар (1.8.0): прежние кассы поле не шлют — в магазин
+    place: oneOf(a.place ?? 'shop', ['shop', 'sklad'] as const, 'куда пришёл товар'),
     items: items.map((it, n) => ({ ...it, expiryDate: dateOrNull(expiry[n], 'срок годности') })),
+  }
+}
+
+// ── Склад (1.8.0) ──
+// Тело — как у POST /sklad/to-shop и /sklad/edit; можно и в обёртке { move: … }.
+// Номер документа — id или clientId с кассы: под ним документ и ляжет на сервере
+function skladRoot(p: any) {
+  const root = obj(p, 'документ склада')
+  return root.move && typeof root.move === 'object' ? obj(root.move, 'документ склада') : root
+}
+
+export function parseSkladToShop(p: any, now?: number) {
+  const m = skladRoot(p)
+  const items = list(m.items, 'что перенести', (i) => ({ productId: id(i.productId, 'товар'), units: int(i.units, 'штуки', 1, MAX_UNITS) }), 5000)
+  return {
+    id: id(m.id ?? m.clientId, 'перенос со склада'),
+    date: m.date === undefined || m.date === null || m.date === '' ? undefined : when(m.date, 'перенос со склада', now),
+    note: text(m.note, 500),
+    items,
+  }
+}
+
+export function parseSkladEdit(p: any, now?: number) {
+  const m = skladRoot(p)
+  return {
+    id: id(m.id ?? m.clientId, 'правка склада'),
+    date: m.date === undefined || m.date === null || m.date === '' ? undefined : when(m.date, 'правка склада', now),
+    note: text(m.note, 500),
+    productId: id(m.productId, 'товар'),
+    units: int(m.units, 'остаток склада', 0, MAX_UNITS),
+    cost: m.cost === undefined || m.cost === null || m.cost === '' ? null : money(m.cost, 'закупочная цена'),
+    expiryDate: dateOrNull(m.expiryDate, 'срок годности'),
   }
 }
 

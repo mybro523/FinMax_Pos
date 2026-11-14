@@ -46,6 +46,7 @@ model Product {
   supplierReturnItems SupplierReturnItem[]
   inventoryItems InventoryItem[]
   stockEdits   StockEdit[]
+  skladBatches SkladBatch[]
 }
 
 // ── Категория товара ──
@@ -145,6 +146,9 @@ model Arrival {
   // Чем заплатили: cash — из кассы, own — наличными мимо кассы, card — картой,
   // debt — в долг. Пусто — приход прежней версии
   payMethod String   @default("")
+  // Куда пришёл товар (1.8.0): shop — в магазин (партии Batch), sklad — на свой склад
+  // (партии SkladBatch); магазин тогда не меняется
+  place    String        @default("shop")
   userId   String? // кто принял — для истории движения товара
   user     User?         @relation(fields: [userId], references: [id])
   items    ArrivalItem[]
@@ -425,6 +429,7 @@ model User {
   supplierReturns  SupplierReturn[]
   cashMoves    CashMove[]
   stockEdits   StockEdit[]
+  skladMoves   SkladMove[]
 }
 
 // ── Возврат товара ──
@@ -741,4 +746,39 @@ model PriceLog {
 model SyncMeta {
   key   String @id
   value String
+}
+
+// ── Склад (1.8.0) ──
+// Свой склад магазина — отдельный запас товара. Магазин (Product.stock, Batch) его не
+// видит: продажи, сроки, списания, пересчёт работают как прежде. Товар попадает на склад
+// приходом с place 'sklad', уходит в магазин переносом (SkladMove kind 'toShop').
+model SkladBatch {
+  id         String    @id @default(cuid())
+  productId  String
+  product    Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  units      Int       @default(0) // штук на складе в этой партии (как Batch.units)
+  cost       Decimal   @default(0) @db.Decimal(12, 2) // закупочная за упаковку товара
+  expiryDate DateTime?
+  arrivalId  String? // приход на склад, которым заведена
+  createdAt  DateTime  @default(now())
+
+  @@index([productId])
+  @@index([arrivalId])
+}
+
+// Документ движения склада: toShop — перенос в магазин, edit — правка остатка склада
+model SkladMove {
+  id       String   @id @default(cuid())
+  clientId String?  @unique // id с кассы без связи — повтор не задваивает
+  kind     String
+  date     DateTime @default(now())
+  userId   String?
+  user     User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  note     String   @default("")
+  // [{ productId, name, units, cost, expiryDate }]: toShop — сколько штук ушло в магазин,
+  // edit — изменение со знаком
+  items    Json     @default("[]")
+  total    Decimal  @default(0) @db.Decimal(12, 2) // по закупке, без знака
+
+  @@index([date])
 }

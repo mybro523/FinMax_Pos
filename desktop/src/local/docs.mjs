@@ -6,7 +6,7 @@
 // ключ повтора. Остальное читается из самого документа.
 import { q } from './db.mjs'
 
-export const KINDS = ['sale', 'return', 'arrival', 'writeoff', 'payment', 'shift', 'expense', 'cashmove', 'supplierpayment', 'income', 'supplierreturn', 'inventory']
+export const KINDS = ['sale', 'return', 'arrival', 'writeoff', 'payment', 'shift', 'expense', 'cashmove', 'supplierpayment', 'income', 'supplierreturn', 'inventory', 'skladmove']
 
 // За какой срок касса держит журналы у себя. Столько же по умолчанию отдаёт сервер
 // (server/src/*/…service.ts) и столько же держит в памяти окно (client/src/db/store.js).
@@ -15,6 +15,8 @@ export const WINDOW_DAYS = {
   sale: 60, return: 180, arrival: 180, writeoff: 180, payment: 180, expense: 180, cashmove: 180, supplierpayment: 180, income: 180, supplierreturn: 180,
   // Листы пересчёта: применённые — за тот же срок, незаконченные — пока не применят (snapshot.mjs)
   inventory: 180,
+  // Движения склада (1.8.0): перенос в магазин и правка остатка склада
+  skladmove: 180,
 }
 
 // Какое поле документа считается его датой
@@ -32,7 +34,9 @@ export function putDoc(db, kind, body, { sync = 'synced', deviceId = null } = {}
     kind === 'shift' ? null : body.shiftId ?? null,
     kind === 'return' ? body.saleId ?? null : null,
     // Ключ повтора есть у чека, возврата, расхода, дохода, движения наличных и оплаты поставщику
-    kind === 'sale' || kind === 'return' || kind === 'expense' || kind === 'cashmove' || kind === 'income' || kind === 'supplierpayment' ? body.clientId ?? null : null,
+    kind === 'sale' || kind === 'return' || kind === 'expense' || kind === 'cashmove' || kind === 'income' || kind === 'supplierpayment' || kind === 'skladmove'
+      ? body.clientId ?? null
+      : null,
     deviceId ?? body.deviceId ?? null,
     // У смены — когда закрыта; у применённого листа пересчёта — когда применён (по нему
     // пересборка остатка находит пересчёты, не разбирая тела всех листов, stock.mjs)

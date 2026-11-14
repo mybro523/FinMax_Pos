@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   LuBanknote, LuCreditCard, LuClock, LuCalculator, LuTrash2, LuScanLine, LuPackagePlus, LuEraser,
-  LuPlus, LuCheck, LuListChecks, LuReceipt, LuSearch, LuRotateCcw,
+  LuPlus, LuCheck, LuListChecks, LuReceipt, LuSearch, LuRotateCcw, LuStore, LuWarehouse,
 } from 'react-icons/lu'
 import { useToast, useDialog } from '../../components/ui'
 import NumberInput from '../../components/NumberInput'
@@ -861,7 +861,9 @@ function FinishPanel({ suppliers, sup, total, lines, dialog, toast, onSaved, edi
     if (paidCash > 0 && !tills.length) return toast(tr('Нет открытой смены — из кассы взять нечего.'), 'err')
     try {
       // Мгновенно: склад пополняется сразу; при ошибке сети — откат и сообщение
+      const naSklad = st.kuda === 'sklad'
       receiveArrival({
+        ...(naSklad ? { place: 'sklad' } : {}),
         payMethod: method,
         paidCash,
         shiftId: paidCash > 0 ? sourceId || '' : '',
@@ -870,7 +872,7 @@ function FinishPanel({ suppliers, sup, total, lines, dialog, toast, onSaved, edi
         debt,
         items: lines.map(toItem),
       }).catch((e) => toast(e.message, 'err'))
-      toast(tr('Приход оприходован, склад пополнен'))
+      toast(naSklad ? tr('Приход оприходован на склад') : tr('Приход оприходован, склад пополнен'))
       resetDraft()
       onSaved?.()
     } catch (e) {
@@ -902,10 +904,13 @@ function FinishPanel({ suppliers, sup, total, lines, dialog, toast, onSaved, edi
             canAdd={can('suppliers.edit')}
           />
           <PayBlock tills={tills} total={total} canDebt={can('arrivals.debt')} tour="af.credit" />
+          {/* Куда кладётся товар (1.8.0): в магазин — на продажу; на склад — в запас */}
+          <KudaBlock />
         </div>
         <div className="prh-finish-total">
           <span>{t('К оплате поставщику')}</span>
           <b>{money(total)}</b>
+          {st.kuda === 'sklad' && <span className="badge low" data-testid="prh-na-sklad" style={{ alignSelf: 'flex-start' }}>{t('Товар — на склад')}</span>}
           <small>{lines.length} {t('поз.')}{sup ? ` · ${sup.name}` : ''}</small>
           <button type="button" className="btn green big" data-tour="af.submit" disabled={!lines.length} onClick={submit}>
             <span className="ic"><LuCheck size={18} /></span> {t('Оприходовать')}
@@ -916,6 +921,39 @@ function FinishPanel({ suppliers, sup, total, lines, dialog, toast, onSaved, edi
             </button>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Куда: магазин или склад (1.8.0) ──
+// Склад — отдельный запас: продажи берут товар только из магазина. Приход на склад
+// пополняет склад, в магазин товар потом переносят («Склад → В магазин» или
+// «Свой склад» слева). Без права на склад выбора нет — приход идёт в магазин
+export function KudaBlock() {
+  const can = useCan()
+  const st = usePrihod()
+  if (!can('sklad.view')) return null
+  const KNOPKI = [
+    ['shop', tr('В магазин'), LuStore],
+    ['sklad', tr('На склад'), LuWarehouse],
+  ]
+  return (
+    <div style={{ margin: '10px 0 4px' }} data-tour="af.kuda" data-testid="prh-kuda">
+      <label style={{ display: 'block', fontSize: 13, color: 'var(--muted)', marginBottom: 6 }}>{tr('Куда')}</label>
+      <div className="arr-pay" style={{ gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
+        {KNOPKI.map(([key, label, Icon]) => (
+          <button
+            key={key}
+            type="button"
+            data-kuda={key}
+            className={'arr-pay-btn' + ((st.kuda || 'shop') === key ? ' active' : '')}
+            onClick={() => setPrihod({ kuda: key })}
+          >
+            <Icon size={16} />
+            <span>{label}</span>
+          </button>
+        ))}
       </div>
     </div>
   )

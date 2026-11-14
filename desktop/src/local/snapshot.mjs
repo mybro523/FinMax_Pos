@@ -26,6 +26,8 @@ export const DOC_KEYS = {
   sales: 'sale', returns: 'return', arrivals: 'arrival', writeoffs: 'writeoff', payments: 'payment', shifts: 'shift', expenses: 'expense',
   cashMoves: 'cashmove', supplierPayments: 'supplierpayment', incomes: 'income', supplierReturns: 'supplierreturn',
   inventories: 'inventory',
+  // Движения склада (1.8.0): перенос в магазин и правка остатка склада
+  skladMoves: 'skladmove',
 }
 
 const rows = (v) => (Array.isArray(v) ? v : [])
@@ -126,6 +128,7 @@ function applyProducts(db, products, batches, full, now) {
   for (const id of products.remove) {
     q(db, 'DELETE FROM products WHERE id = ?').run(id)
     q(db, 'DELETE FROM batches WHERE productId = ?').run(id)
+    q(db, 'DELETE FROM sklad_batches WHERE productId = ?').run(id)
   }
 
   for (const b of batches.upsert) {
@@ -159,6 +162,22 @@ function applyProducts(db, products, batches, full, now) {
   // проигрываются только тогда, когда сам товар уже на месте
   if (replayEdits(db, ['products'])) reorder = true
   if (reorder) reorderProducts(db)
+}
+
+// ── Партии склада (1.8.0) ── Как партии полки: серверное количество — основа (sUnits), свои
+// неотправленные движения склада наложит пересборка остатка (stock.mjs, rebuildStock)
+function applySklad(db, sklad, full, now) {
+  if (full) q(db, 'DELETE FROM sklad_batches').run()
+  const insert = q(
+    db,
+    'INSERT OR REPLACE INTO sklad_batches (id, productId, units, sUnits, costC, expiryDate, arrivalId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  )
+  for (const b of sklad.upsert) {
+    if (!b || typeof b.id !== 'string' || typeof b.productId !== 'string') continue
+    const units = wholeNonNeg(b.units)
+    insert.run(b.id, b.productId, units, units, toCents(b.cost), isoOrNull(b.expiryDate), b.arrivalId ?? null, isoOrNull(b.createdAt) || new Date(now).toISOString())
+  }
+  for (const id of sklad.remove) q(db, 'DELETE FROM sklad_batches WHERE id = ?').run(id)
 }
 
 // Порядок товаров в списке — по алфавиту, как у сервера
@@ -443,12 +462,19 @@ export function applyPull(db, res, { now }) {
     const batches = part(data.batches)
     const stockTouched = (full && !!data.products) || touched(products) || touched(batches)
     if (stockTouched) applyProducts(db, products, batches, full && !!data.products, now)
+    // Склад (1.8.0) — тоже основа для пересборки: движения склада в том же журнале
+    const sklad = part(data.skladBatches)
+    const skladTouched = (full && !!data.skladBatches) || touched(sklad)
+    if (skladTouched) {
+      applySklad(db, sklad, full && !!data.skladBatches, now)
+      changed.push('skladBatches')
+    }
     // Основа новая (или сервер отверг какую-то операцию) — накладываем поверх всё,
     // что сделано здесь и ещё не принято
     // Пришёл применённый лист, а неотправленные движения есть — пересобрать, даже если товары
     // не менялись: часть этих движений теперь учтена пересчётом
     const pendingQty = sheetApplied && !!q(db, 'SELECT 1 FROM stock_moves WHERE synced = 0 LIMIT 1').get()
-    if (stockTouched || pendingQty || getMeta(db, 'needRebuild') === '1') {
+    if (stockTouched || skladTouched || pendingQty || getMeta(db, 'needRebuild') === '1') {
       rebuildStock(db)
       recountDebts(db)
       setMeta(db, 'needRebuild', '0')

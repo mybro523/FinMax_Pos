@@ -80,7 +80,11 @@ export function applyRowEdit(db, e) {
   if (e.action === 'del') {
     q(db, `DELETE FROM ${e.tbl} WHERE id = ?`).run(e.rowId)
     // Товар убрали — его партии на полке больше не числятся
-    if (e.tbl === 'products') q(db, 'DELETE FROM batches WHERE productId = ?').run(e.rowId)
+    if (e.tbl === 'products') {
+      q(db, 'DELETE FROM batches WHERE productId = ?').run(e.rowId)
+      // …и на складе (1.8.0): у сервера партии склада уходят вместе с товаром
+      q(db, 'DELETE FROM sklad_batches WHERE productId = ?').run(e.rowId)
+    }
     return
   }
   if (e.action === 'map') {
@@ -395,7 +399,10 @@ export function undoEdits(db, opId) {
     if (!cols) continue
     if (e.action === 'put' && data.row) {
       q(db, `DELETE FROM ${e.tbl} WHERE id = ?`).run(e.rowId)
-      if (e.tbl === 'products') q(db, 'DELETE FROM batches WHERE productId = ?').run(e.rowId)
+      if (e.tbl === 'products') {
+        q(db, 'DELETE FROM batches WHERE productId = ?').run(e.rowId)
+        q(db, 'DELETE FROM sklad_batches WHERE productId = ?').run(e.rowId)
+      }
     } else if (e.action === 'put' && data.was && typeof data.was === 'object') {
       applyRowEdit(db, { tbl: e.tbl, rowId: e.rowId, action: 'put', data: { set: data.was } })
     } else if (e.action === 'del' && data.wasRow && typeof data.wasRow === 'object') {

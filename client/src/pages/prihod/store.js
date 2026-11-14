@@ -67,6 +67,11 @@ const blank = (owner = '') => ({
   pay: blankPay(),
   flash: '', // строка, которую только что добавили или нашли сканером
   ret: blankRet(), // возврат поставщику (вкладка «Возврат»)
+  // Склад (1.8.0): куда кладётся новый приход — 'shop' (магазин) или 'sklad' (склад).
+  // Не запоминается: после проведения снова «Магазин»
+  kuda: 'shop',
+  // Слева выбран «Свой склад»: экран прихода — перенос со склада в магазин
+  svoySklad: false,
 })
 
 let state = blank()
@@ -104,7 +109,7 @@ export const setPay = (patch) => setPrihod((s) => ({ pay: { ...s.pay, ...patch }
 // Приход оформлен — чистый лист. Выбранный поставщик и касса оплаты остаются:
 // следующую накладную того же поставщика часто принимают сразу
 export function resetDraft() {
-  setPrihod((s) => ({ lines: [], checked: [], discAll: false, form: blankForm(), pay: blankPay(s.pay.sourceId), sub: 'add', flash: '' }))
+  setPrihod((s) => ({ lines: [], checked: [], discAll: false, form: blankForm(), pay: blankPay(s.pay.sourceId), sub: 'add', flash: '', kuda: 'shop' }))
 }
 
 export const setRet = (patch) => setPrihod((s) => ({ ret: { ...s.ret, ...(typeof patch === 'function' ? patch(s.ret) : patch) } }))

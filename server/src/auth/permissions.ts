@@ -39,6 +39,9 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       ['arrivals.edit', 'Приход товара: изменить и удалить'],
       ['arrivals.debt', 'Приход товара: в долг поставщику'],
       ['arrivals.return', 'Приход товара: возврат поставщику'],
+      // Свой склад (1.8.0): отдельный запас товара вне зала
+      ['sklad.view', 'Склад: просмотр'],
+      ['sklad.move', 'Склад: перенос в магазин и правка остатка'],
       ['expiry.view', 'Срок годности'],
       ['writeoffs.view', 'Списание: журнал'],
       ['writeoffs.create', 'Списание: списать товар'],
@@ -178,6 +181,9 @@ export const OP_PERMISSIONS: Record<string, string[]> = {
   income: ['incomes.create'],
   'cash.move': ['shift.cash'],
   'supplier.return': ['arrivals.return'],
+  // Склад (1.8.0): перенос в магазин и правка остатка — как на сайте
+  'sklad.toShop': ['sklad.move'],
+  'sklad.edit': ['sklad.move'],
   // ── Справочники и правки документов без связи — те же права, что на сайте ──
   'product.create': ['products.create'],
   'product.update': ['products.edit'],

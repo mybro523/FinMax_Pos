@@ -113,7 +113,7 @@ export function shortageWorth(rows: { cost: Prisma.Decimal | number; units: numb
 }
 
 // Порядок списания: сначала ближайший срок, бессрочные — в конце
-const byFefo = (a: { expiryDate: Date | null; createdAt: Date }, b: { expiryDate: Date | null; createdAt: Date }) => {
+export const byFefo = (a: { expiryDate: Date | null; createdAt: Date }, b: { expiryDate: Date | null; createdAt: Date }) => {
   const ax = a.expiryDate ? a.expiryDate.getTime() : Number.MAX_SAFE_INTEGER
   const bx = b.expiryDate ? b.expiryDate.getTime() : Number.MAX_SAFE_INTEGER
   return ax !== bx ? ax - bx : a.createdAt.getTime() - b.createdAt.getTime()

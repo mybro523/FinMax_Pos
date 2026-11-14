@@ -28,11 +28,14 @@ const COLLECTIONS = [
   'products', 'sales', 'arrivals', 'customers', 'deferred', 'shifts', 'payments', 'returns', 'writeoffs', 'categories',
   'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices', 'productTypes',
   'incomes', 'incomeCategories', 'supplierReturns',
+  // Склад (1.8.0): партии товара на складе и документы его движения (перенос в магазин, правка)
+  'skladBatches', 'skladMoves',
 ]
 // Адрес раздела на сервере — там, где он не совпадает с названием раздела здесь
 const PATHS = {
   expenseCategories: 'expense-categories', supplierPayments: 'supplier-payments', cashMoves: 'cash-moves', payServices: 'pay-services',
   productTypes: 'product-types', incomeCategories: 'income-categories', supplierReturns: 'supplier-returns',
+  skladBatches: 'sklad', skladMoves: 'sklad/moves',
 }
 export const pathOf = (key) => '/' + (PATHS[key] || key)
 // ── Кэш принадлежит своему магазину ──
@@ -83,6 +86,7 @@ export const CACHE_DAYS = {
   supplierPayments: JOURNAL_CACHE_DAYS,
   cashMoves: JOURNAL_CACHE_DAYS,
   supplierReturns: JOURNAL_CACHE_DAYS,
+  skladMoves: JOURNAL_CACHE_DAYS,
 }
 
 const QUERY = Object.fromEntries(Object.entries(CACHE_DAYS).map(([k, d]) => [k, `?days=${d}`]))
@@ -396,7 +400,7 @@ export function refreshAll() {
 // берём их заметно реже, а при возвращении на вкладку — сразу и все.
 const SLOW_KEYS = new Set([
   'arrivals', 'returns', 'writeoffs', 'payments', 'expenses', 'expenseCategories', 'suppliers', 'supplierPayments', 'cashMoves', 'payServices',
-  'incomes', 'incomeCategories', 'supplierReturns',
+  'incomes', 'incomeCategories', 'supplierReturns', 'skladMoves',
 ])
 const SLOW_EVERY = 8 // каждый восьмой тик ≈ раз в минуту
 

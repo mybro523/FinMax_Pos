@@ -446,6 +446,27 @@ export const PHARMACY_SCHEMA = [
     at TEXT NOT NULL
   );
   `,
+  // ── Склад магазина (версия 1.8.0) ──
+  // Отдельный запас рядом с полкой: партии склада устроены как партии полки (units — с учётом
+  // сделанного здесь, sUnits — по словам сервера, NULL — заведена здесь). Движения склада — в
+  // журнале stock_moves своими видами (stock.mjs), документы движений — в docs (kind = skladmove),
+  // приход на склад — обычный приход с place = 'sklad' в теле. Склад могли завести на сайте до
+  // обновления программы — отметки обмена сбрасываются, один раз касса получит всё заново
+  `
+  CREATE TABLE sklad_batches (
+    id TEXT PRIMARY KEY,
+    productId TEXT NOT NULL,
+    units INTEGER NOT NULL DEFAULT 0,
+    sUnits INTEGER,
+    costC INTEGER NOT NULL DEFAULT 0,
+    expiryDate TEXT,
+    arrivalId TEXT,
+    createdAt TEXT NOT NULL
+  );
+  CREATE INDEX sklad_batches_product ON sklad_batches(productId);
+  CREATE INDEX sklad_batches_arrival ON sklad_batches(arrivalId);
+  DELETE FROM meta WHERE key IN ('cursor', 'wcursor');
+  `,
 ]
 
 // ── Общая база программы ──
