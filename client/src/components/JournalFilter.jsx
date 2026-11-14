@@ -3,6 +3,7 @@ import { LuSearch } from 'react-icons/lu'
 import { useCollection, loadRange, needsServerFor } from '../db/store'
 import { startOfDay, startOfDaysAgo } from '../lib/time'
 import { useT, translate as tr } from '../lib/i18n'
+import KameraKnopka from './KameraKnopka'
 import { poiskZapros, kodyPodhodyat } from '../lib/poisk'
 import StickyBar from './StickyBar'
 
@@ -91,7 +92,7 @@ export function useJournalFilter(key, { dateOf = (r) => r.date, textOf = () => '
   }
 }
 
-export function JournalFilter({ controls, placeholder, children }) {
+export function JournalFilter({ controls, placeholder, children, kamera }) {
   const t = useT()
   const { period, setPeriod, fromDate, setFromDate, toDate, setToDate, q, setQ } = controls
   // Поиск и период закреплены вверху, пока листается журнал; даты ниже — нет: полоса с
@@ -101,12 +102,23 @@ export function JournalFilter({ controls, placeholder, children }) {
     <>
       <StickyBar panel pad="12px 16px 10px" className="journal-filter-bar">
         <div className="toolbar">
-          <input
-            className="search"
-            placeholder={placeholder || t('Поиск по товару…')}
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
+          {kamera ? (
+            <div className="search kamera-pole">
+              <input
+                placeholder={placeholder || t('Поиск по товару…')}
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+              <KameraKnopka onCode={setQ} testid={kamera} />
+            </div>
+          ) : (
+            <input
+              className="search"
+              placeholder={placeholder || t('Поиск по товару…')}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          )}
           {children}
         </div>
         <div className="chips">

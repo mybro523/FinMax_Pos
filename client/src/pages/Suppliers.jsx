@@ -10,6 +10,7 @@ import { useCollection, money, db, onChanged } from '../db/store'
 import { api } from '../db/api'
 import { fmtDate, fmtDateTime } from '../lib/time'
 import { useT } from '../lib/i18n'
+import KameraKnopka from '../components/KameraKnopka'
 import { poiskZapros, tovarPodhodit } from '../lib/poisk'
 import { useCan, getUser } from '../db/auth'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
@@ -304,7 +305,10 @@ export default function Suppliers() {
         </div>
         <StickyBar panel pad="10px 16px 14px">
           <div className="toolbar">
-            <input className="search" placeholder={t('Товар, штрихкод или поставщик…')} value={hq} onChange={(e) => setHq(e.target.value)} />
+            <div className="search kamera-pole">
+              <input placeholder={t('Товар, штрихкод или поставщик…')} value={hq} onChange={(e) => setHq(e.target.value)} />
+              <KameraKnopka onCode={setHq} testid="kamera-postavshiki" />
+            </div>
             <select value={supFilter} onChange={(e) => setSupFilter(e.target.value)} aria-label={t('Поставщик')} style={{ maxWidth: 260 }}>
               <option value="">{t('Все поставщики')}</option>
               {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}

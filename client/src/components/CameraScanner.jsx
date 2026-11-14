@@ -1,27 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { BrowserMultiFormatReader } from '@zxing/browser'
-import { DecodeHintType, BarcodeFormat } from '@zxing/library'
+import { decodeGray, grayOf } from '../lib/scanWorker'
 import { LuCamera, LuImage, LuTriangleAlert, LuScanLine, LuZoomIn, LuFlashlight } from 'react-icons/lu'
 import { overlayHost, useBackdropClose } from './ui'
-
-// Надёжные форматы (без ITF/Codabar — они дают ложные/обрезанные чтения).
-// DATA_MATRIX и QR_CODE — двумерные коды на упаковках товаров: их печатают вместо
-// обычного штрихкода или рядом с ним. QR раньше отсутствовал в списке, поэтому камера
-// его физически не искала и не распознавала.
-const ZXING_FORMATS = [
-  BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E,
-  BarcodeFormat.CODE_128, BarcodeFormat.CODE_39,
-  BarcodeFormat.DATA_MATRIX, BarcodeFormat.QR_CODE, BarcodeFormat.AZTEC,
-]
 
 // Сколько раз подряд код должен совпасть, чтобы его принять (защита от misread)
 const CONFIRM = 2
 
-// Пауза между распознаваниями. Прежде ZXing молотил почти каждый кадр FullHD-видео
-// прямо в потоке интерфейса — на телефоне тормозило и видео, и кнопки. 140 мс —
-// это ~7 попыток в секунду: для наведения за глаза, а телефону легко
-const SCAN_MS = 140
+// Пауза между распознаваниями. Распознавание идёт в фоновом потоке (lib/scanWorker.js):
+// страница только снимает маленький кадр, видео не ждёт. 110 мс — ~9 попыток в секунду.
+// Нет фонового потока (очень старый браузер) — разбор в странице, но реже: 260 мс
+const SCAN_MS = 110
+const SCAN_MS_MAIN = 260
+// Кадр для цикла — не шире 640 точек: штрихкоду хватает, а работы вчетверо меньше
+const LOOP_W = 640
 
 // Те же форматы для встроенного распознавателя браузера (Chrome/Android —
 // аппаратный, почти не грузит процессор). Если он знает меньше пяти наших
@@ -40,23 +32,17 @@ async function makeNativeDetector() {
   }
 }
 
-function makeZxing(tryHarder) {
-  const hints = new Map()
-  hints.set(DecodeHintType.POSSIBLE_FORMATS, ZXING_FORMATS)
-  // TRY_HARDER в непрерывном цикле слишком дорог для телефона — он включается
-  // только для ручного «Сфотографировать и распознать»
-  if (tryHarder) hints.set(DecodeHintType.TRY_HARDER, true)
-  return new BrowserMultiFormatReader(hints)
-}
-
 export default function CameraScanner({ onDetect, onClose }) {
   const backdrop = useBackdropClose(onClose)
   const videoRef = useRef(null)
   const streamRef = useRef(null)
   const detectorRef = useRef(null) // встроенный распознаватель браузера (если есть)
-  const zxingRef = useRef(null) // ZXing для цикла — там, где встроенного нет
+  const workerRef = useRef(null) // фоновый поток распознавания (lib/scanWorker.js)
+  const waitRef = useRef(new Map()) // id кадра → ответ фонового потока
+  const seqRef = useRef(0)
   const scanTimerRef = useRef(null)
   const scanCanvasRef = useRef(null) // переиспользуемый холст кадра — без мусора в памяти
+  const frameRef = useRef(0) // номер кадра цикла: каждый третий — и двумерные коды
   const doneRef = useRef(false)
   const voteRef = useRef({ code: '', count: 0 })
   const [error, setError] = useState('')
@@ -102,6 +88,10 @@ export default function CameraScanner({ onDetect, onClose }) {
     doneRef.current = true
     clearTimeout(scanTimerRef.current)
     try { streamRef.current?.getTracks().forEach((t) => t.stop()) } catch {}
+    try { workerRef.current?.terminate() } catch {}
+    workerRef.current = null
+    for (const done of waitRef.current.values()) done(null)
+    waitRef.current.clear()
   }
 
   // Кадр для распознавания: НЕ весь экран, а жёлтая рамка прицела, и не крупнее
@@ -116,7 +106,7 @@ export default function CameraScanner({ onDetect, onClose }) {
     const sy = full ? 0 : Math.round(vh * 0.2)
     const sw = full ? vw : Math.round(vw * 0.84)
     const sh = full ? vh : Math.round(vh * 0.6)
-    const k = Math.min(1, (full ? 1200 : 800) / sw)
+    const k = Math.min(1, (full ? 1280 : LOOP_W) / sw)
     const canvas = (scanCanvasRef.current ||= document.createElement('canvas'))
     canvas.width = Math.round(sw * k)
     canvas.height = Math.round(sh * k)
@@ -124,7 +114,58 @@ export default function CameraScanner({ onDetect, onClose }) {
     return canvas
   }
 
-  // Одна попытка распознавания: встроенным распознавателем, а где его нет — ZXing
+  // Фоновый поток распознавания. Не завёлся (старый браузер) — разбор в странице
+  function startWorker() {
+    if (workerRef.current !== null || typeof Worker === 'undefined') return workerRef.current
+    try {
+      const w = new Worker(new URL('../lib/scanWorker.js', import.meta.url), { type: 'module' })
+      w.onmessage = (e) => {
+        const { id, code } = e.data || {}
+        const done = waitRef.current.get(id)
+        if (done) {
+          waitRef.current.delete(id)
+          done(code || null)
+        }
+      }
+      w.onerror = () => {
+        // Поток упал — дальше разбираем в странице
+        try { w.terminate() } catch {}
+        workerRef.current = false
+        for (const done of waitRef.current.values()) done(null)
+        waitRef.current.clear()
+      }
+      workerRef.current = w
+    } catch {
+      workerRef.current = false
+    }
+    return workerRef.current
+  }
+
+  // Разобрать кадр холста: в фоновом потоке (буфер передаётся, не копируется),
+  // а без него — здесь же
+  function zxingFrame(canvas, mode) {
+    const w = canvas.width
+    const h = canvas.height
+    const img = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h)
+    const worker = workerRef.current
+    if (!worker) return Promise.resolve(decodeGray(grayOf(img.data, w, h), w, h, mode))
+    const id = ++seqRef.current
+    return new Promise((resolve) => {
+      waitRef.current.set(id, resolve)
+      worker.postMessage({ id, rgba: img.data.buffer, w, h, mode }, [img.data.buffer])
+      // Поток не ответил за 3 с — кадр пропускаем
+      setTimeout(() => {
+        if (waitRef.current.has(id)) {
+          waitRef.current.delete(id)
+          resolve(null)
+        }
+      }, 3000)
+    })
+  }
+
+  // Одна попытка распознавания: встроенным распознавателем браузера (Chrome/Android —
+  // аппаратный), а где его нет — ZXing в фоновом потоке. Обычные штрихкоды — каждый
+  // кадр, двумерные (QR, DataMatrix) — каждый третий: так кадр разбирается быстрее
   async function decodeOnce(full) {
     const canvas = snapFrame(full)
     if (!canvas) return null
@@ -132,11 +173,8 @@ export default function CameraScanner({ onDetect, onClose }) {
       const found = await detectorRef.current.detect(canvas)
       return found && found[0] ? String(found[0].rawValue) : null
     }
-    try {
-      return (zxingRef.current ||= makeZxing(false)).decodeFromCanvas(canvas).getText()
-    } catch {
-      return null
-    }
+    const n = ++frameRef.current
+    return zxingFrame(canvas, n % 3 === 0 ? 'all' : 'fast')
   }
 
   useEffect(() => {
@@ -178,7 +216,9 @@ export default function CameraScanner({ onDetect, onClose }) {
             const min = caps.zoom.min ?? 1
             const max = caps.zoom.max ?? 1
             if (max > min) {
-              const start = Math.min(max, min + (max - min) * 0.3)
+              // Не больше 1,5×: цифровое приближение умножает дрожание руки — при 3× (как было)
+              // картинка «прыгала» при каждом движении. Мелкий код — ползунком
+              const start = Math.min(max, Math.max(min, 1.5))
               setZoom({ min, max, step: caps.zoom.step || 0.1, value: start })
               await track.applyConstraints({ advanced: [{ zoom: start }] }).catch(() => {})
             }
@@ -194,6 +234,8 @@ export default function CameraScanner({ onDetect, onClose }) {
         // цикл по области рамки, а не перемалывание каждого кадра целиком
         detectorRef.current = await makeNativeDetector()
         if (cancelled) return
+        if (!detectorRef.current) startWorker()
+        const pause = detectorRef.current || workerRef.current ? SCAN_MS : SCAN_MS_MAIN
         setHint('Наведите код в рамку: штрихкод, QR или DataMatrix. Мелкий код — приблизьте зумом, при бликах включите подсветку')
 
         const tick = async () => {
@@ -205,7 +247,7 @@ export default function CameraScanner({ onDetect, onClose }) {
           } catch { /* неудачный кадр — просто пробуем следующий */ }
           if (cancelled || doneRef.current) return
           // держим ровный темп: вычитаем из паузы время, потраченное на распознавание
-          scanTimerRef.current = setTimeout(tick, Math.max(40, SCAN_MS - (performance.now() - t0)))
+          scanTimerRef.current = setTimeout(tick, Math.max(40, pause - (performance.now() - t0)))
         }
         tick()
       } catch (e) {
@@ -236,7 +278,7 @@ export default function CameraScanner({ onDetect, onClose }) {
       }
       if (!code) {
         const canvas = snapFrame(true)
-        code = canvas ? makeZxing(true).decodeFromCanvas(canvas).getText() : null
+        code = canvas ? await zxingFrame(canvas, 'hard') : null
       }
       if (code) return fire(code)
     } catch { /* не распознался — подскажем ниже */ }

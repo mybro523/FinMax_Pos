@@ -13,6 +13,7 @@ import { fmtDate, serverNow } from '../lib/time'
 import { skachatXlsx } from '../lib/excel'
 import { getUser, useCan } from '../db/auth'
 import { useT } from '../lib/i18n'
+import KameraKnopka from '../components/KameraKnopka'
 import { poiskZapros } from '../lib/poisk'
 import { BEZ_POSTAVSHIKA, otborZayavki, postavshikiTovarov, sPostavshikom, spisokKategoriy, spisokPostavshikov } from '../lib/zayavka'
 
@@ -122,14 +123,16 @@ export default function Orders() {
           <div className="panel" data-tour="ord.list" style={{ padding: 0 }}>
             <StickyBar panel pad="16px 16px 14px">
               <div className="toolbar tools-wrap" data-tour="ord.filters">
-                <input
-                  className="search"
-                  data-testid="ord-search"
-                  placeholder={t('Название или штрихкод…')}
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  aria-label={t('Поиск')}
-                />
+                <div className="search kamera-pole">
+                  <input
+                    data-testid="ord-search"
+                    placeholder={t('Название или штрихкод…')}
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    aria-label={t('Поиск')}
+                  />
+                  <KameraKnopka onCode={setQ} testid="kamera-orders" />
+                </div>
                 <select value={supOk ? sup : ''} onChange={(e) => setSup(e.target.value)} aria-label={t('Поставщик')} data-testid="ord-sup" style={{ maxWidth: 260 }}>
                   <option value="">{t('Все поставщики')}</option>
                   {sups.list.map((s) => <option key={s.key} value={s.key}>{s.name} ({s.count})</option>)}

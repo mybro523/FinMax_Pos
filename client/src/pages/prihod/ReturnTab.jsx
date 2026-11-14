@@ -220,6 +220,7 @@ function NewReturn({ products, suppliers, sup, arrivals }) {
       <div className="prh-ret-form">
         <ProductPick
           ids={{ code: 'ret-q', name: 'ret-name' }}
+          kameraTestid="kamera-vozvrat-post"
           tour="ret.scan"
           codeRef={scanRef}
           products={products}

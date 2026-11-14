@@ -7,6 +7,7 @@ import { szhatFoto } from '../lib/foto'
 import { useDialog, useToast } from './ui'
 import { useCollection, money } from '../db/store'
 import { useT } from '../lib/i18n'
+import KameraKnopka from './KameraKnopka'
 import { useCategories, categoryNames, categoryOptions } from '../lib/categories'
 import { useProductTypes, typeNames, typeOptions, typeHasAnalogs } from '../lib/productTypes'
 import { generateEan13, isInternalBarcode } from '../lib/barcode'
@@ -232,6 +233,7 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
               }}
               placeholder="487…"
             />
+            <KameraKnopka onCode={(c) => { set('barcode', c); nameRef.current?.focus() }} testid="kamera-tovar-kod" />
             <button
               type="button"
               className="btn ghost"

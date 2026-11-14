@@ -10,6 +10,7 @@ import { normalizeScan, canonBarcode } from '../lib/scan'
 import { expiryStatus, expiryLabel } from '../lib/expiry'
 import { fmtDate } from '../lib/time'
 import { useT } from '../lib/i18n'
+import KameraKnopka from '../components/KameraKnopka'
 import { poiskZapros, tovarPodhodit } from '../lib/poisk'
 import { getUser, useCan } from '../db/auth'
 import { useCategories, categoryNames } from '../lib/categories'
@@ -194,7 +195,10 @@ export default function Products() {
       {/* Поиск и категории закреплены вверху: при прокрутке списка не уезжают (1.5.11) */}
       <StickyBar>
         <div className="toolbar">
-          <input className="search" data-tour="prod.search" placeholder={t('Поиск по названию или штрихкоду…')} value={q} onChange={(e) => setQ(e.target.value)} />
+          <div className="search kamera-pole">
+            <input data-tour="prod.search" placeholder={t('Поиск по названию или штрихкоду…')} value={q} onChange={(e) => setQ(e.target.value)} />
+            <KameraKnopka onCode={setQ} testid="kamera-tovary" />
+          </div>
         </div>
         <div className="chips" data-tour="prod.chips">
           {categories.map((c) => (

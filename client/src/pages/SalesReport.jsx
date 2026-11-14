@@ -10,6 +10,7 @@ import { useCollection, money } from '../db/store'
 import { getUser } from '../db/auth'
 import { fmtDateTime, chekNomer } from '../lib/time'
 import { useT } from '../lib/i18n'
+import KameraKnopka from '../components/KameraKnopka'
 import { skachatXlsx } from '../lib/excel'
 import { prodazhiPoTovaram, vseProdazhi, spisokChekov, chekPodhodit, chekVida, VIDY_CHEKOV } from '../lib/otchety'
 import { poiskZapros, tovarPodhodit, shtrihkodyPoId } from '../lib/poisk'
@@ -220,7 +221,10 @@ export default function SalesReport() {
       <div className="panel" data-tour="sr.table" style={{ padding: 0 }}>
         <StickyBar panel pad="16px 16px 14px">
           <div className="toolbar tools-wrap">
-            <input className="search" data-tour="sr.search" placeholder={tab === 'cheki' ? t('Номер чека, товар или клиент…') : t('Поиск по товару или штрихкоду…')} value={q} onChange={(e) => setQ(e.target.value)} />
+            <div className="search kamera-pole">
+              <input data-tour="sr.search" placeholder={tab === 'cheki' ? t('Номер чека, товар или клиент…') : t('Поиск по товару или штрихкоду…')} value={q} onChange={(e) => setQ(e.target.value)} />
+              <KameraKnopka onCode={setQ} testid="kamera-prodazhi" />
+            </div>
             {tab === 'products' && (
               <select value={cat} onChange={(e) => setCat(e.target.value)} aria-label={t('Категория')} style={{ maxWidth: 220 }}>
                 <option value="">{t('Все категории')}</option>

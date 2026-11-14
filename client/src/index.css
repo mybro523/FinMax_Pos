@@ -2901,3 +2901,11 @@ tr.inv-last > td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
 .cn-preview .cn-page { width: max-content; zoom: 1.35; }
 .cn-rows { max-height: 34vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .cn-rows td, .cn-rows th { padding: 8px 12px; }
+
+/* ── Кнопка «Камера» у полей штрихкода (мобильная версия, 1.8.1) ──
+   Поле + квадратная кнопка в одну строку; на компьютере кнопки нет — поле во всю ширину */
+.kamera-pole { display: flex; gap: 6px; align-items: stretch; min-width: 0; }
+.kamera-pole > input, .kamera-pole > .prh-search { flex: 1 1 auto; min-width: 0; width: auto; }
+.kamera-btn { flex: 0 0 auto; width: 42px; min-width: 42px; padding: 0 !important; }
+.kamera-btn .ic { margin: 0; }
+.prh-sheet-search .kamera-btn, .prh-side-search .kamera-btn { width: 34px; min-width: 34px; height: 32px; border: 0; margin: 2px -6px 2px 0; background: transparent; }

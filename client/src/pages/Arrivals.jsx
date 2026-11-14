@@ -12,6 +12,7 @@ import { getArrival, updateArrival, deleteArrival } from '../db/ops'
 import { useCan, getUser } from '../db/auth'
 import { fmtDateTime } from '../lib/time'
 import { useT } from '../lib/i18n'
+import KameraKnopka from '../components/KameraKnopka'
 import { poiskZapros, kodyPodhodyat, shtrihkodyPoId } from '../lib/poisk'
 import NumberInput from '../components/NumberInput'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
@@ -364,6 +365,7 @@ export default function Arrivals() {
                   <label className="prh-sheet-search">
                     <LuSearch size={15} aria-hidden="true" />
                     <input value={jq} onChange={(e) => setJq(e.target.value)} placeholder={t('Поставщик, товар или штрихкод…')} aria-label={t('Поставщик, товар или штрихкод…')} />
+                    <KameraKnopka onCode={setJq} testid="kamera-arrivals" />
                   </label>
                   <span className="tag-cat">
                     {loading ? t('Загружаем историю за выбранный период…') : `${t('Найдено записей')}: ${journal.length} · ${money(journalSum)}`}

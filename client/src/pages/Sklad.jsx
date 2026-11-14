@@ -13,6 +13,7 @@ import { useCollection, useCollectionIf, money, stockText } from '../db/store'
 import { useCan, getUser } from '../db/auth'
 import { skladEdit } from '../db/ops'
 import { useT } from '../lib/i18n'
+import KameraKnopka from '../components/KameraKnopka'
 import { skladPoTovaram, skladItogo, skladUnitsOf } from '../lib/sklad'
 import { poiskZapros, tovarPodhodit } from '../lib/poisk'
 import { unitsText, packLabel } from '../lib/units'
@@ -143,6 +144,7 @@ export default function Sklad() {
           <label className="prh-sheet-search" style={{ marginTop: 10, maxWidth: 420 }}>
             <LuSearch size={15} aria-hidden="true" />
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Название или штрихкод…')} aria-label={t('Поиск товара на складе')} data-testid="sklad-q" />
+            <KameraKnopka onCode={setQ} testid="kamera-sklad" />
           </label>
         )}
       </StickyBar>
@@ -356,6 +358,7 @@ function EditOkno({ products, batches, productId, onClose }) {
           <label className="prh-sheet-search" style={{ marginBottom: 10 }}>
             <LuSearch size={15} aria-hidden="true" />
             <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Название или штрихкод…')} aria-label={t('Найти товар')} data-testid="sklad-edit-q" />
+            <KameraKnopka onCode={setQ} testid="kamera-sklad-edit" />
           </label>
           <div style={{ maxHeight: '46vh', overflow: 'auto' }}>
             <table>

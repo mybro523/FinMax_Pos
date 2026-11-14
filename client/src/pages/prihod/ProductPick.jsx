@@ -5,6 +5,7 @@ import { useT } from '../../lib/i18n'
 import { normalizeScan } from '../../lib/scan'
 import { beepError } from '../../lib/sound'
 import { autoPickDelay, leftUnknownCode, leftUnknownName, looksLikeCode, nameSuggest, productByCode } from '../../lib/pick'
+import KameraKnopka from '../../components/KameraKnopka'
 
 // ── Товар: «Штрихкод» и «Наименование» ──
 // Одно и то же в новом поступлении и в возврате поставщику (правила — lib/pick.js).
@@ -53,6 +54,7 @@ export default function ProductPick({
   // у формы, здесь только классы); labels — свои подписи полей
   rows = false,
   labels = {},
+  kameraTestid = 'kamera-prihod',
 }) {
   const t = useT()
   const [active, setActive] = useState(0)
@@ -91,6 +93,14 @@ export default function ProductPick({
     if (p) return onPick(p)
     beepError()
     onUnknownCode?.(normalizeScan(val))
+  }
+
+  // Камера (мобильная версия): код ставится в поле и разбирается, как скан с Enter
+  function kameraCode(raw) {
+    const val = String(raw || '').trim()
+    if (!val) return
+    onCode(val)
+    resolveCode(val)
   }
 
   // Ушли из поля (Tab, мышью), а такого товара в базе нет: это новый товар. Набранное
@@ -159,6 +169,7 @@ export default function ProductPick({
     <div className={'prh-pick' + (chosen ? ' found' : '') + (nov ? ' nov' : '') + (rows ? ' rows' : '')} data-tour={tour}>
       <div className="prh-f prh-f-code" data-tour={codeTour}>
         <label htmlFor={ids.code}>{labels.code || t('Штрихкод')}</label>
+        <div className="kamera-pole">
         <input
           id={ids.code}
           ref={codeRef}
@@ -175,6 +186,8 @@ export default function ProductPick({
           onBlur={leaveCode}
           placeholder={t('Сканируйте код')}
         />
+        {!readOnly && <KameraKnopka onCode={kameraCode} testid={kameraTestid} />}
+        </div>
       </div>
       <div className="prh-f prh-f-name" data-tour={nameTour}>
         <label htmlFor={ids.name} className={nov && !String(name || '').trim() ? 'req' : ''}>

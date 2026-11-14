@@ -3,6 +3,7 @@ import { LuScale, LuReceipt, LuBanknote } from 'react-icons/lu'
 import { money } from '../../db/store'
 import { fmtDateTime } from '../../lib/time'
 import { useT } from '../../lib/i18n'
+import KameraKnopka from '../../components/KameraKnopka'
 import StickyBar from '../../components/StickyBar'
 import { poiskZapros, tovarPodhodit } from '../../lib/poisk'
 import { sverkaPostavshikov, zakupkiIOplaty } from '../../lib/otchety'
@@ -95,7 +96,10 @@ export default function Reports({ rep, suppliers, loading, periodLabel }) {
         </div>
         <StickyBar panel pad="8px 16px 14px">
           <div className="toolbar">
-            <input className="search" placeholder={t('Товар, штрихкод или поставщик…')} value={q} onChange={(e) => setQ(e.target.value)} />
+            <div className="search kamera-pole">
+              <input placeholder={t('Товар, штрихкод или поставщик…')} value={q} onChange={(e) => setQ(e.target.value)} />
+              <KameraKnopka onCode={setQ} testid="kamera-prihod-otchet" />
+            </div>
           </div>
         </StickyBar>
         <div className="table-cards-wrap">

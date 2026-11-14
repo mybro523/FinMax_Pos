@@ -7,6 +7,7 @@ import { useCollection, db, money } from '../db/store'
 import { fmtDateTime } from '../lib/time'
 import { normalizeScan } from '../lib/scan'
 import { useT, translate as tr } from '../lib/i18n'
+import KameraKnopka from '../components/KameraKnopka'
 import { useCan } from '../db/auth'
 import { useCategories, categoryNames } from '../lib/categories'
 import { sellsBelowCost } from '../lib/pricing'
@@ -155,7 +156,7 @@ function ProductForm({ barcode, onSave, onClose }) {
         <input value={f.name} onChange={(e) => set('name', e.target.value)} placeholder="Напр. Индометацин 25мг №30" autoFocus />
       </div>
       <div className="row">
-        <div className="field" style={{ flex: 1 }}><label>{tr('Штрихкод')}</label><input value={f.barcode} onChange={(e) => set('barcode', e.target.value)} /></div>
+        <div className="field" style={{ flex: 1 }}><label>{tr('Штрихкод')}</label><div className="kamera-pole"><input value={f.barcode} onChange={(e) => set('barcode', e.target.value)} /><KameraKnopka onCode={(c) => set('barcode', c)} testid="kamera-deferred" /></div></div>
         <div className="field" style={{ flex: 1 }}>
           <label>{tr('Категория')}</label>
           <select value={f.category} onChange={(e) => set('category', e.target.value)}>

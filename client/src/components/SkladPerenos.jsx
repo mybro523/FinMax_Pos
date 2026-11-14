@@ -5,6 +5,7 @@ import { useToast } from './ui'
 import { money, stockText } from '../db/store'
 import { skladToShop } from '../db/ops'
 import { useT } from '../lib/i18n'
+import KameraKnopka from './KameraKnopka'
 import { poiskZapros, tovarPodhodit } from '../lib/poisk'
 import { uppOf, isVesovoy, opensPack, packLabel, pieceLabel, unitsText, gramsOfKg, KG } from '../lib/units'
 import { fmtDate } from '../lib/time'
@@ -97,6 +98,7 @@ export function PerenosForm({ rows, onDone, onCancel, compact = false }) {
       <label className="prh-sheet-search" style={{ marginBottom: 10 }}>
         <LuSearch size={15} aria-hidden="true" />
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Название или штрихкод…')} aria-label={t('Поиск товара на складе')} data-testid="perenos-q" />
+        <KameraKnopka onCode={setQ} testid="kamera-perenos" />
       </label>
       <div style={{ maxHeight: compact ? '46vh' : '60vh', overflow: 'auto' }}>
         <table className="table-cards">

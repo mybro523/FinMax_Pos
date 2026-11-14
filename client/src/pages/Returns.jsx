@@ -11,6 +11,7 @@ import { useCollection, money } from '../db/store'
 import { returnGoods } from '../db/ops'
 import { fmtDateTime, dayKey, chekNomer } from '../lib/time'
 import { useT } from '../lib/i18n'
+import KameraKnopka from '../components/KameraKnopka'
 import { poiskZapros, kodyPodhodyat, shtrihkodyPoId } from '../lib/poisk'
 import { useCategories, needsExpiry } from '../lib/categories'
 import NumberInput from '../components/NumberInput'
@@ -241,13 +242,15 @@ export default function Returns() {
         <div className="stick-scope">
           <StickyBar>
             <div className="toolbar">
-              <input
-                className="search"
-                data-tour="ret.search"
-                placeholder={t('Поиск чека: товар, штрихкод или сумма…')}
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-              />
+              <div className="search kamera-pole">
+                <input
+                  data-tour="ret.search"
+                  placeholder={t('Поиск чека: товар, штрихкод или сумма…')}
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                />
+                <KameraKnopka onCode={setQ} testid="kamera-vozvrat" />
+              </div>
             </div>
           </StickyBar>
           <div className="panel" style={{ padding: 0 }}>
@@ -406,7 +409,7 @@ export default function Returns() {
         <h2 style={{ padding: '16px 16px 0' }}>
           <span className="h2-title"><span className="ic"><LuUndo2 size={17} /></span>{t('История возвратов')}</span>
         </h2>
-        <JournalFilter controls={journal.controls} placeholder={t('Товар, штрихкод или кассир…')} />
+        <JournalFilter controls={journal.controls} placeholder={t('Товар, штрихкод или кассир…')} kamera="kamera-vozvrat-zhurnal" />
         <div style={{ padding: '0 16px' }}>
           <JournalCount rows={journal.rows.length} loading={journal.loading} />
         </div>

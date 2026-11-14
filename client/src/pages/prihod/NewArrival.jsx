@@ -11,6 +11,7 @@ import { db, money, stockText } from '../../db/store'
 import { receiveArrival } from '../../db/ops'
 import { useCan } from '../../db/auth'
 import { useT, translate as tr } from '../../lib/i18n'
+import KameraKnopka from '../../components/KameraKnopka'
 import { normalizeScan, canonBarcode } from '../../lib/scan'
 import { beepOk, beepError } from '../../lib/sound'
 import { isVesovoy, EDINICY, uppOf, gramsOfKg } from '../../lib/units'
@@ -350,6 +351,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
           <div className="prh-sheet-search">
             <LuSearch size={15} aria-hidden="true" />
             <input value={lq} onChange={(e) => setLq(e.target.value)} placeholder={t('Поиск по строкам…')} aria-label={t('Поиск по строкам…')} />
+            <KameraKnopka onCode={setLq} testid="kamera-prihod-stroki" />
           </div>
         </div>
         <div className="prh-grid-wrap">

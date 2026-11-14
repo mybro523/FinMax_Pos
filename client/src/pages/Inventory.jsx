@@ -412,6 +412,7 @@ export default function Inventory() {
       <ProductPick
         readOnly={readOnly}
         ids={{ code: 'inv-code', name: 'inv-name' }}
+        kameraTestid="kamera-inventory"
         codeRef={scanRef}
         products={products}
         code={pick.code}
