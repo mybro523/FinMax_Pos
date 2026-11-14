@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { LuScale, LuReceipt, LuWallet, LuTruck, LuUndo2 } from 'react-icons/lu'
 import Layout from '../components/Layout'
+import { Modal } from '../components/ui'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { PeriodPicker, presetPeriod, periodRange, periodText, useDeepPeriod } from '../components/Period'
 import { useCollection, money } from '../db/store'
@@ -44,6 +45,8 @@ export default function SupplierReport() {
   )
 
   const podzag = periodText(period, t)
+  // Карточка сверху открывает окно: какие поставщики дали эту цифру
+  const [okno, setOkno] = useState(null)
   const nameOf = (x) => x.name || (x.supplierId ? '—' : t('Без поставщика'))
   const cols = [
     { header: t('Поставщик'), key: 'name', width: 34 },
@@ -65,12 +68,31 @@ export default function SupplierReport() {
       <PeriodPicker value={period} onChange={setPeriod} tour="spr.period" />
 
       <div className="cards" data-tour="spr.cards" style={{ margin: '14px 0 16px' }}>
-        <Metric label={t('Долг на начало')} value={money(r.itogo.nachalo)} Icon={LuScale} />
-        <Metric label={t('Закуплено')} value={money(r.itogo.zakupleno)} Icon={LuReceipt} />
-        {r.itogo.vozvrat > 0 && <Metric label={t('Возвращено')} value={money(r.itogo.vozvrat)} Icon={LuUndo2} />}
-        <Metric label={t('Оплачено')} value={money(r.itogo.oplacheno)} Icon={LuWallet} good />
-        <Metric label={t('Долг на конец')} value={money(r.itogo.konec)} Icon={LuTruck} bad={r.itogo.konec > 0} />
+        <Metric label={t('Долг на начало')} value={money(r.itogo.nachalo)} Icon={LuScale} onClick={() => setOkno('nachalo')} testid="card-spr-nachalo" />
+        <Metric label={t('Закуплено')} value={money(r.itogo.zakupleno)} Icon={LuReceipt} onClick={() => setOkno('zakupleno')} testid="card-spr-zakupleno" />
+        {r.itogo.vozvrat > 0 && <Metric label={t('Возвращено')} value={money(r.itogo.vozvrat)} Icon={LuUndo2} onClick={() => setOkno('vozvrat')} testid="card-spr-vozvrat" />}
+        <Metric label={t('Оплачено')} value={money(r.itogo.oplacheno)} Icon={LuWallet} good onClick={() => setOkno('oplacheno')} testid="card-spr-oplacheno" />
+        <Metric label={t('Долг на конец')} value={money(r.itogo.konec)} Icon={LuTruck} bad={r.itogo.konec > 0} onClick={() => setOkno('konec')} testid="card-spr-konec" />
       </div>
+      {okno && (() => {
+        const col = cols.find((c) => c.key === okno)
+        const list = r.rows.filter((x) => Math.abs(Number(x[okno]) || 0) >= 0.005).sort((a, b) => (b[okno] || 0) - (a[okno] || 0))
+        return (
+          <Modal title={`${col.header} · ${podzag}`} onClose={() => setOkno(null)}>
+            <div style={{ maxHeight: '56vh', overflow: 'auto' }} data-testid="spr-okno">
+              {list.map((x) => (
+                <div className="total-row" key={x.supplierId || 'none'}>
+                  <span>{nameOf(x)}</span>
+                  <span>{money(x[okno])}</span>
+                </div>
+              ))}
+              {list.length === 0 && <div className="empty">{t('Нет данных за этот период')}</div>}
+            </div>
+            <div className="total-row big"><span>{t('Итого')}</span><span>{money(r.itogo[okno])}</span></div>
+            <div className="modal-actions"><button className="btn" onClick={() => setOkno(null)}>{t('Закрыть')}</button></div>
+          </Modal>
+        )
+      })()}
 
       <div className="panel" data-tour="spr.table" style={{ padding: 0 }}>
         <div className="table-cards-wrap">
@@ -117,14 +139,18 @@ export default function SupplierReport() {
   )
 }
 
-function Metric({ label, value, Icon, good, bad }) {
+function Metric({ label, value, Icon, good, bad, onClick, testid }) {
   const style = good
     ? { background: 'var(--green-soft, var(--accent-soft))', color: 'var(--green)' }
     : bad
       ? { background: 'var(--danger-soft)', color: 'var(--danger)' }
       : undefined
+  // Карточка с действием — кнопка: и мышью, и с клавиатуры
+  const act = onClick
+    ? { role: 'button', tabIndex: 0, onClick, onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } }
+    : {}
   return (
-    <div className="metric">
+    <div className={'metric' + (onClick ? ' clickable' : '')} {...act} data-testid={testid}>
       <div className="metric-head">
         <div className="label">{label}</div>
         <div className="ic-box" style={style}><Icon size={19} /></div>

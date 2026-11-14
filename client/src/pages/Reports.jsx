@@ -9,11 +9,12 @@ import { Pagination, usePagination } from '../components/Pagination'
 import { useCollection, money, loadRange, needsServerFor } from '../db/store'
 import { stockUnits, stockValue, stockCost, lineUnits } from '../lib/units'
 import { startOfDay, startOfDaysAgo, fmtShort, fmtDateTime } from '../lib/time'
-import { useT, translate as tr } from '../lib/i18n'
+import { useT } from '../lib/i18n'
 import { periodFinance } from '../lib/finance'
 import { opuFinance } from '../lib/opu'
 import ExportPechat from '../components/ExportPechat'
 import OpuSheet from '../components/OpuSheet'
+import { ChekiOkno } from '../components/Cheki'
 import { skachatXlsx } from '../lib/excel'
 import { useCan, getUser } from '../db/auth'
 
@@ -30,28 +31,6 @@ const costValOf = stockCost
 
 function MC({ label, v, color }) {
   return <div className="mini-card"><div className="m-label">{label}</div><div className="m-value sm" style={color ? { color } : undefined}>{v}</div></div>
-}
-
-function SalesTable({ list }) {
-  if (!list.length) return <div className="empty">{tr('Продаж нет')}</div>
-  return (
-    <div style={{ maxHeight: '52vh', overflow: 'auto' }}>
-      <table>
-        <thead><tr><th>{tr('Время')}</th><th>{tr('Товары')}</th><th className="num">{tr('Сумма')}</th><th className="num">{tr('Прибыль')}</th><th>{tr('Оплата')}</th></tr></thead>
-        <tbody>
-          {list.map((s) => (
-            <tr key={s.id}>
-              <td>{fmtShort(s.date)}</td>
-              <td>{s.items.map((i) => i.name).join(', ').slice(0, 40)}</td>
-              <td className="num"><b>{money(s.total)}</b></td>
-              <td className="num" style={{ color: 'var(--green)' }}>{money(s.profit || 0)}</td>
-              <td><PayBadge type={s.payment} via={s.payVia} /></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
 }
 
 // ── Отчёт о прибылях и убытках (прибыли и убытки) ──
@@ -293,16 +272,16 @@ function Opu({ onExcelRef }) {
       {loadingOlder && <div className="note info no-print" style={{ marginBottom: 12 }}>{t('Загружаем историю за выбранный период…')}</div>}
 
       <div className="cards six opu-cards" data-tour="opu.cards">
-        <Metric label={t('Выручка')} value={money(d.prodazha)} Icon={LuWallet} tint="accent" sub={t('подробнее')} onClick={() => setModal('vyruchka')} />
-        <Metric label={t('Себестоимость')} value={money(d.sebestoimost)} Icon={LuBoxes} tint="blue" sub={t('подробнее')} onClick={() => setModal('sebest')} />
-        <Metric label={t('Валовой доход')} value={money(d.valovoy)} Icon={LuTrendingUp} tint="green" sub={t('подробнее')} onClick={() => setModal('valovoy')} />
-        <Metric label={t('Прочие доходы')} value={money(d.prochieDohody)} Icon={LuCoins} tint="green" sub={t('подробнее')} onClick={() => setModal('dohody')} />
-        <Metric label={t('Поставщик')} value={money(d.supplierPaid)} Icon={LuTruck} tint="blue" sub={t('подробнее')} onClick={() => setModal('postavshik')} />
-        <Metric label={t('Зарплата')} value={money(d.zarplata)} Icon={LuUsers} tint="accent" sub={t('подробнее')} onClick={() => setModal('zarplata')} />
-        <Metric label={t('Другие расходы')} value={money(d.allExpenses - d.zarplata)} Icon={LuHandCoins} tint="danger" sub={t('подробнее')} onClick={() => setModal('drugie')} />
-        <Metric label={t('Все расходы')} value={money(d.allExpenses)} Icon={LuReceipt} tint="danger" sub={t('подробнее')} onClick={() => setModal('vse')} />
-        <Metric label={t('Чистый доход')} value={money(d.chistiy)} Icon={LuPiggyBank} tint={d.chistiy < 0 ? 'danger' : 'green'} sub={t('подробнее')} onClick={() => setModal('chistiy')} />
-        <Metric label={t('Касса')} value={money(d.kassa)} Icon={LuCalculator} tint="accent" sub={t('подробнее')} onClick={() => setModal('kassa')} />
+        <Metric testid="card-opu-vyruchka" label={t('Выручка')} value={money(d.prodazha)} Icon={LuWallet} tint="accent" sub={t('подробнее')} onClick={() => setModal('vyruchka')} />
+        <Metric testid="card-opu-sebest" label={t('Себестоимость')} value={money(d.sebestoimost)} Icon={LuBoxes} tint="blue" sub={t('подробнее')} onClick={() => setModal('sebest')} />
+        <Metric testid="card-opu-valovoy" label={t('Валовой доход')} value={money(d.valovoy)} Icon={LuTrendingUp} tint="green" sub={t('подробнее')} onClick={() => setModal('valovoy')} />
+        <Metric testid="card-opu-dohody" label={t('Прочие доходы')} value={money(d.prochieDohody)} Icon={LuCoins} tint="green" sub={t('подробнее')} onClick={() => setModal('dohody')} />
+        <Metric testid="card-opu-postavshik" label={t('Поставщик')} value={money(d.supplierPaid)} Icon={LuTruck} tint="blue" sub={t('подробнее')} onClick={() => setModal('postavshik')} />
+        <Metric testid="card-opu-zarplata" label={t('Зарплата')} value={money(d.zarplata)} Icon={LuUsers} tint="accent" sub={t('подробнее')} onClick={() => setModal('zarplata')} />
+        <Metric testid="card-opu-drugie" label={t('Другие расходы')} value={money(d.allExpenses - d.zarplata)} Icon={LuHandCoins} tint="danger" sub={t('подробнее')} onClick={() => setModal('drugie')} />
+        <Metric testid="card-opu-vse" label={t('Все расходы')} value={money(d.allExpenses)} Icon={LuReceipt} tint="danger" sub={t('подробнее')} onClick={() => setModal('vse')} />
+        <Metric testid="card-opu-chistiy" label={t('Чистый доход')} value={money(d.chistiy)} Icon={LuPiggyBank} tint={d.chistiy < 0 ? 'danger' : 'green'} sub={t('подробнее')} onClick={() => setModal('chistiy')} />
+        <Metric testid="card-opu-kassa" label={t('Касса')} value={money(d.kassa)} Icon={LuCalculator} tint="accent" sub={t('подробнее')} onClick={() => setModal('kassa')} />
       </div>
 
       <div className="panel mt opu-panel" data-tour="opu.table" style={{ padding: 0 }}>
@@ -514,18 +493,24 @@ export default function Reports() {
   function renderModal() {
     if (modal === 'revenue' || modal === 'checks') {
       return (
-        <Modal wide title={`${t('Продажи')} · ${rangeLabel}`} onClose={close}>
-          <div className="mini-cards">
-            <MC label={t('Продано на')} v={money(data.revenueGross)} />
-            <MC label={t('Возвраты')} v={data.refunds > 0 ? '−' + money(data.refunds) : money(0)} color={data.refunds > 0 ? 'var(--danger)' : undefined} />
-            <MC label={t('Выручка')} v={money(data.revenue)} />
-            <MC label={t('Чеков')} v={data.count} />
-            <MC label={t('Наличные')} v={money(data.byPay.cash)} />
-            <MC label={t('Карта')} v={money(data.byPay.card)} />
-            <MC label={t('В долг')} v={money(data.byPay.debt)} />
-          </div>
-          <SalesTable list={data.list} />
-        </Modal>
+        <ChekiOkno
+          title={`${t('Продажи')} · ${rangeLabel}`}
+          sales={data.list}
+          returns={(deep && deep.returns) || returns}
+          onClose={close}
+          empty={t('Продаж нет')}
+          top={(
+            <div className="mini-cards">
+              <MC label={t('Продано на')} v={money(data.revenueGross)} />
+              <MC label={t('Возвраты')} v={data.refunds > 0 ? '−' + money(data.refunds) : money(0)} color={data.refunds > 0 ? 'var(--danger)' : undefined} />
+              <MC label={t('Выручка')} v={money(data.revenue)} />
+              <MC label={t('Чеков')} v={data.count} />
+              <MC label={t('Наличные')} v={money(data.byPay.cash)} />
+              <MC label={t('Карта')} v={money(data.byPay.card)} />
+              <MC label={t('В долг')} v={money(data.byPay.debt)} />
+            </div>
+          )}
+        />
       )
     }
     if (modal === 'expenses') {
@@ -658,7 +643,7 @@ export default function Reports() {
       {/* Ячеек шесть — три в ряд: пять в ряд оставляли бы шестую одну на строке */}
       <div className="cards six">
         <Metric
-          tour="rep.revenue"
+          tour="rep.revenue" testid="card-rep-revenue"
           label={t('Выручка')}
           value={money(data.revenue)}
           Icon={LuWallet}
@@ -668,7 +653,7 @@ export default function Reports() {
           onClick={() => setModal('revenue')}
         />
         <Metric
-          tour="rep.profit"
+          tour="rep.profit" testid="card-rep-profit"
           label={t('Прибыль')}
           value={money(data.profit)}
           Icon={LuTrendingUp}
@@ -678,7 +663,7 @@ export default function Reports() {
           onClick={() => setModal('profit')}
         />
         <Metric
-          tour="rep.expenses"
+          tour="rep.expenses" testid="card-rep-expenses"
           label={t('Расходы')}
           value={money(data.expenses)}
           Icon={LuHandCoins}
@@ -687,7 +672,7 @@ export default function Reports() {
           onClick={() => setModal('expenses')}
         />
         <Metric
-          tour="rep.incomes"
+          tour="rep.incomes" testid="card-rep-incomes"
           label={t('Прочие доходы')}
           value={money(data.incomes)}
           Icon={LuCoins}
@@ -696,7 +681,7 @@ export default function Reports() {
           onClick={() => setModal('incomes')}
         />
         <Metric
-          tour="rep.net"
+          tour="rep.net" testid="card-rep-net"
           label={t('Чистая прибыль')}
           value={money(data.netProfit)}
           Icon={LuPiggyBank}
@@ -705,8 +690,8 @@ export default function Reports() {
           warn={data.netProfit < 0}
           onClick={() => setModal('net')}
         />
-        <Metric tour="rep.cost" label={t('Себестоимость')} value={money(data.cost)} Icon={LuBoxes} tint="blue" sub={t('подробнее')} onClick={() => setModal('cost')} />
-        <Metric tour="rep.checks" label={t('Чеков')} value={data.count} Icon={LuReceipt} tint="accent" sub={t('список')} onClick={() => setModal('checks')} />
+        <Metric tour="rep.cost" testid="card-rep-cost" label={t('Себестоимость')} value={money(data.cost)} Icon={LuBoxes} tint="blue" sub={t('подробнее')} onClick={() => setModal('cost')} />
+        <Metric tour="rep.checks" testid="card-rep-checks" label={t('Чеков')} value={data.count} Icon={LuReceipt} tint="accent" sub={t('список')} onClick={() => setModal('checks')} />
       </div>
 
       {data.hasLosses && (

@@ -4,6 +4,7 @@ import { useToast } from './ui'
 import { useAuth } from '../db/auth'
 import { getRekvizity, saveRekvizity } from '../lib/rekvizity'
 import { useT } from '../lib/i18n'
+import { pechatPoGotovo, setPechatPoGotovo } from '../lib/pechatGotovo'
 
 // ── Данные чека ──
 // Что печатается на чеке под названием магазина: адрес, телефон и подпись внизу.
@@ -17,6 +18,13 @@ export default function ChekPanel() {
   const code = auth?.pharmacy?.code
   const [r, setR] = useState(() => getRekvizity(code))
   const set = (patch) => setR({ ...r, ...patch })
+  // «Печатать чек при нажатии „Готово“» — запоминается сразу, без «Сохранить»
+  const [gotovo, setGotovo] = useState(pechatPoGotovo)
+  function toggleGotovo(on) {
+    const v = setPechatPoGotovo(on)
+    setGotovo(v)
+    toast(v === on ? (on ? t('Чек будет печататься при нажатии «Готово»') : t('Печать по «Готово» выключена')) : t('Не удалось сохранить на этом устройстве'), v === on ? undefined : 'err')
+  }
 
   function save() {
     setR(saveRekvizity(code, r))
@@ -43,6 +51,15 @@ export default function ChekPanel() {
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button className="btn" onClick={save}>{t('Сохранить')}</button>
+      </div>
+      <div style={{ borderTop: '1px solid var(--border)', marginTop: 14, paddingTop: 14 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14.5, fontWeight: 600, cursor: 'pointer' }}>
+          <input type="checkbox" checked={gotovo} onChange={(e) => toggleGotovo(e.target.checked)} style={{ width: 18, height: 18 }} data-testid="chek-gotovo-print" />
+          {t('Печатать чек при нажатии «Готово»')}
+        </label>
+        <div className="tag-cat" style={{ marginTop: 6, lineHeight: 1.6 }}>
+          {t('Кассир проводит продажу и жмёт «Готово» — окно чека закрывается, а чек сам уходит на печать, без кнопки «Печать». Настройка этого компьютера.')}
+        </div>
       </div>
     </div>
   )

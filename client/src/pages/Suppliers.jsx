@@ -40,6 +40,14 @@ export default function Suppliers() {
   const [q, setQ] = useState('')
   const [form, setForm] = useState(null) // { id?, name, phone, note, openingDebt }
   const [cardId, setCardId] = useState(null)
+  // Карточки сверху: долги, закуплено и оплачено — открывают окно с поставщиками
+  const [okno, setOkno] = useState(null)
+  const kartochka = (vid) => ({
+    role: 'button',
+    tabIndex: 0,
+    onClick: () => setOkno(vid),
+    onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOkno(vid) } },
+  })
 
   // ── Вкладки: список поставщиков и сводка долгов ──
   // Раньше это были две плитки меню про одно и то же. Адрес ?tab=debts ведёт сразу
@@ -204,7 +212,7 @@ export default function Suppliers() {
       <PrintSheet zagolovok={t('Закупки и оплаты поставщикам')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />
 
       <div className="cards" style={{ marginBottom: 16 }}>
-        <div className="metric" data-tour="sup.total">
+        <div className="metric clickable" data-tour="sup.total" {...kartochka('dolg')} data-testid="card-sup-dolg">
           <div className="metric-head">
             <div className="label">{t('Долги поставщикам')}</div>
             <div className="ic-box" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}><LuTruck size={19} /></div>
@@ -212,7 +220,7 @@ export default function Suppliers() {
           <div className="value">{money(totalDebt)}</div>
           <div className="sub">{suppliers.filter((s) => (Number(s.debt) || 0) > 0).length} {t('поставщик(ов) с долгом')}</div>
         </div>
-        <div className="metric">
+        <div className="metric clickable" {...kartochka('zakupleno')} data-testid="card-sup-zakupleno">
           <div className="metric-head">
             <div className="label">{t('Закуплено за период')}</div>
             <div className="ic-box" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}><LuReceipt size={19} /></div>
@@ -220,7 +228,7 @@ export default function Suppliers() {
           <div className="value">{money(zakItogo.sum)}</div>
           <div className="sub">{periodText(period, t)}</div>
         </div>
-        <div className="metric">
+        <div className="metric clickable" {...kartochka('oplacheno')} data-testid="card-sup-oplacheno">
           <div className="metric-head">
             <div className="label">{t('Оплачено за период')}</div>
             <div className="ic-box" style={{ background: 'var(--green-soft, var(--accent-soft))', color: 'var(--green)' }}><LuWallet size={19} /></div>
@@ -229,6 +237,63 @@ export default function Suppliers() {
           <div className="sub">{t('сразу при приходе и погашения долга')}</div>
         </div>
       </div>
+      {okno === 'dolg' && (
+        <Modal title={t('Долги поставщикам')} onClose={() => setOkno(null)}>
+          <div style={{ maxHeight: '56vh', overflow: 'auto' }} data-testid="sup-okno">
+            {suppliers.filter((x) => (Number(x.debt) || 0) > 0).sort((a, b) => (Number(b.debt) || 0) - (Number(a.debt) || 0)).map((x) => (
+              <div
+                className="total-row clickable"
+                key={x.id}
+                role="button"
+                tabIndex={0}
+                title={t('Открыть карточку поставщика')}
+                style={{ cursor: 'pointer' }}
+                onClick={() => { setOkno(null); setCardId(x.id) }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOkno(null); setCardId(x.id) } }}
+              >
+                <span><b>{x.name}</b>{x.phone ? <span className="tag-cat"> · {x.phone}</span> : null}</span>
+                <span style={{ color: 'var(--danger)' }}>{money(x.debt)}</span>
+              </div>
+            ))}
+            {totalDebt <= 0 && <div className="empty">{t('Долгов нет')}</div>}
+          </div>
+          <div className="total-row big"><span>{t('Всего должны')}</span><span>{money(totalDebt)}</span></div>
+          <div className="modal-actions"><button className="btn" onClick={() => setOkno(null)}>{t('Закрыть')}</button></div>
+        </Modal>
+      )}
+      {(okno === 'zakupleno' || okno === 'oplacheno') && (() => {
+        const m = new Map()
+        for (const r of zakRows) {
+          const k = r.supplierId || r.supplier || ''
+          const x = m.get(k) || { name: r.supplier || t('Без поставщика'), sum: 0, paid: 0 }
+          x.sum += r.sum
+          x.paid += r.paid
+          m.set(k, x)
+        }
+        const key = okno === 'zakupleno' ? 'sum' : 'paid'
+        const list = [...m.values()].filter((x) => Math.abs(x[key]) >= 0.005).sort((a, b) => b[key] - a[key])
+        return (
+          <Modal wide title={`${okno === 'zakupleno' ? t('Закуплено за период') : t('Оплачено за период')} · ${periodText(period, t)}`} onClose={() => setOkno(null)}>
+            <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+              <table data-testid="sup-okno">
+                <thead><tr><th>{t('Поставщик')}</th><th className="num">{t('Закуплено')}</th><th className="num">{t('Оплачено')}</th></tr></thead>
+                <tbody>
+                  {list.map((x) => (
+                    <tr key={x.name}>
+                      <td><b>{x.name}</b></td>
+                      <td className="num" style={key === 'sum' ? { fontWeight: 700 } : undefined}>{money(x.sum)}</td>
+                      <td className="num" style={key === 'paid' ? { fontWeight: 700, color: 'var(--green)' } : { color: 'var(--green)' }}>{money(x.paid)}</td>
+                    </tr>
+                  ))}
+                  {list.length === 0 && <tr><td colSpan="3" className="empty">{t('Нет данных за этот период')}</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <div className="total-row big"><span>{t('Итого')}</span><span>{money(zakItogo[key])}</span></div>
+            <div className="modal-actions"><button className="btn" onClick={() => setOkno(null)}>{t('Закрыть')}</button></div>
+          </Modal>
+        )
+      })()}
 
       <div className="panel" data-tour="sup.history" style={{ padding: 0, marginBottom: 16 }}>
         <div style={{ padding: '16px 16px 0' }}>

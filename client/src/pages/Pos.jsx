@@ -44,6 +44,7 @@ import { sellsBelowCost } from '../lib/pricing'
 import { saleTicket, qtyPriceText } from '../lib/ticket'
 import { showCustomer, customerLabels, cartScreen } from '../lib/customerScreen'
 import { autoPrint } from '../lib/print'
+import { pechatPoGotovo } from '../lib/pechatGotovo'
 import TicketView from '../components/TicketView'
 import PrintDoc from '../components/PrintDoc'
 import { pechatBezOkna } from '../components/PrintKeeper'
@@ -2028,6 +2029,10 @@ function Receipt({ sale, onClose, onCancel }) {
   const ticketRef = useRef(ticket)
   ticketRef.current = ticket
   const printedFor = useRef('')
+  // Чек уже ушёл на принтер сам («сразу после продажи») — «Готово» второй раз не печатает
+  const autoPrinted = useRef('')
+  // …и наоборот: «Готово» уже отправило чек — запоздавшая самопечать его не повторяет
+  const gotovoPrinted = useRef('')
   const key = sale._key || sale.id
   useEffect(() => {
     if (sale._failed || printedFor.current === key) return undefined
@@ -2035,7 +2040,11 @@ function Receipt({ sale, onClose, onCancel }) {
     const go = () => {
       if (!alive || printedFor.current === key) return
       printedFor.current = key
-      autoPrint().then((on) => on && print(ticketRef.current))
+      autoPrint().then((on) => {
+        if (!on || gotovoPrinted.current === key) return
+        autoPrinted.current = key
+        print(ticketRef.current)
+      })
     }
     if (sale._stored) {
       go()
@@ -2099,7 +2108,21 @@ function Receipt({ sale, onClose, onCancel }) {
           >
             <span className="ic"><LuPrinter size={16} /></span> {tr('Печать')}
           </button>
-          <button className="btn" onClick={onClose}>{tr('Готово')}</button>
+          {/* «Готово»: с галочкой «Печатать чек при нажатии „Готово“» (Настройки → Чек и печать)
+              окно закрывается и чек печатается, как по «Печать». Не записанная продажа
+              и уже напечатанный сам чек второй раз не печатаются */}
+          <button
+            className="btn"
+            data-testid="chek-gotovo"
+            onClick={() => {
+              const pechat = pechatPoGotovo() && !sale._failed && autoPrinted.current !== key
+              if (pechat) gotovoPrinted.current = key
+              onClose()
+              if (pechat) pechatBezOkna(ticket, tr('Чек продажи')).catch((e) => toast(tr(e?.message || 'Не удалось отправить задание на принтер.'), 'err'))
+            }}
+          >
+            {tr('Готово')}
+          </button>
         </div>
       )}
     </Modal>

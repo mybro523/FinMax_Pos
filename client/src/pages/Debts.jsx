@@ -171,25 +171,41 @@ function CustomerHistory({ customer, sales, payments, returns, products, canPay,
     nomer: chekNomer,
   })
   const print = () => pechatTicket(ticket).catch((e) => toast(tr(e.message), 'err'))
+  // Карточки сверху — отбор истории: «Текущий долг» — всё, остальные — только свои операции
+  const [vid, setVid] = useState('')
+  const vidOf = (e) => (e.kind === 'debt' || e.kind === 'return' ? e.kind : 'pay')
+  const events = vid ? data.events.filter((e) => vidOf(e) === vid) : data.events
+  const card = (key) => ({
+    className: 'mini-card clickable' + (vid === key ? ' active' : ''),
+    role: 'button',
+    tabIndex: 0,
+    'data-testid': 'debt-card-' + (key || 'all'),
+    title: tr('Показать эти операции'),
+    onClick: () => setVid(key),
+    onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setVid(key) } },
+  })
 
   return (
     <Modal wide title={<><span className="ic"><LuReceipt size={18} /></span>{customer.name}</>} onClose={onClose}>
       <div className="tag-cat" style={{ marginBottom: 12 }}>{customer.phone || tr('без телефона')}</div>
 
       <div className="mini-cards">
-        <div className="mini-card"><div className="m-label">{tr('Текущий долг')}</div><div className="m-value" style={{ color: customer.debt > 0 ? 'var(--danger)' : 'var(--green)' }}>{money(customer.debt)}</div></div>
-        <div className="mini-card"><div className="m-label">{tr('Куплено в долг')}</div><div className="m-value sm">{money(data.totalCredit)}</div></div>
+        <div {...card('')}><div className="m-label">{tr('Текущий долг')}</div><div className="m-value" style={{ color: customer.debt > 0 ? 'var(--danger)' : 'var(--green)' }}>{money(customer.debt)}</div></div>
+        <div {...card('debt')}><div className="m-label">{tr('Куплено в долг')}</div><div className="m-value sm">{money(data.totalCredit)}</div></div>
         {data.totalReturned > 0 && (
-          <div className="mini-card"><div className="m-label">{tr('Возвращено')}</div><div className="m-value sm">{money(data.totalReturned)}</div></div>
+          <div {...card('return')}><div className="m-label">{tr('Возвращено')}</div><div className="m-value sm">{money(data.totalReturned)}</div></div>
         )}
-        <div className="mini-card"><div className="m-label">{tr('Погашено')}</div><div className="m-value sm" style={{ color: 'var(--green)' }}>{money(data.totalPaid)}</div></div>
+        <div {...card('pay')}><div className="m-label">{tr('Погашено')}</div><div className="m-value sm" style={{ color: 'var(--green)' }}>{money(data.totalPaid)}</div></div>
       </div>
 
-      <h2 style={{ fontSize: 14, margin: '16px 0 6px' }}>{tr('История операций')}</h2>
+      <h2 style={{ fontSize: 14, margin: '16px 0 6px' }}>
+        {vid === 'debt' ? tr('Покупки в долг') : vid === 'return' ? tr('Возвраты') : vid === 'pay' ? tr('Погашения') : tr('История операций')}
+        {vid && <button className="btn ghost sm" style={{ marginLeft: 8 }} onClick={() => setVid('')}>{tr('Показать все')}</button>}
+      </h2>
       <div style={{ maxHeight: '46vh', overflow: 'auto' }}>
         <table>
           <tbody>
-            {data.events.map((e, n) => (
+            {events.map((e, n) => (
               <tr key={n}>
                 <td>
                   {e.kind === 'debt' ? (
@@ -212,7 +228,7 @@ function CustomerHistory({ customer, sales, payments, returns, products, canPay,
                 </td>
               </tr>
             ))}
-            {data.opening !== 0 && (
+            {!vid && data.opening !== 0 && (
               <tr>
                 <td>
                   <b>{tr('Прежний долг до')} {fmtDate(data.start)}</b>
@@ -221,7 +237,8 @@ function CustomerHistory({ customer, sales, payments, returns, products, canPay,
                 <td className="num" style={{ whiteSpace: 'nowrap' }}><b>{money(data.opening)}</b></td>
               </tr>
             )}
-            {data.events.length === 0 && data.opening === 0 && <tr><td colSpan="2" className="empty">{tr('Операций пока нет')}</td></tr>}
+            {vid && events.length === 0 && <tr><td colSpan="2" className="empty">{tr('Таких операций нет')}</td></tr>}
+            {!vid && data.events.length === 0 && data.opening === 0 && <tr><td colSpan="2" className="empty">{tr('Операций пока нет')}</td></tr>}
           </tbody>
         </table>
       </div>

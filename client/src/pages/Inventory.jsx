@@ -102,6 +102,14 @@ export default function Inventory() {
   const [list, setList] = useState([])
   const [open, setOpen] = useState(null) // открытый лист — таким, каким он лежит на сервере
   const [typed, setTyped] = useState({}) // строка листа → что ввели здесь и чего на сервере ещё нет
+  // Карточка листа сверху открывает окно со своими строками: vse | counted | shortage | surplus
+  const [okno, setOkno] = useState(null)
+  const kartochka = (vid) => ({
+    role: 'button',
+    tabIndex: 0,
+    onClick: () => setOkno(vid),
+    onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOkno(vid) } },
+  })
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState(null) // чем кончилось применение, если не так, как ждали
   const [scope, setScope] = useState('all')
@@ -785,11 +793,48 @@ export default function Inventory() {
       ) : (
         <>
           <div className="cards four" style={{ marginBottom: 16 }}>
-            <div className="metric"><div className="metric-head"><div className="label">{t('Позиций в листе')}</div></div><div className="value">{open.items.length}</div></div>
-            <div className="metric"><div className="metric-head"><div className="label">{t('Пересчитано')}</div></div><div className="value">{sum.counted}</div></div>
-            <div className="metric"><div className="metric-head"><div className="label">{t('Недостача')}</div></div><div className="value" style={{ color: sum.shortage.length ? 'var(--danger)' : undefined }}>{sum.shortage.length}</div></div>
-            <div className="metric"><div className="metric-head"><div className="label">{t('Излишек')}</div></div><div className="value" style={{ color: sum.surplus.length ? 'var(--warn)' : undefined }}>{sum.surplus.length}</div></div>
+            <div className="metric clickable" {...kartochka('vse')} data-testid="card-inv-vse"><div className="metric-head"><div className="label">{t('Позиций в листе')}</div></div><div className="value">{open.items.length}</div></div>
+            <div className="metric clickable" {...kartochka('counted')} data-testid="card-inv-counted"><div className="metric-head"><div className="label">{t('Пересчитано')}</div></div><div className="value">{sum.counted}</div></div>
+            <div className="metric clickable" {...kartochka('shortage')} data-testid="card-inv-shortage"><div className="metric-head"><div className="label">{t('Недостача')}</div></div><div className="value" style={{ color: sum.shortage.length ? 'var(--danger)' : undefined }}>{sum.shortage.length}</div></div>
+            <div className="metric clickable" {...kartochka('surplus')} data-testid="card-inv-surplus"><div className="metric-head"><div className="label">{t('Излишек')}</div></div><div className="value" style={{ color: sum.surplus.length ? 'var(--warn)' : undefined }}>{sum.surplus.length}</div></div>
           </div>
+          {okno && (() => {
+            // «Позиций в листе» — все строки листа (непересчитанные — с прочерком);
+            // остальные — пересчитанные строки (tally), недостача и излишек
+            const list = okno === 'vse'
+              ? open.items.map((i) => {
+                  const actual = countOf(shownOf(i, typed))
+                  return { ...i, expected: i.expectedUnits, actual, diff: actual === null ? null : actual - i.expectedUnits }
+                })
+              : okno === 'counted' ? sum.rows : okno === 'shortage' ? sum.shortage : sum.surplus
+            const title = { vse: t('Позиций в листе'), counted: t('Пересчитано'), shortage: t('Недостача'), surplus: t('Излишек') }[okno]
+            return (
+              <Modal wide title={title} onClose={() => setOkno(null)}>
+                <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+                  <table data-testid="inv-okno">
+                    <thead><tr><th>{t('Товар')}</th><th className="num">{t('По системе, шт')}</th><th className="num">{t('По факту, шт')}</th><th className="num">{t('Расхождение')}</th></tr></thead>
+                    <tbody>
+                      {list.map((r, n) => (
+                        <tr key={(r.id || r.productId || r.name) + '_' + n}>
+                          <td><b>{r.name}</b></td>
+                          <td className="num">{chisloEx(r, r.expected)}</td>
+                          <td className="num">{r.actual === null ? '—' : chisloEx(r, r.actual)}</td>
+                          <td className="num" style={{ color: r.diff < 0 ? 'var(--danger)' : r.diff > 0 ? 'var(--warn)' : undefined, fontWeight: r.diff ? 700 : undefined }}>
+                            {r.diff === null ? '—' : (r.diff > 0 ? '+' : '') + chisloEx(r, r.diff)}
+                          </td>
+                        </tr>
+                      ))}
+                      {list.length === 0 && <tr><td colSpan="4" className="empty">{t('Нет данных')}</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+                {okno === 'shortage' && sum.shortageCost > 0 && (
+                  <div className="total-row big"><span>{t('Недостача по себестоимости')}</span><span style={{ color: 'var(--danger)' }}>{money(sum.shortageCost)}</span></div>
+                )}
+                <div className="modal-actions"><button className="btn" onClick={() => setOkno(null)}>{t('Закрыть')}</button></div>
+              </Modal>
+            )
+          })()}
 
           {open.status === 'applied' && (
             <div className="note info" style={{ marginBottom: 12 }}>{t('Этот пересчёт уже применён — данные показаны для истории.')}</div>

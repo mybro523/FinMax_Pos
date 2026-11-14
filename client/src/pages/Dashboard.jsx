@@ -10,6 +10,7 @@ const DashboardCharts = lazy(() => import('../components/DashboardCharts'))
 import Layout from '../components/Layout'
 import Metric from '../components/Metric'
 import Discrepancies from '../components/Discrepancies'
+import { ChekiOkno } from '../components/Cheki'
 import { Modal, PayBadge, PAYMENTS } from '../components/ui'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
@@ -52,30 +53,6 @@ function ProductTable({ list, showValue }) {
               <td className="num">{money(showValue ? valueOf(p) : p.price)}</td>
             </tr>
           ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function SalesTable({ list }) {
-  if (!list.length) return <div className="empty">{tr('Продаж нет')}</div>
-  return (
-    <div style={{ maxHeight: '52vh', overflow: 'auto' }}>
-      <table>
-        <thead><tr><th>{tr('Время')}</th><th>{tr('Товары')}</th><th className="num">{tr('Сумма')}</th><th>{tr('Оплата')}</th></tr></thead>
-        <tbody>
-          {list.map((s) => {
-            const names = s.items.map((i) => i.name).join(', ')
-            return (
-              <tr key={s.id}>
-                <td>{fmtShort(s.date)}</td>
-                <td>{names.slice(0, 40)}{names.length > 40 ? '…' : ''}</td>
-                <td className="num"><b>{money(s.total)}</b></td>
-                <td><PayBadge type={s.payment} /></td>
-              </tr>
-            )
-          })}
         </tbody>
       </table>
     </div>
@@ -173,19 +150,25 @@ export default function Dashboard() {
   function renderModal() {
     if (modal.type === 'sales') {
       return (
-        <Modal wide title={t('Продажи за сегодня')} onClose={close}>
-          <div className="mini-cards">
-            <MC label={t('Продано на')} v={money(stats.fin.revenueGross)} />
-            {stats.fin.refunds > 0 && <MC label={t('Возвраты')} v={'−' + money(stats.fin.refunds)} color="var(--danger)" />}
-            <MC label={t('Выручка')} v={money(stats.salesToday)} />
-            <MC label={t('Чеков')} v={stats.todayCount} />
-            <MC label={t('Наличные')} v={money(stats.todayByPay.cash)} />
-            <MC label={t('Карта')} v={money(stats.todayByPay.card)} />
-            <MC label={t('Перевод')} v={money(stats.todayByPay.transfer)} />
-            <MC label={t('В долг')} v={money(stats.todayByPay.debt)} />
-          </div>
-          <SalesTable list={stats.todayList} />
-        </Modal>
+        <ChekiOkno
+          title={t('Продажи за сегодня')}
+          sales={stats.todayList}
+          returns={returns}
+          onClose={close}
+          empty={t('Продаж нет')}
+          top={(
+            <div className="mini-cards">
+              <MC label={t('Продано на')} v={money(stats.fin.revenueGross)} />
+              {stats.fin.refunds > 0 && <MC label={t('Возвраты')} v={'−' + money(stats.fin.refunds)} color="var(--danger)" />}
+              <MC label={t('Выручка')} v={money(stats.salesToday)} />
+              <MC label={t('Чеков')} v={stats.todayCount} />
+              <MC label={t('Наличные')} v={money(stats.todayByPay.cash)} />
+              <MC label={t('Карта')} v={money(stats.todayByPay.card)} />
+              <MC label={t('Перевод')} v={money(stats.todayByPay.transfer)} />
+              <MC label={t('В долг')} v={money(stats.todayByPay.debt)} />
+            </div>
+          )}
+        />
       )
     }
     if (modal.type === 'profit') {
@@ -219,6 +202,12 @@ export default function Dashboard() {
             {t('За сегодня')} {stats.todayCount} {t('чек(ов)')}.{' '}
             {t('Товар, вернувшийся на полку, прибыль не уменьшает — потеряны только деньги за него.')}
           </p>
+          <div className="modal-actions">
+            <button className="btn ghost" data-testid="profit-cheki" onClick={() => setModal({ type: 'sales' })}>
+              <span className="ic"><LuReceipt size={16} /></span> {t('Чеки за сегодня')}
+            </button>
+            <button className="btn" onClick={close}>{t('Закрыть')}</button>
+          </div>
         </Modal>
       )
     }
@@ -293,10 +282,14 @@ export default function Dashboard() {
       const list = sales.filter((s) => s && s.date && Array.isArray(s.items) && dayKey(s.date) === modal.key)
       const sum = list.reduce((a, s) => a + (s.total || 0), 0)
       return (
-        <Modal wide title={`${t('Продажи за')} ${modal.label}`} onClose={close}>
-          <div className="mini-cards"><MC label={t('Выручка')} v={money(sum)} /><MC label={t('Чеков')} v={list.length} /></div>
-          <SalesTable list={list} />
-        </Modal>
+        <ChekiOkno
+          title={`${t('Продажи за')} ${modal.label}`}
+          sales={list}
+          returns={returns}
+          onClose={close}
+          empty={t('Продаж нет')}
+          top={<div className="mini-cards"><MC label={t('Выручка')} v={money(sum)} /><MC label={t('Чеков')} v={list.length} /></div>}
+        />
       )
     }
     if (modal.type === 'product') {
@@ -527,10 +520,10 @@ export default function Dashboard() {
 
       {/* Ячеек шесть — три в ряд, как в отчётах */}
       <div className="cards six">
-        <Metric tour="dash.sales" label={t('Продажи за сегодня')} value={money(stats.salesToday)} Icon={LuWallet} tint="accent"
+        <Metric tour="dash.sales" testid="card-dash-sales" label={t('Продажи за сегодня')} value={money(stats.salesToday)} Icon={LuWallet} tint="accent"
           sub={stats.fin.refunds > 0 ? `${stats.todayCount} ${t('чек(ов)')} · ${t('возвраты')} −${money(stats.fin.refunds)}` : `${stats.todayCount} ${t('чек(ов) · подробнее')}`}
           warn={stats.fin.refunds > 0} onClick={() => setModal({ type: 'sales' })} />
-        <Metric tour="dash.profit" label={t('Прибыль за сегодня')} value={money(stats.profitToday)} Icon={LuTrendingUp} tint="green"
+        <Metric tour="dash.profit" testid="card-dash-profit" label={t('Прибыль за сегодня')} value={money(stats.profitToday)} Icon={LuTrendingUp} tint="green"
           sub={stats.fin.writeOffCost > 0 ? `${t('списано')} −${money(stats.fin.writeOffCost)}` : t('нажмите для деталей')}
           warn={stats.fin.writeOffCost > 0} onClick={() => setModal({ type: 'profit' })} />
         {/* ── Две цены одного и того же склада ──
@@ -542,16 +535,16 @@ export default function Dashboard() {
             у меня добра», хотя половина этой суммы ещё не заработана. Поэтому
             у обеих подписано, по какой цене считается: без подписи два разных
             числа про один склад выглядят как ошибка. */}
-        <Metric tour="dash.invested" label={t('Вложено в товар')} value={money(stats.stockCost)} Icon={LuBanknote} tint="accent"
+        <Metric tour="dash.invested" testid="card-dash-invested" label={t('Вложено в товар')} value={money(stats.stockCost)} Icon={LuBanknote} tint="accent"
           sub={t('по закупочной цене')} onClick={() => setModal({ type: 'invested' })} />
-        <Metric tour="dash.stock" label={t('Остаток на складе')} value={money(stats.stockValue)} Icon={LuBoxes} tint="blue"
+        <Metric tour="dash.stock" testid="card-dash-stock" label={t('Остаток на складе')} value={money(stats.stockValue)} Icon={LuBoxes} tint="blue"
           sub={stats.lowList.length
             ? `${stats.stockUnits} ${t('уп')} · ${stats.lowList.length} ${t('заканчивается')}`
             : `${stats.stockUnits} ${t('уп')} · ${t('по цене продажи')}`}
           warn={stats.lowList.length > 0} onClick={() => setModal({ type: 'stock' })} />
-        <Metric tour="dash.debts" label={t('Долги клиентов')} value={money(stats.debtTotal)} Icon={LuReceipt} tint={stats.debtTotal > 0 ? 'danger' : 'accent'}
+        <Metric tour="dash.debts" testid="card-dash-debts" label={t('Долги клиентов')} value={money(stats.debtTotal)} Icon={LuReceipt} tint={stats.debtTotal > 0 ? 'danger' : 'accent'}
           sub={stats.debtors.length ? `${stats.debtors.length} ${t('клиент(ов) с долгом')}` : t('долгов нет')} onClick={() => setModal({ type: 'debts' })} />
-        <Metric tour="dash.suppliers" label={t('Долги поставщикам')} value={money(stats.supplierDebt)} Icon={LuTruck} tint={stats.supplierDebt > 0 ? 'danger' : 'accent'}
+        <Metric tour="dash.suppliers" testid="card-dash-suppliers" label={t('Долги поставщикам')} value={money(stats.supplierDebt)} Icon={LuTruck} tint={stats.supplierDebt > 0 ? 'danger' : 'accent'}
           sub={stats.creditors.length ? `${stats.creditors.length} ${t('поставщик(ов) с долгом')}` : t('долгов нет')} onClick={() => setModal({ type: 'suppliers' })} />
       </div>
 

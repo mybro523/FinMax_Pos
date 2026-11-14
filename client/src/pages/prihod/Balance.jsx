@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { LuPackagePlus, LuBanknote } from 'react-icons/lu'
 import { money } from '../../db/store'
 import { fmtDateTime } from '../../lib/time'
@@ -6,6 +6,8 @@ import { useT } from '../../lib/i18n'
 import { oplataPrihoda } from '../../lib/otchety'
 import { SupplierPayPanel, SupplierPaymentsTable } from '../../components/SupplierMoney'
 import SupplierDebtsPanel from '../SupplierDebts'
+import { Modal, useToast } from '../../components/ui'
+import { REFUNDS } from './ReturnTab'
 
 // ── Платежи и баланс ──
 // Поставщик выбран слева — его долг, оплата долга, оплаты и приходы за период.
@@ -56,14 +58,7 @@ export default function Balance({ supplier, bal, dolgi, periodLabel, onSelect, o
   const debt = Number(supplier.debt) || 0
   return (
     <div className="prh-balance">
-      <div className="mini-cards prh-bal-cards" data-tour="bal.cards">
-        <div className="mini-card"><div className="m-label">{t('Долг сейчас')}</div><div className="m-value sm" style={{ color: debt > 0 ? 'var(--danger)' : undefined }}>{money(debt)}</div></div>
-        <div className="mini-card"><div className="m-label">{t('Закуплено за период')}</div><div className="m-value sm">{money(bal.zakupleno)}</div></div>
-        <div className="mini-card"><div className="m-label">{t('Возвращено за период')}</div><div className="m-value sm">{money(bal.vozvrat)}</div></div>
-        <div className="mini-card"><div className="m-label">{t('Оплачено за период')}</div><div className="m-value sm" style={{ color: bal.oplacheno > 0 ? 'var(--green)' : undefined }}>{money(bal.oplacheno)}</div></div>
-        <div className="mini-card"><div className="m-label">{t('Начальный долг')}</div><div className="m-value sm">{money(supplier.openingDebt || 0)}</div></div>
-        <div className="mini-card"><div className="m-label">{t('Телефон')}</div><div className="m-value sm">{supplier.phone || '—'}</div></div>
-      </div>
+      <BalanceCards supplier={supplier} bal={bal} debt={debt} periodLabel={periodLabel} onOpenArrival={onOpenArrival} />
 
       <div className="prh-bal-cols">
         <SupplierPayPanel supplierId={supplier.id} debt={debt} tour="bal.pay" />
@@ -107,3 +102,122 @@ export default function Balance({ supplier, bal, dolgi, periodLabel, onSelect, o
   )
 }
 
+
+// ── Карточки баланса — кликабельные ──
+// «Долг сейчас» — приходы периода, по которым остался долг; «Закуплено» — приходы;
+// «Возвращено» — возвраты поставщику; «Оплачено» — оплаты; «Начальный долг» — откуда
+// он; «Телефон» — копируется. Всё — из уже посчитанного баланса за выбранный период
+function BalanceCards({ supplier, bal, debt, periodLabel, onOpenArrival }) {
+  const t = useT()
+  const toast = useToast()
+  const [okno, setOkno] = useState('')
+  function open(key) {
+    if (key !== 'phone') return setOkno(key)
+    if (!supplier.phone) return toast(t('Телефон поставщика не записан'), 'err')
+    Promise.resolve()
+      .then(() => navigator.clipboard.writeText(supplier.phone))
+      .then(() => toast(t('Телефон скопирован')), () => toast(supplier.phone))
+  }
+  const card = (key, label, value, style) => (
+    <div
+      className="mini-card clickable"
+      role="button"
+      tabIndex={0}
+      data-testid={'bal-card-' + key}
+      onClick={() => open(key)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(key) } }}
+    >
+      <div className="m-label">{label}</div><div className="m-value sm" style={style}>{value}</div>
+    </div>
+  )
+  const close = () => setOkno('')
+  const arrivalsTable = (list, empty) => (
+    <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+      <table>
+        <thead><tr><th>{t('Дата')}</th><th className="num">{t('Позиций')}</th><th className="num">{t('Сумма')}</th><th className="num">{t('В долг')}</th><th></th></tr></thead>
+        <tbody>
+          {list.map((a) => (
+            <tr key={a.id} className="clickable" onClick={() => { close(); onOpenArrival(a) }}>
+              <td style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(a.date)}</td>
+              <td className="num">{(a.items || []).length}</td>
+              <td className="num"><b>{money(a.total)}</b></td>
+              <td className="num" style={{ color: Number(a.debt) > 0 ? 'var(--danger)' : undefined }}>{money(a.debt)}</td>
+              <td className="num"><span className="btn ghost sm">{t('Подробно')}</span></td>
+            </tr>
+          ))}
+          {!list.length && <tr><td colSpan="5" className="empty">{empty}</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  )
+  const title = (x) => `${supplier.name} · ${x}`
+  const closeBtn = <div className="modal-actions"><button className="btn" onClick={close}>{t('Закрыть')}</button></div>
+  return (
+    <>
+      <div className="mini-cards prh-bal-cards" data-tour="bal.cards">
+        {card('debt', t('Долг сейчас'), money(debt), { color: debt > 0 ? 'var(--danger)' : undefined })}
+        {card('zakup', t('Закуплено за период'), money(bal.zakupleno))}
+        {card('vozvrat', t('Возвращено за период'), money(bal.vozvrat))}
+        {card('oplata', t('Оплачено за период'), money(bal.oplacheno), { color: bal.oplacheno > 0 ? 'var(--green)' : undefined })}
+        {card('nachalo', t('Начальный долг'), money(supplier.openingDebt || 0))}
+        {card('phone', t('Телефон'), supplier.phone || '—')}
+      </div>
+      {okno === 'debt' && (
+        <Modal wide title={title(t('Долг сейчас'))} onClose={close}>
+          <div className="tag-cat" style={{ marginBottom: 8 }}>
+            {t('Долг сейчас')}: <b>{money(debt)}</b> · {t('Приходы в долг за период')} ({periodLabel})
+          </div>
+          {arrivalsTable(bal.arrivals.filter((a) => Number(a.debt) > 0), t('За этот период приходов в долг не было'))}
+          {closeBtn}
+        </Modal>
+      )}
+      {okno === 'zakup' && (
+        <Modal wide title={title(t('Закуплено за период'))} onClose={close}>
+          <div className="tag-cat" style={{ marginBottom: 8 }}>{periodLabel} · {t('Приходов')}: {bal.arrivals.length} · {money(bal.zakupleno)}</div>
+          {arrivalsTable(bal.arrivals, t('За этот период приходов от поставщика не было'))}
+          {closeBtn}
+        </Modal>
+      )}
+      {okno === 'vozvrat' && (
+        <Modal wide title={title(t('Возвращено за период'))} onClose={close}>
+          <div className="tag-cat" style={{ marginBottom: 8 }}>{periodLabel} · {money(bal.vozvrat)}</div>
+          <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+            <table>
+              <thead><tr><th>{t('Дата')}</th><th className="num">{t('Позиций')}</th><th className="num">{t('Сумма')}</th><th>{t('Как вернули деньги')}</th></tr></thead>
+              <tbody>
+                {(bal.returns || []).map((r) => (
+                  <tr key={r.id}>
+                    <td style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.date)}</td>
+                    <td className="num">{(r.items || []).length}</td>
+                    <td className="num"><b>{money(r.total)}</b></td>
+                    <td>{t(REFUNDS[r.refund]?.[0] || '—')}</td>
+                  </tr>
+                ))}
+                {!(bal.returns || []).length && <tr><td colSpan="4" className="empty">{t('За этот период возвратов не было')}</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          {closeBtn}
+        </Modal>
+      )}
+      {okno === 'oplata' && (
+        <Modal wide title={title(t('Оплачено за период'))} onClose={close}>
+          <div className="tag-cat" style={{ marginBottom: 8 }}>{periodLabel} · {money(bal.oplacheno)}</div>
+          <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+            <SupplierPaymentsTable payments={bal.payments} empty={t('За этот период оплат не было')} />
+          </div>
+          {closeBtn}
+        </Modal>
+      )}
+      {okno === 'nachalo' && (
+        <Modal title={title(t('Начальный долг'))} onClose={close}>
+          <div className="total-row big"><span>{t('Начальный долг')}</span><span>{money(supplier.openingDebt || 0)}</span></div>
+          <p style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.6 }}>
+            {t('Сколько магазин был должен поставщику до начала работы в программе. Вписывается в карточке поставщика.')}
+          </p>
+          {closeBtn}
+        </Modal>
+      )}
+    </>
+  )
+}

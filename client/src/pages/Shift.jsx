@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   LuClock, LuWallet, LuBanknote, LuCreditCard, LuTrendingUp,
   LuCircleCheck, LuTriangleAlert, LuCalculator, LuReceipt, LuUsers,
@@ -8,7 +8,7 @@ import Layout from '../components/Layout'
 import Metric from '../components/Metric'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
-import { useCollection, money } from '../db/store'
+import { useCollection, money, loadSalesRange } from '../db/store'
 import { useAuth, useCan, getUser } from '../db/auth'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
@@ -24,6 +24,7 @@ import PrintDoc from '../components/PrintDoc'
 import { pechatTicket } from '../lib/pechat'
 import { getRekvizity } from '../lib/rekvizity'
 import { canCloseShift, shiftOpenerName } from '../lib/shiftOwner'
+import { ChekiOkno, RasshifrovkaOkno } from '../components/Cheki'
 
 export default function Shift() {
   const shifts = useCollection('shifts')
@@ -37,6 +38,8 @@ export default function Shift() {
   const t = useT()
   const [openCash, setOpenCash] = useState('')
   const [view, setView] = useState(null)
+  // Карточка или строка истории, открытая окном: { kind, shift }
+  const [okno, setOkno] = useState(null)
 
   const user = useAuth()
   const can = useCan()
@@ -336,6 +339,8 @@ export default function Shift() {
           <div className="cards">
             <Metric
               tour="shift.sales"
+              testid="card-shift-sales"
+              onClick={() => setOkno({ kind: 'all', shift: current })}
               label={t('Продажи за смену')}
               value={money(live.netSales)}
               Icon={LuTrendingUp}
@@ -344,16 +349,18 @@ export default function Shift() {
                 : `${live.count} ${t('чек(ов)')}`}
               warn={live.refundTotal > 0}
             />
-            <Metric tour="shift.paysplit" label={t('Наличными')} value={money(live.cash)} Icon={LuBanknote} />
-            <Metric tour="shift.paysplit" label={t('Картой')} value={money(live.card)} Icon={LuCreditCard} />
+            <Metric tour="shift.paysplit" testid="card-shift-cash" onClick={() => setOkno({ kind: 'cash', shift: current })} label={t('Наличными')} value={money(live.cash)} Icon={LuBanknote} />
+            <Metric tour="shift.paysplit" testid="card-shift-card" onClick={() => setOkno({ kind: 'card', shift: current })} label={t('Картой')} value={money(live.card)} Icon={LuCreditCard} />
             <Metric
               tour="shift.paysplit"
+              testid="card-shift-transfer"
+              onClick={() => setOkno({ kind: 'transfer', shift: current })}
               label={t('Переводом')}
               value={money(live.transfer)}
               Icon={LuQrCode}
               sub={Object.entries(live.transferBy).map(([via, sum]) => `${via} ${money(sum)}`).join(' · ') || undefined}
             />
-            <Metric tour="shift.expected" label={t('Ожидается в кассе')} value={money(live.expectedCash)} Icon={LuWallet} tint="accent" />
+            <Metric tour="shift.expected" testid="card-shift-expected" onClick={() => setOkno({ kind: 'expected', shift: current })} label={t('Ожидается в кассе')} value={money(live.expectedCash)} Icon={LuWallet} tint="accent" />
           </div>
           {(live.debt > 0 || live.debtPaid > 0 || live.refundTotal > 0 || live.expenseCash > 0 || live.cashIn > 0 || live.cashOut > 0 || live.supplierCash > 0 || live.supplierRefund > 0) && (
             <div className="panel mt" style={{ maxWidth: 460 }}>
@@ -469,7 +476,15 @@ export default function Shift() {
           </thead>
           <tbody>
             {pg.slice.map((s) => (
-              <tr key={s.id}>
+              <tr
+                key={s.id}
+                className="clickable"
+                tabIndex={0}
+                title={t('Показать чеки смены')}
+                data-testid="shift-row"
+                onClick={() => setOkno({ kind: 'all', shift: s })}
+                onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOkno({ kind: 'all', shift: s }) } }}
+              >
                 <td>
                   {fmtShort(s.openedAt)}{' — '}{s.closedAt && fmtTime(s.closedAt)}
                 </td>
@@ -491,7 +506,7 @@ export default function Shift() {
                     {s.difference > 0 ? '+' : ''}{money(s.difference)}
                   </span>
                 </td>
-                <td className="num"><button className="btn ghost sm" onClick={() => setView(s)}>{t('Z-отчёт')}</button></td>
+                <td className="num"><button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); setView(s) }}>{t('Z-отчёт')}</button></td>
               </tr>
             ))}
             {history.length === 0 && <tr><td colSpan="7" className="empty">{t('Закрытых смен пока нет')}</td></tr>}
@@ -501,6 +516,12 @@ export default function Shift() {
       </div>
 
       {view && <ZReport shift={view} onClose={() => setView(null)} />}
+      {okno && okno.kind === 'expected' && live && current && okno.shift.id === current.id && (
+        <OzhidaetsyaOkno shift={current} live={live} onClose={() => setOkno(null)} />
+      )}
+      {okno && okno.kind !== 'expected' && (
+        <ChekiSmeny shift={okno.shift} kind={okno.kind} sales={sales} returns={returns} onClose={() => setOkno(null)} />
+      )}
     </Layout>
   )
 }
@@ -552,4 +573,76 @@ function ZReport({ shift, onClose }) {
 function otmenySmeny(list) {
   const oo = (list || []).filter(isOtmena)
   return { count: oo.length, total: Math.round(oo.reduce((a, r) => a + (Number(r.total) || 0), 0) * 100) / 100 }
+}
+
+// ── Чеки смены ──
+// «Продажи за смену», «Наличными», «Картой», «Переводом» и строка истории смен:
+// чеки этой смены (по shiftId, как на сервере) — по клику чек целиком с повтором печати.
+// Продажи старше кэша устройства (60 дней) догружаются с сервера за время смены
+const KIND_TITLE = {
+  all: 'Чеки смены',
+  cash: 'Наличными — чеки смены',
+  card: 'Картой — чеки смены',
+  transfer: 'Переводом — чеки смены',
+}
+function ChekiSmeny({ shift, kind, sales, returns, onClose }) {
+  const t = useT()
+  const mine = useMemo(() => sales.filter((x) => x.shiftId === shift.id), [sales, shift.id])
+  const [loaded, setLoaded] = useState(null)
+  const need = mine.length === 0 && (Number(shift.count) || 0) > 0 && !!shift.closedAt
+  useEffect(() => {
+    if (!need) return undefined
+    let alive = true
+    const to = new Date(new Date(shift.closedAt).getTime() + 60000)
+    loadSalesRange(shift.openedAt, to)
+      .then((list) => alive && setLoaded(list.filter((x) => x.shiftId === shift.id)))
+      .catch(() => alive && setLoaded([]))
+    return () => {
+      alive = false
+    }
+  }, [need, shift.id, shift.openedAt, shift.closedAt])
+  const all = need ? loaded || [] : mine
+  const list = kind === 'all' ? all : all.filter((x) => (x.payment || 'cash') === kind)
+  const period = `${fmtShort(shift.openedAt)}${shift.closedAt ? ' — ' + fmtTime(shift.closedAt) : ''}`
+  return (
+    <ChekiOkno
+      title={`${t(KIND_TITLE[kind] || KIND_TITLE.all)} · ${period}`}
+      sales={list}
+      returns={returns}
+      onClose={onClose}
+      top={
+        <div className="tag-cat">
+          {t('Кассир')}: {shift.user?.name || '—'}{shift.deviceName ? ` · ${shift.deviceName}` : ''}
+        </div>
+      }
+      empty={need && loaded === null ? t('Загружаем…') : t('В этой смене таких чеков нет')}
+    />
+  )
+}
+
+// ── «Ожидается в кассе» по шагам ──
+// Та же формула, что в карточке и при закрытии смены
+function OzhidaetsyaOkno({ shift, live, onClose }) {
+  const t = useT()
+  const plus = (k, v) => (v > 0 ? { k, v: '+' + money(v), color: 'var(--green)' } : null)
+  const minus = (k, v) => (v > 0 ? { k, v: '−' + money(v), color: 'var(--danger)' } : null)
+  return (
+    <RasshifrovkaOkno
+      title={t('Ожидается в кассе')}
+      Icon={LuWallet}
+      note={t('Сколько наличных должно лежать в ящике прямо сейчас — по шагам.')}
+      rows={[
+        { k: t('Касса на старте'), v: money(shift.openingCash || 0) },
+        plus(t('Наличные продажи'), live.cash),
+        plus(t('Погашения долга'), live.debtPaid),
+        plus(t('Внесено'), live.cashIn),
+        plus(t('Вернули поставщики'), live.supplierRefund),
+        minus(t('Возвраты наличными'), live.refundCash),
+        minus(t('Расходы из кассы'), live.expenseCash),
+        minus(t('Оплаты поставщикам из кассы'), live.supplierCash),
+        minus(t('Изъято'), live.cashOut),
+      ]}
+      itog={{ k: t('Ожидается в кассе'), v: money(live.expectedCash) }}
+    />
+  )
 }

@@ -3,6 +3,7 @@ import { LuClipboardList, LuPackage, LuWallet, LuCircleCheck } from 'react-icons
 import Layout from '../components/Layout'
 import Metric from '../components/Metric'
 import StickyBar from '../components/StickyBar'
+import { Modal } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { useCollection, useCollectionIf, money, stockText } from '../db/store'
@@ -63,6 +64,8 @@ export default function Orders() {
     [low, z, sup, cat, supOk, catOk],
   )
   const pg = usePagination(rows, 10, `${q}|${sup}|${cat}`)
+  // Карточки открывают подробности той же заявки (с теми же фильтрами)
+  const [okno, setOkno] = useState(null)
 
   const total = rows.reduce((s, p) => s + p.cost * p.need, 0)
   const units = rows.reduce((s, p) => s + p.need, 0)
@@ -110,10 +113,11 @@ export default function Orders() {
       ) : (
         <>
           <div className="cards three" data-tour="ord.cards" style={{ marginBottom: 16 }}>
-            <Metric label={t('Позиций к заказу')} value={rows.length} Icon={LuClipboardList} sub={filtered ? `${t('из')} ${low.length}` : undefined} />
-            <Metric label={t('Единиц товара')} value={units} Icon={LuPackage} />
-            <Metric label={t('Сумма заявки')} value={money(total)} Icon={LuWallet} />
+            <Metric label={t('Позиций к заказу')} value={rows.length} Icon={LuClipboardList} sub={filtered ? `${t('из')} ${low.length}` : t('подробнее')} onClick={() => setOkno('pozicii')} testid="card-ord-pozicii" />
+            <Metric label={t('Единиц товара')} value={units} Icon={LuPackage} sub={t('подробнее')} onClick={() => setOkno('edinicy')} testid="card-ord-edinicy" />
+            <Metric label={t('Сумма заявки')} value={money(total)} Icon={LuWallet} sub={t('по поставщикам')} onClick={() => setOkno('summa')} testid="card-ord-summa" />
           </div>
+          {okno && <ZayavkaOkno vid={okno} rows={rows} total={total} units={units} onClose={() => setOkno(null)} />}
 
           <div className="panel" data-tour="ord.list" style={{ padding: 0 }}>
             <StickyBar panel pad="16px 16px 14px">
@@ -169,5 +173,64 @@ export default function Orders() {
         </>
       )}
     </Layout>
+  )
+}
+
+// ── Окно карточки заявки ──
+// «Позиций» и «Единиц» — те же товары заявки (по сумме или по количеству),
+// «Сумма» — сколько заказать у каждого поставщика
+function ZayavkaOkno({ vid, rows, total, units, onClose }) {
+  const t = useT()
+  if (vid === 'summa') {
+    const m = new Map()
+    for (const p of rows) {
+      const k = p.supplier || ''
+      const x = m.get(k) || { name: p.supplier || t('Без поставщика'), count: 0, need: 0, sum: 0 }
+      x.count += 1
+      x.need += p.need
+      x.sum += p.cost * p.need
+      m.set(k, x)
+    }
+    const list = [...m.values()].sort((a, b) => b.sum - a.sum)
+    return (
+      <Modal wide title={t('Сумма заявки по поставщикам')} onClose={onClose}>
+        <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+          <table data-testid="ord-okno">
+            <thead><tr><th>{t('Поставщик')}</th><th className="num">{t('Позиций')}</th><th className="num">{t('Заказать')}</th><th className="num">{t('Сумма')}</th></tr></thead>
+            <tbody>
+              {list.map((x) => (
+                <tr key={x.name}><td><b>{x.name}</b></td><td className="num">{x.count}</td><td className="num">{x.need}</td><td className="num">{money(x.sum)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="total-row big"><span>{t('Сумма заявки')}</span><span>{money(total)}</span></div>
+        <div className="modal-actions"><button className="btn" onClick={onClose}>{t('Закрыть')}</button></div>
+      </Modal>
+    )
+  }
+  const list = [...rows].sort(vid === 'edinicy' ? (a, b) => b.need - a.need : (a, b) => b.cost * b.need - a.cost * a.need)
+  return (
+    <Modal wide title={vid === 'edinicy' ? t('Единиц товара к заказу') : t('Позиций к заказу')} onClose={onClose}>
+      <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+        <table data-testid="ord-okno">
+          <thead><tr><th>{t('Товар')}</th><th>{t('Поставщик')}</th><th className="num">{t('Остаток')}</th><th className="num">{t('Заказать')}</th><th className="num">{t('Сумма')}</th></tr></thead>
+          <tbody>
+            {list.map((p) => (
+              <tr key={p.id}>
+                <td><b>{p.name}</b>{p.barcode ? <div className="tag-cat">{p.barcode}</div> : null}</td>
+                <td>{p.supplier || <span className="tag-cat">{t('Без поставщика')}</span>}</td>
+                <td className="num">{stockText(p)}</td>
+                <td className="num"><b>{p.need} {t(p.unit || '')}</b></td>
+                <td className="num">{money(p.cost * p.need)}</td>
+              </tr>
+            ))}
+            {list.length === 0 && <tr><td colSpan="5" className="empty">{t('Ничего не найдено')}</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div className="total-row big"><span>{t('Итого')} · {units} {t('ед.')}</span><span>{money(total)}</span></div>
+      <div className="modal-actions"><button className="btn" onClick={onClose}>{t('Закрыть')}</button></div>
+    </Modal>
   )
 }

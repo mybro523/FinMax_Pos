@@ -1,25 +1,20 @@
 import { useMemo, useState } from 'react'
-import { LuWallet, LuTrendingUp, LuBoxes, LuReceipt, LuPrinter } from 'react-icons/lu'
+import { LuWallet, LuTrendingUp, LuBoxes, LuReceipt } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import StickyBar from '../components/StickyBar'
-import { Modal, PAYMENTS, useToast } from '../components/ui'
+import { Modal, PAYMENTS } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
-import PrintDoc from '../components/PrintDoc'
-import TicketView from '../components/TicketView'
 import { PeriodPicker, presetPeriod, periodRange, periodText, useDeepPeriod } from '../components/Period'
 import { useCollection, money } from '../db/store'
-import { getUser, useAuth } from '../db/auth'
+import { getUser } from '../db/auth'
 import { fmtDateTime, chekNomer } from '../lib/time'
 import { useT } from '../lib/i18n'
 import { skachatXlsx } from '../lib/excel'
 import { prodazhiPoTovaram, vseProdazhi, spisokChekov, chekPodhodit, chekVida, VIDY_CHEKOV } from '../lib/otchety'
 import { poiskZapros, tovarPodhodit, shtrihkodyPoId } from '../lib/poisk'
-import { isOtmena, otmenennyeCheki } from '../lib/otmena'
-import { sEdinicami } from '../lib/units'
-import { saleTicket } from '../lib/ticket'
-import { getRekvizity } from '../lib/rekvizity'
-import { pechatTicket } from '../lib/pechat'
+import { otmenennyeCheki } from '../lib/otmena'
+import { ChekOkno } from '../components/Cheki'
 
 // ── Отчёт продажи ──
 // Три вкладки. «По товарам» — сколько продано каждого товара, выручка после скидок,
@@ -86,6 +81,7 @@ export default function SalesReport() {
   const cheki = useMemo(() => spisokChekov({ sales, returns, from: range.from, to: range.to }), [sales, returns, range])
   const kody = useMemo(() => shtrihkodyPoId(products), [products])
   const [otkryt, setOtkryt] = useState(null) // чек, открытый в окне
+  const [kartochka, setKartochka] = useState(null) // карточка сверху, открытая в окне
 
   const z = useMemo(() => poiskZapros(q), [q])
   const tovRows = useMemo(
@@ -215,10 +211,10 @@ export default function SalesReport() {
       <PeriodPicker value={period} onChange={setPeriod} tour="sr.period" />
 
       <div className="cards" data-tour="sr.cards" style={{ margin: '14px 0 16px' }}>
-        <Metric label={t('Выручка')} value={money(poTov.itogo.revenue)} Icon={LuWallet} />
-        <Metric label={t('Себестоимость')} value={money(poTov.itogo.cost)} Icon={LuBoxes} />
-        <Metric label={t('Прибыль')} value={money(poTov.itogo.profit)} Icon={LuTrendingUp} good />
-        <Metric label={t('Чеков')} value={vse.itogo.cheki} sub={`${poTov.itogo.positions} ${t('наименований')}`} Icon={LuReceipt} onClick={() => setTab('cheki')} title={t('Показать чеки')} />
+        <Metric label={t('Выручка')} value={money(poTov.itogo.revenue)} Icon={LuWallet} sub={t('по товарам')} onClick={() => setKartochka('revenue')} title={t('Подробнее')} testid="card-sr-revenue" />
+        <Metric label={t('Себестоимость')} value={money(poTov.itogo.cost)} Icon={LuBoxes} sub={t('по товарам')} onClick={() => setKartochka('cost')} title={t('Подробнее')} testid="card-sr-cost" />
+        <Metric label={t('Прибыль')} value={money(poTov.itogo.profit)} Icon={LuTrendingUp} good sub={t('по товарам')} onClick={() => setKartochka('profit')} title={t('Подробнее')} testid="card-sr-profit" />
+        <Metric testid="card-sr-cheki" label={t('Чеков')} value={vse.itogo.cheki} sub={`${poTov.itogo.positions} ${t('наименований')}`} Icon={LuReceipt} onClick={() => setTab('cheki')} title={t('Показать чеки')} />
       </div>
 
       <div className="panel" data-tour="sr.table" style={{ padding: 0 }}>
@@ -368,66 +364,19 @@ export default function SalesReport() {
         {tab === 'cheki' ? <Pagination {...pgC} /> : tab === 'products' ? <Pagination {...pgT} /> : <Pagination {...pgV} />}
       </div>
 
+      {kartochka && <TovaryOkno vid={kartochka} poTov={poTov} onClose={() => setKartochka(null)} />}
       {otkryt && <ChekOkno row={otkryt} products={products} onClose={() => setOtkryt(null)} />}
     </Layout>
   )
 }
 
-// ── Окно чека из отчёта ──
-// Чек в том же виде, что на бумаге (lib/ticket.js), и «Печать» — тот же чек ещё раз:
-// на чековый принтер или через экран печати. Строк «Получено» и «Сдача» в повторе нет —
-// программа их не хранит, они есть только на первом чеке. Если чек отменили или по нему
-// был возврат — об этом сказано над чеком
-function ChekOkno({ row, products, onClose }) {
-  const t = useT()
-  const auth = useAuth()
-  const toast = useToast()
-  // У строк продажи с сервера нет единицы (кг, л…) — она берётся из карточки товара
-  const s = { ...row.sale, items: sEdinicami(row.sale.items, products) }
-  const ticket = saleTicket(s, {
-    t,
-    money,
-    when: fmtDateTime,
-    pharmacy: auth?.pharmacy?.name,
-    cashier: s.user?.name || '',
-    rekvizity: getRekvizity(auth?.pharmacy?.code),
-    nomer: chekNomer(s.date),
-    // Повтор отменённого чека — с пометкой: продажи по нему больше нет
-    pometka: row.otmena ? `${t('Чек отменён')} ${fmtDateTime(row.otmena.date)}` : '',
-  })
-  const print = () => pechatTicket(ticket).catch((e) => toast(t(e.message), 'err'))
-  const vozvraty = (row.vozvraty || []).filter((r) => !isOtmena(r))
-  return (
-    <Modal title={<><span className="ic"><LuReceipt size={18} /></span>{t('Чек')} № {chekNomer(s.date)}</>} onClose={onClose}>
-      {row.otmena && (
-        <div className="note err" style={{ marginBottom: 12 }}>
-          {t('Чек отменён')} {fmtDateTime(row.otmena.date)}{row.otmena.user?.name ? ` · ${row.otmena.user.name}` : ''} —{' '}
-          {s.payment === 'debt' ? t('товар вернулся на склад, долг клиента уменьшен.') : t('товар вернулся на склад, деньги возвращены.')}
-        </div>
-      )}
-      {vozvraty.map((r) => (
-        <div className="note info" style={{ marginBottom: 12 }} key={r.id}>
-          {t('Возврат по чеку')}: {fmtDateTime(r.date)} — {money(r.total)}
-        </div>
-      ))}
-      <TicketView ticket={ticket} />
-      {/* На бумагу — этот же чек, из печатного слоя */}
-      <PrintDoc prio={2} kind="ticket" title={t('Чек продажи')}><TicketView ticket={ticket} /></PrintDoc>
-      <div className="modal-actions">
-        <button className="btn ghost" data-testid="chek-print" onClick={print}><span className="ic"><LuPrinter size={16} /></span> {t('Печать')}</button>
-        <button className="btn" onClick={onClose}>{t('Закрыть')}</button>
-      </div>
-    </Modal>
-  )
-}
-
-function Metric({ label, value, sub, Icon, good, onClick, title }) {
+function Metric({ label, value, sub, Icon, good, onClick, title, testid }) {
   // Карточка с действием — кнопка: и мышью, и с клавиатуры
   const act = onClick
     ? { role: 'button', tabIndex: 0, title, onClick, onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } }
     : {}
   return (
-    <div className={'metric' + (onClick ? ' clickable' : '')} {...act}>
+    <div className={'metric' + (onClick ? ' clickable' : '')} {...act} data-testid={testid}>
       <div className="metric-head">
         <div className="label">{label}</div>
         <div className="ic-box" style={good ? { background: 'var(--green-soft, var(--accent-soft))', color: 'var(--green)' } : undefined}><Icon size={19} /></div>
@@ -435,5 +384,46 @@ function Metric({ label, value, sub, Icon, good, onClick, title }) {
       <div className="value">{value}</div>
       {sub ? <div className="sub">{sub}</div> : null}
     </div>
+  )
+}
+
+// ── Окно карточки «Выручка» / «Себестоимость» / «Прибыль» ──
+// Из каких товаров сложилась цифра за период — от самого большого вклада
+const KARTOCHKI = {
+  revenue: { title: 'Выручка по товарам', key: 'revenue' },
+  cost: { title: 'Себестоимость по товарам', key: 'cost' },
+  profit: { title: 'Прибыль по товарам', key: 'profit' },
+}
+function TovaryOkno({ vid, poTov, onClose }) {
+  const t = useT()
+  const k = KARTOCHKI[vid] || KARTOCHKI.revenue
+  const list = [...poTov.rows].sort((a, b) => b[k.key] - a[k.key])
+  return (
+    <Modal wide title={t(k.title)} onClose={onClose}>
+      <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+        <table data-testid="sr-okno">
+          <thead>
+            <tr>
+              <th>{t('Товар')}</th><th className="num">{t('Продано')}</th><th className="num">{t('Выручка')}</th>
+              <th className="num">{t('Себестоимость')}</th><th className="num">{t('Прибыль')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((r) => (
+              <tr key={r.key || r.name}>
+                <td><b>{r.name}</b>{r.category ? <div className="tag-cat">{t(r.category)}</div> : null}</td>
+                <td className="num">{r.qty}</td>
+                <td className="num" style={k.key === 'revenue' ? { fontWeight: 700 } : undefined}>{money(r.revenue)}</td>
+                <td className="num" style={k.key === 'cost' ? { fontWeight: 700 } : undefined}>{money(r.cost)}</td>
+                <td className="num" style={{ color: r.profit < 0 ? 'var(--danger)' : 'var(--green)', fontWeight: k.key === 'profit' ? 700 : undefined }}>{money(r.profit)}</td>
+              </tr>
+            ))}
+            {list.length === 0 && <tr><td colSpan="5" className="empty">{t('За этот период продаж нет')}</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div className="total-row big"><span>{t('Итого')}</span><span>{money(poTov.itogo[k.key])}</span></div>
+      <div className="modal-actions"><button className="btn" onClick={onClose}>{t('Закрыть')}</button></div>
+    </Modal>
   )
 }

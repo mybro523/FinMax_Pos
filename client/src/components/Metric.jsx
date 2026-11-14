@@ -10,8 +10,12 @@ const TINTS = {
 }
 
 // tour — метка для тура по разделу: карточка подсвечивается и объясняется
-export default function Metric({ label, value, Icon, tint, sub, warn, subTo, onClick, tour }) {
+// onClick — карточка открывает подробности: кликабельна мышью, пальцем и с клавиатуры
+export default function Metric({ label, value, Icon, tint, sub, warn, subTo, onClick, tour, testid }) {
   const t = TINTS[tint] || TINTS.accent
+  const act = onClick
+    ? { role: 'button', tabIndex: 0, onClick, onKeyDown: (e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onClick() } } }
+    : {}
   const subInner = (
     <>
       {warn && <LuTriangleAlert size={12} style={{ verticalAlign: '-2px' }} />} {sub}
@@ -20,7 +24,7 @@ export default function Metric({ label, value, Icon, tint, sub, warn, subTo, onC
   )
   const hasSub = sub !== undefined && sub !== null && sub !== ''
   return (
-    <div className={'metric' + (onClick ? ' clickable' : '')} onClick={onClick} data-tour={tour}>
+    <div className={'metric' + (onClick ? ' clickable' : '')} {...act} data-tour={tour} data-testid={testid}>
       <div className="metric-head">
         <div className="label">{label}</div>
         <div className="ic-box" style={{ background: t.bg, color: t.color }}>{Icon && <Icon size={19} />}</div>
@@ -28,7 +32,7 @@ export default function Metric({ label, value, Icon, tint, sub, warn, subTo, onC
       <div className="value">{value}</div>
       {hasSub &&
         (subTo ? (
-          <Link to={subTo} className={'sub' + (warn ? ' warn' : '')} style={{ textDecoration: 'none', cursor: 'pointer' }}>
+          <Link to={subTo} className={'sub' + (warn ? ' warn' : '')} style={{ textDecoration: 'none', cursor: 'pointer' }} onClick={(e) => e.stopPropagation()}>
             {subInner}
           </Link>
         ) : (
