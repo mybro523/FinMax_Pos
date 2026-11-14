@@ -1,6 +1,41 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import basicSsl from '@vitejs/plugin-basic-ssl'
+import { createHash } from 'node:crypto'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import { swEntries, swScript } from './src/lib/swFiles.js'
+
+// ── Сайт без интернета: service worker (14.11.2026) ──
+// После сборки сайта в dist кладётся sw.js: список всего, что нужно кассе без сети (страница,
+// код, стили, шрифты, картинки), с отпечатками содержимого, и сам service worker
+// (src/lib/sw-worker.js). Только сайт: у программы для Windows файлы и так на компьютере
+function serviceWorker() {
+  let root = '.'
+  let outDir = 'dist'
+  return {
+    name: 'finmax-sw',
+    apply: 'build',
+    configResolved(cfg) {
+      root = cfg.root
+      outDir = resolve(cfg.root, cfg.build.outDir)
+    },
+    closeBundle() {
+      if (!existsSync(join(outDir, 'index.html'))) return
+      const files = []
+      const walk = (dir, rel) => {
+        for (const d of readdirSync(dir, { withFileTypes: true })) {
+          const r = rel ? rel + '/' + d.name : d.name
+          if (d.isDirectory()) walk(join(dir, d.name), r)
+          else files.push({ path: r, hash: createHash('sha256').update(readFileSync(join(dir, d.name))).digest('hex').slice(0, 12) })
+        }
+      }
+      walk(outDir, '')
+      const template = readFileSync(join(root, 'src', 'lib', 'sw-worker.js'), 'utf8')
+      writeFileSync(join(outDir, 'sw.js'), swScript(template, swEntries(files)))
+    },
+  }
+}
 
 // ── Знакомство с сервером начинаем заранее ──
 // Пока браузер качает и разбирает код программы, соединения с сервером ещё нет.
@@ -99,7 +134,7 @@ const desktop = {
 }
 
 export default defineConfig(({ mode }) => (mode === 'desktop' ? desktop : {
-  plugins: [react(), basicSsl(), preconnectApi()],
+  plugins: [react(), basicSsl(), preconnectApi(), serviceWorker()],
   build: {
     rollupOptions,
     chunkSizeWarningLimit: 700,

@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer'
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator'
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator'
 
 // Номер кассы и номера операций создаёт программа на компьютере магазина. Это
 // обычные UUID; проверяем вид, чтобы в базу не попало ничего, кроме букв, цифр и дефисов
@@ -13,6 +13,19 @@ export class PushOpDto {
   // Когда она случилась на кассе
   @IsString() @MaxLength(40) createdAt: string
   // Содержимое разбирается отдельно и целиком — см. payload.ts
+  @IsObject() payload: Record<string, any>
+}
+
+// ── Чек сайта, проданный без интернета (POST /sales/offline) ──
+// Та же операция «чек», что у программы, только по одной и без номера кассы: payload —
+// { sale: {...} } в формате sync/payload.ts parseSale. type можно не присылать — он всегда 'sale'
+export class WebSaleDto {
+  @IsString() @Matches(ID) id: string
+  @IsOptional() @IsIn(['sale']) type?: string
+  // Кто продал. Пусто — тот же, кто прислал; чужой чек может прислать только владелец
+  @IsOptional() @IsString() @Matches(ID) accountId?: string
+  // Когда продано (время браузера)
+  @IsString() @MaxLength(40) createdAt: string
   @IsObject() payload: Record<string, any>
 }
 

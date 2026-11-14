@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common'
 import { SyncService } from './sync.service'
 import { CurrentUser, Perm } from '../auth/decorators'
-import { CloseDeviceShiftDto, PullQuery, PushDto, RenameDeviceDto } from './dto'
+import { CloseDeviceShiftDto, PullQuery, PushDto, RenameDeviceDto, WebSaleDto } from './dto'
 
 // ── Обмен с кассами, которые работают без интернета ──
 // Сайту эти адреса не нужны: он всегда на связи и пишет прямо в свои разделы.
@@ -76,5 +76,20 @@ export class DiscrepancyController {
   @Post(':id/resolve')
   resolve(@Param('id') id: string) {
     return this.sync.resolveDiscrepancy(id)
+  }
+}
+
+// ── Чеки сайта, проданные без интернета ──
+// Касса сайта без связи кладёт чек в очередь браузера и присылает его сюда, когда связь
+// вернулась, — по одному, по порядку. Права и модули спрашивает сам приём (как у чеков
+// программы): отказ по праву записывается и возвращается ответом «rejected», чтобы браузер
+// не слал этот чек по кругу. Адрес — рядом с обычной продажей (sales.controller: POST /sales)
+@Controller('sales')
+export class WebSalesController {
+  constructor(private readonly sync: SyncService) {}
+
+  @Post('offline')
+  offline(@Body() dto: WebSaleDto, @CurrentUser() u: any) {
+    return this.sync.pushWeb(dto, u)
   }
 }

@@ -2,17 +2,17 @@ import { useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   LuLayoutDashboard, LuShoppingCart, LuPill, LuPackagePlus,
-  LuClipboardList, LuReceipt, LuTrendingUp, LuSettings, LuClock, LuTag, LuCalculator, LuWifiOff,
+  LuClipboardList, LuReceipt, LuTrendingUp, LuSettings, LuClock, LuTag, LuCalculator,
   LuUsers, LuCalendarClock, LuUndo2, LuTrash2, LuClipboardCheck, LuTriangleAlert,
   LuGraduationCap, LuHandCoins, LuTruck, LuShieldCheck, LuChartColumn, LuScale, LuCoins, LuInfo, LuWarehouse,
 } from 'react-icons/lu'
-import { useConnection } from '../db/store'
 import { useAuth, leavePharmacy } from '../db/auth'
 import { can, kassaFirst } from '../lib/permissions'
 import { moduleOn, routeOn } from '../lib/moduli'
 import { useT } from '../lib/i18n'
 import { isDesktop } from '../lib/desktop'
 import AppFoot from './AppFoot'
+import OfflineBar from './OfflineBar'
 import LicenceBanner from './LicenceBanner'
 import { BrandWord } from './ui'
 import emblem from '../assets/brand/emblem-64.png'
@@ -75,7 +75,6 @@ const EXTRA_ICONS = { '/about': LuInfo }
 // в той же строке; note — сводка раздела под названием («Общая задолженность: …»)
 // noTitle — раздел без названия вверху (1.7.7: «Приход товара» — по просьбе владельца); кнопки остаются
 export default function Layout({ title, subtitle, note, actions, fill, hub, noTitle = false, children }) {
-  const conn = useConnection()
   const user = useAuth()
   const t = useT()
   const location = useLocation()
@@ -114,14 +113,10 @@ export default function Layout({ title, subtitle, note, actions, fill, hub, noTi
             <button className="back" onClick={() => leavePharmacy()}>{t('вернуться к себе')}</button>
           </div>
         )}
-        {/* В программе для Windows полосы «нет связи» нет: касса там работает и без
-            интернета, а что ушло на сервер, видно в «Настройках» (вкладка «Профиль») */}
-        {conn === 'error' && !isDesktop && (
-          <div className="conn-banner">
-            <span className="ic"><LuWifiOff size={15} /></span>
-            {t('Нет связи с сервером — показаны сохранённые данные, изменения синхронизируются автоматически')}
-          </div>
-        )}
+        {/* Нет связи и чеки, проданные без неё (сайт): components/OfflineBar.jsx. В программе
+            для Windows полосы нет: касса там работает и без интернета, а что ушло на сервер,
+            видно в «Настройках» (вкладка «Профиль») */}
+        <OfflineBar />
         {/* Шапка — только у главного экрана: имя системы и его кнопки; закреплена вверху
             окна. В разделах её нет, место отдано странице: «Меню» и «?» стоят в полосе
             внизу (AppFoot.jsx), кнопки раздела — строкой вверху страницы. Значков версии,

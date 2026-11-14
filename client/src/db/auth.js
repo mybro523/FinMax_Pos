@@ -2,9 +2,11 @@
 // Токен и пользователь хранятся во вкладке (sessionStorage); подписка через useSyncExternalStore.
 import { useSyncExternalStore } from 'react'
 import { api, setAuthErrorHandler } from './api'
-import { resetStore } from './store'
+import { rehydrateForShop, resetStore } from './store'
 import { bridge } from '../lib/desktop'
 import { can as canUser } from '../lib/permissions'
+import { hasOfflineLogin, openOfflineLogin, saveOfflineLogin } from '../lib/offlineLogin'
+import { offlineNow } from '../lib/offlineSales'
 
 // ── Ключ входа живёт только во вкладке ──
 // sessionStorage, а не localStorage: закрыли вкладку или программу — в следующий
@@ -54,6 +56,9 @@ function setAuth(t, u) {
   } catch {
     /* ignore */
   }
+  // Вошли в магазин в этой же вкладке — его сохранённые списки (товары, смена) сразу на
+  // экран, не дожидаясь сервера: без интернета их иначе не было бы вовсе
+  if (t && u) rehydrateForShop()
   // ── Программа для Windows ──
   // Настоящий ключ входа лежит не в окне, а в основной части программы. Вышли здесь —
   // значит и там его надо стереть: иначе на экране был бы вход, а ключ продолжал бы
@@ -116,9 +121,68 @@ export function useCan() {
   return (...keys) => canUser(u, ...keys)
 }
 
+// ── Вход без интернета (сайт, 14.11.2026) ──
+// Если сервер не ответил — входим по записи этого браузера (lib/offlineLogin.js): ключ
+// входа, зашифрованный паролем. Связи нет совсем (браузер это знает) — не ждём сервер
+// вовсе; связь «есть», но сервер молчит — ждём его OFFLINE_WAIT_MS, потом запись. Сервер
+// ответил позже — молча берём его свежий ключ. Программа для Windows входит по-своему
+const OFFLINE_WAIT_MS = 4000
+const noLink = (e) => !!e && e.status === 0
+const browserOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false
+export const NO_OFFLINE_LOGIN = 'Нет связи с интернетом. Без интернета войти может только тот, кто уже входил в этом браузере.'
+const WRONG_PASSWORD = 'Неверное имя или пароль'
+
 export async function login(name, password) {
   suspended = null
-  const res = await api.post('/auth/login', { name, password })
+  const online = api.post('/auth/login', { name, password })
+  if (bridge || !hasOfflineLogin(name)) {
+    let res
+    try {
+      res = await online
+    } catch (e) {
+      // Сайт без связи, а записи для этого логина в браузере нет — так и сказать
+      if (!bridge && noLink(e)) {
+        const err = new Error(NO_OFFLINE_LOGIN)
+        err.status = 0
+        throw err
+      }
+      throw e
+    }
+    return finishLogin(res, name, password)
+  }
+  online.catch(() => {}) // ответ разберём ниже; без этого браузер ругался бы на «необработанный»
+  const first = await Promise.race([
+    online.then(
+      (res) => ({ res }),
+      (err) => ({ err }),
+    ),
+    new Promise((r) => setTimeout(() => r({ slow: true }), browserOffline() ? 0 : OFFLINE_WAIT_MS)),
+  ])
+  if (first.res) return finishLogin(first.res, name, password)
+  // Сервер ответил отказом по существу (неверный пароль, магазин остановлен) — это ответ
+  if (first.err && !noLink(first.err)) throw first.err
+  const off = await openOfflineLogin({ login: name, password })
+  if (off.token) {
+    setAuth(off.token, off.user)
+    // Сервер всё-таки ответил — переходим на его свежий ключ, пока это всё ещё тот же вход
+    if (first.slow) {
+      online.then(
+        (res) => {
+          if (token === off.token && res?.token && res.user && res.user.role !== 'superadmin') finishLogin(res, name, password).catch(() => {})
+        },
+        () => {},
+      )
+    }
+    return off.user
+  }
+  // Запись не открылась, а сервер ещё думает — ждём его ответа (пароль могли сменить)
+  if (first.slow && !browserOffline()) return finishLogin(await online, name, password)
+  const err = new Error(off.error === 'password' ? WRONG_PASSWORD : NO_OFFLINE_LOGIN)
+  err.status = off.error === 'password' ? 401 : 0
+  throw err
+}
+
+async function finishLogin(res, name, password) {
   // ── Владельцу сервиса программа для Windows не нужна ──
   // Она сделана для магазина: касса, склад, работа без интернета. У владельца сервиса
   // ничего этого нет — у него список магазинов, и он целиком живёт на сайте. Пустить его
@@ -128,6 +192,11 @@ export async function login(name, password) {
     throw new Error('Панель владельца сервиса работает на сайте. Эта программа — для магазина.')
   }
   setAuth(res.token, res.user)
+  // Запомнить вход для работы без интернета (только сайт, не владелец сервиса). В фоне:
+  // шифрование паролем занимает долю секунды, а человек уже вошёл
+  if (!bridge && res.user?.role !== 'superadmin') {
+    saveOfflineLogin({ login: name, password, token: res.token, user: res.user }).catch(() => {})
+  }
   return res.user
 }
 
@@ -136,7 +205,13 @@ export async function login(name, password) {
 // человек вылетал бы из системы сразу после смены собственного пароля.
 export async function changePassword(oldPassword, newPassword) {
   const res = await api.post('/auth/change-password', { oldPassword, newPassword })
-  if (res && res.token) setAuth(res.token, res.user || user)
+  if (res && res.token) {
+    setAuth(res.token, res.user || user)
+    // Запись для входа без интернета — под новый пароль (старым её больше не открыть)
+    if (!bridge && user?.name && user.role !== 'superadmin' && !isImpersonating()) {
+      saveOfflineLogin({ login: user.name, password: newPassword, token: res.token, user }).catch(() => {})
+    }
+  }
   return res
 }
 
@@ -147,8 +222,11 @@ export function logout() {
   } catch {
     /* ignore */
   }
+  // Выход без связи: сохранённые товары этого магазина остаются — следующий вход без
+  // интернета (lib/offlineLogin.js) должен найти их, иначе продавать нечем
+  const shop = !bridge && offlineNow() ? user?.pharmacy?.code || '' : ''
   setAuth(null, null)
-  resetStore() // чтобы следующий пользователь не видел чужой кэш
+  resetStore({ keepShop: shop }) // чтобы следующий пользователь не видел чужой кэш
   dropRealtime()
 }
 
@@ -214,7 +292,11 @@ export async function refreshMe() {
     const u = await api.get('/auth/me')
     setAuth(token, u)
     return u
-  } catch {
+  } catch (e) {
+    // Нет связи или сервер прилёг — человек остаётся, кем был: касса на сайте продаёт и
+    // без интернета (вошли без связи, обновили страницу — выкидывать нельзя). Выходим
+    // только по ответу сервера: ключ недействителен, работа остановлена
+    if (!e?.status || e.status >= 500) return user
     setAuth(null, null)
     resetStore()
     return null

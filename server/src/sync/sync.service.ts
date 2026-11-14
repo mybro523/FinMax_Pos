@@ -44,7 +44,7 @@ import {
   when,
 } from './payload'
 import { addToSklad, skladEditIn, skladToShopIn, SKLAD_WITH_USER } from '../sklad/sklad.service'
-import { PushDto, PushOpDto } from './dto'
+import { PushDto, PushOpDto, WebSaleDto } from './dto'
 import { mark, sinceOf } from './cursor'
 import { applyEdit, EDIT_TYPES, EditKit, loadAliases, rewriteAliases } from './edits'
 import { applyTeam, TEAM_TYPES, TeamKit, teamFor, teamMemoForget } from './team'
@@ -239,6 +239,9 @@ const DAY = 86400000
 const PRICE_SLACK_MS = 2 * 60 * 1000
 // Номер операции — как его проверяет приём (см. dto.ts)
 const OP_ID = /^[A-Za-z0-9_:.-]{1,64}$/
+// Условный номер «кассы» для чеков сайта, проданных без интернета (POST /sales/offline):
+// кассы и ключа у сайта нет, в таблице касс его нет; смена у сайта общая (deviceId пуст)
+export const WEB_DEVICE = 'web'
 // Под этим именем сервер помнит, какую отметку обмена он выдал кассе в прошлый раз
 const MARK = 'cursor:'
 // А под этим — отпечаток ключа кассы (см. checkKey)
@@ -336,6 +339,20 @@ export class SyncService {
     return { results }
   }
 
+  // ── Чек сайта, проданный без интернета ──
+  // Сайт без связи кладёт чек в очередь браузера и присылает его, когда связь вернулась.
+  // Принимается тем же путём, что чеки программы: повтор по номеру операции отвечает
+  // тем же, время продажи — своё, нехватка остатка — в «Расхождения», цены сверяются,
+  // права и модули — как у сайта. Отличие одно: у сайта нет своей кассы и ключа — его
+  // операции идут под условным номером WEB_DEVICE, а смена у сайта общая (см. shiftRef).
+  // Принимаются только чеки: остальное сайт без связи не делает
+  async pushWeb(op: WebSaleDto, user: SyncUser): Promise<OpResult> {
+    const touched = new Set<string>()
+    const r = await this.applyOne({ ...op, type: 'sale' }, WEB_DEVICE, user, touched)
+    if (touched.size) this.events.changed(...touched)
+    return r
+  }
+
   // touched — разделы, которые после этой операции устарели у сайта и других касс
   private async applyOne(op: PushOpDto, deviceId: string, user: SyncUser, touched: Set<string>): Promise<OpResult> {
     // Уже принимали? Отвечаем тем же, чем в первый раз
@@ -377,7 +394,8 @@ export class SyncService {
       }
     }
     // Приход на склад при выключенном модуле «Склад» (1.8.1) — как на сайте: только в магазин
-    if (type === 'arrival' && op.payload?.place === 'sklad' && !moduleOn(modulesOff, 'sklad')) {
+    // Приход лежит в payload.arrival (sync/payload.ts parseArrival), а не в самом payload
+    if (type === 'arrival' && (op.payload?.arrival ?? op.payload)?.place === 'sklad' && !moduleOn(modulesOff, 'sklad')) {
       return this.reject(op, deviceId, user, createdAt, 'Модуль выключен у магазина')
     }
 
@@ -519,7 +537,12 @@ export class SyncService {
   // с ним, либо мы увидим смену уже закрытой и пересчитаем итоги сами (recountClosed)
   private async shiftRef(tx: Tx, shiftId: string | null, ctx: Ctx): Promise<string | null> {
     if (!shiftId) return null
-    const rows = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Shift" WHERE "id" = ${shiftId} AND "deviceId" = ${ctx.deviceId} FOR UPDATE`
+    // Чек сайта — в общую смену сайта (у неё deviceId пуст), а не в смену какой-то кассы.
+    // Смену могли закрыть, пока чек ждал связи, — он всё равно ложится в неё, как у кассы
+    const rows =
+      ctx.deviceId === WEB_DEVICE
+        ? await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Shift" WHERE "id" = ${shiftId} AND "deviceId" IS NULL FOR UPDATE`
+        : await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Shift" WHERE "id" = ${shiftId} AND "deviceId" = ${ctx.deviceId} FOR UPDATE`
     return rows[0]?.id ?? null
   }
 
@@ -1868,7 +1891,7 @@ export class SyncService {
     const user = new Map(users.map((u) => [u.id, u.name]))
     return rows.map((r) => ({
       ...r,
-      deviceName: (r.deviceId && device.get(r.deviceId)) || '',
+      deviceName: deviceNameOf(r.deviceId, device),
       userName: (r.userId && user.get(r.userId)) || '',
     }))
   }
@@ -1947,16 +1970,27 @@ export class SyncService {
 // ── Права и обмен ──
 // Что нужно, чтобы касса прислала операцию. Скидка и продажа в долг, приход в долг
 // поставщику — отдельные права, как и на сайте
-function requiredPermissions(type: string, payload: any): string[][] {
+// Сам чек лежит в payload.sale, приход — в payload.arrival (sync/payload.ts). Раньше здесь
+// смотрели прямо в payload — и право «в долг» и «скидка» у чеков касс не спрашивалось вовсе
+export function requiredPermissions(type: string, payload: any): string[][] {
   const need: string[][] = []
   const base = OP_PERMISSIONS[type]
   if (base) need.push(base)
   if (type === 'sale') {
-    if (payload?.payment === 'debt') need.push(['pos.debt'])
-    if (Array.isArray(payload?.items) && payload.items.some((i: any) => Number(i?.discount) > 0)) need.push(['pos.discount'])
+    const s = payload?.sale ?? payload
+    if (s?.payment === 'debt') need.push(['pos.debt'])
+    if (Array.isArray(s?.items) && s.items.some((i: any) => Number(i?.discount) > 0)) need.push(['pos.discount'])
   }
-  if (type === 'arrival' && Number(payload?.debt) > 0) need.push(['arrivals.debt'])
+  const a = payload?.arrival ?? payload
+  if (type === 'arrival' && Number(a?.debt) > 0) need.push(['arrivals.debt'])
   return need
+}
+
+// Имя кассы для владельца: у чеков сайта без связи кассы нет — «Сайт»
+export function deviceNameOf(deviceId: string | null | undefined, names: Map<string, string>): string {
+  if (!deviceId) return ''
+  if (deviceId === WEB_DEVICE) return 'Сайт'
+  return names.get(deviceId) || ''
 }
 
 // Какие разделы с деньгами магазина касса получает в обмене: журнал списаний, расходы

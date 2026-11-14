@@ -10,6 +10,7 @@ import { db, setCollection, refresh, uid, beginMutate, endMutate, realId } from 
 import { normalizeScan, canonBarcode } from '../lib/scan.js'
 import { serverNow } from '../lib/time.js'
 import { uppOf, unitCost, sellableUnits, expiredUnits, stockUnits, splitUnits, lineGross, ownPiecePrice, isVesovoy, kgText, edinica, isDivisible, KG } from '../lib/units.js'
+import { buildOfflineSale, enqueueSale, isNetworkFailure, markOffline, offlineEnabled, offlineNow, saleView } from '../lib/offlineSales.js'
 
 // Короткие перебои связи (Wi-Fi моргнул) не должны беспокоить кассира: тихо пробуем ещё раз.
 // Повторяем только сетевые сбои — отказ сервера («нет на складе») повторять бессмысленно.
@@ -43,6 +44,10 @@ export function findByBarcode(code) {
   const norm = canonBarcode(normalizeScan(raw))
   return products.find((p) => canonBarcode(p.barcode) === norm) || null
 }
+
+// Продажа без открытой смены не проводится — текст слово в слово как у сервера
+// (server/src/shifts/till.ts): без связи сайт проверяет это сам
+export const NO_SHIFT_SALE = 'Сначала откройте смену: без открытой смены продажа невозможна.'
 
 // Провести продажу. items: [{productId, name, qty(упаковки), pieces(штуки), price, cost, unitsPerPack, discount}]
 // Возвращает { sale, synced }: sale — чек для немедленной печати (считается локально,
@@ -137,24 +142,60 @@ export function checkout({ items, payment, payVia, customer }) {
   }
 
   beginMutate(['products', 'sales', 'customers'])
+
+  // ── Без связи (сайт, 14.11.2026) ──
+  // Чек не ушёл из-за связи — он не теряется и не возвращается в корзину, а встаёт
+  // в очередь в браузере (lib/offlineSales.js) и уйдёт сам, когда связь вернётся.
+  // clientId — тот же, что у попытки записать его сразу: если та всё-таки дошла, а
+  // ответ потерялся, сервер второй чек не заведёт. Остатки, продажа и долг на экране
+  // остаются, как после обычной продажи (их держит наложение очереди)
+  const vOchered = async () => {
+    if (!openShiftId) throw Object.assign(new Error(NO_SHIFT_SALE), { status: 400 })
+    const sale = buildOfflineSale({
+      lines: saleItems,
+      payment,
+      payVia,
+      customerId: payment === 'debt' && customer ? customer.id : null,
+      shiftId: openShiftId,
+      date: tempSale.date,
+      clientId: tempSale.id,
+    })
+    const rec = await enqueueSale(sale, { customerName: payment === 'debt' && customer ? customer.name : '' })
+    return saleView(rec)
+  }
+  // Связь уже известна как потерянная — не ждём повторов, сразу в очередь
+  const srazu = offlineEnabled() && offlineNow()
+
   // Запрос уходит в фоне — чек уже можно печатать. Промис возвращаем отдельно,
   // чтобы касса показала предупреждение, если продажа всё-таки не записалась.
-  const synced = postWithRetry('/sales', {
-    items: saleItems.map((i) => ({ productId: i.productId, qty: i.qty, pieces: i.pieces, discount: i.discount })),
-    payment,
-    payVia: payment === 'transfer' ? payVia : undefined,
-    customerId: payment === 'debt' && customer ? customer.id : undefined,
-    // Ключ один и тот же у всех повторов: сервер не создаст второй чек,
-    // если первый запрос всё-таки дошёл, а ответ потерялся
-    clientId: tempSale.id,
-  })
-    .then((sale) => {
-      // Заменяем временную запись серверной (канонические цены/итоги)
-      setCollection('sales', db.get('sales').map((s) => (s.id === tempSale.id ? sale : s)))
-      // Точные остатки/долги/историю продаж подтягиваем с сервера в фоне
-      refresh('products', 'customers', 'sales')
-      return sale
-    })
+  const synced = (
+    srazu
+      ? vOchered()
+      : postWithRetry('/sales', {
+          items: saleItems.map((i) => ({ productId: i.productId, qty: i.qty, pieces: i.pieces, discount: i.discount })),
+          payment,
+          payVia: payment === 'transfer' ? payVia : undefined,
+          customerId: payment === 'debt' && customer ? customer.id : undefined,
+          // Ключ один и тот же у всех повторов: сервер не создаст второй чек,
+          // если первый запрос всё-таки дошёл, а ответ потерялся
+          clientId: tempSale.id,
+        }).then(
+          (sale) => {
+            // Заменяем временную запись серверной (канонические цены/итоги)
+            setCollection('sales', db.get('sales').map((s) => (s.id === tempSale.id ? sale : s)))
+            // Точные остатки/долги/историю продаж подтягиваем с сервера в фоне
+            refresh('products', 'customers', 'sales')
+            return sale
+          },
+          (e) => {
+            // Отказ сервера по существу (нет товара, нет прав) — как раньше: продажа не
+            // записана. Обрыв связи — чек в очередь
+            if (!offlineEnabled() || !isNetworkFailure(e)) throw e
+            markOffline()
+            return vOchered()
+          },
+        )
+  )
     .catch((e) => {
       // Не записалось: возвращаем остатки, долг и список продаж как было
       setCollection('products', prevP)

@@ -147,7 +147,7 @@ export default function Login() {
       // ушёл из «Настроек»), и после входа кассир оказался бы там
       await login_(name.trim(), pw)
     } catch (e) {
-      setErr(e.message || t('Не удалось войти'))
+      setErr(e.message ? t(e.message) : t('Не удалось войти'))
     } finally {
       setBusy(false)
     }

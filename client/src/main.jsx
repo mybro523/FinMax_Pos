@@ -5,6 +5,7 @@ import { BrowserRouter, HashRouter } from 'react-router-dom'
 import App from './App.jsx'
 import { unlockAudio } from './lib/sound'
 import { startVersionWatch } from './lib/version'
+import { registerServiceWorker } from './lib/swRegister'
 import './lib/theme' // применяет сохранённую тему (светлая/тёмная) при старте
 import './lib/shrift' // размер шрифта этого компьютера (1.7.7) — с первого кадра
 import './lib/lite' // облегчённый вид на слабом компьютере (программа для Windows) — с первого кадра
@@ -14,6 +15,10 @@ import './index.css'
 // Следим за выходом новой версии: без этого вкладка, открытая на весь день,
 // продолжает работать по старому коду и не видит выложенных исправлений
 startVersionWatch()
+
+// Сайт открывается и без интернета (14.11.2026): касса продаёт без связи, а страницу могут
+// обновить или закрыть — service worker держит её файлы в браузере (lib/sw-worker.js)
+registerServiceWorker()
 
 const events = ['pointerdown', 'keydown', 'touchend']
 function unlockOnce() {

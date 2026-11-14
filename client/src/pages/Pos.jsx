@@ -30,6 +30,7 @@ import {
   osvezhit, sdacha, kupyury, pohozheNaKod, estBukva, raspredelit,
 } from '../lib/cheki'
 import { findByBarcode, checkout, returnGoods, openShift as openShiftOp } from '../db/ops'
+import { cancelQueued } from '../lib/offlineSales'
 import { otmenaVozvrat } from '../lib/otmena'
 import { productPayload } from '../components/ProductForm'
 import NewProductModal from '../components/NewProductModal'
@@ -1150,6 +1151,8 @@ export default function Pos() {
       synced
         .then((stored) => {
           if (!stored?.date) return
+          // Связи нет — чек лёг в очередь браузера и уйдёт на сервер сам (lib/offlineSales.js)
+          if (stored._offline) toast(t('Нет связи — чек сохранён и уйдёт на сервер сам'))
           setReceipt((r) =>
             r && r._key === sale.id
               ? {
@@ -1233,6 +1236,18 @@ export default function Pos() {
     } catch {
       // Продажа не записалась вовсе — её вернёт в корзину окно «Продажа не записана»
       setReceipt((r) => (r && r._key === last.tempId ? null : r))
+      return
+    }
+    // Чек продан без связи и ещё ждёт отправки — он просто снимается из очереди: возврат
+    // не нужен (и без связи невозможен). Уже ушёл на сервер — отменяется возвратом, как обычно
+    if (real?._offline && (await cancelQueued(real.id))) {
+      vernutChek(last.chek)
+      if (lastSaleRef.current === last) {
+        lastSaleRef.current = null
+        setThanks(null)
+      }
+      setReceipt((r) => (r && r._key === last.tempId ? null : r))
+      toast(t('Продажа отменена — товары снова в корзине'))
       return
     }
     const v = otmenaVozvrat(real)

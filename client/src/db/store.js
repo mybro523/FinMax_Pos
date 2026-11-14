@@ -9,6 +9,7 @@ import { api } from './api.js'
 import { dayKey } from '../lib/time.js'
 import { blockUpdate } from '../lib/version.js'
 import { isDivisible, isVesovoy, stockUnits, unitsText } from '../lib/units.js'
+import { OFFLINE_KEYS, activeItems, applyOverlay, connectStore, kickOffline, startOffline, stripOverlay } from '../lib/offlineSales.js'
 
 const EMPTY = []
 // «returns» и «writeoffs» — журналы возвратов и списаний. Они нужны, чтобы деньги
@@ -109,6 +110,15 @@ const mutating = new Map() // key -> число незавершённых оп�
 const listeners = new Set()
 let conn = 'ok' // 'ok' | 'error' — состояние связи с сервером
 
+// ── Чеки сайта, проданные без связи (lib/offlineSales.js) ──
+// Пока чек ждёт отправки, его следы — продажа в списке, меньший остаток, долг клиента —
+// накладываются поверх данных сервера. base — данные сервера по этим разделам (их же
+// храним в localStorage), cache — то, что на экране: base плюс очередь
+const OVERLAY = new Set(OFFLINE_KEYS)
+const base = {}
+const viewOf = (key, arr) => (OVERLAY.has(key) && Array.isArray(arr) ? applyOverlay(key, arr, activeItems(), base.sales) : arr)
+const baseOf = (key, arr) => (OVERLAY.has(key) && Array.isArray(arr) ? stripOverlay(key, arr, activeItems(), base.sales) : arr)
+
 // Пока по коллекции идёт оптимистичная мутация (POST/PATCH/DELETE), фоновый polling
 // НЕ опрашивает её — иначе GET мог бы затереть временную запись и вызвать мерцание/дубль.
 // Заодно на это время запрещаем самообновление программы: перезагрузка посреди
@@ -132,23 +142,46 @@ export function endMutate(keys) {
 const isMutating = (key) => (mutating.get(key) || 0) > 0
 
 // Восстановление кэша из localStorage — интерфейс появляется мгновенно
-try {
-  for (const k of COLLECTIONS) {
-    const raw = localStorage.getItem(lsKey(k))
-    if (!raw) continue
-    const arr = JSON.parse(raw)
-    if (Array.isArray(arr)) {
-      cache[k] = arr
-      hydrated.add(k)
+let hydratedCode = null
+function hydrateFromDisk() {
+  hydratedCode = currentCode()
+  try {
+    for (const k of COLLECTIONS) {
+      const raw = localStorage.getItem(lsKey(k))
+      if (!raw) continue
+      const arr = JSON.parse(raw)
+      if (Array.isArray(arr)) {
+        cache[k] = arr
+        if (OVERLAY.has(k)) base[k] = arr
+        hydrated.add(k)
+      }
     }
+  } catch {
+    /* приватный режим/переполнение — работаем без персиста */
   }
-} catch {
-  /* приватный режим/переполнение — работаем без персиста */
+}
+hydrateFromDisk()
+
+// ── Вошли в магазин, не перезагружая страницу ──
+// Кэш читается с диска при открытии страницы — по магазину, который тогда был во вкладке.
+// На экране входа магазина ещё нет, и после входа списки оставались пустыми до ответа
+// сервера. С интернетом это незаметно, а без него (вход без интернета, lib/offlineLogin.js)
+// касса осталась бы без товаров. Магазин во вкладке сменился — перечитываем его кэш
+export function rehydrateForShop() {
+  if (currentCode() === hydratedCode) return
+  for (const k of COLLECTIONS) cache[k] = EMPTY
+  for (const k of Object.keys(base)) delete base[k]
+  loaded.clear()
+  hydrated.clear()
+  hydrateFromDisk()
+  overlayRender()
+  emit()
 }
 
 function persist(key) {
   try {
-    localStorage.setItem(lsKey(key), JSON.stringify(cache[key]))
+    // Чеки очереди в хранилище кэша не пишем: у них своё хранилище, а наложатся заново
+    localStorage.setItem(lsKey(key), JSON.stringify(OVERLAY.has(key) ? (base[key] ?? cache[key]) : cache[key]))
   } catch {
     /* ignore quota */
   }
@@ -177,6 +210,7 @@ const bumpEpoch = (key) => epoch.set(key, (epoch.get(key) || 0) + 1)
 // Прямая запись в кэш + уведомление подписчиков (используется и для оптимизма)
 export function setCollection(key, arr) {
   cache[key] = arr
+  if (OVERLAY.has(key)) base[key] = baseOf(key, arr)
   loaded.add(key)
   bumpEpoch(key)
   persist(key)
@@ -218,9 +252,13 @@ export function fetchKey(key) {
     .then((data) => {
       setConn('ok')
       if ((epoch.get(key) || 0) !== startedAt) return // пока ответ летел, список изменили — выбрасываем
-      cache[key] = Array.isArray(data) ? data : EMPTY
+      const list = Array.isArray(data) ? data : EMPTY
+      if (OVERLAY.has(key)) base[key] = list
+      cache[key] = viewOf(key, list)
       loaded.add(key)
       persist(key)
+      // Связь есть — чеки, проданные без неё, уходят на сервер
+      kickOffline()
     })
     .catch((e) => {
       // Баннер «нет связи» — только про реальный обрыв. Отказ по правам (403 на
@@ -262,8 +300,12 @@ function ensureLoaded(key) {
 }
 
 // Полный сброс кэша (при выходе из аккаунта) — чтобы следующий пользователь не видел чужие данные
-export function resetStore() {
+// keepShop — код магазина, чей сохранённый кэш оставить: выход БЕЗ СВЯЗИ (сайт продаёт и без
+// интернета). Стереть товары сейчас — следующий кассир войдёт без интернета и продавать будет
+// нечем: загрузить их не откуда. Кэш чужих магазинов уходит всё равно
+export function resetStore({ keepShop = '' } = {}) {
   for (const k of COLLECTIONS) cache[k] = EMPTY
+  for (const k of Object.keys(base)) delete base[k]
   // Убираем кэш ВСЕХ магазинов, а не только текущего: этот сброс делается при выходе
   // и при смене того, кто работает, и оставлять после себя чужие данные незачем.
   // Заодно уходят остатки от прежних версий ключа.
@@ -271,8 +313,10 @@ export function resetStore() {
     // Перебираем через length/key — это единственный способ, работающий везде:
     // у хранилища браузера ключи не перечисляются как у обычного объекта
     const doomed = []
+    const kept = keepShop ? LS_BASE + keepShop + '_' : null
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i)
+      if (kept && key && key.startsWith(kept)) continue
       if (key && (key.startsWith(LS_BASE) || key.startsWith('apteka_cache_v2_'))) doomed.push(key)
     }
     doomed.forEach((key) => localStorage.removeItem(key))
@@ -559,3 +603,40 @@ export function stockText(p) {
 
 // Календарный день по Таджикистану (UTC+5). Оставлено для совместимости.
 export const todayKey = dayKey
+
+// ── Наложение очереди чеков без связи (lib/offlineSales.js) ──
+// freeze — запомнить то, что сейчас на экране, как данные сервера (без чеков очереди);
+// render — снова наложить очередь на данные сервера. Очередь меняется — касса зовёт их
+// в нужном порядке: чек принят сервером — сначала очередь, потом freeze (его следы
+// остаются, теперь как данные сервера); чек снят или отклонён — сначала freeze, потом
+// очередь и render (его следы уходят)
+function overlayFreeze() {
+  for (const k of OVERLAY) {
+    if (!Array.isArray(cache[k])) continue
+    const next = baseOf(k, cache[k])
+    if (next === base[k]) continue
+    base[k] = next
+    persist(k)
+  }
+}
+function overlayRender() {
+  let changed = false
+  for (const k of OVERLAY) {
+    const b = base[k] ?? cache[k]
+    if (!Array.isArray(b)) continue
+    const next = viewOf(k, b)
+    if (next !== cache[k]) {
+      cache[k] = next
+      changed = true
+    }
+  }
+  if (changed) emit()
+}
+connectStore({
+  freeze: overlayFreeze,
+  render: overlayRender,
+  refresh: (...keys) => refresh(...keys).catch(() => {}),
+  online: () => conn === 'ok',
+  noteOffline: () => setConn('error'),
+})
+startOffline()
