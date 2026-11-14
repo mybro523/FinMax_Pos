@@ -5,7 +5,7 @@ import { flushSync } from 'react-dom'
 import { LuArrowLeft, LuCloud, LuCopy, LuHardDrive, LuKeyRound, LuLink, LuMonitorSmartphone, LuStore, LuTriangleAlert, LuBadgeCheck } from 'react-icons/lu'
 import { bridge } from '../lib/desktop'
 import { useT } from '../lib/i18n'
-import { CODE_LEN, caretAt, editCode, editEnd, formatCode, licLine, normalizeCode, pastedCode, physicalKey, soloMessage } from '../lib/aktivaciya'
+import { caretAt, codeComplete, codeLenOf, editCode, editEnd, formatCode, licLine, normalizeCode, pastedCode, physicalKey, soloMessage } from '../lib/aktivaciya'
 import { REJOIN } from '../lib/kassy'
 import { formatPair, normalizePair, PAIR_LEN } from '../lib/kassy'
 import { PasswordInput } from './ui'
@@ -87,7 +87,7 @@ export function ComputerCode({ code }) {
   )
 }
 
-// ── Поле кода (активации или сброса): 10 групп по 5 знаков ──
+// ── Поле кода (активации или сброса): 10 групп по 5 знаков, код с модулями магазина — 11 (1.8.1) ──
 // Раскладка клавиатуры не важна: русская буква, набранная на клавише латинской, становится
 // латинской (по месту клавиши). Лишнее — дефисы, пробелы — не в счёт. Опечатку правят
 // посреди кода: курсор остаётся на месте, Backspace и Delete перешагивают дефисы
@@ -139,7 +139,8 @@ export function CodeInput({ value, onChange, id, autoFocus }) {
     // Вставили код целиком — он и становится кодом, что бы ни было в поле (после «опечатки»
     // поле полное, и вставка в его середину дала бы чужой код)
     const whole = normalizeCode(pasted, Infinity)
-    if (whole.length >= CODE_LEN) return put(el, { raw: whole.slice(0, CODE_LEN), before: CODE_LEN })
+    const len = codeLenOf(whole)
+    if (whole.length >= len) return put(el, { raw: whole.slice(0, len), before: len })
     const from = el.selectionStart ?? el.value.length
     put(el, editCode(el.value, from, el.selectionEnd ?? from, pasted))
   }
@@ -162,7 +163,7 @@ export function CodeInput({ value, onChange, id, autoFocus }) {
         data-vkb-caret="self"
         data-testid="solo-code"
       />
-      <span className="tag-cat" id={id + '-left'}>{raw.length < CODE_LEN ? `${t('Осталось ввести знаков')}: ${CODE_LEN - raw.length}` : t('Код введён полностью')}</span>
+      <span className="tag-cat" id={id + '-left'}>{raw.length < codeLenOf(raw) ? `${t('Осталось ввести знаков')}: ${codeLenOf(raw) - raw.length}` : t('Код введён полностью')}</span>
     </div>
   )
 }
@@ -178,7 +179,7 @@ export function ActivateCard({ info, onDone, onBack }) {
   const submit = async (e) => {
     e.preventDefault()
     // Enter с экранной клавиатуры отправляет форму и при неполном коде (кнопка тогда выключена)
-    if (busy || normalizeCode(code).length !== CODE_LEN) return
+    if (busy || !codeComplete(code)) return
     setErr('')
     setBusy(true)
     const r = await solo()?.activate(code).catch(() => null)
@@ -210,7 +211,7 @@ export function ActivateCard({ info, onDone, onBack }) {
         <CodeInput id="solo-code" value={code} onChange={(v) => { setCode(v); setErr('') }} autoFocus />
       </div>
       <Problem text={err} />
-      <button className="btn gold block auth-submit" disabled={busy || normalizeCode(code).length !== CODE_LEN} data-testid="solo-activate-submit">
+      <button className="btn gold block auth-submit" disabled={busy || !codeComplete(code)} data-testid="solo-activate-submit">
         <span className="ic"><LuBadgeCheck size={17} /></span> {busy ? t('Проверяем…') : t('Активировать')}
       </button>
     </form>
@@ -293,7 +294,7 @@ export function ResetCard({ info, onDone, onBack }) {
   const submit = async (e) => {
     e.preventDefault()
     // Enter с экранной клавиатуры отправляет форму и при неполном коде (кнопка тогда выключена)
-    if (busy || normalizeCode(code).length !== CODE_LEN) return
+    if (busy || !codeComplete(code)) return
     setErr('')
     if (f.password !== f.confirm) return setErr(t('Пароли не совпадают'))
     setBusy(true)
@@ -329,7 +330,7 @@ export function ResetCard({ info, onDone, onBack }) {
         </div>
       </div>
       <Problem text={err} />
-      <button className="btn gold block auth-submit" disabled={busy || normalizeCode(code).length !== CODE_LEN} data-testid="solo-reset-submit">
+      <button className="btn gold block auth-submit" disabled={busy || !codeComplete(code)} data-testid="solo-reset-submit">
         <span className="ic"><LuKeyRound size={17} /></span> {busy ? t('Проверяем…') : t('Сбросить пароль')}
       </button>
     </form>
@@ -536,7 +537,7 @@ export function ActivationPanel() {
   const submit = async (e) => {
     e.preventDefault()
     // Enter с экранной клавиатуры отправляет форму и при неполном коде (кнопка тогда выключена)
-    if (busy || normalizeCode(code).length !== CODE_LEN) return
+    if (busy || !codeComplete(code)) return
     setErr('')
     setOk('')
     setBusy(true)
@@ -606,7 +607,7 @@ export function ActivationPanel() {
         </div>
         <Problem text={err} />
         {ok && <div className="note ok" style={{ marginBottom: 10 }}>{ok}</div>}
-        <button className="btn" disabled={busy || normalizeCode(code).length !== CODE_LEN} data-testid="solo-panel-submit">{busy ? t('Проверяем…') : t('Ввести код')}</button>
+        <button className="btn" disabled={busy || !codeComplete(code)} data-testid="solo-panel-submit">{busy ? t('Проверяем…') : t('Ввести код')}</button>
       </form>
     </div>
   )

@@ -16,6 +16,7 @@
 // Тот же расчёт — в программе (desktop/src/local/licence-code.mjs): меняются только вместе.
 // Обе стороны сверяют одни и те же образцы (test/licence-code.test.js на сервере,
 // desktop/test/licence-code.test.mjs).
+import { modulesFromMask, modulesMask } from './moduli'
 import { createHash, createHmac, randomBytes } from 'node:crypto'
 
 // ── Кривая secp128r1: y² = x³ + ax + b над полем p, точка G порядка n ──
@@ -196,7 +197,18 @@ export function dateOfDay(day: number): string {
 
 const message = (computer: Buffer, payload: Buffer) => Buffer.concat([Buffer.from('FMX-CODE-1'), computer, payload])
 
-export type LicenceFields = { kind: LicenceKind; until: number; registers: number; serial: number }
+// modulesOff (1.8.1) — выключенные модули магазина, зашитые в код. Пусто — код прежнего вида
+export type LicenceFields = { kind: LicenceKind; until: number; registers: number; serial: number; modulesOff?: string[] }
+
+// ── Два вида кода ──
+// v1 (1.6.0) — 6 байт данных: вид, срок, кассы, номер. 50 знаков.
+// v2 (1.8.1) — те же 6 байт и ещё 3 байта маски выключенных модулей (бит i — MODULES[i]
+// выключен, common/moduli.ts). 33 байта с подписью → 53 знака + 2 знака проверки = 55.
+// Код v2 выпускается, ТОЛЬКО когда что-то выключено: со всеми модулями (и код сброса пароля)
+// — прежний v1 байт в байт, его принимают и программы до 1.8.1
+const V1_LEN = 50
+const V2_LEN = 55
+const MASK_MAX = 0xffffff
 
 // Выпустить код (сервер): computer — 5 байт кода компьютера
 export function issueCode(privateKey: string, computer: Buffer, f: LicenceFields): string {
@@ -205,26 +217,36 @@ export function issueCode(privateKey: string, computer: Buffer, f: LicenceFields
   if (!kind) throw new Error('вид кода')
   if (!Number.isInteger(f.until) || f.until < 0 || f.until > FOREVER) throw new Error('срок')
   if (!Number.isInteger(f.registers) || f.registers < 0 || f.registers > 250) throw new Error('число касс')
-  const payload = Buffer.alloc(6)
-  payload[0] = 0x10 | kind
+  const mask = f.kind === 'activate' ? modulesMask(f.modulesOff) : 0
+  if (mask > MASK_MAX) throw new Error('модули')
+  const payload = Buffer.alloc(mask ? 9 : 6)
+  payload[0] = (mask ? 0x20 : 0x10) | kind
   payload.writeUInt16BE(f.until, 1)
   payload[3] = f.registers
   payload.writeUInt16BE(f.serial & 0xffff, 4)
+  if (mask) payload.writeUIntBE(mask, 6, 3)
   const body = Buffer.concat([payload, sign(privateKey, message(computer, payload))])
   return groups(encode32(body) + check2('FMX-CHK', body))
 }
 
 // Прочитать код (программа и проверки): null — опечатка; bad — не подходит (подпись,
-// чужой компьютер, неизвестный вид)
+// чужой компьютер, неизвестный вид). У кода v1 modulesOff — пустой (всё включено)
 export function readCode(publicKey: string, computer: Buffer, text: string): { ok: true; fields: LicenceFields } | { ok: false; why: 'typo' | 'bad' } {
   const c = clean32(text)
-  if (c.length !== 50) return { ok: false, why: 'typo' }
-  const body = decode32(c.slice(0, 48), 30)
-  if (!body || check2('FMX-CHK', body) !== c.slice(48)) return { ok: false, why: 'typo' }
-  const payload = body.subarray(0, 6)
-  if (payload[0] >> 4 !== 1) return { ok: false, why: 'bad' }
+  const v2 = c.length === V2_LEN
+  if (c.length !== V1_LEN && !v2) return { ok: false, why: 'typo' }
+  const n = v2 ? 33 : 30
+  const body = decode32(c.slice(0, c.length - 2), n)
+  if (!body || check2('FMX-CHK', body) !== c.slice(c.length - 2)) return { ok: false, why: 'typo' }
+  const plen = v2 ? 9 : 6
+  const payload = body.subarray(0, plen)
+  if (payload[0] >> 4 !== (v2 ? 2 : 1)) return { ok: false, why: 'bad' }
   const kind = (Object.keys(KIND) as LicenceKind[]).find((k) => KIND[k] === (payload[0] & 0x0f))
   if (!kind) return { ok: false, why: 'bad' }
-  if (!verify(publicKey, message(computer, payload), body.subarray(6))) return { ok: false, why: 'bad' }
-  return { ok: true, fields: { kind, until: payload.readUInt16BE(1), registers: payload[3], serial: payload.readUInt16BE(4) } }
+  if (!verify(publicKey, message(computer, payload), body.subarray(plen))) return { ok: false, why: 'bad' }
+  const mask = v2 ? payload.readUIntBE(6, 3) : 0
+  return {
+    ok: true,
+    fields: { kind, until: payload.readUInt16BE(1), registers: payload[3], serial: payload.readUInt16BE(4), modulesOff: modulesFromMask(mask) },
+  }
 }

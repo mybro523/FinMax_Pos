@@ -10,6 +10,7 @@ import { useCashSources, sourceName } from '../../components/SupplierMoney'
 import { db, money, stockText } from '../../db/store'
 import { receiveArrival } from '../../db/ops'
 import { useCan } from '../../db/auth'
+import { useModul } from '../../lib/useModul'
 import { useT, translate as tr } from '../../lib/i18n'
 import KameraKnopka from '../../components/KameraKnopka'
 import { normalizeScan, canonBarcode } from '../../lib/scan'
@@ -48,6 +49,8 @@ const looksLikeScan = (v) => String(v ?? '').replace(/\D/g, '').length >= 8
 export default function NewArrival({ products, suppliers, onSaved }) {
   const t = useT()
   const can = useCan()
+  // Модуль «Срок годности» выключен у магазина — поля срока в приходе нет
+  const srokOn = useModul('expiry')
   const toast = useToast()
   const dialog = useDialog()
   const st = usePrihod()
@@ -365,7 +368,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                 <th>{t('Наименование')}</th>
                 <th>{t('Штрихкод')}</th>
                 <th>{t('В упаковке')}</th>
-                <th>{t('Срок годности')}</th>
+                {srokOn && <th>{t('Срок годности')}</th>}
                 <th className="num">{t('Кол-во')}</th>
                 <th className="num">{t('Цена')}</th>
                 <th className="num">{t('Скидка')}</th>
@@ -389,7 +392,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                     <td className="prh-c-name" title={l.name}>{l.name}</td>
                     <td className="muted prh-c-code">{l.barcode || '—'}</td>
                     <td className={'muted' + (packChanged(l) ? ' prh-changed' : '')}>{packText(l, t)}</td>
-                    <td className="muted">{l.expiryDate ? l.expiryDate.split('-').reverse().join('.') : '—'}</td>
+                    {srokOn && <td className="muted">{l.expiryDate ? l.expiryDate.split('-').reverse().join('.') : '—'}</td>}
                     <td className="num"><b>{qtyText(l, t)}</b></td>
                     <td className="num">{n2(num(l.base))}</td>
                     <td className="num">{num(l.disc) > 0 ? pct(l.disc) : '—'}</td>
@@ -419,7 +422,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
             {lines.length > 0 && (
               <tfoot>
                 <tr>
-                  <td colSpan="6">{t('Итого')}: {s.count} {t('поз.')}</td>
+                  <td colSpan={srokOn ? 6 : 5}>{t('Итого')}: {s.count} {t('поз.')}</td>
                   <td className="num">{n2(s.packs)}</td>
                   <td className="num">{n2(s.base)}</td>
                   <td className="num">{s.discount > 0 ? pct(s.discountPct) : '—'}</td>
@@ -540,10 +543,10 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                   </div>
                 </div>
                 <div className="prh-f">
-                  <label>{t('Срок годности')}</label>
+                  <label>{srokOn ? t('Срок годности') : t('Текущий остаток')}</label>
                   <div className="prh-ctl">
-                    <input type="date" value={form.expiryDate} onChange={(e) => setForm({ expiryDate: e.target.value })} onKeyDown={onEnter} disabled={!draft} aria-label={t('Срок годности')} />
-                    <span className="prh-note">{t('Текущий остаток')}: <b>{chosen || editing ? stockText(products.find((p) => p.id === draft.productId) || {}) : '—'}</b></span>
+                    {srokOn && <input type="date" value={form.expiryDate} onChange={(e) => setForm({ expiryDate: e.target.value })} onKeyDown={onEnter} disabled={!draft} aria-label={t('Срок годности')} />}
+                    <span className="prh-note">{srokOn ? <>{t('Текущий остаток')}: </> : null}<b>{chosen || editing ? stockText(products.find((p) => p.id === draft.productId) || {}) : '—'}</b></span>
                   </div>
                 </div>
               </div>
@@ -749,6 +752,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
 // ── Отмеченные строки: одно действие сразу на все ──
 function SelectedPanel({ lines, checked, dialog }) {
   const t = useT()
+  const srokOn = useModul('expiry')
   const toast = useToast()
   const [disc, setDisc] = useState('')
   const [mk, setMk] = useState('')
@@ -816,13 +820,13 @@ function SelectedPanel({ lines, checked, dialog }) {
             </button>
           </div>
         </div>
-        <div className="prh-f">
+        {srokOn && <div className="prh-f">
           <label>{t('Срок годности')}</label>
           <div className="prh-sel-row">
             <input type="date" value={exp} onChange={(e) => setExp(e.target.value)} />
             <button type="button" className="btn" disabled={!exp} onClick={() => apply((l) => ({ ...l, expiryDate: exp }), t('Срок годности задан отмеченным строкам'))}>{t('Задать')}</button>
           </div>
-        </div>
+        </div>}
       </div>
       <div className="prh-add-actions" style={{ justifyContent: 'flex-start' }}>
         <button type="button" className="btn ghost danger-text" onClick={removeMarked}>
@@ -863,7 +867,8 @@ function FinishPanel({ suppliers, sup, total, lines, dialog, toast, onSaved, edi
     if (paidCash > 0 && !tills.length) return toast(tr('Нет открытой смены — из кассы взять нечего.'), 'err')
     try {
       // Мгновенно: склад пополняется сразу; при ошибке сети — откат и сообщение
-      const naSklad = st.kuda === 'sklad'
+      // Без склада (нет права или модуль выключен) выбора нет — приход только в магазин
+      const naSklad = st.kuda === 'sklad' && can('sklad.view')
       receiveArrival({
         ...(naSklad ? { place: 'sklad' } : {}),
         payMethod: method,
@@ -912,7 +917,7 @@ function FinishPanel({ suppliers, sup, total, lines, dialog, toast, onSaved, edi
         <div className="prh-finish-total">
           <span>{t('К оплате поставщику')}</span>
           <b>{money(total)}</b>
-          {st.kuda === 'sklad' && <span className="badge low" data-testid="prh-na-sklad" style={{ alignSelf: 'flex-start' }}>{t('Товар — на склад')}</span>}
+          {st.kuda === 'sklad' && can('sklad.view') && <span className="badge low" data-testid="prh-na-sklad" style={{ alignSelf: 'flex-start' }}>{t('Товар — на склад')}</span>}
           <small>{lines.length} {t('поз.')}{sup ? ` · ${sup.name}` : ''}</small>
           <button type="button" className="btn green big" data-tour="af.submit" disabled={!lines.length} onClick={submit}>
             <span className="ic"><LuCheck size={18} /></span> {t('Оприходовать')}

@@ -19,6 +19,7 @@ import { mayCloseShift, NOT_YOUR_SHIFT } from '../shifts/closer'
 import { AUTH_SECRET } from '../common/config'
 import { lockSupplier, supplierBrief } from '../suppliers/suppliers.service'
 import { CASHIER_DEFAULT, OP_PERMISSIONS, hasPerm, permissionsOf } from '../auth/permissions'
+import { moduleOn } from '../common/moduli'
 import {
 
   OP_TYPES,
@@ -78,6 +79,8 @@ export interface SyncUser {
   tenantUserId?: string | null
   pharmacyId?: string | null
   name?: string
+  // Выключенные модули магазина (1.8.1): их операции не принимаются
+  modulesOff?: string[]
 }
 
 interface Ctx {
@@ -351,7 +354,9 @@ export class SyncService {
     // ── Кто сделал и кто прислал ──
     // Обычно это один человек. Чужую операцию может прислать только владелец:
     // иначе кассир записал бы свою недостачу на соседа — или списание на владельца.
-    let performer = { accountId: user.sub, role: user.role, tenantUserId: user.tenantUserId ?? null, permissions: user.permissions || [] }
+    // Выключенные модули (1.8.1) — у магазина, а не у человека: у соседа по магазину те же
+    const modulesOff: string[] = user.modulesOff || []
+    let performer = { accountId: user.sub, role: user.role, tenantUserId: user.tenantUserId ?? null, permissions: user.permissions || [], modulesOff }
     if (op.accountId && op.accountId !== user.sub) {
       if (user.role !== 'founder') {
         return this.reject(op, deviceId, user, createdAt, 'Операцию другого сотрудника может отправить только он сам или владелец')
@@ -359,13 +364,21 @@ export class SyncService {
       const acc: any = await this.accounts.get(op.accountId)
       performer =
         acc && acc.pharmacyId === user.pharmacyId
-          ? { accountId: acc.id, role: acc.role, tenantUserId: acc.tenantUserId ?? null, permissions: permissionsOf(acc) }
+          ? { accountId: acc.id, role: acc.role, tenantUserId: acc.tenantUserId ?? null, permissions: permissionsOf(acc, modulesOff), modulesOff }
           : // Сотрудника уже удалили — операция остаётся, просто без имени; права — как у кассира
-            { accountId: op.accountId, role: 'cashier', tenantUserId: null, permissions: CASHIER_DEFAULT }
+            { accountId: op.accountId, role: 'cashier', tenantUserId: null, permissions: CASHIER_DEFAULT, modulesOff }
     }
     // Права на операцию — те же, что на сайте: по роли того, кто её сделал
     for (const alternatives of requiredPermissions(type, op.payload)) {
-      if (!hasPerm(performer, ...alternatives)) return this.reject(op, deviceId, user, createdAt, 'Недостаточно прав')
+      if (!hasPerm(performer, ...alternatives)) {
+        // Раздел выключен у магазина (1.8.1) — так и сказать: права тут ни при чём
+        const off = alternatives.length > 0 && alternatives.every((k) => !hasPerm({ role: 'founder', modulesOff }, k))
+        return this.reject(op, deviceId, user, createdAt, off ? 'Модуль выключен у магазина' : 'Недостаточно прав')
+      }
+    }
+    // Приход на склад при выключенном модуле «Склад» (1.8.1) — как на сайте: только в магазин
+    if (type === 'arrival' && op.payload?.place === 'sklad' && !moduleOn(modulesOff, 'sklad')) {
+      return this.reject(op, deviceId, user, createdAt, 'Модуль выключен у магазина')
     }
 
     const ctx: Ctx = { deviceId, tenantUserId: performer.tenantUserId, flagged: false, extra: new Set(), actor: performer, pharmacyId: user.pharmacyId ?? null }

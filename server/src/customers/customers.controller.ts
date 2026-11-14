@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common'
 import { CustomersService } from './customers.service'
-import { Perm } from '../auth/decorators'
+import { Modul, Perm } from '../auth/decorators'
 import { CreateCustomerDto, PayDebtDto } from './dto'
 
 @Controller('customers')
@@ -19,6 +19,8 @@ export class CustomersController {
   }
 
   @Post(':id/pay')
+  // Модуль «Долги клиентов» выключен (1.8.1) — оплаты долга нет
+  @Modul('debts')
   @Perm('debts.pay')
   pay(@Param('id') id: string, @Body() dto: PayDebtDto) {
     return this.customers.payDebt(id, dto.amount)

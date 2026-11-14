@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { ExpensesService } from './expenses.service'
-import { CurrentUser, Perm } from '../auth/decorators'
+import { CurrentUser, Modul, Perm } from '../auth/decorators'
 import { PeriodQuery } from '../common/period'
 import { CreateExpenseCategoryDto, CreateExpenseDto, UpdateExpenseDto } from './dto'
 
@@ -13,6 +13,8 @@ export class ExpensesController {
 
   // Журнал читают и отчёты: чистая прибыль считается за вычетом расходов
   @Get()
+  // Модули (1.8.1): журнал читают и отчёты — закрыт, только когда выключены все
+  @Modul('expenses', 'salesReport', 'opu')
   @Perm('expenses.view', 'reports.view')
   findAll(@Query() q: PeriodQuery) {
     return this.expenses.findAll(q)
@@ -20,6 +22,7 @@ export class ExpensesController {
 
   // Объявлена до адресов с :id, иначе «cash-sources» разобралось бы как номер расхода
   @Get('cash-sources')
+  @Modul('expenses')
   @Perm('expenses.create')
   cashSources() {
     return this.expenses.cashSources()
@@ -28,24 +31,28 @@ export class ExpensesController {
   // Сотрудники с окладом и бонусом — для расхода «Зарплата». Оклады видят только те,
   // кто вносит или правит расходы
   @Get('staff')
+  @Modul('expenses')
   @Perm('expenses.create', 'expenses.edit')
   staff() {
     return this.expenses.staff()
   }
 
   @Post()
+  @Modul('expenses')
   @Perm('expenses.create')
   create(@Body() dto: CreateExpenseDto, @CurrentUser() u: any) {
     return this.expenses.create(dto, u?.tenantUserId)
   }
 
   @Patch(':id')
+  @Modul('expenses')
   @Perm('expenses.edit')
   update(@Param('id') id: string, @Body() dto: UpdateExpenseDto) {
     return this.expenses.update(id, dto)
   }
 
   @Delete(':id')
+  @Modul('expenses')
   @Perm('expenses.edit')
   remove(@Param('id') id: string) {
     return this.expenses.remove(id)
@@ -53,6 +60,7 @@ export class ExpensesController {
 }
 
 // Статьи расходов — свой адрес: список нужен и разделу расходов, и настройкам
+@Modul('expenses')
 @Controller('expense-categories')
 export class ExpenseCategoriesController {
   constructor(private readonly expenses: ExpensesService) {}

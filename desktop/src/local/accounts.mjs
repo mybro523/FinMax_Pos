@@ -11,6 +11,7 @@
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { ApiError, getMeta, newId, q, setMeta } from './db.mjs'
 import { DAY_MS, tjMoment } from './time.mjs'
+import { cleanModulesOff, offPerms } from './moduli.mjs'
 
 // ── Отпечаток пароля ──
 // scrypt с теми же настройками, что на сервере. Дорогая проверка — это намеренно:
@@ -131,7 +132,40 @@ export function saveAccount(db, user, { verifier, now }) {
     // называет — пусто, программа покажет плитки меню, как раньше
     roleSystem: typeof user.roleSystem === 'string' ? user.roleSystem : '',
   })
+  // Модули магазина (1.8.1) — про весь магазин, а не про одного сотрудника: сервер сказал о
+  // них одному — запоминаем всем сотрудникам этого магазина на этом компьютере. Нет поля —
+  // сервер прежней версии или список не с сервера: прежнее не трогаем
+  if (Array.isArray(user.modulesOff)) setModulesOff(db, user.pharmacy.code, user.modulesOff)
+  // Новая запись без слова сервера (сотрудник с соседней кассы) — модули те же, что у остальных
+  // сотрудников этого магазина
+  else {
+    q(
+      db,
+      `UPDATE accounts SET modulesOff = (SELECT o.modulesOff FROM accounts o WHERE o.pharmacyCode = ? AND o.id <> ? AND o.modulesOff <> '' LIMIT 1)
+       WHERE id = ? AND modulesOff = '' AND EXISTS (SELECT 1 FROM accounts o WHERE o.pharmacyCode = ? AND o.id <> ? AND o.modulesOff <> '')`,
+    ).run(user.pharmacy.code, user.id, user.id, user.pharmacy.code, user.id)
+  }
   return accountById(db, user.id)
+}
+
+// ── Модули магазина (1.8.1) ──
+// Выключенные владельцем сервиса модули (moduli.mjs). Пусто — включено всё
+export function setModulesOff(db, pharmacyCode, list) {
+  q(db, 'UPDATE accounts SET modulesOff = ? WHERE pharmacyCode = ?').run(JSON.stringify(cleanModulesOff(list)), pharmacyCode)
+}
+// Выключенные модули учётной записи: список (магазин без интернета подставляет его из кода
+// активации) или строка из базы. Испорченная запись — как пустая
+export function modulesOffOf(acc) {
+  const raw = acc?.modulesOff
+  if (Array.isArray(raw)) return cleanModulesOff(raw)
+  if (typeof raw === 'string' && raw) {
+    try {
+      return cleanModulesOff(JSON.parse(raw))
+    } catch {
+      return []
+    }
+  }
+  return []
 }
 
 // Сервер отказал этому сотруднику: пароль сменили, учётную запись закрыли.
@@ -192,8 +226,7 @@ export const CASHIER_DEFAULT = [
   'pos.sell', 'pos.discount', 'pos.debt', 'pos.defer', 'customers.create',
   'returns.view', 'returns.create', 'shift.view', 'shift.open', 'shift.cash',
 ]
-export function permissionsOf(acc) {
-  if (!acc) return []
+function rolePermissions(acc) {
   const raw = acc.permissions
   if (Array.isArray(raw)) return raw
   if (typeof raw === 'string' && raw) {
@@ -206,12 +239,23 @@ export function permissionsOf(acc) {
   }
   return acc.role === 'cashier' ? CASHIER_DEFAULT : []
 }
-// Владелец может всё; остальным — любое из перечисленных прав
+// Права из роли без прав выключенных модулей магазина (1.8.1)
+export function permissionsOf(acc) {
+  if (!acc) return []
+  const own = rolePermissions(acc)
+  const off = offPerms(modulesOffOf(acc))
+  return off.size ? own.filter((k) => !off.has(k)) : own
+}
+// Владелец может всё; остальным — любое из перечисленных прав. Право выключенного модуля
+// (1.8.1) не действует ни у кого, даже у владельца: как на сервере
 export function hasPerm(acc, ...keys) {
   if (!acc) return false
+  const off = offPerms(modulesOffOf(acc))
+  const list = off.size ? keys.filter((k) => !off.has(k)) : keys
+  if (!list.length) return false
   if (acc.role === 'founder') return true
   const own = permissionsOf(acc)
-  return keys.some((k) => own.includes(k))
+  return list.some((k) => own.includes(k))
 }
 
 // «Кто я» — в том же виде, что отдаёт сервер
@@ -223,6 +267,8 @@ export const userView = (acc, now) => ({
   roleName: acc.role === 'founder' ? 'Владелец' : acc.roleName || 'Кассир',
   roleSystem: acc.role === 'founder' ? 'owner' : acc.roleSystem || null,
   permissions: permissionsOf(acc),
+  // Выключенные модули магазина (1.8.1): окно прячет их разделы и всё связанное
+  modulesOff: modulesOffOf(acc),
   pharmacy: { code: acc.pharmacyCode, name: acc.pharmacyName },
   subscription: subscriptionOf(acc, now),
   impersonatedBy: null,

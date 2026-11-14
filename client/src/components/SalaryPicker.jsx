@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../db/api'
-import { useCollection, money } from '../db/store'
+import { useCollection, useCollectionIf, money } from '../db/store'
 import { useT } from '../lib/i18n'
+import { useModul } from '../lib/useModul'
 import { fmtDate, dayKey } from '../lib/time'
 import { useDeepPeriod } from './Period'
 import {
@@ -60,11 +61,16 @@ export const staffName = (u) => (u ? (u.fullName ? `${u.fullName} (${u.name})` :
 // Выдачи зарплаты, среди которых ищут выдачи за месяц: из общего кэша расходов,
 // а за давние месяцы — с сервера. Остаток месяца бывает выдан и позже, поэтому
 // берём всё от начала месяца (с запасом на аванс накануне) и до сегодня
+// Модуль «Расходы» выключен у магазина (lib/moduli.js) — выдач зарплаты нет и запрашивать
+// их незачем: сервер ответил бы отказом
+const EX_KEYS = ['expenses']
+const NO_KEYS = []
 export function useVydachi(month) {
-  const cached = useCollection('expenses')
+  const on = useModul('expenses')
+  const cached = useCollectionIf('expenses', on)
   const range = useMemo(() => ({ from: new Date(mesyac(month).from.getTime() - 62 * DAY), to: null }), [month])
-  const { deep, loading } = useDeepPeriod(['expenses'], range, { untilNow: true })
-  return { expenses: deep.expenses || cached, loading }
+  const { deep, loading } = useDeepPeriod(on ? EX_KEYS : NO_KEYS, range, { untilNow: true })
+  return { expenses: (on && deep.expenses) || cached, loading }
 }
 
 const kop = (x) => Math.round(x * 100) / 100

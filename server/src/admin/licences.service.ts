@@ -3,6 +3,7 @@ import { randomInt } from 'node:crypto'
 import { AdminDbService } from './admin-db.service'
 import { FOREVER, dateOfDay, dayOf, formatComputerCode, issueCode, makeKeys, parseComputerCode, publicOf, todayDay } from '../common/licence-code'
 import { LICENCE_PUBLIC_KEY } from '../common/licence-pin'
+import { cleanModulesOff, modulesLabel } from '../common/moduli'
 import { isProd } from '../common/config'
 
 // ── Коды активации программы без интернета (версия 1.6.0) ──
@@ -23,6 +24,8 @@ export type LicenceView = {
   computer: string
   until: string | null
   registers: number
+  // Выключенные модули, зашитые в код (1.8.1); пусто — всё включено
+  modulesOff: string[]
   serial: number
   note: string
   code: string
@@ -93,7 +96,7 @@ export class LicencesService {
   }
 
   async issue(
-    dto: { computer?: string; kind?: string; until?: string; forever?: boolean; registers?: number; note?: string },
+    dto: { computer?: string; kind?: string; until?: string; forever?: boolean; registers?: number; note?: string; modulesOff?: string[] },
     byAccountId?: string,
   ): Promise<LicenceView> {
     const raw = parseComputerCode(String(dto.computer ?? ''))
@@ -103,6 +106,8 @@ export class LicencesService {
     const today = todayDay(Date.now())
     let until: number
     let registers = 0
+    // Выключенные модули (1.8.1) — только у кода активации; пусто — код прежнего вида (v1)
+    const modulesOff = kind === 'activate' ? cleanModulesOff(dto.modulesOff) : []
     if (kind === 'activate') {
       if (dto.forever && dto.until) throw new BadRequestException('Выберите одно: до какого дня или «навсегда»')
       if (dto.forever) until = FOREVER
@@ -126,7 +131,7 @@ export class LicencesService {
     // случайный: программа помнит использованные и второй раз тот же код не примет
     const serial = kind === 'activate' ? ((await this.admin.licenceCode.count({ where: { kind: 'activate' } })) + 1) & 0xffff : randomInt(1, 0xffff)
     const k = await this.key()
-    const code = issueCode(k.privateKey, raw, { kind, until, registers, serial })
+    const code = issueCode(k.privateKey, raw, { kind, until, registers, serial, modulesOff })
     const who = byAccountId ? await this.admin.account.findUnique({ where: { id: byAccountId }, select: { login: true } }) : null
     const note = String(dto.note ?? '').trim().slice(0, 200)
     const row = await this.admin.licenceCode.create({
@@ -135,6 +140,7 @@ export class LicencesService {
         computer,
         until: until === FOREVER ? null : new Date(dateOfDay(until) + 'T00:00:00.000Z'),
         registers,
+        modulesOff,
         serial,
         note,
         code,
@@ -145,7 +151,7 @@ export class LicencesService {
     // В журнал панели — как продление: кто, кому и на сколько
     const detail =
       kind === 'activate'
-        ? `код активации для ${computer}: ${until === FOREVER ? 'навсегда' : 'до ' + dateOfDay(until)}, касс — ${registers}${note ? ` (${note})` : ''}`
+        ? `код активации для ${computer}: ${until === FOREVER ? 'навсегда' : 'до ' + dateOfDay(until)}, касс — ${registers}${modulesOff.length ? `, модули: без ${modulesLabel(modulesOff)}` : ''}${note ? ` (${note})` : ''}`
         : `код сброса пароля для ${computer}${note ? ` (${note})` : ''}`
     await this.admin.auditLog
       .create({ data: { accountId: byAccountId ?? null, accountName: who?.login || '', action: kind === 'activate' ? 'licence' : 'licence-reset', detail } })
@@ -165,6 +171,7 @@ function view(r: {
   computer: string
   until: Date | null
   registers: number
+  modulesOff?: string[] | null
   serial: number
   note: string
   code: string
@@ -177,6 +184,7 @@ function view(r: {
     computer: r.computer,
     until: r.until ? r.until.toISOString().slice(0, 10) : null,
     registers: r.registers,
+    modulesOff: cleanModulesOff(r.modulesOff),
     serial: r.serial,
     note: r.note,
     code: r.code,

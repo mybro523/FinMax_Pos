@@ -11,6 +11,7 @@ import NumberInput from '../components/NumberInput'
 import { PerenosForm, QtyFields, unitsFrom, partsFrom } from '../components/SkladPerenos'
 import { useCollection, useCollectionIf, money, stockText } from '../db/store'
 import { useCan, getUser } from '../db/auth'
+import { useModul } from '../lib/useModul'
 import { skladEdit } from '../db/ops'
 import { useT } from '../lib/i18n'
 import KameraKnopka from '../components/KameraKnopka'
@@ -34,6 +35,8 @@ const num = (v) => {
 
 export default function Sklad() {
   const t = useT()
+  // Модуль «Срок годности» выключен у магазина — столбца срока нет
+  const srokOn = useModul('expiry')
   const can = useCan()
   const nav = useNavigate()
   const products = useCollection('products')
@@ -85,7 +88,7 @@ export default function Sklad() {
     { header: t('Товар'), key: 'name', width: 34 },
     { header: t('Штрихкод'), key: 'code', width: 16 },
     { header: t('На складе'), key: 'qty', width: 16 },
-    { header: t('Ближайший срок'), key: 'exp', width: 14 },
+    ...(srokOn ? [{ header: t('Ближайший срок'), key: 'exp', width: 14 }] : []),
     { header: t('По закупке'), key: 'cost', width: 14, money: true },
     { header: t('По цене продажи'), key: 'value', width: 15, money: true },
   ]
@@ -155,7 +158,7 @@ export default function Sklad() {
             <table className="table-cards" data-tour="sklad.table" data-testid="sklad-table">
               <thead>
                 <tr>
-                  <th>{t('Товар')}</th><th className="num">{t('На складе')}</th><th className="num">{t('В магазине')}</th><th>{t('Ближайший срок')}</th>
+                  <th>{t('Товар')}</th><th className="num">{t('На складе')}</th><th className="num">{t('В магазине')}</th>{srokOn && <th>{t('Ближайший срок')}</th>}
                   <th className="num">{t('По закупке')}</th><th className="num">{t('По цене продажи')}</th>{mozhno && <th></th>}
                 </tr>
               </thead>
@@ -168,7 +171,7 @@ export default function Sklad() {
                     </td>
                     <td className="num" data-label={t('На складе')}><b>{unitsText(r.units, r.product, t)}</b></td>
                     <td className="num" data-label={t('В магазине')}>{stockText(r.product)}</td>
-                    <td data-label={t('Ближайший срок')}>{r.expiry ? fmtDate(r.expiry) : '—'}</td>
+                    {srokOn && <td data-label={t('Ближайший срок')}>{r.expiry ? fmtDate(r.expiry) : '—'}</td>}
                     <td className="num" data-label={t('По закупке')}>{money(r.cost)}</td>
                     <td className="num" data-label={t('По цене продажи')}><b>{money(r.value)}</b></td>
                     {mozhno && (
@@ -187,7 +190,7 @@ export default function Sklad() {
               {list.length > 0 && (
                 <tfoot>
                   <tr className="zak-total">
-                    <td colSpan="4">{t('Итого')} · {t('Товаров')}: {list.length}</td>
+                    <td colSpan={srokOn ? 4 : 3}>{t('Итого')} · {t('Товаров')}: {list.length}</td>
                     <td className="num">{money(exItog.cost)}</td>
                     <td className="num">{money(exItog.value)}</td>
                     {mozhno && <td></td>}
@@ -277,6 +280,7 @@ function CardOkno({ what, rows, itogo, onClose }) {
 // ── Документ из истории — подробно ──
 function DocOkno({ doc, title, productById, onClose }) {
   const t = useT()
+  const srok = useModul('expiry') && doc.kind !== 'arrival'
   return (
     <Modal wide title={`${title} · ${fmtDateTime(doc.date)}`} onClose={onClose}>
       <div className="tag-cat" style={{ marginBottom: 8 }}>
@@ -285,7 +289,7 @@ function DocOkno({ doc, title, productById, onClose }) {
       </div>
       <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
         <table data-testid="sklad-doc-okno">
-          <thead><tr><th>{t('Товар')}</th><th className="num">{t('Количество')}</th><th className="num">{t('Закупочная')}</th>{doc.kind !== 'arrival' && <th>{t('Срок')}</th>}</tr></thead>
+          <thead><tr><th>{t('Товар')}</th><th className="num">{t('Количество')}</th><th className="num">{t('Закупочная')}</th>{srok && <th>{t('Срок')}</th>}</tr></thead>
           <tbody>
             {doc.items.map((i, n) => {
               const p = productById.get(i.productId) || (i.upp ? { unitsPerPack: i.upp } : null)
@@ -297,7 +301,7 @@ function DocOkno({ doc, title, productById, onClose }) {
                     {doc.kind === 'edit' ? (i.units < 0 ? '−' : '+') : ''}{kol}
                   </td>
                   <td className="num">{money(i.cost)}</td>
-                  {doc.kind !== 'arrival' && <td>{i.expiryDate ? fmtDate(i.expiryDate) : '—'}</td>}
+                  {srok && <td>{i.expiryDate ? fmtDate(i.expiryDate) : '—'}</td>}
                 </tr>
               )
             })}
@@ -315,6 +319,7 @@ function DocOkno({ doc, title, productById, onClose }) {
 // (нынешняя закупочная товара или вписанная) и со сроком, если он указан
 function EditOkno({ products, batches, productId, onClose }) {
   const t = useT()
+  const srokOn = useModul('expiry')
   const toast = useToast()
   const [pid, setPid] = useState(productId || '')
   const [q, setQ] = useState('')
@@ -395,10 +400,12 @@ function EditOkno({ products, batches, productId, onClose }) {
                 <label>{t('Закупочная за')} {t(packLabel(p))}</label>
                 <NumberInput value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0" data-testid="sklad-edit-cost" />
               </div>
-              <div className="field" style={{ flex: '1 1 160px' }}>
-                <label>{t('Срок годности')}</label>
-                <input type="date" value={exp} onChange={(e) => setExp(e.target.value)} data-testid="sklad-edit-exp" />
-              </div>
+              {srokOn && (
+                <div className="field" style={{ flex: '1 1 160px' }}>
+                  <label>{t('Срок годности')}</label>
+                  <input type="date" value={exp} onChange={(e) => setExp(e.target.value)} data-testid="sklad-edit-exp" />
+                </div>
+              )}
             </div>
           )}
           <div className="modal-actions">

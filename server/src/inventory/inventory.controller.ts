@@ -1,9 +1,11 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { InventoryService } from './inventory.service'
-import { CurrentUser, Perm } from '../auth/decorators'
+import { CurrentUser, Modul, Perm } from '../auth/decorators'
 import { ApplyInventoryDto, CreateInventoryDto, SaveCountDto } from './dto'
 
 // Пересчёт остатков — только основатель
+// Модуль «Инвентаризация» выключен (1.8.1) — раздела нет
+@Modul('inventory')
 @Controller('inventory')
 
 export class InventoryController {

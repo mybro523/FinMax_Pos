@@ -3,6 +3,7 @@
 // программы нужны коды на разные сроки и случаи, а сервер в них не участвует. Что расчёт тот
 // же — сверяют серверные образцы (test/licence-vectors.json, test/local-standalone.test.mjs)
 import { createHash, createHmac, randomBytes } from 'node:crypto'
+import { modulesMask } from '../src/local/moduli.mjs'
 
 const P = 0xfffffffdffffffffffffffffffffffffn
 const A = 0xfffffffdfffffffffffffffffffffffcn
@@ -77,12 +78,17 @@ export const todayDay = (now) => Math.floor((now + 5 * 3600000 - EPOCH) / 864000
 export const FOREVER = 0xffff
 
 // computerRaw — 5 байт кода компьютера; kind — 'activate' | 'reset'
-export function issueCode(privateKey, computerRaw, { kind = 'activate', until, registers = 1, serial = 1 }) {
-  const payload = Buffer.alloc(6)
-  payload[0] = 0x10 | (kind === 'reset' ? 2 : 1)
+// modulesOff (1.8.1) — выключенные модули магазина (local/moduli.mjs): есть — код v2 (55 знаков,
+// маска в трёх последних байтах данных), нет — прежний v1 (50 знаков)
+export function issueCode(privateKey, computerRaw, { kind = 'activate', until, registers = 1, serial = 1, modulesOff = [] }) {
+  const mask = modulesMask(modulesOff)
+  const v2 = kind !== 'reset' && mask !== 0
+  const payload = Buffer.alloc(v2 ? 9 : 6)
+  payload[0] = (v2 ? 0x20 : 0x10) | (kind === 'reset' ? 2 : 1)
   payload.writeUInt16BE(until, 1)
   payload[3] = registers
   payload.writeUInt16BE(serial & 0xffff, 4)
+  if (v2) payload.writeUIntBE(mask, 6, 3)
   const body = Buffer.concat([payload, sign(privateKey, Buffer.concat([Buffer.from('FMX-CODE-1'), computerRaw, payload]))])
   return groups(encode32(body) + check2('FMX-CHK', body))
 }

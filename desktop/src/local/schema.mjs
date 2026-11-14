@@ -553,4 +553,10 @@ export const CORE_SCHEMA = [
     PRIMARY KEY (serial, until)
   );
   `,
+  // ── Модули магазина (версия 1.8.1) ──
+  // Какие модули владелец сервиса выключил магазину (JSON-список ключей, local/moduli.mjs) —
+  // со слова сервера. Пусто — включено всё. У магазина без интернета модули — в коде активации
+  `
+  ALTER TABLE accounts ADD COLUMN modulesOff TEXT NOT NULL DEFAULT '';
+  `,
 ]

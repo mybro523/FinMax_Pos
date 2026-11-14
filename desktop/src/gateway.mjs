@@ -37,8 +37,10 @@ import {
   subscriptionOf,
   userView,
   hasPerm,
+  modulesOffOf,
   permissionsOf,
 } from './local/accounts.mjs'
+import { cleanModulesOff } from './local/moduli.mjs'
 import { matchFallback, matchLocal, pendingInPeriod } from './local/api.mjs'
 import { confirmLicence, hasLicence, licenceOf, licenceTerms, sealStatus, sealTerms, touchLicence } from './local/licence.mjs'
 import { ApiError, getMeta, inTx, newId, openDb, q, setMeta } from './local/db.mjs'
@@ -318,9 +320,11 @@ export function createGateway({
     if (listening) emit(type, payload)
   }
 
+  // Учётная запись того, кто сейчас работает. У магазина без интернета к ней добавлены модули
+  // из кода активации (1.8.1, withModules): по ним проверяются права везде, где она передаётся
   const activeAccount = () => {
     const id = session.activeId()
-    return id ? accountById(core, id) : null
+    return id ? withModules(accountById(core, id)) : null
   }
 
   // ── База магазина ──
@@ -1370,6 +1374,12 @@ export function createGateway({
       watchLicence()
       send('status', status())
     }
+    // Главный ввёл код с другими модулями (1.8.1) — окно перечитывает «кто я» и прячет или
+    // показывает разделы сразу (то же событие, что при смене ролей)
+    if (cleanModulesOff(before.modulesOff).join() !== cleanModulesOff(after.modulesOff).join()) {
+      log.info(`касса: модули от главного — ${cleanModulesOff(after.modulesOff).length ? 'выключены: ' + cleanModulesOff(after.modulesOff).join(', ') : 'включены все'}`)
+      send('changed', ['roles'])
+    }
   }
   // Касса: главный ответил «не знаю такую кассу» (её отключили) — запомнить в сведениях о сроке:
   // касса остановлена, пока её не подключат заново (подключение приносит новые сведения)
@@ -1438,7 +1448,31 @@ export function createGateway({
     const message = a.unpaired ? MESSAGES.regUnpaired : a.lease ? MESSAGES.regLease : a.stopped ? MESSAGES.regStopped : a.register ? MESSAGES.regLicExpired : solo.requireCode ? MESSAGES.licExpired : a.message || MESSAGES.notActivated
     return { status: 'expired', canWrite: false, readOnly: true, warn: true, daysLeft: 0, paidUntil: a.endsAt ?? null, message, standalone: true, trial: !!a.trial }
   }
-  const soloView = (acc) => ({ ...userView(acc, licNow()), subscription: soloAccess(), standalone: true, register: isRegister() })
+  const soloView = (acc) => ({ ...userView(withModules(acc), licNow()), subscription: soloAccess(), standalone: true, register: isRegister() })
+
+  // ── Модули магазина без интернета (1.8.1) ──
+  // Какие модули выключил владелец сервиса — записано в коде активации (у кассы — в коде главного).
+  // Пробный срок и код без модулей — включено всё. Проверка подписи кода — при каждом новом коде:
+  // запоминаем по тексту того, что лежит в базе (код главного, сведения кассы), — новый код сразу
+  // меняет ответ
+  let modulesMemo = { key: null, off: [] }
+  function soloModulesOff() {
+    try {
+      if (!solo.requireCode) return []
+      const key = isRegister() ? 'r|' + (getMeta(core, 'soloLic') || '') : 'm|' + (q(core, 'SELECT code FROM activation WHERE id = 1').get()?.code || '')
+      if (modulesMemo.key !== key) modulesMemo = { key, off: cleanModulesOff(activation().modulesOff) }
+      return modulesMemo.off
+    } catch (e) {
+      log.warn('модули магазина: код не прочитан — включено всё', e)
+      return []
+    }
+  }
+  // Учётная запись магазина без интернета — с модулями из кода; у магазина с сервером они уже
+  // лежат в самой записи (со слова сервера, accounts.modulesOff)
+  function withModules(acc) {
+    if (!acc || !isSolo(acc)) return acc
+    return { ...acc, modulesOff: soloModulesOff() }
+  }
 
   async function soloLogin(name, password) {
     const login = String(name ?? '').trim()
@@ -2257,7 +2291,8 @@ export function createGateway({
   // не отменяет сделанного до неё (как у сервера: sync.service)
   function opAllowed(e, spec) {
     const acc = typeof e.accountId === 'string' ? accountById(core, e.accountId) : null
-    if (acc && acc.pharmacyCode === STANDALONE_CODE) return acc.role === 'founder' || hasPerm(acc, ...spec.p)
+    // Модули магазина (1.8.1): действие выключенного модуля не проходит и у владельца (hasPerm)
+    if (acc && acc.pharmacyCode === STANDALONE_CODE) return hasPerm(withModules(acc), ...spec.p)
     return spec.p.some((k) => CASHIER_DEFAULT.includes(k))
   }
 
@@ -3852,8 +3887,9 @@ export function createGateway({
       data = found.handler({
         db: ph.db,
         now: clock.now(),
-        // Права — из учётной записи: в документы попадают только номер и имя
-        user: { ...docUser(ph, acc), permissions: permissionsOf(acc) },
+        // Права — из учётной записи: в документы попадают только номер и имя. Модули магазина
+        // (1.8.1) — тоже: право выключенного модуля не действует и у владельца
+        user: { ...docUser(ph, acc), permissions: permissionsOf(acc), modulesOff: modulesOffOf(acc) },
         deviceId,
         query: found.query,
         params: found.params,

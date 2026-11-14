@@ -5,6 +5,7 @@ import { useT } from '../lib/i18n'
 import { fmtShort } from '../lib/time'
 import { formatCode, normalizeCode, pastedCode } from '../lib/aktivaciya'
 import { Modal, useToast } from './ui'
+import ModuliVybor, { moduliText } from './ModuliVybor'
 
 // ── Панель владельца сервиса: коды активации программы без интернета (версия 1.6.0) ──
 // Магазин без интернета присылает «код компьютера» (10 знаков). Здесь под него выпускается
@@ -31,7 +32,7 @@ async function copyText(text, toast, t) {
 export default function KodyAktivacii({ onClose }) {
   const t = useT()
   const toast = useToast()
-  const [f, setF] = useState({ computer: '', kind: 'activate', until: inYear(), forever: false, registers: 1, note: '' })
+  const [f, setF] = useState({ computer: '', kind: 'activate', until: inYear(), forever: false, registers: 1, note: '', modulesOff: [] })
   const [list, setList] = useState([])
   const [find, setFind] = useState('')
   const [listErr, setListErr] = useState('')
@@ -75,7 +76,7 @@ export default function KodyAktivacii({ onClose }) {
       const body =
         f.kind === 'reset'
           ? { computer: formatCode(pc), kind: 'reset', note: f.note }
-          : { computer: formatCode(pc), kind: 'activate', forever: f.forever, until: f.forever ? undefined : f.until, registers: Number(f.registers), note: f.note }
+          : { computer: formatCode(pc), kind: 'activate', forever: f.forever, until: f.forever ? undefined : f.until, registers: Number(f.registers), note: f.note, modulesOff: f.modulesOff }
       const r = await api.post('/admin/licences', body)
       setMade(r)
       load()
@@ -122,6 +123,16 @@ export default function KodyAktivacii({ onClose }) {
               </div>
             </div>
           )}
+          {f.kind === 'activate' && (
+            <>
+              <ModuliVybor value={f.modulesOff} onChange={(v) => set('modulesOff', v)} t={t} testid="lic-moduli" />
+              {f.modulesOff.length > 0 && (
+                <div className="tag-cat" style={{ margin: '-6px 0 10px' }}>
+                  {t('Код с выключенными модулями длиннее (55 знаков) и подходит программе 1.8.1 и новее.')}
+                </div>
+              )}
+            </>
+          )}
           {f.kind === 'reset' && <div className="note info" style={{ marginBottom: 10 }}>{t('Код сброса пароля владельца действует три дня и только один раз.')}</div>}
           <div className="field">
             <label htmlFor="lic-note">{t('Заметка')}</label>
@@ -137,7 +148,7 @@ export default function KodyAktivacii({ onClose }) {
           <div className="note ok" style={{ marginTop: 14 }} data-testid="licence-made">
             <div className="tag-cat">
               {made.kind === 'reset' ? t('Код сброса пароля') : t('Код активации')} · {made.computer}
-              {made.kind === 'activate' ? ` · ${made.until ? `${t('до')} ${human(made.until)}` : t('навсегда')} · ${t('касс')}: ${made.registers}` : ''}
+              {made.kind === 'activate' ? ` · ${made.until ? `${t('до')} ${human(made.until)}` : t('навсегда')} · ${t('касс')}: ${made.registers} · ${t('модули')}: ${moduliText(made.modulesOff, t)}` : ''}
             </div>
             <div className="licence-code" data-testid="licence-code">{made.code}</div>
             <button type="button" className="btn ghost" onClick={() => copyText(made.code, toast, t)}>
@@ -169,7 +180,7 @@ export default function KodyAktivacii({ onClose }) {
                   <td data-label={t('Когда')}>{fmtShort(l.createdAt)}</td>
                   <td data-label={t('Компьютер')}><b>{l.computer}</b></td>
                   <td data-label={t('Что')}>
-                    {l.kind === 'reset' ? t('Сброс пароля') : `${l.until ? `${t('до')} ${human(l.until)}` : t('навсегда')} · ${t('касс')}: ${l.registers}`}
+                    {l.kind === 'reset' ? t('Сброс пароля') : `${l.until ? `${t('до')} ${human(l.until)}` : t('навсегда')} · ${t('касс')}: ${l.registers}${l.modulesOff?.length ? ` · ${t('модули')}: ${moduliText(l.modulesOff, t)}` : ''}`}
                   </td>
                   <td data-label={t('Заметка')} className="tag-cat">{l.note || '—'}</td>
                   <td data-label={t('Код')}>

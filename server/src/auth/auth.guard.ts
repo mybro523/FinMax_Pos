@@ -11,8 +11,9 @@ import { Reflector } from '@nestjs/core'
 import { AuthService } from './auth.service'
 import { AccountCache } from '../admin/account-cache.service'
 import { subscriptionOf, subscriptionMessage } from '../admin/subscription'
-import { PERM_KEY, PUBLIC_KEY, ROLES_KEY, SERVICE_WIDE_KEY } from './decorators'
+import { MODULE_KEY, MODULE_OFF, PERM_KEY, PUBLIC_KEY, ROLES_KEY, SERVICE_WIDE_KEY } from './decorators'
 import { hasPerm, permissionsOf } from './permissions'
+import { cleanModulesOff, moduleOn } from '../common/moduli'
 
 // Глобальный guard: все эндпоинты требуют валидный токен, кроме помеченных @Public().
 // @Roles('founder') на методе/классе дополнительно ограничивает по роли.
@@ -126,6 +127,8 @@ export class AuthGuard implements CanActivate {
       role: acc.role,
       // Права из роли (владелец — все). По ним проверяются разделы и действия
       permissions: permissionsOf(acc),
+      // Выключенные модули магазина (1.8.1): их права не в счёт ни у кого (hasPerm)
+      modulesOff: cleanModulesOff(acc.pharmacy?.modulesOff),
       roleId: acc.role === 'founder' ? 'owner' : acc.roleId ?? null,
       roleName: acc.role === 'founder' ? 'Владелец' : acc.roleRef?.name || 'Кассир',
       pharmacyId: acc.pharmacyId,
@@ -134,6 +137,11 @@ export class AuthGuard implements CanActivate {
     }
     if (roles && roles.length && !roles.includes(acc.role)) {
       throw new ForbiddenException('Недостаточно прав')
+    }
+    // Раздел выключенного модуля (1.8.1) — закрыт для всех, включая владельца и поддержку
+    const modul = this.reflector.getAllAndOverride<string[]>(MODULE_KEY, [ctx.getHandler(), ctx.getClass()])
+    if (modul && modul.length && modul.every((k) => !moduleOn(req.user.modulesOff, k))) {
+      throw new ForbiddenException(MODULE_OFF)
     }
     const perms = this.reflector.getAllAndOverride<string[]>(PERM_KEY, [ctx.getHandler(), ctx.getClass()])
     if (perms && perms.length && !hasPerm(req.user, ...perms)) {

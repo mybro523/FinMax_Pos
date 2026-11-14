@@ -13,6 +13,7 @@
 // время; нет связи — касса считает по своим журналам (FALLBACK ниже). Чего здесь нет
 // вовсе (сотрудники, пересчёт остатков, резервная копия), уходит на сервер.
 import { hasPerm } from './accounts.mjs'
+import { cleanModulesOff } from './moduli.mjs'
 import { categoriesList, productTypesList, customersList, deferredList, productByBarcode, productsList, productView1 } from './catalog.mjs'
 import { bad, forbidden, notFound, q } from './db.mjs'
 import { listDocs, listShifts, liveDoc, myOpenShift, WINDOW_DAYS } from './docs.mjs'
@@ -108,6 +109,13 @@ const perm = (keys, handler) => (ctx) => {
   if (!hasPerm(ctx.user, ...keys)) throw forbidden('Недостаточно прав')
   return handler(ctx)
 }
+// Модули магазина (1.8.1) — как @Modul на сервере: раздел закрыт, когда выключены ВСЕ
+// перечисленные модули (журнал списаний нужен и отчётам, и панели). Владельцу тоже
+const modul = (keys, handler) => (ctx) => {
+  const off = cleanModulesOff(ctx.user?.modulesOff)
+  if (off.length && keys.every((k) => off.includes(k))) throw forbidden('Этот раздел у вашего магазина выключен')
+  return handler(ctx)
+}
 // Скидка, продажа в долг и приход в долг — отдельные права.
 // Без открытой смены на этой кассе продажа не проводится: чек обязан войти в её отчёт
 const canSell = (ctx) => {
@@ -123,6 +131,8 @@ const canSell = (ctx) => {
 const here = (kind, fn) => (ctx) => (liveDoc(ctx.db, kind, ctx.params[0]) ? fn(ctx) : { __remote: true })
 const canArrive = (ctx) => {
   if (Number(ctx.body?.debt) > 0 && !hasPerm(ctx.user, 'arrivals.debt')) throw forbidden('Нет права оформлять приход в долг')
+  // Модуль «Склад» выключен — приход только в магазин (как на сервере)
+  if (ctx.body?.place === 'sklad' && cleanModulesOff(ctx.user?.modulesOff).includes('sklad')) throw forbidden('Склад у вашего магазина выключен')
   return createArrival(ctx, ctx.body)
 }
 
@@ -140,7 +150,7 @@ const ROUTES = [
   ['GET', /^\/categories$/, (ctx) => categoriesList(ctx.db)],
   ['GET', /^\/product-types$/, (ctx) => productTypesList(ctx.db)],
   ['GET', /^\/customers$/, (ctx) => customersList(ctx.db)],
-  ['GET', /^\/deferred$/, (ctx) => deferredList(ctx.db)],
+  ['GET', /^\/deferred$/, modul(['deferred'], (ctx) => deferredList(ctx.db))],
   ['GET', /^\/shifts$/, (ctx) => listShifts(ctx.db, ctx.deviceId).map((s) => shiftView(ctx.db, s))],
   ['GET', /^\/sales$/, journal('sale')],
   ['GET', /^\/returns$/, journal('return')],
@@ -149,18 +159,18 @@ const ROUTES = [
   // Возвраты поставщикам — тоже закупочные цены: по тому же праву
   ['GET', /^\/supplier-returns$/, perm(['arrivals.view'], journal('supplierreturn'))],
   // Списание — это убыток, поэтому журнал видит только владелец
-  ['GET', /^\/writeoffs$/, perm(['writeoffs.view', 'reports.view', 'dashboard.view'], journal('writeoff'))],
+  ['GET', /^\/writeoffs$/, modul(['writeoffs', 'salesReport', 'opu', 'dashboard'], perm(['writeoffs.view', 'reports.view', 'dashboard.view'], journal('writeoff')))],
   ['GET', /^\/payments$/, journal('payment')],
   // Расходы — деньги магазина и его чистая прибыль: только владельцу, как и на сервере
-  ['GET', /^\/expenses$/, perm(['expenses.view', 'reports.view'], journal('expense'))],
+  ['GET', /^\/expenses$/, modul(['expenses', 'salesReport', 'opu'], perm(['expenses.view', 'reports.view'], journal('expense')))],
   ['GET', /^\/expenses\/cash-sources$/, perm(['expenses.create'], (ctx) => cashSources(ctx.db, ctx.deviceId))],
   ['GET', /^\/expense-categories$/, perm(['expenses.view', 'expenses.create', 'settings.expenseCategories'], (ctx) => expenseCategoriesList(ctx.db))],
   // Доходы — деньги магазина: по тем же правам, что на сервере
-  ['GET', /^\/incomes$/, perm(['incomes.view', 'reports.view'], journal('income'))],
+  ['GET', /^\/incomes$/, modul(['incomes', 'salesReport', 'opu'], perm(['incomes.view', 'reports.view'], journal('income')))],
   ['GET', /^\/income-categories$/, perm(['incomes.view', 'incomes.create', 'settings.incomeCategories'], (ctx) => incomeCategoriesList(ctx.db))],
   // Склад (1.8.0): партии склада — по тем же правам, что у сервера (панель и приход тоже видят
   // остаток склада); журнал движений — разделу склада
-  ['GET', /^\/sklad$/, perm(['sklad.view', 'sklad.move', 'dashboard.view', 'arrivals.view', 'arrivals.create'], (ctx) => skladList(ctx.db))],
+  ['GET', /^\/sklad$/, modul(['sklad'], perm(['sklad.view', 'sklad.move', 'dashboard.view', 'arrivals.view', 'arrivals.create'], (ctx) => skladList(ctx.db)))],
   ['GET', /^\/sklad\/moves$/, perm(['sklad.view', 'sklad.move'], journal('skladmove'))],
   // Поставщики нужны приходу — всем; долги в них видит только владелец
   ['GET', /^\/suppliers$/, (ctx) => suppliersList(ctx.db, hasPerm(ctx.user, 'suppliers.view'))],

@@ -40,6 +40,8 @@ const SHAPE = {
         offlineDays: true,
         // Когда поставили логотип: «кто я» отдаёт её кассам (см. AuthService.view)
         logoAt: true,
+        // Выключенные модули (1.8.1): по ним сторож отбирает права разделов
+        modulesOff: true,
       },
     },
     roleRef: { select: { id: true, name: true, permissions: true, system: true } },
@@ -57,6 +59,7 @@ type Account = NonNullable<Awaited<ReturnType<AdminDbService['account']['findUni
     trial: boolean
     offlineDays: number
     logoAt: Date | null
+    modulesOff: string[]
   } | null
   roleRef: { id: string; name: string; permissions: string[]; system: string | null } | null
 }

@@ -8,6 +8,8 @@
 // Ключ права — «раздел.действие». Этот же список лежит в интерфейсе
 // (client/src/lib/permissions.js) с подписями и переводами; проверка на сервере
 // сверяет оба списка, чтобы они не разошлись.
+import { offPerms } from '../common/moduli'
+
 export type PermissionGroup = { key: string; title: string; items: [string, string][] }
 
 export const PERMISSION_GROUPS: PermissionGroup[] = [
@@ -137,10 +139,16 @@ export const OWNER_ROLE = { id: 'owner', name: 'Владелец', description: 
 
 // Права вошедшего: владелец может всё, остальные — то, что записано в их роли.
 // Кассир без роли (учётная запись из прежней версии) получает права кассира по умолчанию
-export function permissionsOf(acc: { role: string; roleRef?: { permissions: string[] } | null }): string[] {
-  if (acc.role === 'founder') return ALL_PERMISSIONS
-  if (acc.roleRef) return acc.roleRef.permissions.filter(isPermission)
-  return CASHIER_DEFAULT
+//
+// Модули магазина (1.8.1): права выключенных модулей пропадают у всех, включая владельца
+// (offPerms, common/moduli.ts). modulesOff — список выключенных у магазина этой записи
+export function permissionsOf(
+  acc: { role: string; roleRef?: { permissions: string[] } | null; pharmacy?: { modulesOff?: string[] } | null },
+  modulesOff?: unknown,
+): string[] {
+  const own = acc.role === 'founder' ? ALL_PERMISSIONS : acc.roleRef ? acc.roleRef.permissions.filter(isPermission) : CASHIER_DEFAULT
+  const off = offPerms(modulesOff !== undefined ? modulesOff : acc.pharmacy?.modulesOff)
+  return off.size ? own.filter((k) => !off.has(k)) : own
 }
 
 // ── Смена своего пароля ──
@@ -152,14 +160,18 @@ export function mayChangeOwnPassword(acc: { role: string; roleRef?: { permission
   return permissionsOf(acc).includes('profile.password')
 }
 
-export type Actor = { role?: string; permissions?: string[] }
+export type Actor = { role?: string; permissions?: string[]; modulesOff?: string[] }
 export const isOwner = (u: Actor | null | undefined) => u?.role === 'founder'
-// Достаточно любого из перечисленных прав
+// Достаточно любого из перечисленных прав. Право выключенного модуля (1.8.1) не в счёт ни у
+// кого, даже у владельца: раздела у магазина нет вовсе
 export function hasPerm(u: Actor | null | undefined, ...keys: string[]): boolean {
   if (!u) return false
+  const off = offPerms(u.modulesOff)
+  const list = off.size ? keys.filter((k) => !off.has(k)) : keys
+  if (!list.length) return false
   if (u.role === 'founder') return true
   const own = u.permissions || []
-  return keys.some((k) => own.includes(k))
+  return list.some((k) => own.includes(k))
 }
 
 // Что нужно, чтобы касса прислала операцию, сделанную без связи: то же, что и на сайте

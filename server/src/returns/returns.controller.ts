@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common'
 import { ReturnsService } from './returns.service'
-import { CurrentUser, Perm } from '../auth/decorators'
+import { CurrentUser, Modul, Perm } from '../auth/decorators'
 import { PeriodQuery } from '../common/period'
 import { CreateReturnDto } from './dto'
 
@@ -15,6 +15,8 @@ export class ReturnsController {
   }
 
   @Post()
+  // Модуль «Возврат товара» выключен (1.8.1) — нового возврата нет; журнал прежних нужен смене и отчётам
+  @Modul('returns')
   @Perm('returns.create')
 
   create(@Body() dto: CreateReturnDto, @CurrentUser() u: any) {

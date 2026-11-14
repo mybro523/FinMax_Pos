@@ -71,7 +71,7 @@ test('код активации: 50 знаков, читается только 
   const code = L.issueCode(privateKey, pc, { kind: 'activate', until, registers: 3, serial: 17 })
   assert.match(code, /^([0-9A-HJKMNP-TV-Z]{5}-){9}[0-9A-HJKMNP-TV-Z]{5}$/)
   const r = L.readCode(publicKey, pc, code)
-  assert.deepEqual(r, { ok: true, fields: { kind: 'activate', until, registers: 3, serial: 17 } })
+  assert.deepEqual(r, { ok: true, fields: { kind: 'activate', until, registers: 3, serial: 17, modulesOff: [] } })
   assert.equal(L.dateOfDay(r.fields.until), '2027-11-01')
   // Тот же код на другом компьютере — «не подходит», а не «опечатка»
   assert.deepEqual(L.readCode(publicKey, other, code), { ok: false, why: 'bad' })
@@ -99,6 +99,57 @@ test('код активации: 50 знаков, читается только 
   assert.equal(L.readCode(publicKey, pc, forever).fields.until, L.FOREVER)
 })
 
+test('код v2 (1.8.1): выключенные модули зашиты в код, 55 знаков; без них — прежний код v1', () => {
+  const { privateKey, publicKey } = L.makeKeys()
+  const pc = L.parseComputerCode(L.computerCodeOf('pc-1'))
+  const other = L.parseComputerCode(L.computerCodeOf('pc-2'))
+  const until = L.dayOf('2027-11-01')
+  const f = { kind: 'activate', until, registers: 2, serial: 9 }
+  // Всё включено (пусто, мусор, неизвестные ключи) — байт в байт прежний код
+  const v1 = L.issueCode(privateKey, pc, f)
+  assert.equal(L.issueCode(privateKey, pc, { ...f, modulesOff: [] }), v1)
+  assert.equal(L.issueCode(privateKey, pc, { ...f, modulesOff: ['нет-такого', 5, null] }), v1)
+  assert.equal(L.clean32(v1).length, 50)
+  // Выключено — v2
+  const v2 = L.issueCode(privateKey, pc, { ...f, modulesOff: ['sklad', 'expiry', 'obuchenie'] })
+  assert.match(v2, /^([0-9A-HJKMNP-TV-Z]{5}-){10}[0-9A-HJKMNP-TV-Z]{5}$/)
+  assert.deepEqual(L.readCode(publicKey, pc, v2), { ok: true, fields: { ...f, modulesOff: ['sklad', 'expiry', 'obuchenie'] } })
+  // Порядок и повторы при выпуске не важны
+  assert.equal(L.issueCode(privateKey, pc, { ...f, modulesOff: ['obuchenie', 'expiry', 'sklad', 'sklad'] }), v2)
+  // Все шестнадцать
+  const M = require('../dist/common/moduli')
+  const all = L.issueCode(privateKey, pc, { ...f, modulesOff: M.MODULE_KEYS })
+  assert.deepEqual(L.readCode(publicKey, pc, all).fields.modulesOff, M.MODULE_KEYS)
+  // Чужой компьютер и чужой ключ — «не подходит»
+  assert.deepEqual(L.readCode(publicKey, other, v2), { ok: false, why: 'bad' })
+  assert.deepEqual(L.readCode(L.makeKeys().publicKey, pc, v2), { ok: false, why: 'bad' })
+  // Опечатка в любом знаке ловится (как опечатка или «не подходит»), подделать маску нельзя
+  const plain = L.clean32(v2)
+  let typos = 0
+  for (let i = 0; i < plain.length; i++) {
+    const ch = plain[i] === 'A' ? 'B' : 'A'
+    const res = L.readCode(publicKey, pc, plain.slice(0, i) + ch + plain.slice(i + 1))
+    // Последний знак данных несёт один пустой бит (264 бита в 53 знаках): замена, задевшая
+    // только его, — тот же самый код, а не другой
+    if (res.ok) {
+      assert.equal(i, 52, 'знак ' + i)
+      assert.deepEqual(res.fields, L.readCode(publicKey, pc, v2).fields)
+      continue
+    }
+    if (res.why === 'typo') typos++
+  }
+  assert.ok(typos >= 48, 'как опечатка поймано ' + typos + ' из 55')
+  // Длина ни 50, ни 55 — опечатка
+  assert.deepEqual(L.readCode(publicKey, pc, plain.slice(0, 54)), { ok: false, why: 'typo' })
+  assert.deepEqual(L.readCode(publicKey, pc, plain.slice(0, 52)), { ok: false, why: 'typo' })
+  // Код сброса пароля модулей не несёт — всегда v1
+  const reset = L.issueCode(privateKey, pc, { kind: 'reset', until, registers: 0, serial: 3, modulesOff: ['sklad'] })
+  assert.equal(L.clean32(reset).length, 50)
+  assert.deepEqual(L.readCode(publicKey, pc, reset).fields.modulesOff, [])
+  // Ввод как попало
+  assert.equal(L.readCode(publicKey, pc, v2.toLowerCase().replace(/-/g, ' ').replace(/0/g, 'o')).ok, true)
+})
+
 test('дни: 1 января 2026 — день 0, сегодня — по Душанбе (UTC+5)', () => {
   assert.equal(L.dayOf('2026-01-01'), 0)
   assert.equal(L.dayOf('2027-01-01'), 365)
@@ -120,6 +171,11 @@ test('образцы для программы', () => {
   const pc = L.parseComputerCode(computer)
   const code = L.issueCode(VECTORS.privateKey, pc, { kind: 'activate', until: L.dayOf('2027-11-01'), registers: 2, serial: 7 })
   const reset = L.issueCode(VECTORS.privateKey, pc, { kind: 'reset', until: L.dayOf('2026-11-03'), registers: 0, serial: 4242 })
+  // Код v2 (1.8.1): выключены «Долги клиентов», «Срок годности» и «Обучение»
+  const codeModulesOff = ['debts', 'expiry', 'obuchenie']
+  const codeModules = L.issueCode(VECTORS.privateKey, pc, { kind: 'activate', until: L.dayOf('2027-11-01'), registers: 3, serial: 9, modulesOff: codeModulesOff })
   const expected = require('./licence-vectors.json')
-  assert.deepEqual({ publicKey, computer, code, reset }, expected)
+  assert.deepEqual({ publicKey, computer, code, reset, codeModules, codeModulesOff }, expected)
+  // Та же копия образцов лежит у программы
+  assert.deepEqual(require('../../desktop/test/licence-vectors.json'), expected)
 })

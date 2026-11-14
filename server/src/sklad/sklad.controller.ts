@@ -1,10 +1,12 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common'
-import { CurrentUser, Perm } from '../auth/decorators'
+import { CurrentUser, Modul, Perm } from '../auth/decorators'
 import { PeriodQuery } from '../common/period'
 import { SkladService } from './sklad.service'
 import { SkladEditDto, SkladToShopDto } from './dto'
 
 // ── Склад (1.8.0) ──
+// Модуль «Склад» выключен у магазина (1.8.1) — раздела нет, даже остатка для прихода и панели
+@Modul('sklad')
 @Controller('sklad')
 export class SkladController {
   constructor(private readonly sklad: SkladService) {}

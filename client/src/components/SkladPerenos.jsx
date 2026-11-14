@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { LuArrowRightLeft, LuSearch, LuStore } from 'react-icons/lu'
 import NumberInput from './NumberInput'
+import { useModul } from '../lib/useModul'
 import { useToast } from './ui'
 import { money, stockText } from '../db/store'
 import { skladToShop } from '../db/ops'
@@ -64,6 +65,7 @@ export function QtyFields({ p, packs, pieces, onChange, testid }) {
 // rows — строки склада (lib/sklad.js: skladPoTovaram); onDone — после переноса
 export function PerenosForm({ rows, onDone, onCancel, compact = false }) {
   const t = useT()
+  const srokOn = useModul('expiry')
   const toast = useToast()
   const [q, setQ] = useState('')
   const [vvod, setVvod] = useState({}) // productId → { packs, pieces }
@@ -113,7 +115,7 @@ export function PerenosForm({ rows, onDone, onCancel, compact = false }) {
                 <tr key={r.productId} data-testid="perenos-row">
                   <td className="cell-main">
                     <b>{r.product.name}</b>{r.product.dosage ? <span className="tag-cat"> · {r.product.dosage}</span> : null}
-                    <div className="tag-cat">{r.product.barcode}{r.expiry ? ` · ${t('срок')} ${fmtDate(r.expiry)}` : ''}</div>
+                    <div className="tag-cat">{r.product.barcode}{srokOn && r.expiry ? ` · ${t('срок')} ${fmtDate(r.expiry)}` : ''}</div>
                   </td>
                   <td className="num" data-label={t('На складе')}><b>{unitsText(r.units, r.product, t)}</b></td>
                   <td className="num" data-label={t('В магазине')}>{stockText(r.product)}</td>

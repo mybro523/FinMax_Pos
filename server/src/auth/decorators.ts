@@ -21,5 +21,15 @@ export const Roles = (...roles: string[]) => SetMetadata(ROLES_KEY, roles)
 export const PERM_KEY = 'perms'
 export const Perm = (...keys: string[]) => SetMetadata(PERM_KEY, keys)
 
+// ── Раздел модуля (1.8.1) ──
+// Владелец сервиса выключает модули магазина (common/moduli.ts). Права выключенного модуля и
+// так пропадают у всех, но часть разделов пускает и по правам обязательных разделов
+// (остаток склада читает и приход) — поэтому раздел модуля помечается и прямо: выключен
+// модуль у магазина — отказ всем, даже владельцу. Несколько ключей — раздел закрыт, только
+// когда выключены все
+export const MODULE_KEY = 'modul'
+export const Modul = (...keys: string[]) => SetMetadata(MODULE_KEY, keys)
+export const MODULE_OFF = 'Этот раздел у вашего магазина выключен'
+
 // Текущий пользователь из токена: @CurrentUser() u -> { sub, name, role }
 export const CurrentUser = createParamDecorator((_data, ctx: ExecutionContext) => ctx.switchToHttp().getRequest().user)

@@ -17,6 +17,7 @@ import OpuSheet from '../components/OpuSheet'
 import { ChekiOkno } from '../components/Cheki'
 import { skachatXlsx } from '../lib/excel'
 import { useCan, getUser } from '../db/auth'
+import { useRouteOn } from '../lib/useModul'
 
 const PERIODS = [
   { key: 'today', label: 'Сегодня', days: 0 },
@@ -314,6 +315,8 @@ function Opu({ onExcelRef }) {
 
 export default function Reports() {
   const can = useCan()
+  // Ссылки — только в разделы, которые у магазина есть (модули, lib/moduli.js)
+  const est = useRouteOn()
   const sales = useCollection('sales')
   const products = useCollection('products')
   // Возвраты и списания — это деньги и товар, ушедшие обратно. Без них
@@ -524,9 +527,11 @@ export default function Reports() {
           ))}
           {data.expenseCount === 0 && <div className="empty">{t('За период расходов нет')}</div>}
           <div className="total-row big"><span>{t('Всего расходов')}</span><span style={{ color: 'var(--danger)' }}>{money(data.expenses)}</span></div>
-          <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6 }}>
-            {t('Расходы вносятся в разделе «Расходы».')} <Link to="/expenses" className="linklike">{t('Открыть раздел')}</Link>
-          </p>
+          {est('/expenses') && (
+            <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6 }}>
+              {t('Расходы вносятся в разделе «Расходы».')} <Link to="/expenses" className="linklike">{t('Открыть раздел')}</Link>
+            </p>
+          )}
         </Modal>
       )
     }
@@ -541,9 +546,11 @@ export default function Reports() {
           ))}
           {data.incomeCount === 0 && <div className="empty">{t('За период доходов нет')}</div>}
           <div className="total-row big"><span>{t('Всего доходов')}</span><span style={{ color: 'var(--green)' }}>{money(data.incomes)}</span></div>
-          <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6 }}>
-            {t('Доходы вносятся в разделе «Доходы».')} <Link to="/incomes" className="linklike">{t('Открыть раздел')}</Link>
-          </p>
+          {est('/incomes') && (
+            <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6 }}>
+              {t('Доходы вносятся в разделе «Доходы».')} <Link to="/incomes" className="linklike">{t('Открыть раздел')}</Link>
+            </p>
+          )}
         </Modal>
       )
     }

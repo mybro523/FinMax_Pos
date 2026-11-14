@@ -20,7 +20,7 @@ test('код активации сервера читается: срок, чи�
   assert.equal(validKey(V.publicKey), true)
   const r = readCode(V.publicKey, computerRawOf(MACHINE), V.code)
   assert.equal(r.ok, true)
-  assert.deepEqual(r.fields, { kind: 'activate', until: r.fields.until, registers: 2, serial: 7 })
+  assert.deepEqual(r.fields, { kind: 'activate', until: r.fields.until, registers: 2, serial: 7, modulesOff: [] })
   assert.equal(dateOfDay(r.fields.until), '2027-11-01')
   const reset = readCode(V.publicKey, computerRawOf(MACHINE), V.reset)
   assert.equal(reset.ok, true)

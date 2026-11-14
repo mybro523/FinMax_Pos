@@ -5,10 +5,11 @@ import { useToast, useDialog } from '../components/ui'
 import { api } from '../db/api'
 import { onChanged } from '../db/store'
 import { useT } from '../lib/i18n'
-import { PERMISSION_GROUPS, OWNER_ROLE_ID, ALL_PERMISSIONS } from '../lib/permissions'
+import { PERMISSION_GROUPS, OWNER_ROLE_ID } from '../lib/permissions'
+import { offPerms } from '../lib/moduli'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
-import { getUser } from '../db/auth'
+import { getUser, useAuth } from '../db/auth'
 
 // ── Роли и права ──
 // Слева роли, справа права выбранной роли по группам. Владелец — особая роль:
@@ -27,6 +28,16 @@ export default function Roles() {
   const [selId, setSelId] = useState(OWNER_ROLE_ID)
   const [draft, setDraft] = useState([]) // права выбранной роли, пока не сохранены
   const [saving, setSaving] = useState(false)
+  // Права выключенных модулей магазина (lib/moduli.js) не показываются: раздела нет, и
+  // давать на него право незачем. В роли они остаются как были — вернётся модуль, вернутся и они
+  const me = useAuth()
+  const offKey = (me?.modulesOff || []).join(',')
+  const groups = useMemo(() => {
+    const off = offPerms(me)
+    return PERMISSION_GROUPS.map((g) => ({ ...g, items: g.items.filter(([k]) => !off.has(k)) })).filter((g) => g.items.length)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offKey])
+  const visibleKeys = useMemo(() => groups.flatMap((g) => g.items.map(([k]) => k)), [groups])
 
   const load = useCallback(async () => {
     try {
@@ -140,7 +151,7 @@ export default function Roles() {
     }
   }
 
-  const total = useMemo(() => PERMISSION_GROUPS.reduce((s, g) => s + g.items.length, 0), [])
+  const total = visibleKeys.length
 
   // ── Выгрузка и печать: кому что можно — права строками, роли колонками ──
   // Сохранённые права ролей (несохранённая правка в выгрузку не попадает)
@@ -150,7 +161,7 @@ export default function Roles() {
     { header: t('Право'), key: 'label', width: 44, wrap: true },
     ...roles.map((r) => ({ header: r.name, key: 'r_' + r.id, width: 14 })),
   ]
-  const exRows = PERMISSION_GROUPS.flatMap((g) =>
+  const exRows = groups.flatMap((g) =>
     g.items.map(([key, label]) => ({
       group: t(g.title),
       label: t(label),
@@ -159,7 +170,7 @@ export default function Roles() {
   )
   const exItogi = {
     group: t('Прав включено'),
-    ...Object.fromEntries(roles.map((r) => ['r_' + r.id, String(ALL_PERMISSIONS.filter((k) => hasRole(r, k)).length)])),
+    ...Object.fromEntries(roles.map((r) => ['r_' + r.id, String(visibleKeys.filter((k) => hasRole(r, k)).length)])),
   }
   const exPodzag = `${t('Ролей')}: ${roles.length} · ${t('Всего прав')}: ${total} · ${t('Владельцу можно всё')}`
   const exportExcel = () =>
@@ -195,7 +206,7 @@ export default function Roles() {
               <span className="role-item-main">
                 <b>{r.name}</b>
                 <span className="tag-cat">
-                  {r.people} {t('чел.')} · {r.id === OWNER_ROLE_ID ? t('все права') : `${r.permissions.length} ${t('из')} ${total}`}
+                  {r.people} {t('чел.')} · {r.id === OWNER_ROLE_ID ? t('все права') : `${r.permissions.filter((k) => visibleKeys.includes(k)).length} ${t('из')} ${total}`}
                 </span>
               </span>
               {r.system && <span className="role-lock" title={t('системная')}><LuLock size={14} /></span>}
@@ -235,7 +246,7 @@ export default function Roles() {
 
             {owner && <div className="note info" style={{ marginBottom: 14 }}>{t('У владельца всегда все права, изменить их нельзя.')}</div>}
 
-            {PERMISSION_GROUPS.map((g) => {
+            {groups.map((g) => {
               const keys = g.items.map(([k]) => k)
               const n = keys.filter((k) => has(k)).length
               return (

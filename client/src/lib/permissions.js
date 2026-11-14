@@ -7,6 +7,7 @@
 //
 // Владелец может всё: у него нет роли, и спрашивать его права незачем.
 // Расширение в путях не указано: файл грузится и проверками без сборщика.
+import { offPerms } from './moduli.js'
 export const PERMISSION_GROUPS = [
   {
     key: 'sales',
@@ -116,20 +117,25 @@ export const isOwner = (user) => user?.role === 'founder'
 
 // Права вошедшего. Сотрудник, вошедший до появления ролей, ещё не принёс их с
 // сервера — до обновления «кто я» он считается кассиром по умолчанию
+// Права выключенных модулей магазина (lib/moduli.js) пропадают у всех, и у владельца
 export function permissionsOf(user) {
   if (!user) return []
-  if (user.role === 'founder') return ALL_PERMISSIONS
-  if (Array.isArray(user.permissions)) return user.permissions
-  return user.role === 'cashier' ? CASHIER_DEFAULT : []
+  const off = offPerms(user)
+  const strip = (list) => (off.size ? list.filter((k) => !off.has(k)) : list)
+  if (user.role === 'founder') return strip(ALL_PERMISSIONS)
+  if (Array.isArray(user.permissions)) return strip(user.permissions)
+  return strip(user.role === 'cashier' ? CASHIER_DEFAULT : [])
 }
 
 // Достаточно любого из перечисленных прав
 // Касса магазина без интернета (1.7.0): удалить покупателя, пересчитать остаток и сменить свой
 // пароль можно только на главном компьютере — даже владельцу. Кнопок этого на кассе нет
 export const MAIN_ONLY = new Set(['customers.delete', 'inventory.count', 'inventory.apply', 'profile.password'])
+// Право выключенного модуля (lib/moduli.js) не даётся никому — и владельцу
 export function can(user, ...keys) {
   if (!user) return false
-  const list = user.register ? keys.filter((k) => !MAIN_ONLY.has(k)) : keys
+  const off = offPerms(user)
+  const list = keys.filter((k) => !(user.register && MAIN_ONLY.has(k)) && !off.has(k))
   if (!list.length) return false
   if (user.role === 'founder') return true
   const own = permissionsOf(user)

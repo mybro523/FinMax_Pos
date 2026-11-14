@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, ForbiddenException } from '@nestjs/common'
 import { ArrivalsService } from './arrivals.service'
-import { CurrentUser, Perm } from '../auth/decorators'
+import { CurrentUser, MODULE_OFF, Perm } from '../auth/decorators'
+import { moduleOn } from '../common/moduli'
 import { hasPerm } from '../auth/permissions'
 import { PeriodQuery } from '../common/period'
 import { CreateArrivalDto, UpdateArrivalDto } from './dto'
@@ -34,6 +35,8 @@ export class ArrivalsController {
   create(@Body() dto: CreateArrivalDto, @CurrentUser() u: any) {
     // Приход в долг поставщику — отдельное право: это обязательство магазина
     if ((dto.debt || 0) > 0 && !hasPerm(u, 'arrivals.debt')) throw new ForbiddenException('Нет права оформлять приход в долг')
+    // Модуль «Склад» выключен у магазина (1.8.1) — товар приходит только в магазин
+    if ((dto as any).place === 'sklad' && !moduleOn(u, 'sklad')) throw new ForbiddenException(MODULE_OFF)
 
     return this.arrivals.create(dto, u?.tenantUserId)
   }

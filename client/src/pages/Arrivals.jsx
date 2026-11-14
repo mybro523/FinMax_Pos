@@ -10,6 +10,7 @@ import { presetPeriod, periodRange, periodText, useDeepPeriod } from '../compone
 import { useCollection, useCollectionIf, money } from '../db/store'
 import { getArrival, updateArrival, deleteArrival } from '../db/ops'
 import { useCan, getUser } from '../db/auth'
+import { useModul } from '../lib/useModul'
 import { fmtDateTime } from '../lib/time'
 import { useT } from '../lib/i18n'
 import KameraKnopka from '../components/KameraKnopka'
@@ -621,6 +622,8 @@ function ArrivalDetails({ a, products, sposob, busy, canEdit, canLabels, onClose
 // записали (снимок строки): с ней строка и правится, и уходит на сервер
 function EditArrival({ arrival, suppliers, products, canAddSupplier, onClose, onSave }) {
   const t = useT()
+  // Модуль «Срок годности» выключен — столбца срока нет (прежний срок партии не меняется)
+  const srokOn = useModul('expiry')
   const dialog = useDialog()
   const toast = useToast()
   const [supplierId, setSupplierId] = useState(arrival.supplierId || '')
@@ -715,7 +718,7 @@ function EditArrival({ arrival, suppliers, products, canAddSupplier, onClose, on
               <th>{t('Товар')}</th>
               <th className="num">{t('Кол-во')}</th>
               <th className="num">{t('Закуп.')}</th>
-              <th>{t('Срок годности')}</th>
+              {srokOn && <th>{t('Срок годности')}</th>}
             </tr>
           </thead>
           <tbody>
@@ -750,9 +753,11 @@ function EditArrival({ arrival, suppliers, products, canAddSupplier, onClose, on
                 <td className="num" style={{ width: 104 }}>
                   <NumberInput className="disc-input" value={l.cost} onChange={(e) => set(n, 'cost', e.target.value)} />
                 </td>
-                <td style={{ width: 168 }}>
-                  <input type="date" style={{ width: '100%' }} value={l.expiryDate} onChange={(e) => set(n, 'expiryDate', e.target.value)} title={t('Пусто — срок останется прежним')} />
-                </td>
+                {srokOn && (
+                  <td style={{ width: 168 }}>
+                    <input type="date" style={{ width: '100%' }} value={l.expiryDate} onChange={(e) => set(n, 'expiryDate', e.target.value)} title={t('Пусто — срок останется прежним')} />
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

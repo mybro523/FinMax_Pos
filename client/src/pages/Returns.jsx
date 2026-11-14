@@ -24,6 +24,7 @@ import PrintDoc from '../components/PrintDoc'
 import { pechatTicket } from '../lib/pechat'
 import { getRekvizity } from '../lib/rekvizity'
 import { useAuth, useCan, getUser } from '../db/auth'
+import { useModul } from '../lib/useModul'
 
 // Чем вернули деньги — подписи те же, что в форме возврата
 const REFUND = { cash: 'Наличными из кассы', card: 'Возврат на карту', transfer: 'Возврат переводом', debt: 'Уменьшить долг клиента' }
@@ -39,6 +40,8 @@ const REFUND = { cash: 'Наличными из кассы', card: 'Возвра
 
 export default function Returns() {
   const can = useCan()
+  // Модуль «Срок годности» выключен у магазина — срок с упаковки не спрашиваем
+  const srokOn = useModul('expiry')
   const sales = useCollection('sales')
   // Журнал возвратов общий со сменой и отчётами: там от него зависят деньги в кассе
   const returns = useCollection('returns')
@@ -140,7 +143,7 @@ export default function Returns() {
   // Нужен ли товару срок годности: у бытовой химии и техники его нет — и спрашивать незачем
   const wantsExpiry = (l) => needsExpiry(products.find((p) => p.id === l.productId)?.category, categories)
   // Срок спрашиваем только у того, что возвращается в продажу
-  const asksExpiry = (l) => l.restock && l.units > 0 && !l.deleted && wantsExpiry(l)
+  const asksExpiry = (l) => srokOn && l.restock && l.units > 0 && !l.deleted && wantsExpiry(l)
   const today = dayKey()
 
   const customerDebt = Number(sale?.customer?.debt || 0)

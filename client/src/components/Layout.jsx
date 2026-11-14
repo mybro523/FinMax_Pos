@@ -9,6 +9,7 @@ import {
 import { useConnection } from '../db/store'
 import { useAuth, leavePharmacy } from '../db/auth'
 import { can, kassaFirst } from '../lib/permissions'
+import { moduleOn, routeOn } from '../lib/moduli'
 import { useT } from '../lib/i18n'
 import { isDesktop } from '../lib/desktop'
 import AppFoot from './AppFoot'
@@ -56,8 +57,11 @@ export const NAV = [
   { to: '/settings', label: 'Настройки', Icon: LuSettings },
 ]
 
+// Есть ли раздел у магазина вообще: раздел выключенного модуля (lib/moduli.js) не
+// показывается нигде — ни плиткой, ни серым, ни в «Меню» кассира
+export const navShown = (user, n) => routeOn(user, n.to)
 // Открыт ли раздел этому сотруднику
-export const allowedNav = (user, n) => (n.owner ? user?.role === 'founder' : !n.perm || can(user, n.perm))
+export const allowedNav = (user, n) => navShown(user, n) && (n.owner ? user?.role === 'founder' : !n.perm || can(user, n.perm))
 
 // Значок раздела, которого нет в меню (у остальных — значок их плитки)
 const EXTRA_ICONS = { '/about': LuInfo }
@@ -96,7 +100,8 @@ export default function Layout({ title, subtitle, note, actions, fill, hub, noTi
 
   // Тур по разделу есть у каждого пункта меню, кроме самого «Обучения»:
   // что у каждого пункта есть урок, стережёт отдельная проверка
-  const hasTour = NAV.some((n) => n.to === location.pathname && !n.help)
+  // Обучение выключено у магазина (модуль «Обучение») — и кнопки «?» нет
+  const hasTour = moduleOn(user, 'obuchenie') && NAV.some((n) => n.to === location.pathname && !n.help)
   const PageIcon = NAV.find((n) => n.to === location.pathname)?.Icon || EXTRA_ICONS[location.pathname] || null
 
   return (

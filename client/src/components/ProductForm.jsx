@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useModul } from '../lib/useModul'
 import { LuCamera, LuWandSparkles, LuX } from 'react-icons/lu'
 import NumberInput from './NumberInput'
 import { AddCategoryBtn } from './CategorySelect'
@@ -112,6 +113,8 @@ export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
 // arrival — форма открыта из прихода: «Остаток» здесь становится количеством в строке
 // прихода (товар считается один раз), а «Вскрыто (штук)» не спрашивается
 export default function ProductForm({ value, onChange, autoFocus = 'barcode', arrival = false }) {
+  // Модуль «Срок годности» выключен у магазина — поля срока в карточке нет
+  const srokOn = useModul('expiry')
   const dialog = useDialog()
   const fotoRef = useRef(null)
   const t = useT()
@@ -320,10 +323,12 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
           <label>{t('Фасовка / объём')}</label>
           <input value={value.dosage} onChange={(e) => set('dosage', e.target.value)} placeholder={t('напр. 500 мг, 1 л')} />
         </div>
-        <div className="field" style={{ flex: 1 }} data-tour="pf.expiry">
-          <label>{t('Срок годности')}</label>
-          <input type="date" value={value.expiryDate} onChange={(e) => set('expiryDate', e.target.value)} />
-        </div>
+        {srokOn && (
+          <div className="field" style={{ flex: 1 }} data-tour="pf.expiry">
+            <label>{t('Срок годности')}</label>
+            <input type="date" value={value.expiryDate} onChange={(e) => set('expiryDate', e.target.value)} />
+          </div>
+        )}
       </div>
 
       {/* Подписи в одну строку, «за 1 уп» — мелко под полем: три поля стоят на одной

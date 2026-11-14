@@ -1946,8 +1946,9 @@ input.pn-count { width: 84px; text-align: right; }
 .app-hub .main { height: 100vh; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 @supports (height: 100dvh) { .app-hub .main { height: 100dvh; } }
 .app-hub .topbar { flex: 0 0 auto; }
-/* 1.8.0: 24 раздела + касса на две клетки = 5 × 5 */
-.hub-grid { display: grid; gap: 12px; grid-template-columns: repeat(5, minmax(0, 1fr)); grid-template-rows: repeat(5, minmax(0, 1fr)); }
+/* 1.8.0: 24 раздела + касса на две клетки = 5 × 5. 1.8.1: у магазина без части модулей
+   рядов меньше (--hub-rows ставит Home.jsx) — плитки крупнее, пустых рядов нет */
+.hub-grid { display: grid; gap: 12px; grid-template-columns: repeat(5, minmax(0, 1fr)); grid-template-rows: repeat(var(--hub-rows, 5), minmax(0, 1fr)); }
 .hub-tile {
   --hub-pt: 14px; --hub-px: 12px; --hub-pb: 12px;
   position: relative; display: flex; flex-direction: column; align-items: flex-start; overflow: hidden;
@@ -1979,6 +1980,9 @@ input.pn-count { width: 84px; text-align: right; }
 /* Касса: золотая и на две колонки; картинка стоит справа, «КАССА» — заглавными и в полтора
    раза крупнее остальных надписей (если помещается левее тележки) */
 .hub-tile.wide { grid-column: span 2; }
+/* Последний неполный ряд (модули выключены) — на всю ширину, без пустых клеток (Home.jsx) */
+@media (min-width: 601px) { .hub-tile.stretch { grid-column: span var(--span, 1); } }
+@media (max-width: 600px) { .hub-tile.fill2 { grid-column: span 2; } }
 .hub-tile.wide .hub-pic { height: min(76%, 132px); right: 4%; bottom: 6%; }
 .hub-tile.gold { background: linear-gradient(160deg, #ffd65a 0%, var(--gold) 55%, var(--gold-dark) 100%); border-color: var(--gold-dark); color: var(--on-gold); }
 .hub-tile.gold .hub-name { font-size: var(--hub-fs-gold, clamp(16px, min(7cqw, 20cqh), 32px)); text-transform: uppercase; letter-spacing: 0.02em; text-shadow: none; }
@@ -2020,7 +2024,7 @@ input.pn-count { width: 84px; text-align: right; }
 }
 /* Окно ниже 520 px — плиткам не сжаться в нечитаемое: ряды постоянной высоты, меню листается */
 @media (min-width: 601px) and (max-height: 520px) {
-  .app-hub .hub-grid { grid-template-rows: repeat(5, 104px); }
+  .app-hub .hub-grid { grid-template-rows: repeat(var(--hub-rows, 5), 104px); }
 }
 /* Узкий экран (планшет стоя): та же сетка 5×5, но поля плиток и зазоры меньше. Слова и тут
    целиком — размер считается под самое длинное слово */

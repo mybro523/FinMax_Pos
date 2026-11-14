@@ -16,6 +16,8 @@ import { AuthService } from '../auth/auth.service'
 import { EventsGateway } from '../events/events.gateway'
 import { AccountCache } from './account-cache.service'
 import { SubscriptionWatchService } from './subscription-watch.service'
+import { cleanModulesOff, modulesLabel } from '../common/moduli'
+import { teamMemoForget } from '../sync/team'
 import { checkLogo } from './logo'
 import { importProducts } from './import-products'
 
@@ -39,6 +41,8 @@ export interface NewPharmacy {
   products?: unknown[]
   // Логотип магазина — data URL картинки (src/admin/logo.ts). Нет — чеки без логотипа
   logo?: string
+  // Выключенные модули (1.8.1, common/moduli.ts). Нет — всё включено
+  modulesOff?: string[]
 }
 
 export interface UpdatePharmacy {
@@ -55,6 +59,8 @@ export interface UpdatePharmacy {
   offlineDays?: number
   // Логотип: data URL — поставить или заменить, '' — убрать, нет поля — не трогать
   logo?: string
+  // Выключенные модули (1.8.1): полный новый список; [] — всё включено, нет поля — не трогать
+  modulesOff?: string[]
 }
 
 export interface ExtendPharmacy {
@@ -175,6 +181,8 @@ export class PharmaciesService {
           schemaName,
           paidUntil,
           trial: true,
+          // Выключенные модули (1.8.1): неизвестные ключи отбрасываются, пусто — всё включено
+          modulesOff: cleanModulesOff(dto.modulesOff),
           // Логотип — той же записью: магазин заводится сразу с ним или без него
           ...(logo ? { logoAt: new Date(), logo: { create: { data: logo } } } : {}),
         },
@@ -338,6 +346,11 @@ export class PharmaciesService {
     }
     if (dto.trial !== undefined) data.trial = !!dto.trial
     if (dto.offlineDays !== undefined) data.offlineDays = offlineDaysOf({ offlineDays: dto.offlineDays })
+    // Модули (1.8.1): пишем, только если список действительно другой
+    const modulesBefore = cleanModulesOff(ph.modulesOff)
+    const modulesNext = dto.modulesOff !== undefined ? cleanModulesOff(dto.modulesOff) : modulesBefore
+    const modulesChanged = modulesNext.join(',') !== modulesBefore.join(',')
+    if (modulesChanged) data.modulesOff = modulesNext
 
     // Логотип: новая картинка — заменить, пустая строка — убрать. Отметка logoAt меняется
     // вместе с картинкой одной транзакцией: по ней кассы решают, забирать ли картинку заново
@@ -366,6 +379,20 @@ export class PharmaciesService {
     if (dto.offlineDays !== undefined && data.offlineDays !== ph.offlineDays) {
       this.accounts.dropPharmacy(id)
       await this.log_(byAccountId, ph, 'set-offline-days', `работа без связи: ${data.offlineDays} дн. (было ${ph.offlineDays})`)
+    }
+    // Модули сменились: сторож забывает прежние права сразу, а открытые кассы и вкладки
+    // магазина переспрашивают «кто я» (тот же сигнал, что при смене срока) — выключенный
+    // раздел исчезает без перезагрузки
+    if (modulesChanged) {
+      this.accounts.dropPharmacy(id)
+      teamMemoForget(id)
+      this.events.subscriptionChanged(ph.schemaName)
+      await this.log_(
+        byAccountId,
+        ph,
+        'set-modules',
+        modulesNext.length ? `модули: выключены ${modulesLabel(modulesNext)}` : 'модули: все включены',
+      )
     }
     if (dto.paidUntil !== undefined || dto.trial !== undefined) {
       this.accounts.dropPharmacy(id)

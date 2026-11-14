@@ -16,6 +16,7 @@
 //     «Расхождениях», касса узнаёт новый логин при обмене;
 //   • роль с таким же названием уже есть — это та же роль (номер кассы ведёт к ней);
 //   • отказы — те же, что на сайте, теми же словами.
+import { cleanModulesOff } from '../common/moduli'
 import { createHash } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { AdminDbService } from '../admin/admin-db.service'
@@ -352,7 +353,7 @@ async function roleDelete(tx: Tx, p: { id: string; at: Date }, ctx: EditCtx, kit
 // а список меняется редко — он помнится несколько секунд и забывается при любой правке
 // сотрудника или роли (здесь, на сайте — users.service, roles.service)
 const TEAM_MEMO_MS = 5000
-const memo = new Map<string, { at: number; value: { v: string; accounts: any[]; roles: any[] } }>()
+const memo = new Map<string, { at: number; value: { v: string; accounts: any[]; roles: any[]; modulesOff: string[] } }>()
 export function teamMemoForget(pharmacyId?: string | null) {
   if (pharmacyId) memo.delete(pharmacyId)
 }
@@ -368,9 +369,10 @@ export async function teamFor(team: TeamKit, pharmacyId: string) {
 
 async function teamOf(team: TeamKit, pharmacyId: string) {
   // Без «заведения ролей по умолчанию» (roles.ensure пишет в базу): обмен только читает
-  const [roleRows, owners] = await Promise.all([
+  const [roleRows, owners, shop] = await Promise.all([
     team.admin.role.findMany({ where: { pharmacyId }, orderBy: [{ system: 'desc' }, { createdAt: 'asc' }], include: { _count: { select: { accounts: true } } } }),
     team.admin.account.count({ where: { pharmacyId, role: 'founder' } }),
+    team.admin.pharmacy.findUnique({ where: { id: pharmacyId }, select: { modulesOff: true } }),
   ])
   const roles = [
     { id: OWNER_ROLE.id, name: OWNER_ROLE.name, description: OWNER_ROLE.description, system: 'owner', permissions: ALL_PERMISSIONS, people: owners },
@@ -391,5 +393,7 @@ async function teamOf(team: TeamKit, pharmacyId: string) {
     createdAt: a.createdAt,
     userId: a.tenantUserId ?? null,
   }))
-  return { accounts, roles }
+  // Выключенные модули магазина (1.8.1): программа проверяет по ним вход и действия любого
+  // сотрудника без связи. Сменились — сменится и отпечаток v, касса получит команду заново
+  return { accounts, roles, modulesOff: cleanModulesOff(shop?.modulesOff) }
 }

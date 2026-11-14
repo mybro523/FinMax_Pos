@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useState } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { ToastProvider, DialogProvider, useToast } from './components/ui'
 import ErrorBoundary from './components/ErrorBoundary'
 import PageFallback from './components/PageFallback'
@@ -11,6 +11,7 @@ import Suspended from './components/Suspended'
 import { setThemeScope } from './lib/theme'
 import { setLangScope } from './lib/i18n'
 import { can, kassaFirst } from './lib/permissions'
+import { moduleOn, routeOn } from './lib/moduli'
 
 // Ленивые страницы — код грузится по требованию (быстрый первый экран)
 const Home = lazy(() => import('./pages/Home'))
@@ -129,8 +130,10 @@ const homeFor = (user) => (user?.role === 'superadmin' ? '/admin' : kassaFirst(u
 // Нет права — на главный экран, где этот раздел показан серым (кассира главный экран
 // сам уводит в кассу). Проверка здесь — для удобства, а не для защиты: сервер отклонит
 // запрос и без неё
+// Раздел выключенного модуля магазина (lib/moduli.js) не открывается и по прямому адресу
 function Allowed({ user, perm, owner, children }) {
-  const ok = owner ? user?.role === 'founder' : !perm || can(user, perm)
+  const { pathname } = useLocation()
+  const ok = routeOn(user, pathname) && (owner ? user?.role === 'founder' : !perm || can(user, perm))
   return ok ? children : <Navigate to="/" replace />
 }
 
@@ -158,7 +161,9 @@ function AuthedApp({ user }) {
   // закрыл, пропустил или прошёл, и больше тур сам не выскакивает; снова его
   // запускают из «Обучения». Владельцу сервиса это не нужно: у него другая программа.
   useEffect(() => {
-    if (!isService && !obucheniePokazano()) startTour(OBSHIY)
+    // Модуль «Обучение» выключен у магазина — тур сам не запускается
+    if (!isService && moduleOn(user, 'obuchenie') && !obucheniePokazano()) startTour(OBSHIY)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isService])
 
   // ── Постоянное соединение держат все ──
@@ -174,7 +179,9 @@ function AuthedApp({ user }) {
 
   // Владелец поменял права роли — открытые окна перечитывают «кто я» и тут же
   // прячут или показывают разделы, не дожидаясь нового входа
-  useEffect(() => onChanged((keys) => keys.includes('roles') && refreshMe()), [])
+  // Владелец сервиса поменял модули магазина (событие 'moduli') — так же: разделы и кнопки
+  // выключенных модулей пропадают сразу
+  useEffect(() => onChanged((keys) => (keys.includes('roles') || keys.includes('moduli')) && refreshMe()), [])
   // Логотип магазина забираем сразу после входа: к первой печати чека он уже на месте.
   // На сайте он же идёт в окно покупателя (программа добавляет его сама)
   const shopLogo = useShopLogo()
@@ -232,7 +239,7 @@ function AuthedApp({ user }) {
           <Route path="/sales-report" element={guarded('reports.view', <SalesReport />)} />
           <Route path="/supplier-report" element={guarded('suppliers.view', <SupplierReport />)} />
           <Route path="/settings" element={<Settings />} />
-          <Route path="/obuchenie" element={<Obuchenie />} />
+          <Route path="/obuchenie" element={guarded(null, <Obuchenie />)} />
           {/* О компании FinMax — кнопка в шапке главного меню, открыта всем */}
           <Route path="/about" element={<About />} />
           <Route path="/employees" element={ownerOnly(<Employees />)} />

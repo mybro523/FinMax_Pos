@@ -14,6 +14,7 @@ import { useCollection, refresh, db, resetStore } from '../db/store'
 import { api, LONG_TIMEOUT_MS } from '../db/api'
 import { dayKey, fmtDate, serverNow, tjMoment } from '../lib/time'
 import { useAuth, useCan, changePassword as apiChangePassword } from '../db/auth'
+import { useModul } from '../lib/useModul'
 import { useT, useLang, setLang, LANGS } from '../lib/i18n'
 import { useTheme, setTheme } from '../lib/theme'
 import DevicesPanel from '../components/DevicesPanel'
@@ -773,6 +774,8 @@ function IncomeCategoriesPanel() {
 // Список задаёт владелец, и он тут же уходит во все формы, фильтры и приёмку:
 // категории живут в общем слое данных и рассылаются на устройства сигналом.
 function CategoriesPanel() {
+  // Модуль «Срок годности» выключен у магазина — отметки «срок нужен / не нужен» нет
+  const srokOn = useModul('expiry')
   const t = useT()
   const toast = useToast()
   const dialog = useDialog()
@@ -851,25 +854,29 @@ function CategoriesPanel() {
           <span className="ic"><LuPlus size={16} /></span> {t('Добавить')}
         </button>
       </div>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, color: 'var(--muted)', marginBottom: 14 }}>
-        <input type="checkbox" checked={noExpiry} onChange={(e) => setNoExpiry(e.target.checked)} style={{ width: 16, height: 16 }} />
-        {t('срок годности не нужен (бинты, вата, приборы)')}
-      </label>
+      {srokOn && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, color: 'var(--muted)', marginBottom: 14 }}>
+          <input type="checkbox" checked={noExpiry} onChange={(e) => setNoExpiry(e.target.checked)} style={{ width: 16, height: 16 }} />
+          {t('срок годности не нужен (бинты, вата, приборы)')}
+        </label>
+      )}
 
       <table>
         <thead>
-          <tr><th>{t('Категория')}</th><th className="num">{t('Товаров')}</th><th>{t('Срок годности')}</th><th></th></tr>
+          <tr><th>{t('Категория')}</th><th className="num">{t('Товаров')}</th>{srokOn && <th>{t('Срок годности')}</th>}<th></th></tr>
         </thead>
         <tbody>
           {categories.map((c) => (
             <tr key={c.id}>
               <td><b>{c.name}</b></td>
               <td className="num">{countIn(c.name)}</td>
-              <td>
-                <button className="btn ghost sm" onClick={() => toggleExpiry(c)} title={t('Нажмите, чтобы изменить')}>
-                  {c.noExpiry ? t('не нужен') : t('обязателен')}
-                </button>
-              </td>
+              {srokOn && (
+                <td>
+                  <button className="btn ghost sm" onClick={() => toggleExpiry(c)} title={t('Нажмите, чтобы изменить')}>
+                    {c.noExpiry ? t('не нужен') : t('обязателен')}
+                  </button>
+                </td>
+              )}
               <td className="num" style={{ whiteSpace: 'nowrap' }}>
                 <button className="btn ghost sm icon" onClick={() => rename(c)} title={t('Переименовать')}><LuPencil size={15} /></button>{' '}
                 <button className="btn ghost sm icon" onClick={() => remove(c)} title={t('Удалить')}><LuTrash2 size={15} /></button>

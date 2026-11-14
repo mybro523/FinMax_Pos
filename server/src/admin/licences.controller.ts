@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post } from '@nestjs/common'
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator'
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator'
 import { CurrentUser, Roles, ServiceWide } from '../auth/decorators'
 import { LicencesService, MAX_REGISTERS } from './licences.service'
 
@@ -31,6 +31,13 @@ export class IssueLicenceDto {
   @IsString()
   @MaxLength(200)
   note?: string
+
+  // Выключенные модули (1.8.1) — зашиваются в код активации; неизвестные отбрасываются
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(64)
+  @IsString({ each: true })
+  modulesOff?: string[]
 }
 
 // ── Коды активации: выпуск и список — только владельцу сервиса ──

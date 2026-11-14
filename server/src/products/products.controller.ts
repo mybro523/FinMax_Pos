@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { ProductsService } from './products.service'
-import { CurrentUser, Perm } from '../auth/decorators'
+import { CurrentUser, Modul, Perm } from '../auth/decorators'
 import { hasPerm } from '../auth/permissions'
 import { PeriodQuery } from '../common/period'
 import { CreateProductDto, MergeProductDto, UpdateProductDto } from './dto'
@@ -31,6 +31,8 @@ export class ProductsController {
 
   // Поставщик каждого товара — по последнему приходу (авто-заявка, 1.7.2)
   @Get('suppliers')
+  // Модуль «Авто-заявка» выключен (1.8.1) — раздела нет
+  @Modul('orders')
   @Perm('orders.view')
   lastSuppliers() {
     return this.products.lastSuppliers()

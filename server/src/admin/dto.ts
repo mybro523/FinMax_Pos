@@ -25,6 +25,9 @@ export class CreatePharmacyDto {
 
   // Товары из Excel клиента (admin/import-products.ts проверяет каждую строку)
   @IsOptional() @IsArray() @ArrayMaxSize(50000) products?: any[]
+
+  // Выключенные модули (1.8.1): ключи из common/moduli.ts; неизвестные отбрасываются. Нет — всё включено
+  @IsOptional() @IsArray() @ArrayMaxSize(64) @IsString({ each: true }) modulesOff?: string[]
 }
 
 // Дозагрузка товаров из Excel в уже заведённый магазин
@@ -53,4 +56,6 @@ export class UpdatePharmacyDto {
   @IsOptional() @IsInt() @Min(1) @Max(30) offlineDays?: number
   // Логотип: data URL — поставить или заменить, пустая строка — убрать, нет поля — не трогать
   @IsOptional() @IsString() logo?: string
+  // Выключенные модули (1.8.1): полный новый список; пустой — всё включено, нет поля — не трогать
+  @IsOptional() @IsArray() @ArrayMaxSize(64) @IsString({ each: true }) modulesOff?: string[]
 }

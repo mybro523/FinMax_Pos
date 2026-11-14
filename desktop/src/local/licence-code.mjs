@@ -9,6 +9,7 @@
 // Электрон собран с BoringSSL, а в нём этой кривой нет — поэтому арифметика своя, на BigInt.
 // Она короткая, и тесты сверяют её с OpenSSL (server/test/licence-code.test.js).
 import { createHash } from 'node:crypto'
+import { modulesFromMask } from './moduli.mjs'
 
 const P = 0xfffffffdffffffffffffffffffffffffn
 const A = 0xfffffffdfffffffffffffffffffffffcn
@@ -143,17 +144,31 @@ const KINDS = { 1: 'activate', 2: 'reset' }
 const message = (computer, payload) => Buffer.concat([Buffer.from('FMX-CODE-1'), computer, payload])
 
 // ── Прочитать код ──
-// { ok: true, fields: { kind, until, registers, serial } } или { ok: false, why }:
-// 'typo' — опечатка (не сошлась проверка), 'bad' — код не для этого компьютера или подделан
+// { ok: true, fields: { kind, until, registers, serial, modulesOff } } или { ok: false, why }:
+// 'typo' — опечатка (не сошлась проверка), 'bad' — код не для этого компьютера или подделан.
+// Два вида (1.8.1):
+//   v1 — 50 знаков: данные 6 байт, все модули включены (modulesOff пуст);
+//   v2 — 55 знаков: данные 9 байт, в последних трёх — маска выключенных модулей (moduli.mjs:
+//        бит i — модуль MODULES[i] выключен). Сервер выпускает v2, только если что-то выключено,
+//        поэтому коды «всё включено» по-прежнему читают и программы до 1.8.1
+const FORMS = {
+  50: { chars: 48, bytes: 30, payload: 6, ver: 1 },
+  55: { chars: 53, bytes: 33, payload: 9, ver: 2 },
+}
 export function readCode(publicKey, computerRaw, text) {
   const c = clean32(text)
-  if (c.length !== 50) return { ok: false, why: 'typo' }
-  const body = decode32(c.slice(0, 48), 30)
-  if (!body || check2('FMX-CHK', body) !== c.slice(48)) return { ok: false, why: 'typo' }
-  const payload = body.subarray(0, 6)
-  if (payload[0] >> 4 !== 1) return { ok: false, why: 'bad' }
+  const form = FORMS[c.length]
+  if (!form) return { ok: false, why: 'typo' }
+  const body = decode32(c.slice(0, form.chars), form.bytes)
+  if (!body || check2('FMX-CHK', body) !== c.slice(form.chars)) return { ok: false, why: 'typo' }
+  const payload = body.subarray(0, form.payload)
+  if (payload[0] >> 4 !== form.ver) return { ok: false, why: 'bad' }
   const kind = KINDS[payload[0] & 0x0f]
   if (!kind) return { ok: false, why: 'bad' }
-  if (!verify(publicKey, message(computerRaw, payload), body.subarray(6))) return { ok: false, why: 'bad' }
-  return { ok: true, fields: { kind, until: payload.readUInt16BE(1), registers: payload[3], serial: payload.readUInt16BE(4) } }
+  if (!verify(publicKey, message(computerRaw, payload), body.subarray(form.payload))) return { ok: false, why: 'bad' }
+  const mask = form.ver === 2 ? payload.readUIntBE(6, 3) : 0
+  return {
+    ok: true,
+    fields: { kind, until: payload.readUInt16BE(1), registers: payload[3], serial: payload.readUInt16BE(4), modulesOff: modulesFromMask(mask) },
+  }
 }

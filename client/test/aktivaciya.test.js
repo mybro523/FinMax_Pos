@@ -234,3 +234,24 @@ test('вставка кода компьютера из сообщения: дв
   // Без групп — русские слова отбрасываются
   assert.equal(normalizeCode(pastedCode('Код: XJ980C0A4R', 2), 10), 'XJ980C0A4R')
 })
+
+// ── Код с модулями магазина (1.8.1): 55 знаков, 11 групп; узнаётся по первому знаку «4» ──
+test('код с модулями: 55 знаков, обычный — 50; длина — по первому знаку', async () => {
+  const { CODE_LEN_MODULES, codeLenOf, codeComplete } = await import('../src/lib/aktivaciya.js')
+  const LONG = '4419T-0R014-0820G-TDY9Z-PMRYP-XEFKK-7P69J-YBBK5-TWMDM-05QH3-F86XG'
+  const LRAW = LONG.replace(/-/g, '')
+  assert.equal(LRAW.length, CODE_LEN_MODULES)
+  assert.equal(codeLenOf(LRAW), 55)
+  assert.equal(codeLenOf(RAW), CODE_LEN)
+  assert.equal(normalizeCode(LONG.toLowerCase()), LRAW)
+  assert.equal(normalizeCode(LRAW + 'ABCDE'), LRAW, 'больше 55 не набирается')
+  assert.equal(formatCode(LRAW), LONG)
+  assert.equal(codeComplete(LONG), true)
+  assert.equal(codeComplete(LONG.slice(0, -1)), false)
+  assert.equal(codeComplete(LRAW.slice(0, 50)), false, 'длинный код на 50-м знаке ещё не введён')
+  assert.equal(codeComplete(CODE), true)
+  // Вставка из сообщения — код целиком, хоть 11 групп, хоть 10
+  assert.equal(pastedCode(`Ваш код: ${LONG}. Спасибо`), LRAW)
+  assert.equal(pastedCode(`Ваш код: ${CODE}. Спасибо`), RAW)
+  assert.equal(normalizeCode(pastedCode(`Ваш код: ${LONG}`), Infinity), LRAW)
+})

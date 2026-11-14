@@ -23,6 +23,7 @@ import { periodFinance } from '../lib/finance'
 import { LuTriangleAlert } from 'react-icons/lu'
 import { useT, translate as tr } from '../lib/i18n'
 import { useCan, getUser } from '../db/auth'
+import { useModul, useRouteOn } from '../lib/useModul'
 
 // Формулы упаковок и штук — общие, из lib/units
 const unitsOf = stockUnits
@@ -71,6 +72,11 @@ export default function Dashboard() {
   const writeOffs = useCollection('writeoffs')
   const t = useT()
   const can = useCan()
+  // Модули магазина (1.8.1): без «Срока годности» нет и «истекает», без «Долгов клиентов» —
+  // карточки долгов; ссылки ведут только в разделы, которые у магазина есть
+  const srokOn = useModul('expiry')
+  const dolgiOn = useModul('debts')
+  const est = useRouteOn()
   // Склад (1.8.0): партии склада — только тому, кому раздел разрешён
   const skladOn = can('sklad.view')
   const skladBatches = useCollectionIf('skladBatches', skladOn)
@@ -148,9 +154,9 @@ export default function Dashboard() {
     return {
       salesToday, profitToday, costToday, todayByPay, todayList, todayCount: todayList.length, fin,
       stockValue, stockCost, stockUnits, debtTotal, debtors, supplierDebt, creditors, lowList, outList, margin, categories, deadStock,
-      chart, topProducts, recent, expiring: expiringProducts(products).length,
+      chart, topProducts, recent, expiring: srokOn ? expiringProducts(products).length : 0,
     }
-  }, [sales, products, customers, suppliers, returns, writeOffs])
+  }, [sales, products, customers, suppliers, returns, writeOffs, srokOn])
 
 
   function renderModal() {
@@ -243,7 +249,7 @@ export default function Dashboard() {
             </table>
           </div>
           <div className="modal-actions">
-            <Link to="/orders" className="btn" onClick={close}>{t('Открыть авто-заявку')}</Link>
+            {est('/orders') && <Link to="/orders" className="btn" onClick={close}>{t('Открыть авто-заявку')}</Link>}
           </div>
         </Modal>
       )
@@ -280,7 +286,7 @@ export default function Dashboard() {
               </tbody>
             </table>
           </div>
-          <div className="modal-actions"><Link to="/debts" className="btn ghost" onClick={close}>{t('Все клиенты')}</Link></div>
+          {est('/debts') && <div className="modal-actions"><Link to="/debts" className="btn ghost" onClick={close}>{t('Все клиенты')}</Link></div>}
         </Modal>
       )
     }
@@ -436,7 +442,7 @@ export default function Dashboard() {
       return (
         <Modal wide title={t('Заканчивается')} onClose={close}>
           <ProductTable list={stats.lowList} showValue />
-          <div className="modal-actions"><Link to="/orders" className="btn" onClick={close}>{t('Открыть авто-заявку')}</Link></div>
+          {est('/orders') && <div className="modal-actions"><Link to="/orders" className="btn" onClick={close}>{t('Открыть авто-заявку')}</Link></div>}
         </Modal>
       )
     }
@@ -507,12 +513,12 @@ export default function Dashboard() {
       : []),
     { k: t('Вложено в товар (по закупочной)'), sum: kop(stats.stockCost + sklad.cost) },
     { k: t('Средняя маржа склада, %'), cnt: stats.margin },
-    { k: t('Долги клиентов'), sum: kop(stats.debtTotal), cnt: stats.debtors.length },
+    ...(dolgiOn ? [{ k: t('Долги клиентов'), sum: kop(stats.debtTotal), cnt: stats.debtors.length }] : []),
     { k: t('Долги поставщикам'), sum: kop(stats.supplierDebt), cnt: stats.creditors.length },
     { k: t('Заканчивается, позиций'), cnt: stats.lowList.length },
     { k: t('Нет в наличии, позиций'), cnt: stats.outList.length },
     { k: t('Неликвид (без продаж), позиций'), cnt: stats.deadStock.length },
-    { k: t('Срок годности истекает, позиций'), cnt: stats.expiring },
+    ...(srokOn ? [{ k: t('Срок годности истекает, позиций'), cnt: stats.expiring }] : []),
   ]
   const itogo = (rows, key) => kop(rows.reduce((s, r) => s + (Number(r[key]) || 0), 0))
   const prodazhiDnya = stats.todayList.map((s) => ({
@@ -542,7 +548,7 @@ export default function Dashboard() {
       cols: [{ header: t('Товар'), key: 'name', width: 34 }, { header: t('Категория'), key: 'cat', width: 18 }, { header: t('Остаток'), key: 'stock', width: 16 }, { header: t('Минимум'), key: 'min', width: 10, num: true }],
       rows: stats.lowList.map((p) => ({ name: p.name, cat: p.category || '', stock: stockText(p), min: p.minStock })),
     },
-    {
+    dolgiOn && {
       list: t('Должники'), zagolovok: t('Долги клиентов'),
       cols: [{ header: t('Клиент'), key: 'name', width: 28 }, { header: t('Телефон'), key: 'phone', width: 18 }, { header: t('Долг'), key: 'debt', width: 14, money: true }],
       rows: stats.debtors.map((c) => ({ name: c.name, phone: c.phone || '', debt: kop(c.debt) })),
@@ -558,7 +564,7 @@ export default function Dashboard() {
       rows: prodazhiDnya,
     },
   ]
-    .filter((l) => l.rows.length)
+    .filter((l) => l && l.rows.length)
     .map((l) => (l.cols.some((c) => c.money) ? { ...l, itogi: { [l.cols[0].key]: t('Итого'), ...Object.fromEntries(l.cols.filter((c) => c.money).map((c) => [c.key, itogo(l.rows, c.key)])) } } : l))
   const exPodzag = `${t('Сводка на')} ${fmtShort(new Date())}`
   const exportExcel = () =>
@@ -574,7 +580,7 @@ export default function Dashboard() {
       }>
       <PrintSheet zagolovok={t('Панель управления')} podzag={exPodzag} cols={exCols} rows={exRows} listy={exListy} />
 
-      {stats.expiring > 0 && (
+      {stats.expiring > 0 && est('/expiry') && (
         <Link to="/expiry" className="note err" data-tour="dash.expiring" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, textDecoration: 'none' }}>
           <LuTriangleAlert size={18} style={{ flexShrink: 0 }} />
           <span><b>{stats.expiring}</b> {t('товар(ов) с истекающим или истёкшим сроком годности — проверьте раздел «Срок годности»')}</span>
@@ -617,8 +623,10 @@ export default function Dashboard() {
           <Metric testid="card-dash-vsego" label={t('Всего товара')} value={money(stats.stockValue + sklad.value)} Icon={LuLayers} tint="green"
             sub={`${t('магазин + склад')} · ${t('по закупке')} ${money(stats.stockCost + sklad.cost)}`} onClick={() => setModal({ type: 'vsego' })} />
         )}
-        <Metric tour="dash.debts" testid="card-dash-debts" label={t('Долги клиентов')} value={money(stats.debtTotal)} Icon={LuReceipt} tint={stats.debtTotal > 0 ? 'danger' : 'accent'}
-          sub={stats.debtors.length ? `${stats.debtors.length} ${t('клиент(ов) с долгом')}` : t('долгов нет')} onClick={() => setModal({ type: 'debts' })} />
+        {dolgiOn && (
+          <Metric tour="dash.debts" testid="card-dash-debts" label={t('Долги клиентов')} value={money(stats.debtTotal)} Icon={LuReceipt} tint={stats.debtTotal > 0 ? 'danger' : 'accent'}
+            sub={stats.debtors.length ? `${stats.debtors.length} ${t('клиент(ов) с долгом')}` : t('долгов нет')} onClick={() => setModal({ type: 'debts' })} />
+        )}
         <Metric tour="dash.suppliers" testid="card-dash-suppliers" label={t('Долги поставщикам')} value={money(stats.supplierDebt)} Icon={LuTruck} tint={stats.supplierDebt > 0 ? 'danger' : 'accent'}
           sub={stats.creditors.length ? `${stats.creditors.length} ${t('поставщик(ов) с долгом')}` : t('долгов нет')} onClick={() => setModal({ type: 'suppliers' })} />
       </div>
@@ -666,7 +674,7 @@ export default function Dashboard() {
       <div className="panel mt" data-tour="dash.recent">
         <h2>
           <span className="h2-title"><span className="ic"><LuReceipt size={17} /></span>{t('Последние продажи')}</span>
-          <Link to="/reports" className="linklike">{t('смотреть все')} <LuChevronRight size={14} /></Link>
+          {est('/reports') && <Link to="/reports" className="linklike">{t('смотреть все')} <LuChevronRight size={14} /></Link>}
         </h2>
         <table>
           <thead><tr><th>{t('Время')}</th><th>{t('Товары')}</th><th className="num">{t('Сумма')}</th><th>{t('Оплата')}</th></tr></thead>

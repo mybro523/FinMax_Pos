@@ -13,6 +13,7 @@ import { useT } from '../lib/i18n'
 import KameraKnopka from '../components/KameraKnopka'
 import { poiskZapros, tovarPodhodit } from '../lib/poisk'
 import { getUser, useCan } from '../db/auth'
+import { useModul } from '../lib/useModul'
 import { useCategories, categoryNames } from '../lib/categories'
 import { sellsBelowCost } from '../lib/pricing'
 import ProductForm, { emptyProduct, productPayload, vesUpText, repackNeeded } from '../components/ProductForm'
@@ -43,6 +44,8 @@ export default function Products() {
   // Сервер такие запросы всё равно отклонит — кнопки убраны, чтобы кассир не упирался
   // в отказ там, где кнопка выглядит рабочей.
   const can = useCan()
+  // Модуль «Срок годности» выключен у магазина — столбца «Годен до» нет ни в таблице, ни в выгрузке
+  const srokOn = useModul('expiry')
   const [q, setQ] = useState('')
   const [cat, setCat] = useState('Все')
   const [edit, setEdit] = useState(null) // объект формы или null
@@ -155,7 +158,7 @@ export default function Products() {
     { header: t('Ед.'), key: 'unit', width: 9 },
     { header: t('Продажа'), key: 'price', width: 13, money: true },
     { header: t('Остаток'), key: 'ostatok', width: 13, num: true },
-    { header: t('Годен до'), key: 'exp', width: 13 },
+    ...(srokOn ? [{ header: t('Годен до'), key: 'exp', width: 13 }] : []),
   ]
   const exRows = useMemo(
     () =>
@@ -224,7 +227,7 @@ export default function Products() {
                 </th>
               )}
               <th>{t('Наименование')}</th><th>{t('Штрихкод')}</th><th>{t('Категория')}</th>
-              <th className="num">{t('Продажа')}</th><th className="num">{t('Остаток')}</th><th>{t('Годен до')}</th><th></th>
+              <th className="num">{t('Продажа')}</th><th className="num">{t('Остаток')}</th>{srokOn && <th>{t('Годен до')}</th>}<th></th>
             </tr>
           </thead>
           <tbody>
@@ -249,14 +252,14 @@ export default function Products() {
                   <td className="num">
                     <span className={'badge ' + (p.stock <= p.minStock ? 'low' : 'ok')}>{stockText(p)}</span>
                   </td>
-                  <td>
+                  {srokOn && <td>
                     {e.has ? (
                       <span style={{ color: EXP_COLOR[e.level], fontWeight: e.level === 'ok' ? 400 : 600, fontSize: 13 }}>
                         {fmtDate(p.expiryDate)}
                         {e.level !== 'ok' && <div className="tag-cat" style={{ color: EXP_COLOR[e.level] }}>{expiryLabel(e.days)}</div>}
                       </span>
                     ) : <span className="tag-cat">—</span>}
-                  </td>
+                  </td>}
                   <td className="num" style={{ whiteSpace: 'nowrap' }}>
                     {can('products.labels') && (
                       <><button className="btn ghost sm icon" data-tour="prod.label" onClick={() => setLabelFor(p)} title={t('Печать этикетки')}><LuTag size={15} /></button>{' '}</>

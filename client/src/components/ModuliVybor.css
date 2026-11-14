@@ -1,0 +1,36 @@
+/* Модули магазина (1.8.1): галочки в панели владельца сервиса.
+   Внутри .field общие правила полей (подпись блоком, поле на всю ширину) переопределены */
+.moduli-vybor .moduli-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 2px 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  min-width: 0;
+}
+.moduli-vybor label.moduli-item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+  padding: 5px 0;
+  margin: 0;
+  cursor: pointer;
+  min-width: 0;
+}
+.moduli-vybor label.moduli-item[data-off] span { color: var(--muted); text-decoration: line-through; }
+.moduli-vybor label.moduli-item input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  margin: 0;
+  padding: 0;
+  flex: none;
+}

@@ -1,9 +1,11 @@
 import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common'
 import { DeferredService } from './deferred.service'
 import { CreateDeferredDto } from './dto'
-import { Perm } from '../auth/decorators'
+import { Modul, Perm } from '../auth/decorators'
 
 
+// Модуль «Отложенные штрихкоды» выключен (1.8.1) — раздела нет, и касса не откладывает
+@Modul('deferred')
 @Controller('deferred')
 export class DeferredController {
   constructor(private readonly deferred: DeferredService) {}

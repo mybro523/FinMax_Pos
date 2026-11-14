@@ -8,6 +8,16 @@
 // (desktop/src/local/licence-code.mjs): опечатку она отличает от чужого кода.
 
 export const CODE_LEN = 50
+// Код с модулями магазина (1.8.1): владелец сервиса выключил часть разделов — код длиннее,
+// 55 знаков (11 групп). Узнаётся по первому знаку: у такого кода он «4», у обычного — «2»
+// (в первых битах — вид кода, desktop/src/local/licence-code.mjs)
+export const CODE_LEN_MODULES = 55
+export const codeLenOf = (raw) => (String(raw ?? '')[0] === '4' ? CODE_LEN_MODULES : CODE_LEN)
+// Код набран целиком (своей длины)
+export const codeComplete = (text) => {
+  const raw = normalizeCode(text)
+  return raw.length === codeLenOf(raw)
+}
 const ALLOWED = /[0-9A-HJKMNP-TV-Z]/
 
 // Русская раскладка ЙЦУКЕН → латинская QWERTY по месту клавиши
@@ -17,14 +27,15 @@ const RU_KEYS = {
   Я: 'Z', Ч: 'X', С: 'C', М: 'V', И: 'B', Т: 'N', Ь: 'M',
 }
 
-export function normalizeCode(text, max = CODE_LEN) {
+// max не указан — длина кода по его первому знаку (50 или 55, codeLenOf)
+export function normalizeCode(text, max) {
   let out = ''
   for (const ch0 of String(text ?? '').toUpperCase()) {
     let ch = RU_KEYS[ch0] || ch0
     if (ch === 'O') ch = '0'
     else if (ch === 'I' || ch === 'L') ch = '1'
     if (ALLOWED.test(ch)) out += ch
-    if (out.length >= max) break
+    if (out.length >= (max ?? codeLenOf(out))) break
   }
   return out
 }
@@ -47,16 +58,18 @@ export function editCode(shown, from, to, text = '') {
 }
 
 // Вставка из сообщения: код там латиницей, а вокруг — русские слова («Ваш код: …»). Если в
-// тексте есть код целиком — ровно groups групп по 5 (код активации — 10, код компьютера — 2), —
-// берётся только он. Иначе русские буквы отбрасываются: по месту клавиш их переводят только
+// тексте есть код целиком — ровно groups групп по 5 (код активации — 11 или 10, код компьютера — 2),
+// — берётся только он. Иначе русские буквы отбрасываются: по месту клавиш их переводят только
 // при наборе, а не при вставке
 const DASH = '\\s\\-\\u2010-\\u2015'
 const wholeOf = (groups) =>
   new RegExp(`(?<![0-9A-Za-z][${DASH}]{0,3})[0-9A-Za-z]{5}(?:[${DASH}]{1,3}[0-9A-Za-z]{5}){${groups - 1}}(?![${DASH}]{0,3}[0-9A-Za-z])`)
-export function pastedCode(text, groups = 10) {
+export function pastedCode(text, groups = [11, 10]) {
   const s = String(text ?? '')
-  const whole = s.match(wholeOf(groups))
-  if (whole) return whole[0].replace(new RegExp(`[${DASH}]`, 'g'), '')
+  for (const g of Array.isArray(groups) ? groups : [groups]) {
+    const whole = s.match(wholeOf(g))
+    if (whole) return whole[0].replace(new RegExp(`[${DASH}]`, 'g'), '')
+  }
   return s.replace(/[Ѐ-ӿ]+/g, ' ')
 }
 

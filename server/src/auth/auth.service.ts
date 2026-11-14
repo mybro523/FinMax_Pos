@@ -5,6 +5,7 @@ import { LoginThrottle } from './throttle'
 import { AUTH_SECRET as SECRET } from '../common/config'
 import { hashPassword, verifyPassword, passwordProblem, isOutdatedHash } from './password'
 import { OFFLINE_DAYS_FOR_OLD_APPS, subscriptionOf, subscriptionMessage } from '../admin/subscription'
+import { cleanModulesOff } from '../common/moduli'
 import { mayChangeOwnPassword, NO_PASSWORD_CHANGE, permissionsOf } from './permissions'
 import { AccountCache } from '../admin/account-cache.service'
 import { PrismaService } from '../prisma/prisma.service'
@@ -109,7 +110,7 @@ export class AuthService {
     role: string
     roleId?: string | null
     roleRef?: { id: string; name: string; permissions: string[]; system?: string | null } | null
-    pharmacy?: { code: string; name: string; paidUntil: Date; trial: boolean; blocked: boolean; offlineDays?: number; logoAt?: Date | null } | null
+    pharmacy?: { code: string; name: string; paidUntil: Date; trial: boolean; blocked: boolean; offlineDays?: number; logoAt?: Date | null; modulesOff?: string[] } | null
   }) {
     const ph = acc.pharmacy
     const sub = ph ? subscriptionOf(ph) : null
@@ -126,6 +127,9 @@ export class AuthService {
       // меню. Учётная запись без роли — кассир прежней версии
       roleSystem: acc.role === 'founder' ? 'owner' : acc.roleRef ? acc.roleRef.system || null : 'cashier',
       permissions: permissionsOf(acc),
+      // Выключенные модули магазина (1.8.1): интерфейс прячет их разделы и всё связанное,
+      // программа для Windows хранит список у учётной записи и проверяет по нему без связи
+      modulesOff: cleanModulesOff(ph?.modulesOff),
       // logoAt — когда владелец сервиса поставил логотип (null — логотипа нет): сменилась
       // отметка — касса забирает картинку заново (GET /shop/logo)
       pharmacy: ph ? { code: ph.code, name: ph.name, logoAt: ph.logoAt ? ph.logoAt.toISOString() : null } : null,

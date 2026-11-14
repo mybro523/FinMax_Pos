@@ -83,6 +83,9 @@ export function codeState({ publicKey, computerRaw, code, now }) {
     daysLeft,
     registers: f.registers,
     serial: f.serial,
+    // Модули магазина (1.8.1): какие разделы владелец сервиса выключил этим кодом. Срок кода
+    // вышел — модули те же (просмотр идёт по ним же)
+    modulesOff: f.modulesOff || [],
     message: expired ? ACTIVATION_TEXT.expired(human(f.until)) : warn ? ACTIVATION_TEXT.ends(human(f.until)) : '',
   }
 }
@@ -91,7 +94,8 @@ export function codeState({ publicKey, computerRaw, code, now }) {
 // from — когда он пошёл (null — магазина ещё нет: срок не начался). Последний день действует
 // целиком, как у кода. Число касс в пробный срок не ограничено (registers: null)
 export function trialState({ from, now }) {
-  const base = { activated: false, trial: true, forever: false, registers: null, serial: 0 }
+  // Пробный срок — все модули включены
+  const base = { activated: false, trial: true, forever: false, registers: null, serial: 0, modulesOff: [] }
   if (!Number.isFinite(from)) {
     return { ...base, active: true, expired: false, warn: false, notStarted: true, until: null, untilHuman: null, endsAt: null, daysLeft: TRIAL_DAYS, message: '' }
   }

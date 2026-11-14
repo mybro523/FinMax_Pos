@@ -60,6 +60,10 @@ model Pharmacy {
 
   note      String   @default("")
 
+  // Выключенные модули (1.8.1): ключи из server/src/common/moduli.ts. Пусто — всё
+  // включено; так магазины, заведённые раньше, ничего не заметят. Выбирает владелец сервиса
+  modulesOff String[] @default([])
+
   // ── Живой ли клиент ──
   // Дата последнего чека в самом магазине. Лежит здесь, а не считается на лету:
   // за ней надо идти в схему магазина, и на списке из трёхсот клиентов это триста
@@ -243,6 +247,8 @@ model LicenceCode {
   computer    String
   until       DateTime?
   registers   Int       @default(0)
+  // Выключенные модули, зашитые в код (1.8.1). Пусто — код прежнего вида, всё включено
+  modulesOff  String[]  @default([])
   serial      Int
   note        String    @default("")
   code        String

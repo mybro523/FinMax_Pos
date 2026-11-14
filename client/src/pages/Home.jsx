@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { LuLogOut, LuMoon, LuSun, LuPower, LuLock, LuInfo } from 'react-icons/lu'
-import Layout, { NAV, allowedNav } from '../components/Layout'
-import { useCollection } from '../db/store'
+import Layout, { NAV, allowedNav, navShown } from '../components/Layout'
+import { useCollection, useCollectionIf } from '../db/store'
 import { useAuth, logout } from '../db/auth'
 import { expiringProducts } from '../lib/expiry'
+import { moduleOn } from '../lib/moduli'
 import { useLang, useT } from '../lib/i18n'
 import { customerLabels, showCustomer } from '../lib/customerScreen'
 import { useTheme, toggleTheme } from '../lib/theme'
@@ -69,16 +70,47 @@ export default function Home() {
   // Закрыть программу — с тем же вопросом, что и кнопка в полосе внизу
   const closeApp = useCloseApp()
   const theme = useTheme()
-  const deferred = useCollection('deferred')
+  // Модуль «Отложенные штрихкоды» выключен — список не запрашиваем (сервер ответил бы отказом)
+  const deferred = useCollectionIf('deferred', moduleOn(user, 'deferred'))
   const products = useCollection('products')
-  const expiring = expiringProducts(products).length
+  // Разделы выключенных модулей магазина (lib/moduli.js) в меню не стоят вовсе: плитки
+  // сдвигаются, рядов становится меньше — без пустых мест. Значок «истекает» — только
+  // когда модуль «Срок годности» включён
+  const shown = NAV.filter((n) => navShown(user, n))
+  const expiring = moduleOn(user, 'expiry') ? expiringProducts(products).length : 0
+  const deferredN = moduleOn(user, 'deferred') ? deferred.length : 0
+  // Клеток: касса — две, остальные по одной; в ряду 5
+  const cells = shown.reduce((s, n) => s + (n.main ? 2 : 1), 0)
+  const rows = Math.max(1, Math.ceil(cells / 5))
+  // Последний неполный ряд (часть модулей выключена) растягивается на всю ширину — без
+  // пустых клеток в углу: 5 колонок делятся между плитками ряда, лишняя — последним.
+  // На телефоне (2 колонки) одинокая последняя плитка — во всю ширину
+  const spans = (() => {
+    const out = new Map()
+    const rem = cells % 5
+    if (rem) {
+      const last = []
+      let left = rem
+      for (let i = shown.length - 1; i >= 0 && left > 0; i--) {
+        left -= shown[i].main ? 2 : 1
+        last.unshift(shown[i])
+      }
+      if (left === 0 && !last.some((n) => n.main)) {
+        const base = Math.floor(5 / last.length)
+        const extra = 5 % last.length
+        last.forEach((n, i) => out.set(n.to, base + (i >= last.length - extra ? 1 : 0)))
+      }
+    }
+    return out
+  })()
+  const phoneFill = cells % 2 === 1 ? shown[shown.length - 1]?.to : null
 
   const temaText = theme === 'dark' ? t('Светлая тема') : t('Тёмная тема')
 
   const gridRef = useRef(null)
   // Размер надписей меню из «Настройки → Шрифт» (1.7.7) — пересчёт и при его смене
   const menuShrift = useShrift().menu
-  useHubFont(gridRef, NAV.map((n) => t(n.label)).join('|') + '#' + deferred.length + '#' + expiring + '#' + menuShrift)
+  useHubFont(gridRef, shown.map((n) => t(n.label)).join('|') + '#' + deferredN + '#' + expiring + '#' + menuShrift + '#' + rows)
 
   // Экран покупателя (программа для Windows): после входа, при входе в другой магазин и
   // при смене языка — название магазина и «Добро пожаловать». Корзину покажет касса
@@ -145,11 +177,12 @@ export default function Home() {
       }
     >
       <div className="hub" data-tour="sidebar">
-        <div className="hub-grid" ref={gridRef}>
-          {NAV.map((n) => {
+        <div className="hub-grid" ref={gridRef} style={{ '--hub-rows': rows }}>
+          {shown.map((n) => {
                 const ok = allowedNav(user, n)
-                const badge = n.badge && deferred.length > 0 ? deferred.length : n.expiryBadge && expiring > 0 ? expiring : 0
-                const cls = 'hub-tile' + (n.main ? ' gold wide' : '') + (ok ? '' : ' off')
+                const badge = n.badge && deferredN > 0 ? deferredN : n.expiryBadge && expiring > 0 ? expiring : 0
+                const tileStyle = spans.has(n.to) ? { '--span': spans.get(n.to) } : undefined
+                const cls = 'hub-tile' + (n.main ? ' gold wide' : '') + (ok ? '' : ' off') + (spans.has(n.to) ? ' stretch' : '') + (phoneFill === n.to ? ' fill2' : '')
                 const inner = (
                   <>
                     {/* Цифра в углу — внутри надписи, справа: текст её обтекает и под неё не
@@ -170,13 +203,14 @@ export default function Home() {
                   </>
                 )
                 return ok ? (
-                  <Link key={n.to} to={n.to} className={cls} data-tour={'nav:' + n.to}>
+                  <Link key={n.to} to={n.to} className={cls} style={tileStyle} data-tour={'nav:' + n.to}>
                     {inner}
                   </Link>
                 ) : (
                   <div
                     key={n.to}
                     className={cls}
+                    style={tileStyle}
                     data-tour={'nav:' + n.to}
                     title={t('Доступно по решению владельца')}
                     aria-disabled="true"

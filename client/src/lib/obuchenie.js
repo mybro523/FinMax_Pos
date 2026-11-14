@@ -27,6 +27,7 @@ const НЕТ_ЧЕКА = 'Появится после того, как вы вы�
 
 // Расширение в пути указано намеренно: файл грузится и проверками, без сборщика
 import { can } from './permissions.js'
+import { moduleOn, routeOn } from './moduli.js'
 
 export const OBUCHENIE = [
   // ══════════ ПРОДАЖИ ══════════
@@ -736,7 +737,23 @@ export const OBSHIY_TUR = [
 ]
 
 // Что доступно этому сотруднику: по праву или только владельцу — то же правило, что в меню
-export const dostupno = (user, x) => (!x.owner || user?.role === 'founder') && (!x.perm || can(user, x.perm))
+// Раздел выключенного модуля магазина (lib/moduli.js) — ни урока, ни шага тура про его
+// плитку; без модуля «Обучение» нет и шага про кнопку «?»
+// Метки элементов, которые прячутся вместе с модулем: поле и полоса сроков, карточка
+// долгов и выбор клиента «В долг», «Куда: Склад»
+const METKA_MODULYA = [
+  [/expir/, 'expiry'],
+  [/^(dash\.debts|pos\.customer)$/, 'debts'],
+  [/^af\.kuda$/, 'sklad'],
+]
+const razdelEst = (user, x) => {
+  if (x.to && x.to !== '/' && !routeOn(user, x.to)) return false
+  if (typeof x.t === 'string' && METKA_MODULYA.some(([re, key]) => re.test(x.t) && !moduleOn(user, key))) return false
+  if (typeof x.t === 'string' && x.t.startsWith('nav:') && !routeOn(user, x.t.slice(4))) return false
+  if (x.t === 'app.help' && !moduleOn(user, 'obuchenie')) return false
+  return true
+}
+export const dostupno = (user, x) => razdelEst(user, x) && (!x.owner || user?.role === 'founder') && (!x.perm || can(user, x.perm))
 
 // Уроки под роль — то же правило, что и в меню
 export const urokiFor = (user) => OBUCHENIE.filter((u) => dostupno(user, u))
@@ -746,4 +763,4 @@ export const urokFor = (to) => OBUCHENIE.find((u) => u.to === to) || null
 // Пункты «Что на экране», которые видит эта роль: кассиру не описываем кнопки,
 // которых у него нет
 export const ekranFor = (u, user) =>
-  u.ekran.filter(([, , s]) => !(s && typeof s === 'object') || dostupno(user, s))
+  u.ekran.filter(([, , s]) => dostupno(user, typeof s === 'string' ? { t: s } : s || {}))

@@ -75,6 +75,8 @@ export function fakeServer({ now = () => Date.parse('2026-10-04T10:00:00.000Z') 
             ? ((s.roles || []).find((r) => r.id === u.roleId)?.system ?? null)
             : 'cashier',
     ...(Array.isArray(u.permissions) ? { permissions: u.permissions } : {}),
+    // Выключенные модули магазина (1.8.1): задано — отдаём, как настоящий сервер; нет — сервер прежней версии
+    ...(u.role !== 'superadmin' && Array.isArray(s.pharmacy.modulesOff) ? { modulesOff: s.pharmacy.modulesOff } : {}),
     // logoAt — когда поставили логотип (1.6.4): есть в магазине — отдаём, как настоящий сервер
     pharmacy:
       u.role === 'superadmin'

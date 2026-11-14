@@ -7,6 +7,7 @@ import {
 import { Modal, useToast, useDialog } from '../components/ui'
 import NumberInput from '../components/NumberInput'
 import KodyAktivacii from '../components/KodyAktivacii'
+import ModuliVybor, { moduliText } from '../components/ModuliVybor'
 import { api, LONG_TIMEOUT_MS } from '../db/api'
 import { money } from '../db/store'
 import { logout, useAuth, enterPharmacy } from '../db/auth'
@@ -124,6 +125,8 @@ const emptyNew = {
   trialDays: '14', ownerLogin: '', ownerPassword: '', demo: false, logo: '',
   // Товары из Excel клиента (components/TovaryIzExcel.jsx) — разобранный файл или null
   tovary: null,
+  // Модули (1.8.1): список ВЫКЛЮЧЕННЫХ — по умолчанию у клиента есть всё
+  modulesOff: [],
 }
 
 export default function Admin() {
@@ -242,6 +245,8 @@ export default function Admin() {
       logo: form.logo || undefined,
       // Товары из Excel — готовым списком (свой код товарам без штрихкода уже дан)
       products: form.tovary?.items?.length ? form.tovary.items : undefined,
+      // Модули: выключенные (пусто — всё включено)
+      modulesOff: form.modulesOff?.length ? form.modulesOff : undefined,
     }
 
     setForm(null)
@@ -563,6 +568,8 @@ function NewPharmacy({ form, setForm, onStart, toast, t }) {
 
       <LogoField value={form.logo} onChange={(v) => set('logo', v)} onBusy={setLogoBusy} toast={toast} t={t} />
 
+      <ModuliVybor value={form.modulesOff} onChange={(v) => set('modulesOff', v)} t={t} testid="new-moduli" />
+
       <div className="note info" style={{ marginBottom: 14 }}>
         {t('Под этим логином войдёт владелец магазина. Пароль можно не задавать — он придумается и покажется один раз.')}
       </div>
@@ -574,7 +581,7 @@ function NewPharmacy({ form, setForm, onStart, toast, t }) {
       </div>
 
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14, marginBottom: 16, opacity: form.tovary ? 0.5 : 1 }}>
-        <input type="checkbox" checked={form.demo && !form.tovary} disabled={!!form.tovary} onChange={(e) => set('demo', e.target.checked)} />
+        <input type="checkbox" style={{ width: 18, height: 18, flex: 'none', margin: 0 }} checked={form.demo && !form.tovary} disabled={!!form.tovary} onChange={(e) => set('demo', e.target.checked)} />
         {t('Заполнить демонстрационными товарами и продажами')}
       </label>
 
@@ -836,6 +843,7 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
               // Логотип меняется, только если его тронули в окне: иначе «Сохранить» его не касается
               logo: '',
               logoChanged: false,
+              modulesOff: Array.isArray(ph.modulesOff) ? ph.modulesOff : [],
             })
           }
         >
@@ -865,6 +873,7 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
         <Kv label={t('Владелец')} value={ph.ownerName || '—'} />
         <Kv label={t('Телефон')} value={ph.phone || '—'} />
         <Kv label={t('Город')} value={ph.city || '—'} />
+        <Kv label={t('Модули')} value={<span data-testid="card-moduli">{moduliText(ph.modulesOff, t)}</span>} />
         {ph.note && <Kv label={t('Примечание')} value={ph.note} />}
         {ph.calledAt && (
           <Kv label={t('Последний звонок')} value={`${fmtDate(ph.calledAt)}${ph.callNote ? ' · ' + ph.callNote : ''}`} />
@@ -1028,6 +1037,7 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
             toast={toast}
             t={t}
           />
+          <ModuliVybor value={edit.modulesOff} onChange={(v) => setEdit((e) => e && { ...e, modulesOff: v })} t={t} testid="edit-moduli" />
           <div className="note info" style={{ marginBottom: 14 }}>
             {t('Дату меняют, когда ошиблись при вводе, дают бесплатное продление или закрывают сразу. Обычную оплату лучше проводить кнопкой «Продлить» — она попадёт в историю оплат.')}
           </div>
@@ -1057,6 +1067,8 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
                           : undefined,
                         // Логотип: новая картинка или '' (убрать); не трогали — поле не отправляем
                         logo: edit.logoChanged ? edit.logo : undefined,
+                        // Модули: выключенные (пусто — всё включено)
+                        modulesOff: edit.modulesOff,
                       })
                       .then(() => setEdit(null)),
                   t('Сохранено'),

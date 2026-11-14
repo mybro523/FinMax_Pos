@@ -11,6 +11,7 @@ import { monthName, useVydachi } from '../components/SalaryPicker'
 import { api } from '../db/api'
 import { onChanged, money, useCollection } from '../db/store'
 import { useAuth, getUser } from '../db/auth'
+import { useRouteOn } from '../lib/useModul'
 import { skachatXlsx } from '../lib/excel'
 import {
   mesyac, poslednieMesyacy, prodazhiSotrudnika, zarplataKVydache, vydanoZaMesyac, ostatokZarplaty,
@@ -332,6 +333,8 @@ export default function Employees() {
 // сотруднику за этот месяц уже выбрана и в сумме стоит остаток
 function ZpCells({ z, employeeId, month }) {
   const t = useT()
+  // «Выдать» ведёт в «Расходы» — нет модуля «Расходы», нет и кнопки
+  const est = useRouteOn()
   const nichego = !z || (z.nachisleno <= 0 && z.vydano <= 0)
   return (
     <>
@@ -343,7 +346,7 @@ function ZpCells({ z, employeeId, month }) {
         ) : z.ostalos > 0 ? (
           <>
             <b style={{ color: 'var(--danger)' }}>{money(z.ostalos)}</b>{' '}
-            {employeeId && (
+            {employeeId && est('/expenses') && (
               <Link to="/expenses" state={{ zarplata: { employeeId, month } }} className="btn ghost sm emp-zp-pay" title={t('Выдать зарплату в «Расходах»')}>
                 <LuHandCoins size={14} /> {t('Выдать')}
               </Link>
