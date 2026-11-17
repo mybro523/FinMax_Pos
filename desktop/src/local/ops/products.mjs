@@ -97,7 +97,8 @@ function readFields(raw) {
     out.type = out.type.trim()
     if (out.type.length > 40) throw bad('Тип: не длиннее 40 символов')
   }
-  if (out.unit !== undefined) out.unit = out.unit.trim() || 'уп'
+  // Пусто — единица по умолчанию (17.11.2026): штуки, а упаковка из нескольких штук — «уп»
+  if (out.unit !== undefined) out.unit = out.unit.trim() || (Number(out.unitsPerPack) > 1 ? 'уп' : 'шт')
   if (out.image !== undefined && (out.image.length > 200_000 || !IMAGE.test(out.image))) throw bad('Фото: не тот вид')
   if (out.name !== undefined && !out.name) throw bad('Укажите название товара')
   if (out.barcode !== undefined && !out.barcode) throw bad('Укажите штрихкод')
@@ -122,8 +123,10 @@ export function createProduct(ctx, raw) {
   // Остаток — в штуках по упаковке из формы. Упаковка дробного товара — не меньше 1000
   // граммов, своя цена — только у товара, упаковку которого вскрывают (как у сервера)
   const units = stock * (f.unitsPerPack ?? 1) + looseUnits
-  const upp = packFor(f.unit ?? 'уп', f.unitsPerPack ?? 1)
-  if (!opensPack({ unit: f.unit ?? 'уп', unitsPerPack: upp })) f.piecePrice = null
+  // Единица не пришла — штуки (17.11.2026), упаковка из нескольких штук — «уп»
+  f.unit = f.unit ?? (Number(f.unitsPerPack) > 1 ? 'уп' : 'шт')
+  const upp = packFor(f.unit, f.unitsPerPack ?? 1)
+  if (!opensPack({ unit: f.unit, unitsPerPack: upp })) f.piecePrice = null
   unitsOk(units)
 
   return inTx(db, () => {
@@ -142,7 +145,7 @@ export function createProduct(ctx, raw) {
       priceC: toCents(f.price ?? 0),
       pieceC: pieceCentsIn(f.piecePrice),
       minStock: f.minStock ?? 5,
-      unit: f.unit ?? 'уп',
+      unit: f.unit,
       unitsPerPack: upp,
       dosage: f.dosage ?? '',
       analogIds: JSON.stringify(f.analogIds ?? []),

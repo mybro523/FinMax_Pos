@@ -61,7 +61,7 @@ export default function VesyPanel() {
           </div>
         </>
       )}
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div className="set-btns" style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button className="btn" onClick={save}>{t('Сохранить')}</button>
       </div>
     </div>

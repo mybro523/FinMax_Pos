@@ -4,8 +4,10 @@ export class OpenShiftDto {
   @IsNumber() @Min(0) openingCash: number
 }
 
+// Сумму «по факту» сервер не берёт (17.11.2026): факт — то, что ожидается (shifts/totals.ts).
+// Прежние версии сайта и программы ещё присылают её — поле остаётся, но не обязательно
 export class CloseShiftDto {
-  @IsNumber() @Min(0) countedCash: number
+  @IsOptional() @IsNumber() @Min(0) countedCash?: number
 }
 
 // Внесение (размен) или изъятие (забрали выручку) наличных в открытой смене

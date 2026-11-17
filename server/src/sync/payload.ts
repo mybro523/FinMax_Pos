@@ -556,8 +556,9 @@ function productFields(src: any) {
   // Своя цена штуки: пусто — своей нет (1.5.11)
   if (has(src, 'piecePrice')) out.piecePrice = src.piecePrice === null || src.piecePrice === '' ? null : money(src.piecePrice, 'цена штуки')
   if (has(src, 'minStock')) out.minStock = int(src.minStock, 'минимальный остаток')
-  if (has(src, 'unit')) out.unit = text(src.unit, 20).trim() || 'уп'
   if (has(src, 'unitsPerPack')) out.unitsPerPack = int(src.unitsPerPack, 'штук в упаковке', 1, MAX_UPP)
+  // Пусто — единица по умолчанию (17.11.2026): штуки, упаковка из нескольких штук — «уп»
+  if (has(src, 'unit')) out.unit = text(src.unit, 20).trim() || (Number(out.unitsPerPack) > 1 ? 'уп' : 'шт')
   if (has(src, 'dosage')) out.dosage = text(src.dosage, 200)
   if (has(src, 'analogIds')) {
     if (!Array.isArray(src.analogIds)) throw new Reject('Аналоги: ожидался список')
@@ -591,7 +592,7 @@ export function parseProductCreate(p: any, now?: number) {
     price: (f.price as number) ?? 0,
     piecePrice: (f.piecePrice as number | null | undefined) ?? null,
     minStock: (f.minStock as number) ?? 5,
-    unit: (f.unit as string) ?? 'уп',
+    unit: (f.unit as string) ?? (upp > 1 ? 'уп' : 'шт'),
     unitsPerPack: upp,
     dosage: (f.dosage as string) ?? '',
     analogIds: (f.analogIds as string[]) ?? [],

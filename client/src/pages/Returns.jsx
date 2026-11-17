@@ -1,7 +1,7 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useLayoutEffect, useRef } from 'react'
 import { LuUndo2, LuSearch, LuTriangleAlert, LuCircleCheck, LuPrinter } from 'react-icons/lu'
 import Layout from '../components/Layout'
-import StickyBar from '../components/StickyBar'
+import StickyBar, { useTelefon } from '../components/StickyBar'
 import { Modal, useToast, PayBadge } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { JournalFilter, JournalCount, useJournalFilter, periodText } from '../components/JournalFilter'
@@ -28,6 +28,10 @@ import { useModul } from '../lib/useModul'
 
 // Чем вернули деньги — подписи те же, что в форме возврата
 const REFUND = { cash: 'Наличными из кассы', card: 'Возврат на карту', transfer: 'Возврат переводом', debt: 'Уменьшить долг клиента' }
+// Сколько последних чеков показывать на телефоне, пока поиск пуст. Карточка чека высокая
+// (около 215 px): из сорока чеков список выходил на дюжину экранов, и до «Истории возвратов»
+// приходилось долго листать. Остальные — по кнопке «Показать все» или поиском
+const KOROTKO = 5
 
 // ── Возврат товара ──
 // Кассир находит чек, отмечает что и сколько возвращают и решает по каждой позиции:
@@ -65,6 +69,10 @@ export default function Returns() {
   const [refundVia, setRefundVia] = useState('') // через какой сервис, если переводом
   const payServices = useCollection('payServices')
   const [failed, setFailed] = useState(null) // возврат не записался на сервер
+  // Телефон (окно до 600 px): своя разметка в нескольких местах — ниже у каждого сказано, где.
+  // На компьютере и в программе всё как было
+  const phone = useTelefon()
+  const [vse, setVse] = useState(false) // на телефоне: показать все найденные чеки, а не пять
 
   // Последние продажи для поиска чека
   const found = useMemo(() => {
@@ -80,6 +88,48 @@ export default function Returns() {
       )
       .slice(0, 40)
   }, [sales, q, kodPoId])
+  const korotko = phone && !q.trim() && !vse && found.length > KOROTKO
+  const shown = korotko ? found.slice(0, KOROTKO) : found
+
+  // Что по чеку уже вернули: отменён ли он, на какую сумму вернули, сколько штук каждого товара.
+  // На телефоне это пометка в карточке чека: по чеку, где всё уже вернули, «Выбрать» открывало
+  // позиции с нулями и неактивной кнопкой — лишнее нажатие, и непонятно почему
+  const vozvratyChekov = useMemo(() => {
+    const map = new Map()
+    for (const r of returns) {
+      if (!r || !r.saleId) continue
+      const x = map.get(r.saleId) || { otmena: false, sum: 0, units: {} }
+      if (isOtmena(r)) x.otmena = true
+      else x.sum += Number(r.total) || 0
+      for (const i of r.items || []) x.units[i.productId] = (x.units[i.productId] || 0) + (i.units || 0)
+      map.set(r.saleId, x)
+    }
+    return map
+  }, [returns])
+  // Пометка чека: { text, color, nechego } — nechego: возвращать по чеку больше нечего
+  const pometka = (s) => {
+    const x = vozvratyChekov.get(s.id)
+    if (!x) return null
+    if (x.otmena) return { text: t('Отменён'), color: 'var(--danger)', nechego: true }
+    // Тот же счёт, что при выборе чека (pickSale): продано минус уже возвращённое
+    const ostalos = s.items.some((i) => i.productId && soldUnits(i) - (x.units[i.productId] || 0) > 0)
+    if (!ostalos) return { text: t('Возвращён полностью'), color: 'var(--warn)', nechego: true }
+    return x.sum > 0 ? { text: `${t('Возврат')} ${money(x.sum)}`, color: 'var(--warn)', nechego: false } : null
+  }
+
+  // На телефоне после «Выбрать» форма встаёт на место списка, а экран оставался прокрученным
+  // вниз: «Что возвращают» уходило выше экрана, и казалось, что кнопка не сработала. Поднимаем
+  // форму к верху экрана — до отрисовки, без рывка. Отступ сверху — scroll-margin (m-smena.css)
+  const formRef = useRef(null)
+  const saleId = sale?.id
+  useLayoutEffect(() => {
+    const el = formRef.current
+    if (!phone || !saleId || !el) return
+    if (el.getBoundingClientRect().top < 0) el.scrollIntoView({ block: 'start' })
+  }, [phone, saleId])
+  // Подсветка тура на телефоне — только у первой позиции чека: позиции стоят разными
+  // карточками, и общая рамка вокруг всех перечёркивала их полосой
+  const tourFirst = (key, n) => (!phone || n === 0 ? key : undefined)
 
   // Сколько уже возвращено по конкретному чеку — больше него отдать нельзя.
   // Считаем по переданному чеку, а не по выбранному в state: на момент выбора
@@ -248,7 +298,9 @@ export default function Returns() {
               <div className="search kamera-pole">
                 <input
                   data-tour="ret.search"
-                  placeholder={t('Поиск чека: товар, штрихкод или сумма…')}
+                  // На телефоне подсказка короче: длинная обрезалась на «…штрихко», и не было
+                  // видно главного — что чек ищется и по сумме
+                  placeholder={phone ? t('Товар, штрихкод, сумма…') : t('Поиск чека: товар, штрихкод или сумма…')}
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                 />
@@ -257,38 +309,58 @@ export default function Returns() {
             </div>
           </StickyBar>
           <div className="panel" style={{ padding: 0 }}>
-            <table>
+            {/* На телефоне чеки — карточками (index.css, .table-cards): вбок ничего не листается */}
+            <div className="table-cards-wrap">
+            <table className="table-cards ret-found">
               <thead>
                 <tr><th>{t('Время')}</th><th>{t('Товары')}</th><th className="num">{t('Сумма')}</th><th>{t('Оплата')}</th><th></th></tr>
               </thead>
               <tbody>
-                {found.map((s) => (
-                  <tr key={s.id}>
-                    <td>{fmtDateTime(s.date)}</td>
-                    <td>{s.items.map((i) => i.name).join(', ').slice(0, 50)}</td>
-                    <td className="num"><b>{money(s.total)}</b></td>
-                    <td><PayBadge type={s.payment} /></td>
-                    <td className="num">
-                      {can('returns.create') && (
-                        <button className="btn ghost sm" data-tour="ret.pick" onClick={() => pickSale(s)}>
-                          <LuSearch size={14} /> {t('Выбрать')}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {shown.map((s) => {
+                  const tovary = s.items.map((i) => i.name).join(', ')
+                  // На телефоне — пометка, если по чеку уже возвращали; вернуть нечего — не «Выбрать»
+                  const pm = phone ? pometka(s) : null
+                  return (
+                    <tr key={s.id}>
+                      <td data-label={t('Время')}>{fmtDateTime(s.date)}</td>
+                      {/* На телефоне товары — заголовок карточки, и места хватает на все названия:
+                          обрезка на полуслове («Бинт сте») бросалась в глаза */}
+                      <td className="cell-main">
+                        {phone ? tovary : tovary.slice(0, 50)}
+                        {pm && <div className="tag-cat" style={{ color: pm.color }}>{pm.text}</div>}
+                      </td>
+                      <td className="num" data-label={t('Сумма')}><b>{money(s.total)}</b></td>
+                      <td data-label={t('Оплата')}><PayBadge type={s.payment} /></td>
+                      <td className="num cell-actions">
+                        {can('returns.create') && !pm?.nechego && (
+                          <button className="btn ghost sm" data-tour="ret.pick" onClick={() => pickSale(s)}>
+                            <LuSearch size={14} /> {t('Выбрать')}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
                 {found.length === 0 && <tr><td colSpan="5" className="empty">{t('Чеки не найдены')}</td></tr>}
               </tbody>
             </table>
+            {korotko && (
+              <button type="button" className="btn ghost ret-more" data-testid="ret-more" onClick={() => setVse(true)}>
+                {t('Показать все')} ({found.length})
+              </button>
+            )}
+            </div>
           </div>
         </div>
       ) : (
-        <div className="panel" style={{ maxWidth: 900 }}>
+        <div className="panel ret-sale" ref={formRef} style={{ maxWidth: 900 }}>
           <h2>
             <span className="h2-title"><span className="ic"><LuUndo2 size={17} /></span>{t('Что возвращают')}</span>
             <span className="tag-cat">{fmtDateTime(sale.date)} · {money(sale.total)}</span>
           </h2>
-          <table>
+          {/* На телефоне позиции — карточками: название, сколько продано, поле «Вернуть» и выбор
+              «Что с товаром» во всю ширину карточки (styles/m-smena.css, .ret-lines) */}
+          <table className="table-cards ret-lines">
             <thead>
               <tr>
                 <th>{t('Товар')}</th>
@@ -300,12 +372,14 @@ export default function Returns() {
             <tbody>
               {lines.map((l, n) => (
                 <tr key={l.key}>
-                  <td>
+                  <td className="cell-main">
                     <b>{l.name}</b>
                     {l.deleted && <div className="tag-cat" style={{ color: 'var(--warn)' }}>{t('товар удалён из базы')}</div>}
                   </td>
-                  <td className="num">{l.deleted ? '—' : l.ves ? `${kgText(l.max)} ${t(edinica(l))}` : l.max}</td>
-                  <td data-tour="ret.lines">
+                  {/* Число — сколько ещё можно вернуть (продано минус уже возвращённое). Подпись
+                      карточки на телефоне так и говорит; заголовок колонки на компьютере прежний */}
+                  <td className="num" data-label={t('Можно вернуть, шт')}>{l.deleted ? '—' : l.ves ? `${kgText(l.max)} ${t(edinica(l))}` : l.max}</td>
+                  <td data-label={t('Вернуть, шт')} data-tour={tourFirst('ret.lines', n)}>
                     {l.ves ? (
                       <VesInput
                         className="disc-input"
@@ -331,17 +405,37 @@ export default function Returns() {
                       />
                     )}
                   </td>
-                  <td data-tour="ret.restock">
-                    <select
-                      value={l.restock ? 'stock' : 'off'}
-                      disabled={l.deleted || !l.units}
-                      onChange={(e) => setLines((ls) => ls.map((x, i) => (i === n ? { ...x, restock: e.target.value === 'stock' } : x)))}
-                    >
-                      <option value="stock">{t('Вернуть в продажу')}</option>
-                      <option value="off">{t('Списать (вскрыта/повреждена)')}</option>
-                    </select>
+                  <td className="cell-wide" data-label={t('Что с товаром')} data-tour={tourFirst('ret.restock', n)}>
+                    {phone ? (
+                      // На телефоне — два крупных переключателя вместо списка: в поле шириной в
+                      // карточку «Списать (вскрыта/повреждена)» обрезалось, а по-таджикски — и
+                      // «Вернуть в продажу». Надпись переключателя переносится, а не режется
+                      <div className="ret-restock" role="radiogroup" aria-label={t('Что с товаром')}>
+                        {[[true, t('Вернуть в продажу')], [false, t('Списать (вскрыта/повреждена)')]].map(([v, text]) => (
+                          <label key={String(v)} className={'ret-restock-opt' + (l.restock === v ? ' on' : '') + (v ? '' : ' spisat')}>
+                            <input
+                              type="radio"
+                              name={'ret-restock-' + n}
+                              checked={l.restock === v}
+                              disabled={l.deleted || !l.units}
+                              onChange={() => setLines((ls) => ls.map((x, i) => (i === n ? { ...x, restock: v } : x)))}
+                            />
+                            <span>{text}</span>
+                          </label>
+                        ))}
+                      </div>
+                    ) : (
+                      <select
+                        value={l.restock ? 'stock' : 'off'}
+                        disabled={l.deleted || !l.units}
+                        onChange={(e) => setLines((ls) => ls.map((x, i) => (i === n ? { ...x, restock: e.target.value === 'stock' } : x)))}
+                      >
+                        <option value="stock">{t('Вернуть в продажу')}</option>
+                        <option value="off">{t('Списать (вскрыта/повреждена)')}</option>
+                      </select>
+                    )}
                     {asksExpiry(l) && (
-                      <div className="ret-expiry" data-tour="ret.expiry">
+                      <div className="ret-expiry" data-tour={!phone || n === lines.findIndex(asksExpiry) ? 'ret.expiry' : undefined}>
                         <label htmlFor={'ret-expiry-' + n}>{t('Срок на упаковке')}</label>
                         <input
                           id={'ret-expiry-' + n}
@@ -396,7 +490,11 @@ export default function Returns() {
                 : `${t('Долг клиента уменьшится на')} ${money(total)}. ${t('Наличные не выдаются.')}`
               : refund === 'transfer'
                 ? t('Деньги вернутся покупателю переводом — из кассы ничего не выдаётся.')
-                : t('Деньги возвращаются покупателю из кассы — эта сумма учтётся при закрытии смены.')}
+                // Возврат на карту наличные смены не трогает (Shift.jsx: refundCash — только
+                // 'cash'). Прежде здесь стояла подпись про кассу, и кассир мог выдать наличные
+                : refund === 'card'
+                  ? t('Деньги вернутся покупателю на карту — из кассы ничего не выдаётся.')
+                  : t('Деньги возвращаются покупателю из кассы — эта сумма учтётся при закрытии смены.')}
           </div>
 
           <div className="modal-actions">
@@ -412,21 +510,25 @@ export default function Returns() {
         <h2 style={{ padding: '16px 16px 0' }}>
           <span className="h2-title"><span className="ic"><LuUndo2 size={17} /></span>{t('История возвратов')}</span>
         </h2>
-        <JournalFilter controls={journal.controls} placeholder={t('Товар, штрихкод или кассир…')} kamera="kamera-vozvrat-zhurnal" />
+        {/* На телефоне подсказка короче: «Товар, штрихкод или ка…» обрезалась; штрихкод
+            ищется и так — рядом кнопка камеры */}
+        <JournalFilter controls={journal.controls} placeholder={phone ? t('Товар или кассир…') : t('Товар, штрихкод или кассир…')} kamera="kamera-vozvrat-zhurnal" />
         <div style={{ padding: '0 16px' }}>
           <JournalCount rows={journal.rows.length} loading={journal.loading} />
         </div>
-        {/* Своя прокрутка вбок: на телефоне панель её не даёт — иначе полоса поиска не держалась бы */}
-        <div className="table-scroll">
-        <table>
+        {/* Своя прокрутка вбок: на телефоне панель её не даёт — иначе полоса поиска не держалась бы.
+            На телефоне строки — карточками, и листать вбок уже нечего */}
+        <div className="table-scroll table-cards-wrap">
+        <table className="table-cards ret-history">
           <thead>
             <tr><th>{t('Дата')}</th><th>{t('Товары')}</th><th>{t('Кассир')}</th><th className="num">{t('Возвращено')}</th></tr>
           </thead>
           <tbody>
             {pg.slice.map((r) => (
               <tr key={r.id}>
-                <td>{fmtDateTime(r.date)}</td>
-                <td>
+                <td data-label={t('Дата')}>{fmtDateTime(r.date)}</td>
+                <td className="cell-main">
+                  {/* На телефоне — все товары: это заголовок карточки, места хватает */}
                   {r.items
                     .map((i) => {
                       const prod = products.find((p) => p.id === i.productId)
@@ -434,15 +536,15 @@ export default function Returns() {
                       return `${i.name} ×${drob ? `${kgText(i.units)} ${t(isVesovoy({ unit: i.unit }) ? i.unit : edinica(prod))}` : i.units}`
                     })
                     .join(', ')
-                    .slice(0, 60)}
+                    .slice(0, phone ? undefined : 60)}
                   {r.items.some((i) => !i.restock) && (
                     <div className="tag-cat" style={{ color: 'var(--warn)' }}>{t('часть списана')}</div>
                   )}
                   {/* Отмена только что проведённой продажи кнопкой «Отмена» в окне чека */}
                   {isOtmena(r) && <div className="tag-cat" style={{ color: 'var(--danger)' }}>{t('Отмена чека')}</div>}
                 </td>
-                <td>{r.user?.name || '—'}</td>
-                <td className="num"><b>{money(r.total)}</b></td>
+                <td data-label={t('Кассир')}>{r.user?.name || '—'}</td>
+                <td className="num" data-label={t('Возвращено')}><b>{money(r.total)}</b></td>
               </tr>
             ))}
             {journal.rows.length === 0 && !journal.loading && (
@@ -505,7 +607,8 @@ function ReturnReceipt({ ret, sales, onClose }) {
     saleNomer: saleDate ? chekNomer(saleDate) : '',
   })
   return (
-    <Modal title={<><span className="ic" style={{ color: 'var(--green)' }}><LuCircleCheck size={18} /></span>{t('Возврат оформлен')}</>} onClose={onClose}>
+    // ret-chek-okno — правила для телефона (styles/m-smena.css)
+    <Modal className="ret-chek-okno" title={<><span className="ic" style={{ color: 'var(--green)' }}><LuCircleCheck size={18} /></span>{t('Возврат оформлен')}</>} onClose={onClose}>
       <TicketView ticket={ticket} />
       <PrintDoc prio={2} kind="ticket" title={t('Чек возврата')}><TicketView ticket={ticket} /></PrintDoc>
       <div className="modal-actions">

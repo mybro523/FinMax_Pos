@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { LuTruck, LuPlus, LuPencil, LuTrash2, LuBanknote, LuHandCoins, LuPackagePlus, LuCircleDollarSign, LuReceipt, LuWallet } from 'react-icons/lu'
 import Layout from '../components/Layout'
-import StickyBar from '../components/StickyBar'
+import StickyBar, { useTelefon } from '../components/StickyBar'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import NumberInput from '../components/NumberInput'
@@ -37,6 +37,7 @@ export default function Suppliers() {
   const t = useT()
   const toast = useToast()
   const dialog = useDialog()
+  const telefon = useTelefon()
   const suppliers = useCollection('suppliers')
   const [q, setQ] = useState('')
   const [form, setForm] = useState(null) // { id?, name, phone, note, openingDebt }
@@ -180,6 +181,139 @@ export default function Suppliers() {
       .catch((e) => toast(t(e.message), 'err'))
   }
 
+  // ── Лента «Закупки и оплаты» и список поставщиков ──
+  // На компьютере — лента, под ней список. На телефоне (17.11.2026) — наоборот: строка ленты там
+  // карточка в 270 px, за месяц их десятки, и список — единственное место с «Долг и оплата»,
+  // правкой и удалением поставщика — оказывался за девятью экранами, а новый поставщик — в самом
+  // низу. Выбор поставщика ленты на телефоне — в шапке панели: закреплён при прокрутке только
+  // поиск, вдвоём они занимали полосой 121 px, с нижней полосой — почти четверть экрана
+  const supSelect = (
+    <select value={supFilter} onChange={(e) => setSupFilter(e.target.value)} aria-label={t('Поставщик')} style={{ maxWidth: 260 }}>
+      <option value="">{t('Все поставщики')}</option>
+      {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+    </select>
+  )
+  // prh-head, prh-stick: на телефоне края шапки и поиска — вровень с карточками ниже
+  const zakupkiPanel = (
+    <div className="panel" key="zak" data-tour="sup.history" style={{ padding: 0, marginBottom: 16 }}>
+      <div className="prh-head" style={{ padding: '16px 16px 0' }}>
+        <h2 style={{ marginBottom: 12 }}><span className="h2-title"><span className="ic"><LuReceipt size={17} /></span>{t('Закупки и оплаты')}</span>
+          {loadingOlder && <span className="tag-cat">{t('загружаем…')}</span>}
+        </h2>
+        <PeriodPicker value={period} onChange={setPeriod} tour="sup.period" />
+        {telefon && <div className="sup-zak-filter">{supSelect}</div>}
+      </div>
+      <StickyBar panel pad="10px 16px 14px" className="prh-stick">
+        <div className="toolbar">
+          <div className="search kamera-pole">
+            <input placeholder={t('Товар, штрихкод или поставщик…')} value={hq} onChange={(e) => setHq(e.target.value)} />
+            <KameraKnopka onCode={setHq} testid="kamera-postavshiki" />
+          </div>
+          {!telefon && supSelect}
+        </div>
+      </StickyBar>
+      <div className="table-cards-wrap">
+        <table className="table-cards zak-table prh-cards">
+          <thead>
+            <tr>
+              <th>{t('Дата')}</th><th>{t('Поставщик')}</th><th>{t('Товар')}</th><th className="num">{t('Кол-во')}</th>
+              <th className="num">{t('Цена')}</th><th className="num">{t('Сумма')}</th><th className="num">{t('Оплачено')}</th><th className="num">{t('Долг')}</th><th>{t('Принял')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pgH.slice.map((r) => {
+              // У оплаты долга нет ни количества, ни цены, ни суммы: на телефоне в её карточке
+              // этих пустых строк нет (cell-hide), на компьютере в таблице — прочерки, как были
+              const net = r.kind === 'pay' ? ' cell-hide' : ''
+              return (
+                <tr key={r.id} className={r.kind === 'pay' ? 'zak-pay' : r.kind === 'ret' ? 'zak-ret' : ''}>
+                  <td data-label={t('Дата')} style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.date)}</td>
+                  <td data-label={t('Поставщик')}>{supName(r)}</td>
+                  <td className="cell-main">
+                    {r.kind === 'pay' ? (
+                      <span className="zak-pay-name"><LuBanknote size={14} /> {r.name}{r.fromCash && <span className="badge cash" style={{ marginLeft: 6 }}>{t('из кассы')}</span>}</span>
+                    ) : <b>{r.name}</b>}
+                  </td>
+                  <td className={'num' + net} data-label={t('Кол-во')}>{r.qty || '—'}</td>
+                  <td className={'num' + net} data-label={t('Цена')}>{r.kind !== 'pay' ? money(r.price) : '—'}</td>
+                  <td className={'num' + net} data-label={t('Сумма')}>{r.kind === 'buy' ? <b>{money(r.sum)}</b> : r.kind === 'ret' ? <b>−{money(-r.sum)}</b> : '—'}</td>
+                  <td className="num" data-label={t('Оплачено')} style={{ color: r.paid > 0 ? 'var(--green)' : undefined }}>{r.paid < 0 ? '−' + money(-r.paid) : money(r.paid)}</td>
+                  <td className="num" data-label={t('Долг')} style={{ color: r.debt > 0 ? 'var(--danger)' : r.debt < 0 ? 'var(--green)' : undefined }}>
+                    {r.debt < 0 ? '−' + money(-r.debt) : money(r.debt)}
+                  </td>
+                  <td data-label={t('Принял')} className="tag-cat">{r.user || '—'}</td>
+                </tr>
+              )
+            })}
+            {zakRows.length === 0 && (
+              <tr><td colSpan="9" className="empty">{loadingOlder ? t('Загружаем…') : t('За этот период закупок и оплат нет')}</td></tr>
+            )}
+          </tbody>
+          {zakRows.length > 0 && (
+            <tfoot>
+              <tr className="zak-total">
+                <td colSpan="5">{t('Итого за период')}</td>
+                <td className="num" data-label={t('Сумма')}>{zakItogo.sum < 0 ? '−' + money(-zakItogo.sum) : money(zakItogo.sum)}</td>
+                <td className="num" data-label={t('Оплачено')}>{zakItogo.paid < 0 ? '−' + money(-zakItogo.paid) : money(zakItogo.paid)}</td>
+                <td className="num" data-label={t('Долг')}>{zakItogo.debt < 0 ? '−' + money(-zakItogo.debt) : money(zakItogo.debt)}</td>
+                <td className="cell-hide"></td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+      <Pagination {...pgH} />
+    </div>
+  )
+  const spisokPanel = (
+    <div className="panel" key="spisok" data-tour="sup.list" style={{ padding: 0 }}>
+      <div className="prh-head" style={{ padding: '16px 16px 0' }}>
+        <h2 style={{ marginBottom: 2 }}><span className="h2-title"><span className="ic"><LuTruck size={17} /></span>{t('Список поставщиков')}</span></h2>
+      </div>
+      <StickyBar panel pad="10px 16px 14px" className="prh-stick">
+        <div className="toolbar">
+          <input className="search" placeholder={t('Поиск по названию или телефону…')} value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+      </StickyBar>
+      <div className="table-cards-wrap">
+        <table className="table-cards prh-cards">
+          <thead>
+            <tr><th>{t('Поставщик')}</th><th>{t('Телефон')}</th><th className="num">{t('Долг')}</th><th></th></tr>
+          </thead>
+          <tbody>
+            {pg.slice.map((s) => (
+              <tr key={s.id}>
+                <td className="cell-main">
+                  <b>{s.name}</b>
+                  {s.note ? <div className="tag-cat">{s.note}</div> : null}
+                </td>
+                <td data-label={t('Телефон')}>{s.phone || '—'}</td>
+                <td className="num" data-label={t('Долг')}>
+                  <span className={'badge ' + ((Number(s.debt) || 0) > 0 ? 'debt' : 'ok')}>{money(s.debt)}</span>
+                </td>
+                <td className="num cell-actions" style={{ whiteSpace: 'nowrap', justifyContent: 'flex-end' }}>
+                  <button className="btn ghost sm" data-tour="sup.card" onClick={() => setCardId(s.id)}>
+                    <span className="ic"><LuHandCoins size={15} /></span> {t('Долг и оплата')}
+                  </button>{' '}
+                  {can('suppliers.edit') && (
+                    <><button className="btn ghost sm icon" onClick={() => setForm({ id: s.id, name: s.name, phone: s.phone || '', note: s.note || '' })} title={t('Изменить')} aria-label={`${t('Изменить')}: ${s.name}`}><LuPencil size={15} /></button>{' '}</>
+                  )}
+                  {can('suppliers.delete') && (
+                    <button className="btn ghost sm icon" onClick={() => remove(s)} title={t('Удалить')} aria-label={`${t('Удалить')}: ${s.name}`}><LuTrash2 size={15} /></button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {list.length === 0 && (
+              <tr><td colSpan="4" className="empty">{suppliers.length ? t('Ничего не найдено') : t('Поставщиков пока нет')}</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <Pagination {...pg} />
+    </div>
+  )
+
   return (
     <Layout
       title={t('Поставщики')}
@@ -197,7 +331,7 @@ export default function Suppliers() {
         )
       }
     >
-      <div className="chips" data-tour="sup.tabs" style={{ marginBottom: 14 }}>
+      <div className="chips sup-tabs" data-tour="sup.tabs" style={{ marginBottom: 14 }}>
         <button className={'chip ' + (tab === 'list' ? 'active' : '')} data-tour="sup.tab-list" onClick={() => setTab('list')}>
           <LuTruck size={14} style={{ marginRight: 6, verticalAlign: -2 }} />{t('Поставщики')}
         </button>
@@ -238,9 +372,11 @@ export default function Suppliers() {
           <div className="sub">{t('сразу при приходе и погашения долга')}</div>
         </div>
       </div>
+      {/* На телефоне список в окне не листается отдельно от окна (prh-okno-list): две прокрутки
+          одна в другой пальцем не разобрать — листается всё окно целиком */}
       {okno === 'dolg' && (
-        <Modal title={t('Долги поставщикам')} onClose={() => setOkno(null)}>
-          <div style={{ maxHeight: '56vh', overflow: 'auto' }} data-testid="sup-okno">
+        <Modal title={t('Долги поставщикам')} onClose={() => setOkno(null)} className="prh-okno">
+          <div className="prh-okno-list" style={{ maxHeight: '56vh', overflow: 'auto' }} data-testid="sup-okno">
             {suppliers.filter((x) => (Number(x.debt) || 0) > 0).sort((a, b) => (Number(b.debt) || 0) - (Number(a.debt) || 0)).map((x) => (
               <div
                 className="total-row clickable"
@@ -274,16 +410,16 @@ export default function Suppliers() {
         const key = okno === 'zakupleno' ? 'sum' : 'paid'
         const list = [...m.values()].filter((x) => Math.abs(x[key]) >= 0.005).sort((a, b) => b[key] - a[key])
         return (
-          <Modal wide title={`${okno === 'zakupleno' ? t('Закуплено за период') : t('Оплачено за период')} · ${periodText(period, t)}`} onClose={() => setOkno(null)}>
-            <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
-              <table data-testid="sup-okno">
+          <Modal wide title={`${okno === 'zakupleno' ? t('Закуплено за период') : t('Оплачено за период')} · ${periodText(period, t)}`} onClose={() => setOkno(null)} className="prh-okno">
+            <div className="prh-okno-list" style={{ maxHeight: '56vh', overflow: 'auto' }}>
+              <table className="table-cards" data-testid="sup-okno">
                 <thead><tr><th>{t('Поставщик')}</th><th className="num">{t('Закуплено')}</th><th className="num">{t('Оплачено')}</th></tr></thead>
                 <tbody>
                   {list.map((x) => (
                     <tr key={x.name}>
-                      <td><b>{x.name}</b></td>
-                      <td className="num" style={key === 'sum' ? { fontWeight: 700 } : undefined}>{money(x.sum)}</td>
-                      <td className="num" style={key === 'paid' ? { fontWeight: 700, color: 'var(--green)' } : { color: 'var(--green)' }}>{money(x.paid)}</td>
+                      <td className="cell-main"><b>{x.name}</b></td>
+                      <td className="num" data-label={t('Закуплено')} style={key === 'sum' ? { fontWeight: 700 } : undefined}>{money(x.sum)}</td>
+                      <td className="num" data-label={t('Оплачено')} style={key === 'paid' ? { fontWeight: 700, color: 'var(--green)' } : { color: 'var(--green)' }}>{money(x.paid)}</td>
                     </tr>
                   ))}
                   {list.length === 0 && <tr><td colSpan="3" className="empty">{t('Нет данных за этот период')}</td></tr>}
@@ -296,123 +432,11 @@ export default function Suppliers() {
         )
       })()}
 
-      <div className="panel" data-tour="sup.history" style={{ padding: 0, marginBottom: 16 }}>
-        <div style={{ padding: '16px 16px 0' }}>
-          <h2 style={{ marginBottom: 12 }}><span className="h2-title"><span className="ic"><LuReceipt size={17} /></span>{t('Закупки и оплаты')}</span>
-            {loadingOlder && <span className="tag-cat">{t('загружаем…')}</span>}
-          </h2>
-          <PeriodPicker value={period} onChange={setPeriod} tour="sup.period" />
-        </div>
-        <StickyBar panel pad="10px 16px 14px">
-          <div className="toolbar">
-            <div className="search kamera-pole">
-              <input placeholder={t('Товар, штрихкод или поставщик…')} value={hq} onChange={(e) => setHq(e.target.value)} />
-              <KameraKnopka onCode={setHq} testid="kamera-postavshiki" />
-            </div>
-            <select value={supFilter} onChange={(e) => setSupFilter(e.target.value)} aria-label={t('Поставщик')} style={{ maxWidth: 260 }}>
-              <option value="">{t('Все поставщики')}</option>
-              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </div>
-        </StickyBar>
-        <div className="table-cards-wrap">
-          <table className="table-cards zak-table">
-            <thead>
-              <tr>
-                <th>{t('Дата')}</th><th>{t('Поставщик')}</th><th>{t('Товар')}</th><th className="num">{t('Кол-во')}</th>
-                <th className="num">{t('Цена')}</th><th className="num">{t('Сумма')}</th><th className="num">{t('Оплачено')}</th><th className="num">{t('Долг')}</th><th>{t('Принял')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pgH.slice.map((r) => (
-                <tr key={r.id} className={r.kind === 'pay' ? 'zak-pay' : r.kind === 'ret' ? 'zak-ret' : ''}>
-                  <td data-label={t('Дата')} style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.date)}</td>
-                  <td data-label={t('Поставщик')}>{supName(r)}</td>
-                  <td className="cell-main">
-                    {r.kind === 'pay' ? (
-                      <span className="zak-pay-name"><LuBanknote size={14} /> {r.name}{r.fromCash && <span className="badge cash" style={{ marginLeft: 6 }}>{t('из кассы')}</span>}</span>
-                    ) : <b>{r.name}</b>}
-                  </td>
-                  <td className="num" data-label={t('Кол-во')}>{r.qty || '—'}</td>
-                  <td className="num" data-label={t('Цена')}>{r.kind !== 'pay' ? money(r.price) : '—'}</td>
-                  <td className="num" data-label={t('Сумма')}>{r.kind === 'buy' ? <b>{money(r.sum)}</b> : r.kind === 'ret' ? <b>−{money(-r.sum)}</b> : '—'}</td>
-                  <td className="num" data-label={t('Оплачено')} style={{ color: r.paid > 0 ? 'var(--green)' : undefined }}>{r.paid < 0 ? '−' + money(-r.paid) : money(r.paid)}</td>
-                  <td className="num" data-label={t('Долг')} style={{ color: r.debt > 0 ? 'var(--danger)' : r.debt < 0 ? 'var(--green)' : undefined }}>
-                    {r.debt < 0 ? '−' + money(-r.debt) : money(r.debt)}
-                  </td>
-                  <td data-label={t('Принял')} className="tag-cat">{r.user || '—'}</td>
-                </tr>
-              ))}
-              {zakRows.length === 0 && (
-                <tr><td colSpan="9" className="empty">{loadingOlder ? t('Загружаем…') : t('За этот период закупок и оплат нет')}</td></tr>
-              )}
-            </tbody>
-            {zakRows.length > 0 && (
-              <tfoot>
-                <tr className="zak-total">
-                  <td colSpan="5">{t('Итого за период')}</td>
-                  <td className="num">{zakItogo.sum < 0 ? '−' + money(-zakItogo.sum) : money(zakItogo.sum)}</td>
-                  <td className="num">{zakItogo.paid < 0 ? '−' + money(-zakItogo.paid) : money(zakItogo.paid)}</td>
-                  <td className="num">{zakItogo.debt < 0 ? '−' + money(-zakItogo.debt) : money(zakItogo.debt)}</td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-        <Pagination {...pgH} />
-      </div>
-
-      <div className="panel" data-tour="sup.list" style={{ padding: 0 }}>
-        <div style={{ padding: '16px 16px 0' }}>
-          <h2 style={{ marginBottom: 2 }}><span className="h2-title"><span className="ic"><LuTruck size={17} /></span>{t('Список поставщиков')}</span></h2>
-        </div>
-        <StickyBar panel pad="10px 16px 14px">
-          <div className="toolbar">
-            <input className="search" placeholder={t('Поиск по названию или телефону…')} value={q} onChange={(e) => setQ(e.target.value)} />
-          </div>
-        </StickyBar>
-        <div className="table-cards-wrap">
-          <table className="table-cards">
-            <thead>
-              <tr><th>{t('Поставщик')}</th><th>{t('Телефон')}</th><th className="num">{t('Долг')}</th><th></th></tr>
-            </thead>
-            <tbody>
-              {pg.slice.map((s) => (
-                <tr key={s.id}>
-                  <td className="cell-main">
-                    <b>{s.name}</b>
-                    {s.note ? <div className="tag-cat">{s.note}</div> : null}
-                  </td>
-                  <td data-label={t('Телефон')}>{s.phone || '—'}</td>
-                  <td className="num" data-label={t('Долг')}>
-                    <span className={'badge ' + ((Number(s.debt) || 0) > 0 ? 'debt' : 'ok')}>{money(s.debt)}</span>
-                  </td>
-                  <td className="num" style={{ whiteSpace: 'nowrap', justifyContent: 'flex-end' }}>
-                    <button className="btn ghost sm" data-tour="sup.card" onClick={() => setCardId(s.id)}>
-                      <span className="ic"><LuHandCoins size={15} /></span> {t('Долг и оплата')}
-                    </button>{' '}
-                    {can('suppliers.edit') && (
-                      <><button className="btn ghost sm icon" onClick={() => setForm({ id: s.id, name: s.name, phone: s.phone || '', note: s.note || '' })} title={t('Изменить')} aria-label={`${t('Изменить')}: ${s.name}`}><LuPencil size={15} /></button>{' '}</>
-                    )}
-                    {can('suppliers.delete') && (
-                      <button className="btn ghost sm icon" onClick={() => remove(s)} title={t('Удалить')} aria-label={`${t('Удалить')}: ${s.name}`}><LuTrash2 size={15} /></button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {list.length === 0 && (
-                <tr><td colSpan="4" className="empty">{suppliers.length ? t('Ничего не найдено') : t('Поставщиков пока нет')}</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <Pagination {...pg} />
-      </div>
+      {telefon ? [spisokPanel, zakupkiPanel] : [zakupkiPanel, spisokPanel]}
       </>)}
 
       {form && (
-        <Modal title={form.id ? t('Изменить поставщика') : t('Новый поставщик')} onClose={() => setForm(null)}>
+        <Modal title={form.id ? t('Изменить поставщика') : t('Новый поставщик')} onClose={() => setForm(null)} className="prh-okno">
           <div className="field">
             <label htmlFor="supName">{t('Название')}</label>
             <input id="supName" value={form.name} maxLength={120} autoFocus onChange={(e) => setForm({ ...form, name: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && save()} placeholder={t('Напр. Опт-Маркет')} />
@@ -452,6 +476,8 @@ export default function Suppliers() {
 
 // ── Карточка поставщика: долг, откуда он взялся, оплата ──
 // Оплата и список оплат — общие с вкладкой «Платежи и баланс» прихода (SupplierMoney.jsx)
+// Сколько последних оплат и приходов видно в карточке на телефоне (остальные — по кнопке)
+const OKNO_MALO = 10
 function SupplierCard({ id, supplier, onClose }) {
   const t = useT()
   const toast = useToast()
@@ -470,10 +496,26 @@ function SupplierCard({ id, supplier, onClose }) {
   )
   const debt = Number(supplier?.debt ?? card?.debt ?? 0)
   const name = supplier?.name || card?.name || ''
+  // Телефон: у списков окна нет своей прокрутки — листается всё окно (m-prihod.css), а сервер
+  // присылает оплаты и приходы за всё время, до 500 тех и других. У давнего поставщика окно
+  // вытянулось бы на десятки экранов, и «Готово» с «Приход товара» ушли бы в самый низ.
+  // Поэтому там видно последние 10 (сервер присылает новые первыми), остальные — по кнопке
+  const telefon = useTelefon()
+  const [vsePay, setVsePay] = useState(false)
+  const [vseArr, setVseArr] = useState(false)
+  const pays = card?.payments || []
+  const arrs = card?.arrivals || []
+  const malo = (list, vse) => (telefon && !vse ? list.slice(0, OKNO_MALO) : list)
+  const eshche = (list, vse, open) =>
+    telefon && !vse && list.length > OKNO_MALO && (
+      <button type="button" className="btn ghost sm prh-okno-more" onClick={open}>
+        {t('Показать все')} ({list.length})
+      </button>
+    )
 
   return (
-    <Modal wide title={<><span className="ic"><LuTruck size={18} /></span>{name}</>} onClose={onClose}>
-      <div className="mini-cards">
+    <Modal wide title={<><span className="ic"><LuTruck size={18} /></span>{name}</>} onClose={onClose} className="prh-okno">
+      <div className="mini-cards sup-card-cards">
         <div className="mini-card"><div className="m-label">{t('Долг сейчас')}</div><div className="m-value sm" style={{ color: debt > 0 ? 'var(--danger)' : undefined }}>{money(debt)}</div></div>
         <div className="mini-card"><div className="m-label">{t('Начальный долг')}</div><div className="m-value sm">{money(card?.openingDebt || 0)}</div></div>
         <div className="mini-card"><div className="m-label">{t('Телефон')}</div><div className="m-value sm">{supplier?.phone || card?.phone || '—'}</div></div>
@@ -481,27 +523,31 @@ function SupplierCard({ id, supplier, onClose }) {
 
       <SupplierPayPanel supplierId={id} debt={debt} onPaid={load} tour="sup.pay" style={{ marginBottom: 14 }} />
 
+      {/* На телефоне списки не листаются отдельно от окна (prh-okno-list): две прокрутки
+          одна в другой пальцем не разобрать — листается всё окно целиком */}
       <h2 style={{ fontSize: 14, margin: '0 0 8px' }}>{t('Оплаты')}</h2>
-      <div style={{ maxHeight: '32vh', overflow: 'auto', marginBottom: 14 }}>
-        {card && <SupplierPaymentsTable payments={card.payments || []} onRemoved={load} />}
+      <div className="prh-okno-list" style={{ maxHeight: '32vh', overflow: 'auto', marginBottom: 14 }}>
+        {card && <SupplierPaymentsTable payments={malo(pays, vsePay)} onRemoved={load} />}
+        {card && eshche(pays, vsePay, () => setVsePay(true))}
       </div>
 
       <h2 style={{ fontSize: 14, margin: '0 0 8px' }}>{t('Приходы от поставщика')}</h2>
-      <div style={{ maxHeight: '32vh', overflow: 'auto' }}>
-        <table>
+      <div className="prh-okno-list" style={{ maxHeight: '32vh', overflow: 'auto' }}>
+        <table className="table-cards">
           <thead><tr><th>{t('Дата')}</th><th>{t('Кто принял')}</th><th className="num">{t('Сумма')}</th><th className="num">{t('В долг')}</th></tr></thead>
           <tbody>
-            {(card?.arrivals || []).map((a) => (
+            {malo(arrs, vseArr).map((a) => (
               <tr key={a.id}>
-                <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(a.date)} <span className="tag-cat">· {a.lines} {t('поз.')}</span></td>
-                <td>{a.user?.name || '—'}</td>
-                <td className="num">{money(a.total)}</td>
-                <td className="num" style={{ color: Number(a.debt) > 0 ? 'var(--danger)' : undefined }}>{money(a.debt)}</td>
+                <td className="cell-main" style={{ whiteSpace: 'nowrap' }}>{fmtDate(a.date)} <span className="tag-cat">· {a.lines} {t('поз.')}</span></td>
+                <td data-label={t('Кто принял')}>{a.user?.name || '—'}</td>
+                <td className="num" data-label={t('Сумма')}>{money(a.total)}</td>
+                <td className="num" data-label={t('В долг')} style={{ color: Number(a.debt) > 0 ? 'var(--danger)' : undefined }}>{money(a.debt)}</td>
               </tr>
             ))}
             {card && !card.arrivals.length && <tr><td colSpan="4" className="empty">{t('Приходов от этого поставщика ещё не было')}</td></tr>}
           </tbody>
         </table>
+        {card && eshche(arrs, vseArr, () => setVseArr(true))}
       </div>
       <div className="modal-actions">
         <Link to="/arrivals" className="btn ghost"><span className="ic"><LuPackagePlus size={16} /></span> {t('Приход товара')}</Link>

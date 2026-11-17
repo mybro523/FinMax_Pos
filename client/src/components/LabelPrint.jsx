@@ -1,9 +1,9 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { LuPrinter, LuTag } from 'react-icons/lu'
 import { Modal, useToast } from './ui'
 import PrintDoc from './PrintDoc'
 import NumberInput from './NumberInput'
-import { NakleykiDoc, NakleykaPreview, PovorotPicker, SizePicker, stickerOf } from './Nakleyka'
+import { NakleykiDoc, NakleykaPreview, PovorotPicker, SizePicker, stickerOf, useMestoObraztsa, vmestit } from './Nakleyka'
 import { CennikiDoc, CennikPreview, RazmerCennika, formatOf, pechatCennikov, useRazmerCennika } from './Cenniki'
 import { barcodeModel, barcodeSvg, moduleFor, modulesOf } from '../lib/barcode'
 import { PROBLEM_TEXT, copiesOf, nakleykaName, pageOf, razvernut, rotOf, savedRot, saveRot, savedSize, saveSize, sizeText } from '../lib/nakleyka'
@@ -37,6 +37,29 @@ function a4Label(product) {
   const model = barcodeModel(product.barcode)
   const module = model ? moduleFor(modulesOf(model), 39, 600) : 0
   return module ? barcodeSvg(model, { module, barMm: 16, fontMm: 2.8 }) : ''
+}
+
+// ── Лист A4 на экране ──
+// На компьютере — весь лист, как ляжет на бумагу. На телефоне (окно уже 601 px; там место
+// для образца больше нуля — useMestoObraztsa) лист шёл бы одной этикеткой в ряд на несколько
+// экранов: там он уменьшен до двух этикеток в ряд, и показаны первые четыре — сколько всего,
+// видно в поле выше и строкой под образцом. На бумагу идёт весь лист (печатный слой — свой)
+const A4_OBRAZEC = 4
+// Две этикетки по 42 мм, между ними и по краям листа — 12 px (index.css, .label-sheet)
+const A4_DVA_MM = 2 * 42 + (12 * 25.4) / 96
+function A4Obrazec({ count, label }) {
+  const t = useT()
+  const ref = useRef(null)
+  const mesto = useMestoObraztsa(ref)
+  const pokaz = mesto > 0 ? Math.min(A4_OBRAZEC, count) : count
+  return (
+    <div ref={ref} className="lp-a4">
+      <div className="label-sheet a4" style={mesto > 0 ? { zoom: vmestit(1, A4_DVA_MM, mesto) } : undefined}>
+        {Array.from({ length: pokaz }, (_, i) => label(i))}
+      </div>
+      {pokaz < count && <div className="tag-cat lp-a4-more" data-testid="lp-a4-more">… {t('и ещё')} {count - pokaz}</div>}
+    </div>
+  )
 }
 
 export default function LabelPrint({ product, onClose }) {
@@ -215,7 +238,7 @@ export default function LabelPrint({ product, onClose }) {
             <NumberInput integer value={a4count} onChange={(e) => setA4count(e.target.value)} />
           </div>
           <div className="note info" style={{ marginBottom: 12 }}>{t('Печать на обычном принтере: лист с этикетками, разрежьте по рамкам.')}</div>
-          {!problem && sheet}
+          {!problem && <A4Obrazec count={a4n} label={label} />}
         </>
       )}
 

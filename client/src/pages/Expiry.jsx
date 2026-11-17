@@ -84,7 +84,8 @@ export default function Expiry() {
   return (
     <Layout title={t('Срок годности товаров')} subtitle={`${t('Контроль сроков (предупреждение за')} ${EXPIRY_WARN_DAYS} ${t('дней)')}`} actions={<ExportPechat onExcel={exportExcel} />}>
       <PrintSheet zagolovok={t('Срок годности товаров')} podzag={exPodzag} cols={exCols} rows={exRows} />
-      <div className="cards" data-tour="exp.cards" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 16 }}>
+      {/* Три в ряд — на компьютере; на телефоне по-своему (m-tovary.css, .exp-cards) */}
+      <div className="cards exp-cards" data-tour="exp.cards" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 16 }}>
         <div className="metric clickable" {...kartochka('expired')} data-testid="card-exp-expired">
           <div className="metric-head"><div className="label">{t('Просрочено')}</div><div className="ic-box" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}><LuTriangleAlert size={19} /></div></div>
           <div className="value" style={{ color: rows.expired ? 'var(--danger)' : undefined }}>{rows.expired}</div>
@@ -104,21 +105,22 @@ export default function Expiry() {
         const title = okno === 'expired' ? t('Просрочено') : okno === 'soon' ? `${t('Истекает (≤')}${EXPIRY_WARN_DAYS}${t(' дн.)')}` : t('Всего со сроком')
         return (
           <Modal wide title={title} onClose={() => setOkno(null)}>
-            <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
-              <table data-testid="exp-okno">
+            {/* На телефоне — карточками и без своей прокрутки: листается всё окно */}
+            <div className="okno-list" style={{ maxHeight: '56vh', overflow: 'auto' }}>
+              <table className="table-cards" data-testid="exp-okno">
                 <thead><tr><th>{t('Товар')}</th><th className="num">{t('Остаток')}</th><th>{t('Годен до')}</th><th className="num">{t('Осталось')}</th>{isFounder && <th></th>}</tr></thead>
                 <tbody>
                   {list.map(({ p, s }) => (
                     <tr key={p.id}>
-                      <td><b>{p.name}</b>{p.dosage ? <span className="tag-cat"> · {p.dosage}</span> : null}{p.category ? <div className="tag-cat">{p.category}</div> : null}</td>
-                      <td className="num">
+                      <td className="cell-main"><b>{p.name}</b>{p.dosage ? <span className="tag-cat"> · {p.dosage}</span> : null}{p.category ? <div className="tag-cat">{p.category}</div> : null}</td>
+                      <td className="num" data-label={t('Остаток')}>
                         {stockText(p)}
                         {hasExpired(p) && <div className="tag-cat" style={{ color: 'var(--danger)' }}>{t('негодно')} {expiredUnits(p)} {t('шт')}</div>}
                       </td>
-                      <td style={{ color: EXP_COLOR[s.level], fontWeight: s.level === 'ok' ? 400 : 600 }}>{fmtDate(p.expiryDate)}</td>
-                      <td className="num" style={{ color: EXP_COLOR[s.level], fontWeight: s.level === 'ok' ? 400 : 600 }}>{expiryLabel(s.days)}</td>
+                      <td data-label={t('Годен до')} style={{ color: EXP_COLOR[s.level], fontWeight: s.level === 'ok' ? 400 : 600 }}>{fmtDate(p.expiryDate)}</td>
+                      <td className="num" data-label={t('Осталось')} style={{ color: EXP_COLOR[s.level], fontWeight: s.level === 'ok' ? 400 : 600 }}>{expiryLabel(s.days)}</td>
                       {isFounder && (
-                        <td className="num">
+                        <td className="num cell-actions">
                           <button className="btn ghost sm" onClick={() => writeOff(p)} title={t('Списать просроченный товар')}><LuTrash2 size={14} /> {t('Списать')}</button>
                         </td>
                       )}
@@ -140,40 +142,43 @@ export default function Expiry() {
         </div>
       </StickyBar>
 
+      {/* На телефоне строки — карточками (table-cards): вбок не листается */}
       <div className="panel" data-tour="exp.table" style={{ padding: 0 }}>
-        <table>
-          <thead>
-            <tr><th>{t('Товар')}</th><th>{t('Категория')}</th><th className="num">{t('Остаток')}</th><th>{t('Годен до')}</th><th className="num">{t('Осталось')}</th>{isFounder && <th></th>}</tr>
-          </thead>
-          <tbody>
-            {pg.slice.map(({ p, s }) => (
-              <tr key={p.id}>
-                <td><b>{p.name}</b>{p.dosage ? <span className="tag-cat"> · {p.dosage}</span> : null}</td>
-                <td>{p.category}</td>
-                <td className="num">
-                  {stockText(p)}
-                  {hasExpired(p) && (
-                    <div className="tag-cat" style={{ color: 'var(--danger)' }}>
-                      {t('негодно')} {expiredUnits(p)} {t('шт')} · {t('годно')} {sellableUnits(p)} {t('шт')}
-                    </div>
-                  )}
-                </td>
-                <td style={{ color: EXP_COLOR[s.level], fontWeight: s.level === 'ok' ? 400 : 600 }}>{fmtDate(p.expiryDate)}</td>
-                <td className="num" style={{ color: EXP_COLOR[s.level], fontWeight: s.level === 'ok' ? 400 : 600 }}>{expiryLabel(s.days)}</td>
-                {isFounder && (
-                  <td className="num">
-                    <button className="btn ghost sm" data-tour="exp.writeoff" onClick={() => writeOff(p)} title={t('Списать просроченный товар')}>
-                      <LuTrash2 size={14} /> {t('Списать')}
-                    </button>
+        <div className="table-cards-wrap">
+          <table className="table-cards">
+            <thead>
+              <tr><th>{t('Товар')}</th><th>{t('Категория')}</th><th className="num">{t('Остаток')}</th><th>{t('Годен до')}</th><th className="num">{t('Осталось')}</th>{isFounder && <th></th>}</tr>
+            </thead>
+            <tbody>
+              {pg.slice.map(({ p, s }) => (
+                <tr key={p.id}>
+                  <td className="cell-main"><b>{p.name}</b>{p.dosage ? <span className="tag-cat"> · {p.dosage}</span> : null}</td>
+                  <td data-label={t('Категория')}>{p.category}</td>
+                  <td className="num" data-label={t('Остаток')}>
+                    {stockText(p)}
+                    {hasExpired(p) && (
+                      <div className="tag-cat" style={{ color: 'var(--danger)' }}>
+                        {t('негодно')} {expiredUnits(p)} {t('шт')} · {t('годно')} {sellableUnits(p)} {t('шт')}
+                      </div>
+                    )}
                   </td>
-                )}
-              </tr>
-            ))}
-            {rows.list.length === 0 && (
-              <tr><td colSpan={isFounder ? 6 : 5} className="empty">{mode === 'warn' ? t('Нет товаров с истекающим сроком — всё в порядке') : t('Ни у одного товара не указан срок годности')}</td></tr>
-            )}
-          </tbody>
-        </table>
+                  <td data-label={t('Годен до')} style={{ color: EXP_COLOR[s.level], fontWeight: s.level === 'ok' ? 400 : 600 }}>{fmtDate(p.expiryDate)}</td>
+                  <td className="num" data-label={t('Осталось')} style={{ color: EXP_COLOR[s.level], fontWeight: s.level === 'ok' ? 400 : 600 }}>{expiryLabel(s.days)}</td>
+                  {isFounder && (
+                    <td className="num cell-actions">
+                      <button className="btn ghost sm" data-tour="exp.writeoff" onClick={() => writeOff(p)} title={t('Списать просроченный товар')}>
+                        <LuTrash2 size={14} /> {t('Списать')}
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+              {rows.list.length === 0 && (
+                <tr><td colSpan={isFounder ? 6 : 5} className="empty">{mode === 'warn' ? t('Нет товаров с истекающим сроком — всё в порядке') : t('Ни у одного товара не указан срок годности')}</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
         <Pagination {...pg} />
       </div>
     </Layout>

@@ -77,9 +77,11 @@ export default function SupplierReport() {
       {okno && (() => {
         const col = cols.find((c) => c.key === okno)
         const list = r.rows.filter((x) => Math.abs(Number(x[okno]) || 0) >= 0.005).sort((a, b) => (b[okno] || 0) - (a[okno] || 0))
+        // На телефоне список не листается отдельно от окна (prh-okno-list): две прокрутки одна
+        // в другой пальцем не разобрать — листается всё окно целиком
         return (
-          <Modal title={`${col.header} · ${podzag}`} onClose={() => setOkno(null)}>
-            <div style={{ maxHeight: '56vh', overflow: 'auto' }} data-testid="spr-okno">
+          <Modal title={`${col.header} · ${podzag}`} onClose={() => setOkno(null)} className="prh-okno">
+            <div className="prh-okno-list" style={{ maxHeight: '56vh', overflow: 'auto' }} data-testid="spr-okno">
               {list.map((x) => (
                 <div className="total-row" key={x.supplierId || 'none'}>
                   <span>{nameOf(x)}</span>
@@ -96,7 +98,7 @@ export default function SupplierReport() {
 
       <div className="panel" data-tour="spr.table" style={{ padding: 0 }}>
         <div className="table-cards-wrap">
-          <table className="table-cards">
+          <table className="table-cards prh-cards">
             <thead>
               <tr>
                 <th>{t('Поставщик')}</th><th className="num">{t('Долг на начало')}</th><th className="num">{t('Закуплено')}</th><th className="num">{t('Возвращено')}</th>
@@ -120,18 +122,19 @@ export default function SupplierReport() {
               <tfoot>
                 <tr className="zak-total">
                   <td>{t('Итого')}</td>
-                  <td className="num">{money(r.itogo.nachalo)}</td>
-                  <td className="num">{money(r.itogo.zakupleno)}</td>
-                  <td className="num">{r.itogo.vozvrat > 0 ? '−' + money(r.itogo.vozvrat) : money(0)}</td>
-                  <td className="num">{money(r.itogo.oplacheno)}</td>
-                  <td className="num">{money(r.itogo.konec)}</td>
+                  <td className="num" data-label={t('Долг на начало')}>{money(r.itogo.nachalo)}</td>
+                  <td className="num" data-label={t('Закуплено')}>{money(r.itogo.zakupleno)}</td>
+                  <td className="num" data-label={t('Возвращено')}>{r.itogo.vozvrat > 0 ? '−' + money(r.itogo.vozvrat) : money(0)}</td>
+                  <td className="num" data-label={t('Оплачено')}>{money(r.itogo.oplacheno)}</td>
+                  <td className="num" data-label={t('Долг на конец')}>{money(r.itogo.konec)}</td>
                 </tr>
               </tfoot>
             )}
           </table>
         </div>
       </div>
-      <div className="tag-cat" style={{ marginTop: 12 }}>
+      {/* spr-note: на телефоне ссылка «Поставщики» — целью под палец, а не строчкой в 16 px */}
+      <div className="tag-cat spr-note" style={{ marginTop: 12 }}>
         {t('Долг на конец = долг на начало + закуплено − возвращено − оплачено. Что именно купили, вернули и какими оплатами гасили — в разделе')}{' '}
         <Link to="/suppliers" className="linklike">{t('Поставщики')}</Link>.
       </div>

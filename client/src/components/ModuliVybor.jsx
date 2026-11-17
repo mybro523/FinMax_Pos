@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { MODULES, cleanModulesOff } from '../lib/moduli'
 import './ModuliVybor.css'
 
@@ -8,13 +9,28 @@ import './ModuliVybor.css'
 // выпуске кода активации (там модули зашиваются в код).
 export const REQUIRED_SECTIONS = 'Касса, Смена кассы, Товары, Приход товара, Поставщики, Сотрудники, Роли и права, Настройки'
 
-export default function ModuliVybor({ value, onChange, t, testid = 'moduli' }) {
+// compact — телефон: четырнадцать галочек в столбик занимали три четверти экрана, и форма
+// («Новый магазин», коды активации) растягивалась на три экрана, хотя модули меняют редко.
+// Там выбор свёрнут в строку «все включены · Изменить» и раскрывается по нажатию
+export default function ModuliVybor({ value, onChange, t, testid = 'moduli', compact = false }) {
+  const [open, setOpen] = useState(false)
   const off = new Set(cleanModulesOff(value))
   const toggle = (key, on) => {
     const next = new Set(off)
     if (on) next.delete(key)
     else next.add(key)
     onChange(cleanModulesOff([...next]))
+  }
+  if (compact && !open) {
+    return (
+      <div className="field moduli-vybor" data-testid={testid}>
+        <label>{t('Модули')}</label>
+        <button type="button" className="moduli-svod" onClick={() => setOpen(true)} aria-expanded="false" data-testid={testid + '-open'}>
+          <span className="moduli-svod-text">{moduliText(value, t)}</span>
+          <span className="moduli-svod-act">{t('Изменить')}</span>
+        </button>
+      </div>
+    )
   }
   return (
     <div className="field moduli-vybor" data-testid={testid}>
@@ -23,6 +39,11 @@ export default function ModuliVybor({ value, onChange, t, testid = 'moduli' }) {
         <button type="button" className="btn ghost sm" onClick={() => onChange([])} disabled={!off.size} data-testid={testid + '-all'}>
           {t('Включить все')}
         </button>
+        {compact && (
+          <button type="button" className="btn ghost sm" onClick={() => setOpen(false)} aria-expanded="true" data-testid={testid + '-close'}>
+            {t('Свернуть')}
+          </button>
+        )}
       </label>
       <div className="moduli-grid">
         {MODULES.map((m) => (

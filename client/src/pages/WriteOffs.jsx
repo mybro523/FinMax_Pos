@@ -17,6 +17,7 @@ import { shtrihkodyPoId } from '../lib/poisk'
 import NumberInput from '../components/NumberInput'
 import VesInput from '../components/VesInput'
 import { useCan, getUser } from '../db/auth'
+import { useTelefon } from '../components/StickyBar'
 
 const CameraScanner = lazy(() => import('../components/CameraScanner'))
 
@@ -29,6 +30,10 @@ const CameraScanner = lazy(() => import('../components/CameraScanner'))
 // телефоне есть камера. Тот же товар отсканировали ещё раз — к нему прибавляется
 // штука (не больше остатка): так списывают по одной разбитой упаковке.
 
+// Остаток словами с переведёнными единицами: stockText (db/store.js) пишет их по-русски, и
+// по-таджикски в подсказке стояло «остаток 12 шт». По-русски — как было
+const ostatokText = (p, t) => stockText(p).replace(/[^\d\s.,+-]+/g, (w) => t(w))
+
 export const REASONS = [
   { key: 'expired', label: 'Просрочен' },
   { key: 'damaged', label: 'Брак или повреждение' },
@@ -40,6 +45,7 @@ export default function WriteOffs() {
   const can = useCan()
   const products = useCollection('products')
   const t = useT()
+  const telefon = useTelefon()
   const toast = useToast()
   const dialog = useDialog()
   const [rows, setRows] = useState([]) // {productId, name, units, max}
@@ -276,7 +282,8 @@ export default function WriteOffs() {
       <PrintSheet zagolovok={t('Списание')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} svodka={exSvodka} />
 
       {can('writeoffs.create') && <div className="panel" style={{ maxWidth: 900 }}>
-        <div className="row" style={{ alignItems: 'flex-end' }}>
+        {/* wo-head: на телефоне поиск, причина и пояснение — друг под другом (m-dengi.css) */}
+        <div className="row wo-head" style={{ alignItems: 'flex-end' }}>
           <div className="field wo-search" data-tour="wo.pick" style={{ flex: 2, minWidth: 260 }}>
             <label htmlFor="woScan">{t('Добавить товар')}</label>
             <div className="wo-search-box">
@@ -289,7 +296,13 @@ export default function WriteOffs() {
                 autoComplete="off"
                 onChange={(e) => setCode(e.target.value)}
                 onKeyDown={onScanKey}
-                onFocus={() => setOpen(true)}
+                onFocus={(e) => {
+                  setOpen(true)
+                  // Телефон: поле поднимается к верху экрана — подсказкам под ним остаётся
+                  // место над клавиатурой
+                  const pole = e.currentTarget.closest('.field')
+                  if (telefon && pole) requestAnimationFrame(() => pole.scrollIntoView({ block: 'start' }))
+                }}
                 onBlur={() => setTimeout(() => setOpen(false), 150)}
                 placeholder={t('Название, штрихкод или сканер…')}
                 aria-label={t('Найдите товар: название, штрихкод или сканер')}
@@ -315,7 +328,7 @@ export default function WriteOffs() {
                     }}
                   >
                     <span className="wo-sug-name">{p.name}<span className="tag-cat">{p.barcode}</span></span>
-                    <span className="tag-cat">{t('остаток')} {stockText(p)}</span>
+                    <span className="tag-cat">{t('остаток')} {ostatokText(p, t)}</span>
                   </button>
                 ))}
               </div>
@@ -333,8 +346,11 @@ export default function WriteOffs() {
             </select>
           </div>
           {reason === 'other' && (
-            /* «Другое» без пояснения ничего не скажет через месяц — поле тут же */
-            <div className="field" style={{ flex: 2, minWidth: 220 }}>
+            /* «Другое» без пояснения ничего не скажет через месяц — поле тут же. Пишет в то
+               же примечание, что и поле под строками; wo-drugoe — по ней на телефоне нижнее
+               поле прячется (m-dengi.css): там поля далеко друг от друга, и одно и то же
+               казалось двумя разными */
+            <div className="field wo-drugoe" style={{ flex: 2, minWidth: 220 }}>
               <label>{t('Какая причина?')}</label>
               <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('напр. угостили покупателя')} />
             </div>
@@ -343,16 +359,17 @@ export default function WriteOffs() {
 
         {rows.length > 0 && (
           <>
-            <table data-tour="wo.rows">
+            {/* На телефоне строки — карточками: поле «Списать» и крестик под палец */}
+            <table data-tour="wo.rows" className="table-cards wo-rows">
               <thead>
                 <tr><th>{t('Товар')}</th><th className="num">{t('Остаток, шт')}</th><th style={{ width: 130 }}>{t('Списать, шт')}</th><th></th></tr>
               </thead>
               <tbody>
                 {rows.map((r, n) => (
                   <tr key={r.productId}>
-                    <td><b>{r.name}</b></td>
-                    <td className="num">{r.ves ? `${kgText(r.max)} ${t(r.unit || 'кг')}` : r.max}</td>
-                    <td>
+                    <td className="cell-main"><b>{r.name}</b></td>
+                    <td className="num" data-label={t('Остаток, шт')}>{r.ves ? `${kgText(r.max)} ${t(r.unit || 'кг')}` : r.max}</td>
+                    <td data-label={t('Списать, шт')}>
                       {r.ves ? (
                         <VesInput
                           className="disc-input"
@@ -372,8 +389,14 @@ export default function WriteOffs() {
                         />
                       )}
                     </td>
-                    <td className="num">
-                      <button className="btn ghost sm icon" onClick={() => setRows((rs) => rs.filter((_, i) => i !== n))}>
+                    <td className="num cell-actions">
+                      {/* Кнопка — одним значком: подпись для программы чтения экрана и подсказка */}
+                      <button
+                        className="btn ghost sm icon"
+                        onClick={() => setRows((rs) => rs.filter((_, i) => i !== n))}
+                        title={t('Убрать из списка')}
+                        aria-label={`${t('Убрать из списка')}: ${r.name}`}
+                      >
                         <LuX size={15} />
                       </button>
                     </td>
@@ -404,7 +427,8 @@ export default function WriteOffs() {
           <span className="tag-cat">{t('убыток за период')}: <b style={{ color: 'var(--danger)' }}>{money(periodLoss)}</b></span>
         </h2>
         <JournalFilter controls={journal.controls} placeholder={t('Товар, штрихкод, примечание или сотрудник…')}>
-          <select value={reasonFilter} onChange={(e) => setReasonFilter(e.target.value)} style={{ maxWidth: 220 }}>
+          {/* Ширина — из .journal-filter-bar select (220 px); на телефоне выбор — во всю строку */}
+          <select value={reasonFilter} onChange={(e) => setReasonFilter(e.target.value)}>
             <option value="all">{t('Все причины')}</option>
             {REASONS.map((r) => <option key={r.key} value={r.key}>{t(r.label)}</option>)}
           </select>
@@ -412,23 +436,24 @@ export default function WriteOffs() {
         <div style={{ padding: '0 16px' }}>
           <JournalCount rows={journalRows.length} loading={journal.loading} />
         </div>
-        {/* Своя прокрутка вбок: на телефоне панель её не даёт — иначе полоса поиска не держалась бы */}
-        <div className="table-scroll">
-        <table>
+        {/* Своя прокрутка вбок для узкого окна компьютера: панель её не даёт — иначе полоса
+            поиска не держалась бы. На телефоне строки — карточками, листать вбок нечего */}
+        <div className="table-scroll table-cards-wrap">
+        <table className="table-cards wo-journal">
           <thead>
             <tr><th>{t('Дата')}</th><th>{t('Товары')}</th><th>{t('Причина')}</th><th>{t('Кто')}</th><th className="num">{t('Убыток')}</th></tr>
           </thead>
           <tbody>
             {pg.slice.map((w) => (
               <tr key={w.id}>
-                <td>{fmtDateTime(w.date)}</td>
-                <td>
+                <td data-label={t('Дата')}>{fmtDateTime(w.date)}</td>
+                <td className="cell-main">
                   {w.items.map((i) => `${i.name} ×${i.units}`).join(', ').slice(0, 55)}
                   {w.note ? <div className="tag-cat">{w.note}</div> : null}
                 </td>
-                <td>{reasonLabel(w.reason)}</td>
-                <td>{w.user?.name || '—'}</td>
-                <td className="num" style={{ color: 'var(--danger)' }}>{money(w.totalCost)}</td>
+                <td data-label={t('Причина')}>{reasonLabel(w.reason)}</td>
+                <td data-label={t('Кто')}>{w.user?.name || '—'}</td>
+                <td className="num" data-label={t('Убыток')} style={{ color: 'var(--danger)' }}>{money(w.totalCost)}</td>
               </tr>
             ))}
             {journalRows.length === 0 && !journal.loading && (

@@ -135,8 +135,9 @@ export default function PrihodNakleyki({ arrival, products, onClose }) {
         {first && <NakleykaPreview data={first.data} />}
       </div>
 
-      <div className="table-scroll" style={{ maxHeight: '38vh' }}>
-        <table data-testid="pn-table">
+      {/* На телефоне — карточками и без своей прокрутки: листается всё окно (m-tovary.css) */}
+      <div className="table-scroll okno-list" style={{ maxHeight: '38vh' }}>
+        <table className="table-cards" data-testid="pn-table">
           <thead>
             <tr>
               <th>{t('Товар')}</th>
@@ -147,15 +148,15 @@ export default function PrihodNakleyki({ arrival, products, onClose }) {
           <tbody>
             {rows.map((r) => (
               <tr key={r.key} data-testid="pn-row">
-                <td>{r.product?.name || r.item.name}</td>
-                <td>
+                <td className="cell-main">{r.product?.name || r.item.name}</td>
+                <td data-label={t('Штрихкод')}>
                   {r.problem ? (
                     <span className="pn-problem">{r.problem === 'gone' ? t('Товара больше нет в справочнике') : t(PROBLEM_TEXT[r.problem])}</span>
                   ) : (
                     <span className="pn-code">{r.data.code}</span>
                   )}
                 </td>
-                <td className="num">
+                <td className="num" data-label={t('Наклеек')}>
                   <NumberInput
                     integer
                     className="pn-count"

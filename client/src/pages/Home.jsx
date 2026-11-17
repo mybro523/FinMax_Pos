@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
 import { Link } from 'react-router-dom'
 import { LuLogOut, LuMoon, LuSun, LuPower, LuLock, LuInfo, LuMaximize, LuMinimize } from 'react-icons/lu'
 import Layout, { NAV, allowedNav, navShown } from '../components/Layout'
+import { useToast } from '../components/ui'
 import { useCollection, useCollectionIf } from '../db/store'
 import { useAuth, logout } from '../db/auth'
 import { expiringProducts } from '../lib/expiry'
@@ -67,9 +68,27 @@ function useHubFont(ref, key) {
   }, [ref, key])
 }
 
+// Телефон (до 600 px, как в index.css): сетка там в две колонки, и раскладку плиток по рядам
+// считает Home (см. phoneWide ниже)
+const UZKO = '(max-width: 600px)'
+function useUzko() {
+  return useSyncExternalStore(
+    (cb) => {
+      if (typeof window.matchMedia !== 'function') return () => {}
+      const mq = window.matchMedia(UZKO)
+      mq.addEventListener('change', cb)
+      return () => mq.removeEventListener('change', cb)
+    },
+    () => typeof window.matchMedia === 'function' && window.matchMedia(UZKO).matches,
+    () => false,
+  )
+}
+
 export default function Home() {
   const user = useAuth()
   const t = useT()
+  const toast = useToast()
+  const uzko = useUzko()
   // Закрыть программу — с тем же вопросом, что и кнопка в полосе внизу
   const closeApp = useCloseApp()
   const theme = useTheme()
@@ -106,7 +125,28 @@ export default function Home() {
     }
     return out
   })()
-  const phoneFill = cells % 2 === 1 ? shown[shown.length - 1]?.to : null
+  // Телефон (две колонки): плитки идут строго по порядку меню, как на компьютере, и без пустых
+  // клеток. Касса — во всю ширину; плитка перед ней, которой не досталось пары («Панель
+  // управления»), — тоже во всю ширину (wide: так её и не меряет lib/hubFont.js — размер
+  // надписей считается по обычной плитке). Раньше справа от неё вставала «Смена кассы»
+  // (grid-auto-flow: dense) — выше кассы и не в том порядке, в каком плитки идут для Tab и
+  // экранного диктора. Последняя одинокая плитка — во всю ширину (fill2)
+  const phoneWide = new Set()
+  let phoneFill = null
+  if (uzko) {
+    let col = 0
+    shown.forEach((n, i) => {
+      if (n.main) {
+        if (col === 1) phoneWide.add(shown[i - 1].to)
+        col = 0
+      } else col = 1 - col
+    })
+    if (col === 1) phoneFill = shown[shown.length - 1].to
+  } else if (cells % 2 === 1) phoneFill = shown[shown.length - 1]?.to
+  // Серая плитка (раздел закрыт для этой роли) на телефоне: подсказка в title на сенсорном
+  // экране не показывается, и нажатие выглядело бы так, будто ничего не произошло. Вид — как у
+  // отказа (не галочка «готово»): раздел не открылся
+  const closedTap = uzko ? () => toast(t('Доступно по решению владельца'), 'err') : undefined
 
   const temaText = theme === 'dark' ? t('Светлая тема') : t('Тёмная тема')
   // «Во весь экран» — только на сайте (программа и так на весь экран), не на телефоне (index.css)
@@ -118,7 +158,7 @@ export default function Home() {
   const gridRef = useRef(null)
   // Размер надписей меню из «Настройки → Шрифт» (1.7.7) — пересчёт и при его смене
   const menuShrift = useShrift().menu
-  useHubFont(gridRef, shown.map((n) => t(n.label)).join('|') + '#' + deferredN + '#' + expiring + '#' + menuShrift + '#' + rows)
+  useHubFont(gridRef, shown.map((n) => t(n.label)).join('|') + '#' + deferredN + '#' + expiring + '#' + menuShrift + '#' + rows + '#' + uzko)
 
   // Экран покупателя (программа для Windows): после входа, при входе в другой магазин и
   // при смене языка — название магазина и «Добро пожаловать». Корзину покажет касса
@@ -195,7 +235,7 @@ export default function Home() {
                 const ok = allowedNav(user, n)
                 const badge = n.badge && deferredN > 0 ? deferredN : n.expiryBadge && expiring > 0 ? expiring : 0
                 const tileStyle = spans.has(n.to) ? { '--span': spans.get(n.to) } : undefined
-                const cls = 'hub-tile' + (n.main ? ' gold wide' : '') + (ok ? '' : ' off') + (spans.has(n.to) ? ' stretch' : '') + (phoneFill === n.to ? ' fill2' : '')
+                const cls = 'hub-tile' + (n.main ? ' gold wide' : phoneWide.has(n.to) ? ' wide' : '') + (ok ? '' : ' off') + (spans.has(n.to) ? ' stretch' : '') + (phoneFill === n.to ? ' fill2' : '')
                 const inner = (
                   <>
                     {/* Цифра в углу — внутри надписи, справа: текст её обтекает и под неё не
@@ -227,6 +267,7 @@ export default function Home() {
                     data-tour={'nav:' + n.to}
                     title={t('Доступно по решению владельца')}
                     aria-disabled="true"
+                    onClick={closedTap}
                   >
                     {inner}
                   </div>

@@ -109,8 +109,10 @@ export default function PokupatelPanel() {
     }
   }
 
+  // pk-* — для телефона (styles/m-nastroyki.css): подсказка про Windows там не нужна, а
+  // «открыт / не открыт» стоит в строке заголовка, а не одна под кнопкой во всю ширину
   return (
-    <div className="panel mt" style={{ maxWidth: 640 }} data-testid="pokupatel-panel">
+    <div className="panel mt pk-panel" style={{ maxWidth: 640 }} data-testid="pokupatel-panel">
       <h2>
         <span className="h2-title"><span className="ic"><LuMonitor size={17} /></span>{t('Экран покупателя (второй экран)')}</span>
       </h2>
@@ -118,15 +120,15 @@ export default function PokupatelPanel() {
         {t('Для двустороннего моноблока: на втором экране покупатель видит товары, итог, «Спасибо за покупку» и сдачу. После запуска браузера окно открывают один раз этой кнопкой. Chrome спросит «Управление окнами» — нажмите «Разрешить».')}
       </p>
       {dvaEkrana === false && (
-        <div className="note err" style={{ marginBottom: 12 }} data-testid="pokupatel-one-screen">
+        <div className="note err pk-one-screen" style={{ marginBottom: 12 }} data-testid="pokupatel-one-screen">
           {t('Браузер видит только один экран. В Windows откройте «Параметры → Система → Дисплей» и выберите «Расширить эти экраны» — тогда задний экран станет отдельным.')}
         </div>
       )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+      <div className="set-btns" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <button type="button" className="btn" onClick={otkryt} disabled={busy} data-testid="pokupatel-open">
           <span className="ic"><LuMonitor size={16} /></span> {open ? t('Открыть заново') : t('Открыть экран покупателя')}
         </button>
-        <span className={'badge ' + (open ? 'ok' : 'low')} data-testid="pokupatel-state">
+        <span className={'badge pk-state ' + (open ? 'ok' : 'low')} data-testid="pokupatel-state">
           {open ? t('открыт') : t('не открыт')}
         </span>
       </div>

@@ -1,4 +1,25 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+
+// ── Телефон: окно до 600 px (та же граница, что у правил телефона в index.css) ──
+// Для мест, где на телефоне другое само устройство страницы, а не только вид (17.11.2026):
+// в журналах и в авто-заявке закреплена одна строка поиска — с отбором и периодом полоса
+// занимала до трети невысокого экрана; у листа пересчёта кнопки — в полосе внизу экрана.
+// На компьютере разметка прежняя. Через matchMedia, а не по событию resize: браузер
+// сообщает только о пересечении границы, лишних перерисовок нет
+const TELEFON = '(max-width: 600px)'
+const telefonMq = () => (typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(TELEFON) : null)
+export function useTelefon() {
+  return useSyncExternalStore(
+    (cb) => {
+      const mq = telefonMq()
+      if (!mq) return () => {}
+      mq.addEventListener('change', cb)
+      return () => mq.removeEventListener('change', cb)
+    },
+    () => !!telefonMq()?.matches,
+    () => false,
+  )
+}
 
 // ── Поиск и фильтры, закреплённые вверху ──
 // Владелец (31.10.2026): «поиск и категории — закреплены наверху и при скролле не исчезают»,

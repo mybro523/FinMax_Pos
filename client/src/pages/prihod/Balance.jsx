@@ -7,6 +7,7 @@ import { oplataPrihoda } from '../../lib/otchety'
 import { SupplierPayPanel, SupplierPaymentsTable } from '../../components/SupplierMoney'
 import SupplierDebtsPanel from '../SupplierDebts'
 import { Modal, useToast } from '../../components/ui'
+import { useTelefon } from '../../components/StickyBar'
 import { REFUNDS } from './ReturnTab'
 
 // ── Платежи и баланс ──
@@ -43,12 +44,16 @@ export function useBalance({ supplier, arrivals, payments, returns = [], range }
 
 export default function Balance({ supplier, bal, dolgi, periodLabel, onSelect, onOpenArrival, loading }) {
   const t = useT()
+  const telefon = useTelefon()
 
   if (!supplier) {
     return (
       <div className="prh-balance">
+        {/* На телефоне список поставщиков не слева, а над вкладками — там подсказка без «слева» */}
         <div className="note info" style={{ marginBottom: 14 }}>
-          {t('Выберите поставщика слева — здесь будут его долг, оплата долга, оплаты и приходы за период. Ниже — кому сколько должен магазин.')}
+          {telefon
+            ? t('Выберите поставщика в списке выше — здесь будут его долг, оплата долга, оплаты и приходы за период. Ниже — кому сколько должен магазин.')
+            : t('Выберите поставщика слева — здесь будут его долг, оплата долга, оплаты и приходы за период. Ниже — кому сколько должен магазин.')}
         </div>
         <SupplierDebtsPanel dolgi={dolgi} onOpen={(p) => onSelect(p.id)} />
       </div>
@@ -68,7 +73,7 @@ export default function Balance({ supplier, bal, dolgi, periodLabel, onSelect, o
             <h2><span className="h2-title"><span className="ic"><LuBanknote size={17} /></span>{t('Оплаты')}</span></h2>
             <span className="tag-cat">{periodLabel}</span>
           </div>
-          <div className="prh-scroll">
+          <div className="prh-scroll table-cards-wrap">
             <SupplierPaymentsTable payments={bal.payments} empty={loading ? t('Загружаем…') : t('За этот период оплат не было')} />
           </div>
         </div>
@@ -79,18 +84,18 @@ export default function Balance({ supplier, bal, dolgi, periodLabel, onSelect, o
           <h2><span className="h2-title"><span className="ic"><LuPackagePlus size={17} /></span>{t('Приходы от поставщика')}</span></h2>
           <span className="tag-cat">{periodLabel}</span>
         </div>
-        <div className="prh-scroll">
-          <table>
+        <div className="prh-scroll table-cards-wrap">
+          <table className="table-cards">
             <thead><tr><th>{t('Дата')}</th><th className="num">{t('Позиций')}</th><th className="num">{t('Сумма')}</th><th className="num">{t('В долг')}</th><th>{t('Принял')}</th><th></th></tr></thead>
             <tbody>
               {bal.arrivals.map((a) => (
                 <tr key={a.id}>
-                  <td style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(a.date)}</td>
-                  <td className="num">{(a.items || []).length}</td>
-                  <td className="num"><b>{money(a.total)}</b></td>
-                  <td className="num" style={{ color: Number(a.debt) > 0 ? 'var(--danger)' : undefined }}>{money(a.debt)}</td>
-                  <td className="tag-cat">{a.user?.name || '—'}</td>
-                  <td className="num"><button type="button" className="btn ghost sm" onClick={() => onOpenArrival(a)}>{t('Подробно')}</button></td>
+                  <td className="cell-main" style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(a.date)}</td>
+                  <td className="num" data-label={t('Позиций')}>{(a.items || []).length}</td>
+                  <td className="num" data-label={t('Сумма')}><b>{money(a.total)}</b></td>
+                  <td className="num" data-label={t('В долг')} style={{ color: Number(a.debt) > 0 ? 'var(--danger)' : undefined }}>{money(a.debt)}</td>
+                  <td className="tag-cat" data-label={t('Принял')}>{a.user?.name || '—'}</td>
+                  <td className="num cell-actions"><button type="button" className="btn ghost sm" onClick={() => onOpenArrival(a)}>{t('Подробно')}</button></td>
                 </tr>
               ))}
               {!bal.arrivals.length && <tr><td colSpan="6" className="empty">{loading ? t('Загружаем…') : t('За этот период приходов от поставщика не было')}</td></tr>}
@@ -131,18 +136,20 @@ function BalanceCards({ supplier, bal, debt, periodLabel, onOpenArrival }) {
     </div>
   )
   const close = () => setOkno('')
+  // На телефоне список не листается отдельно от окна (prh-okno-list): две прокрутки одна
+  // в другой пальцем не разобрать — листается всё окно целиком
   const arrivalsTable = (list, empty) => (
-    <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
-      <table>
+    <div className="prh-okno-list" style={{ maxHeight: '56vh', overflow: 'auto' }}>
+      <table className="table-cards">
         <thead><tr><th>{t('Дата')}</th><th className="num">{t('Позиций')}</th><th className="num">{t('Сумма')}</th><th className="num">{t('В долг')}</th><th></th></tr></thead>
         <tbody>
           {list.map((a) => (
             <tr key={a.id} className="clickable" onClick={() => { close(); onOpenArrival(a) }}>
-              <td style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(a.date)}</td>
-              <td className="num">{(a.items || []).length}</td>
-              <td className="num"><b>{money(a.total)}</b></td>
-              <td className="num" style={{ color: Number(a.debt) > 0 ? 'var(--danger)' : undefined }}>{money(a.debt)}</td>
-              <td className="num"><span className="btn ghost sm">{t('Подробно')}</span></td>
+              <td className="cell-main" style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(a.date)}</td>
+              <td className="num" data-label={t('Позиций')}>{(a.items || []).length}</td>
+              <td className="num" data-label={t('Сумма')}><b>{money(a.total)}</b></td>
+              <td className="num" data-label={t('В долг')} style={{ color: Number(a.debt) > 0 ? 'var(--danger)' : undefined }}>{money(a.debt)}</td>
+              <td className="num cell-actions"><span className="btn ghost sm">{t('Подробно')}</span></td>
             </tr>
           ))}
           {!list.length && <tr><td colSpan="5" className="empty">{empty}</td></tr>}
@@ -163,7 +170,7 @@ function BalanceCards({ supplier, bal, debt, periodLabel, onOpenArrival }) {
         {card('phone', t('Телефон'), supplier.phone || '—')}
       </div>
       {okno === 'debt' && (
-        <Modal wide title={title(t('Долг сейчас'))} onClose={close}>
+        <Modal wide title={title(t('Долг сейчас'))} onClose={close} className="prh-okno">
           <div className="tag-cat" style={{ marginBottom: 8 }}>
             {t('Долг сейчас')}: <b>{money(debt)}</b> · {t('Приходы в долг за период')} ({periodLabel})
           </div>
@@ -172,25 +179,25 @@ function BalanceCards({ supplier, bal, debt, periodLabel, onOpenArrival }) {
         </Modal>
       )}
       {okno === 'zakup' && (
-        <Modal wide title={title(t('Закуплено за период'))} onClose={close}>
+        <Modal wide title={title(t('Закуплено за период'))} onClose={close} className="prh-okno">
           <div className="tag-cat" style={{ marginBottom: 8 }}>{periodLabel} · {t('Приходов')}: {bal.arrivals.length} · {money(bal.zakupleno)}</div>
           {arrivalsTable(bal.arrivals, t('За этот период приходов от поставщика не было'))}
           {closeBtn}
         </Modal>
       )}
       {okno === 'vozvrat' && (
-        <Modal wide title={title(t('Возвращено за период'))} onClose={close}>
+        <Modal wide title={title(t('Возвращено за период'))} onClose={close} className="prh-okno">
           <div className="tag-cat" style={{ marginBottom: 8 }}>{periodLabel} · {money(bal.vozvrat)}</div>
-          <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
-            <table>
+          <div className="prh-okno-list" style={{ maxHeight: '56vh', overflow: 'auto' }}>
+            <table className="table-cards">
               <thead><tr><th>{t('Дата')}</th><th className="num">{t('Позиций')}</th><th className="num">{t('Сумма')}</th><th>{t('Как вернули деньги')}</th></tr></thead>
               <tbody>
                 {(bal.returns || []).map((r) => (
                   <tr key={r.id}>
-                    <td style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.date)}</td>
-                    <td className="num">{(r.items || []).length}</td>
-                    <td className="num"><b>{money(r.total)}</b></td>
-                    <td>{t(REFUNDS[r.refund]?.[0] || '—')}</td>
+                    <td className="cell-main" style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.date)}</td>
+                    <td className="num" data-label={t('Позиций')}>{(r.items || []).length}</td>
+                    <td className="num" data-label={t('Сумма')}><b>{money(r.total)}</b></td>
+                    <td data-label={t('Как вернули деньги')}>{t(REFUNDS[r.refund]?.[0] || '—')}</td>
                   </tr>
                 ))}
                 {!(bal.returns || []).length && <tr><td colSpan="4" className="empty">{t('За этот период возвратов не было')}</td></tr>}
@@ -201,16 +208,16 @@ function BalanceCards({ supplier, bal, debt, periodLabel, onOpenArrival }) {
         </Modal>
       )}
       {okno === 'oplata' && (
-        <Modal wide title={title(t('Оплачено за период'))} onClose={close}>
+        <Modal wide title={title(t('Оплачено за период'))} onClose={close} className="prh-okno">
           <div className="tag-cat" style={{ marginBottom: 8 }}>{periodLabel} · {money(bal.oplacheno)}</div>
-          <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+          <div className="prh-okno-list" style={{ maxHeight: '56vh', overflow: 'auto' }}>
             <SupplierPaymentsTable payments={bal.payments} empty={t('За этот период оплат не было')} />
           </div>
           {closeBtn}
         </Modal>
       )}
       {okno === 'nachalo' && (
-        <Modal title={title(t('Начальный долг'))} onClose={close}>
+        <Modal title={title(t('Начальный долг'))} onClose={close} className="prh-okno">
           <div className="total-row big"><span>{t('Начальный долг')}</span><span>{money(supplier.openingDebt || 0)}</span></div>
           <p style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.6 }}>
             {t('Сколько магазин был должен поставщику до начала работы в программе. Вписывается в карточке поставщика.')}

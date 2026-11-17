@@ -7,6 +7,18 @@ import { beepError } from '../../lib/sound'
 import { autoPickDelay, leftUnknownCode, leftUnknownName, looksLikeCode, nameSuggest, productByCode } from '../../lib/pick'
 import KameraKnopka from '../../components/KameraKnopka'
 
+// ── Назад к полю «Штрихкод» ──
+// После «Добавить», «Очистить форму» или ошибки. На компьютере — курсор в поле: следующий товар
+// сразу сканируют. На телефоне (до 600 px) фокус в поле открыл бы клавиатуру и увёл страницу
+// вниз (17.11.2026), поэтому там поле только показываем, если оно ушло за край экрана
+export function kPolyuShtrihkoda(el, telefon) {
+  if (!el) return
+  if (!telefon) return el.focus()
+  const r = el.getBoundingClientRect()
+  // Внизу экрана — закреплённая полоса с кнопкой «Меню»: под ней поле тоже не видно
+  if (r.top < 40 || r.bottom > window.innerHeight - 90) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+}
+
 // ── Товар: «Штрихкод» и «Наименование» ──
 // Одно и то же в новом поступлении и в возврате поставщику (правила — lib/pick.js).
 //   • «Штрихкод»: сканер стреляет сюда и сам жмёт Enter — товар находится сразу,

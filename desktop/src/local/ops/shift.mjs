@@ -107,8 +107,11 @@ export function openShift(ctx, raw) {
   })
 }
 
-// Итоги смены: чеки, погашения долгов и возвраты, привязанные именно к ней
-export function shiftTotals(db, shift, countedCash) {
+// Итоги смены: чеки, погашения долгов и возвраты, привязанные именно к ней.
+// 17.11.2026 (владелец): «Наличные в кассе по факту» изменить нельзя — факт всегда равен
+// ожидаемому, расхождения нет (как и на сервере, server/src/shifts/totals.ts). Недостачу
+// отмечают изъятием до закрытия смены
+export function shiftTotals(db, shift) {
   const sales = docsOfShift(db, 'sale', shift.id)
   let salesCash = D(0)
   let salesCard = D(0)
@@ -173,10 +176,8 @@ export function shiftTotals(db, shift, countedCash) {
     .minus(expenseCash)
     .minus(supplierCash)
     .minus(cashOut)
-  const difference = D(countedCash).minus(expectedCash)
-
   return {
-    countedCash: money(D(countedCash)),
+    countedCash: money(expectedCash),
     totalSales: money(totalSales),
     salesCash: money(salesCash),
     salesCard: money(salesCard),
@@ -196,23 +197,22 @@ export function shiftTotals(db, shift, countedCash) {
     discount: money(discount),
     count: sales.length,
     expectedCash: money(expectedCash),
-    difference: money(difference),
+    difference: 0,
   }
 }
 
 export function closeShift(ctx, raw) {
   const { db, now } = ctx
-  const dto = bodyOf(raw)
-  const c = checker()
-  const countedCash = c.num(dto.countedCash, 'countedCash')
-  c.done()
+  // Сумму «по факту» окно больше не задаёт (прежние версии присылают её — не берём): факт
+  // считает сама касса, он равен ожидаемому (shiftTotals)
+  bodyOf(raw)
 
   return inTx(db, () => {
     const open = myOpenShift(db, ctx.deviceId)
     if (!open) throw bad('Нет открытой смены')
     if (!mayCloseShift(open.body, ctx.user)) throw bad(NOT_YOUR_SHIFT)
 
-    const body = { ...open.body, closedAt: new Date(now).toISOString(), ...shiftTotals(db, open.body, countedCash) }
+    const body = { ...open.body, closedAt: new Date(now).toISOString(), ...shiftTotals(db, open.body) }
     // Смена, открытая здесь же и ещё не ушедшая на сервер, остаётся «ждущей».
     // Уже известная серверу — тоже становится ждущей: её закрытие он ещё не видел
     putDoc(db, 'shift', body, { sync: 'pending', deviceId: ctx.deviceId })

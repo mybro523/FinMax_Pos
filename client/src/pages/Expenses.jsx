@@ -223,7 +223,8 @@ export default function Expenses() {
 
       {can('expenses.create') && <div className="panel" style={{ maxWidth: 900 }}>
         <h2><span className="h2-title"><span className="ic"><LuPlus size={17} /></span>{t('Новый расход')}</span></h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0 14px' }}>
+        {/* fin-form: на телефоне поля — в одну колонку (m-dengi.css) */}
+        <div className="fin-form" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0 14px' }}>
           <div className="field" data-tour="exp.date">
             <label htmlFor="expDate">{t('Дата')}</label>
             <input
@@ -264,7 +265,7 @@ export default function Expenses() {
           />
         </div>
 
-        <div data-tour="exp.cash" style={{ marginBottom: 14 }}>
+        <div className="exp-cash" data-tour="exp.cash" style={{ marginBottom: 14 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: noTill ? 'var(--muted)' : undefined }}>
             <input
               type="checkbox" checked={fromCash} disabled={!tills.length}
@@ -274,7 +275,7 @@ export default function Expenses() {
             {t('Оплачен из кассы')}
           </label>
           {noTill && (
-            <div className="tag-cat" style={{ marginTop: 6 }}>
+            <div className="tag-cat fin-link" style={{ marginTop: 6 }}>
               {t('Нет открытой смены — из кассы взять нечего.')}{' '}
               <Link to="/shift" className="linklike" style={{ fontSize: 12 }}>{t('Откройте смену')}</Link>
             </div>
@@ -299,7 +300,8 @@ export default function Expenses() {
           )}
         </div>
 
-        <div className="tag-cat" style={{ marginBottom: 12 }}>
+        {/* fin-link: на телефоне ссылки — под палец (m-dengi.css) */}
+        <div className="tag-cat fin-link" style={{ marginBottom: 12 }}>
           {t('Нужной статьи нет в списке?')} <Link to="/settings" className="linklike" style={{ fontSize: 12 }}>{t('Добавьте её в «Настройках»')}</Link>
         </div>
         <div className="modal-actions" style={{ justifyContent: 'flex-start' }}>
@@ -317,7 +319,8 @@ export default function Expenses() {
           <span className="tag-cat" data-tour="exp.total">{t('расходы за период')}: <b style={{ color: 'var(--danger)' }}>{money(periodTotal)}</b></span>
         </h2>
         <JournalFilter controls={journal.controls} placeholder={t('Поиск по статье, примечанию или сотруднику…')}>
-          <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} style={{ maxWidth: 220 }} aria-label={t('Статья расхода')}>
+          {/* Ширина — из .journal-filter-bar select (220 px); на телефоне выбор — во всю строку */}
+          <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} aria-label={t('Статья расхода')}>
             <option value="all">{t('Все статьи')}</option>
             {filterCats.map((c) => <option key={c} value={c}>{t(c)}</option>)}
           </select>
@@ -328,7 +331,7 @@ export default function Expenses() {
         {/* На телефоне строки становятся карточками: пять колонок на узком экране
             пришлось бы листать вбок, а кнопки правки стоят как раз с краю */}
         <div className="table-cards-wrap">
-        <table className="table-cards">
+        <table className="table-cards exp-table">
           <thead>
             <tr><th>{t('Дата')}</th><th>{t('Статья')}</th><th>{t('Кто')}</th><th className="num">{t('Сумма')}</th><th></th></tr>
           </thead>
@@ -360,7 +363,7 @@ export default function Expenses() {
                 </td>
                 <td data-label={t('Кто')}>{e.user?.name || '—'}</td>
                 <td className="num" data-label={t('Сумма')} style={{ color: 'var(--danger)', whiteSpace: 'nowrap' }}>{money(e.amount)}</td>
-                <td className="num" style={{ whiteSpace: 'nowrap', justifyContent: 'flex-end' }}>
+                <td className="num cell-actions" style={{ whiteSpace: 'nowrap', justifyContent: 'flex-end' }}>
                   {locked(e) ? (
                     <span className="tag-cat" title={t('Смена закрыта — расход вошёл в её отчёт')} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
                       <LuLock size={14} /> {t('в отчёте смены')}

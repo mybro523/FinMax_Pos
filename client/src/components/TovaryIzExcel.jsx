@@ -44,7 +44,8 @@ export default function TovaryIzExcel({ value, onChange, disabled, t }) {
         </button>
       ) : (
         <div className="note info" data-testid="excel-summary">
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          {/* На телефоне «Убрать» — под сводкой: рядом с кнопкой сводка рвалась по слову в строку */}
+          <div className="excel-sum-head" style={{ display: 'flex', gap: 8, alignItems: 'flex-start', justifyContent: 'space-between' }}>
             <div>
               <b>{value.fileName}</b>
               <div>
@@ -64,8 +65,9 @@ export default function TovaryIzExcel({ value, onChange, disabled, t }) {
               <button type="button" className="btn ghost sm" onClick={() => setShowSkipped((v) => !v)} data-testid="excel-show-skipped">
                 {showSkipped ? t('Скрыть пропущенные') : t('Показать пропущенные')}
               </button>
+              {/* На телефоне — без своей прокрутки: листается всё окно (m-tovary.css) */}
               {showSkipped && (
-                <div className="tag-cat" style={{ maxHeight: 160, overflow: 'auto', marginTop: 6 }} data-testid="excel-skipped-list">
+                <div className="tag-cat excel-skipped-list" style={{ maxHeight: 160, overflow: 'auto', marginTop: 6 }} data-testid="excel-skipped-list">
                   {value.skipped.slice(0, 300).map((s) => (
                     <div key={s.n}>
                       {t('Строка')} {s.n}: {s.why === 'dup' ? `${t('повтор штрихкода, как в строке')} ${s.ref}` : s.why === 'max' ? `${t('больше 50 000 товаров за раз')}` : t('нет названия')}

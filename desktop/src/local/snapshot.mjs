@@ -115,7 +115,7 @@ function applyProducts(db, products, batches, full, now) {
       // Своя цена штуки (1.5.11): сервер прежней версии поля не шлёт — своей нет
       pieceC: pieceCentsIn(p.piecePrice),
       minStock: wholeNonNeg(p.minStock),
-      unit: String(p.unit ?? 'уп'),
+      unit: String(p.unit ?? (uppOf(p) > 1 ? 'уп' : 'шт')),
       upp: uppOf(p),
       dosage: String(p.dosage ?? ''),
       image: String(p.image ?? ''),

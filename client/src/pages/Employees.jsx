@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { LuUserPlus, LuTrash2, LuKeyRound, LuShieldCheck, LuPencil, LuUserCog, LuHandCoins } from 'react-icons/lu'
 import Layout from '../components/Layout'
@@ -9,7 +9,7 @@ import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { useDeepPeriod } from '../components/Period'
 import { monthName, useVydachi } from '../components/SalaryPicker'
 import { api } from '../db/api'
-import { onChanged, money, useCollection } from '../db/store'
+import { onChanged, money, useCollection, useConnection } from '../db/store'
 import { useAuth, getUser } from '../db/auth'
 import { useRouteOn } from '../lib/useModul'
 import { skachatXlsx } from '../lib/excel'
@@ -80,13 +80,21 @@ export default function Employees() {
     return z && (z.nachisleno > 0 || z.vydano > 0)
   })
 
+  // Список ни разу не загрузился (нет связи) — вместо «Нет сотрудников» и «Оклад и бонус пока
+  // никому не заданы» строка об этом и «Обновить»: иначе владелец решил бы, что сотрудники пропали
+  const [loadErr, setLoadErr] = useState(null)
+  const loadedRef = useRef(false)
   const load = useCallback(async () => {
     try {
       const [users, rs] = await Promise.all([api.get('/users'), api.get('/roles')])
       setList(users)
       setRoles(rs)
+      loadedRef.current = true
+      setLoadErr(null)
     } catch (e) {
-      toast(e.message, 'err')
+      // Список уже на экране (перечитывали) — он остаётся, о сбое говорит сообщение
+      if (loadedRef.current) toast(e.message, 'err')
+      else setLoadErr(e)
     } finally {
       setLoading(false)
     }
@@ -95,6 +103,17 @@ export default function Employees() {
     load()
   }, [load])
   useEffect(() => onChanged((keys) => (keys.includes('users') || keys.includes('roles')) && load()), [load])
+  // Связь вернулась — перечитываем сами
+  const conn = useConnection()
+  const connWas = useRef(conn)
+  useEffect(() => {
+    if (connWas.current === 'error' && conn === 'ok') load()
+    connWas.current = conn
+  }, [conn, load])
+  const retry = () => {
+    setLoading(true)
+    load()
+  }
 
   const roleName = (u) => roles.find((r) => r.id === u.roleId)?.name || u.roleName || (u.role === 'founder' ? t('Владелец') : t('Кассир'))
 
@@ -210,9 +229,19 @@ export default function Employees() {
     >
       <PrintSheet zagolovok={t('Сотрудники')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />
       {me?.register && <div className="note info" style={{ marginBottom: 12 }}>{t('Сотрудников, их пароли и роли заводят и меняют на главном компьютере магазина.')}</div>}
+      {loadErr && (
+        <div className="note err" role="alert" style={{ marginBottom: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ flex: '1 1 200px' }}>
+            {loadErr.status === 0 ? t('Нет связи — список не загружен') : `${t('Список не загрузился')}: ${t(loadErr.message)}`}
+          </span>
+          <button type="button" className="btn ghost sm" onClick={retry} disabled={loading}>{t('Обновить')}</button>
+        </div>
+      )}
       <div className="panel" data-tour="emp.list" style={{ padding: 0 }}>
-        <div style={{ overflowX: 'auto' }}>
-          <table>
+        {/* На телефоне строки — карточками (table-cards, index.css): логин крупно, статус под
+            ним, остальное — с подписями из data-label, кнопки — внизу карточки */}
+        <div className="table-cards-wrap" style={{ overflowX: 'auto' }}>
+          <table className="table-cards emp-table">
             <thead>
               <tr>
                 <th>{t('Логин')}</th><th>{t('ФИО')}</th><th>{t('Роль')}</th>
@@ -223,9 +252,9 @@ export default function Employees() {
             <tbody>
               {pg.slice.map((u) => (
                 <tr key={u.id}>
-                  <td><b>{u.name}</b>{u.id === me?.id && <span className="tag-cat"> · {t('это вы')}</span>}</td>
-                  <td>{u.fullName || <span className="tag-cat">—</span>}</td>
-                  <td>
+                  <td className="cell-main"><b>{u.name}</b>{u.id === me?.id && <span className="tag-cat"> · {t('это вы')}</span>}</td>
+                  <td data-label={t('ФИО')}>{u.fullName || <span className="tag-cat">—</span>}</td>
+                  <td data-label={t('Роль')}>
                     {/* Свою роль владелец не меняет — иначе остался бы без прав посреди работы */}
                     {u.id === me?.id ? (
                       <span>{roleName(u)}</span>
@@ -241,11 +270,11 @@ export default function Employees() {
                       </select>
                     )}
                   </td>
-                  <td className="num" data-tour="emp.salary">{Number(u.salary) > 0 ? money(u.salary) : <span className="tag-cat">—</span>}</td>
-                  <td className="num">{Number(u.bonusPercent) > 0 ? pct(u.bonusPercent) : <span className="tag-cat">—</span>}</td>
-                  <td className="tag-cat">{u.createdAt ? fmtDate(u.createdAt) : '—'}</td>
-                  <td>{u.active ? <span className="badge ok">{t('активен')}</span> : <span className="badge debt">{t('заблокирован')}</span>}</td>
-                  <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                  <td className="num" data-label={t('Оклад')} data-tour="emp.salary">{Number(u.salary) > 0 ? money(u.salary) : <span className="tag-cat">—</span>}</td>
+                  <td className="num" data-label={t('Бонус')}>{Number(u.bonusPercent) > 0 ? pct(u.bonusPercent) : <span className="tag-cat">—</span>}</td>
+                  <td className="tag-cat" data-label={t('Добавлен')}>{u.createdAt ? fmtDate(u.createdAt) : '—'}</td>
+                  <td className="cell-state" data-label={t('Статус')}>{u.active ? <span className="badge ok">{t('активен')}</span> : <span className="badge debt">{t('заблокирован')}</span>}</td>
+                  <td className="num cell-actions" style={{ whiteSpace: 'nowrap' }}>
                     {!me?.register && <>
                     <button className="btn ghost sm" data-tour="emp.edit" onClick={() => setEditing(u)} title={t('ФИО, оклад и бонус')}><LuPencil size={14} /> {t('Изменить')}</button>{' '}
                     <button className="btn ghost sm" data-tour="emp.password" onClick={() => resetPw(u)}><LuKeyRound size={14} /> {t('Пароль')}</button>{' '}
@@ -261,7 +290,7 @@ export default function Employees() {
                   </td>
                 </tr>
               ))}
-              {!loading && list.length === 0 && <tr><td colSpan="8" className="empty">{t('Нет сотрудников')}</td></tr>}
+              {!loading && !loadErr && list.length === 0 && <tr><td colSpan="8" className="empty">{t('Нет сотрудников')}</td></tr>}
             </tbody>
           </table>
         </div>
@@ -281,8 +310,8 @@ export default function Employees() {
           </select>
           <span className="tag-cat">{t('Начислено — оклад и бонус от продаж за месяц. Выдают в «Расходах» со статьёй «Зарплата», можно частями.')}</span>
         </div>
-        <div style={{ overflowX: 'auto' }}>
-          <table>
+        <div className="table-cards-wrap" style={{ overflowX: 'auto' }}>
+          <table className="table-cards emp-table">
             <thead>
               <tr>
                 <th>{t('Сотрудник')}</th><th className="num">{t('Оклад')}</th><th className="num">{t('Бонус')}</th>
@@ -293,25 +322,26 @@ export default function Employees() {
             <tbody>
               {zpList.map((u) => (
                 <tr key={u.id}>
-                  <td><b>{u.fullName || u.name}</b>{u.fullName ? <div className="tag-cat">{u.name}</div> : null}</td>
-                  <td className="num">{Number(u.salary) > 0 ? money(u.salary) : <span className="tag-cat">—</span>}</td>
-                  <td className="num">{Number(u.bonusPercent) > 0 ? pct(u.bonusPercent) : <span className="tag-cat">—</span>}</td>
-                  <td className="num">
+                  <td className="cell-main"><b>{u.fullName || u.name}</b>{u.fullName ? <div className="tag-cat">{u.name}</div> : null}</td>
+                  <td className="num" data-label={t('Оклад')}>{Number(u.salary) > 0 ? money(u.salary) : <span className="tag-cat">—</span>}</td>
+                  <td className="num" data-label={t('Бонус')}>{Number(u.bonusPercent) > 0 ? pct(u.bonusPercent) : <span className="tag-cat">—</span>}</td>
+                  <td className="num" data-label={t('Продажи за его месяц')}>
                     {zp.get(u.id)?.salesSum > 0 ? money(zp.get(u.id).salesSum) : <span className="tag-cat">—</span>}
                     {zp.get(u.id)?.per && <div className="tag-cat">{denText(zp.get(u.id).per.from, true)} – {denText(zp.get(u.id).per.to, true)}</div>}
                   </td>
                   <ZpCells z={zp.get(u.id)} employeeId={u.userId} month={month} />
                 </tr>
               ))}
+              {/* Итог на телефоне — своей карточкой, как итог таблицы (m-lyudi.css) */}
               {zpList.length > 0 && (
                 <tr className="emp-zp-total">
-                  <td colSpan="4"><b>{t('Итого')}</b></td>
-                  <td className="num"><b>{money(exItogi.nachisleno)}</b></td>
-                  <td className="num"><b>{money(exItogi.vydano)}</b></td>
-                  <td className="num"><b>{money(Math.max(0, zpList.reduce((s, u) => s + (zp.get(u.id)?.ostalos || 0), 0)))}</b></td>
+                  <td colSpan="4" className="cell-main"><b>{t('Итого')}</b></td>
+                  <td className="num" data-label={t('Начислено')}><b>{money(exItogi.nachisleno)}</b></td>
+                  <td className="num" data-label={t('Выдано')}><b>{money(exItogi.vydano)}</b></td>
+                  <td className="num" data-label={t('Осталось')}><b>{money(Math.max(0, zpList.reduce((s, u) => s + (zp.get(u.id)?.ostalos || 0), 0)))}</b></td>
                 </tr>
               )}
-              {!loading && zpList.length === 0 && (
+              {!loading && !loadErr && zpList.length === 0 && (
                 <tr><td colSpan="7" className="empty">{t('Оклад и бонус пока никому не заданы — впишите их кнопкой «Изменить» в списке выше.')}</td></tr>
               )}
             </tbody>
@@ -320,7 +350,8 @@ export default function Employees() {
       </div>
       <div className="note info" style={{ marginTop: 16, maxWidth: 680, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <span>{t('Что видит и что может каждый сотрудник, решает его роль.')}</span>
-        <Link to="/roles" className="linklike"><LuShieldCheck size={14} /> {t('Роли и права')}</Link>
+        {/* emp-roles-link: на телефоне ссылка — под палец (m-lyudi.css) */}
+        <Link to="/roles" className="linklike emp-roles-link"><LuShieldCheck size={14} /> {t('Роли и права')}</Link>
       </div>
 
       {adding && <AddEmployee roles={roles} onDone={added} onClose={() => setAdding(false)} />}
@@ -338,9 +369,9 @@ function ZpCells({ z, employeeId, month }) {
   const nichego = !z || (z.nachisleno <= 0 && z.vydano <= 0)
   return (
     <>
-      <td className="num">{z && z.nachisleno > 0 ? money(z.nachisleno) : <span className="tag-cat">—</span>}</td>
-      <td className="num">{z && z.vydano > 0 ? money(z.vydano) : <span className="tag-cat">—</span>}</td>
-      <td className="num emp-zp-ost" style={{ whiteSpace: 'nowrap' }}>
+      <td className="num" data-label={t('Начислено')}>{z && z.nachisleno > 0 ? money(z.nachisleno) : <span className="tag-cat">—</span>}</td>
+      <td className="num" data-label={t('Выдано')}>{z && z.vydano > 0 ? money(z.vydano) : <span className="tag-cat">—</span>}</td>
+      <td className="num emp-zp-ost" data-label={t('Осталось')} style={{ whiteSpace: 'nowrap' }}>
         {nichego ? (
           <span className="tag-cat">—</span>
         ) : z.ostalos > 0 ? (

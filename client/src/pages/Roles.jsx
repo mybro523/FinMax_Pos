@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LuLock, LuPlus, LuPencil, LuTrash2, LuShieldCheck, LuCheck } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { useToast, useDialog } from '../components/ui'
 import { api } from '../db/api'
-import { onChanged } from '../db/store'
+import { onChanged, useConnection } from '../db/store'
 import { useT } from '../lib/i18n'
 import { PERMISSION_GROUPS, OWNER_ROLE_ID } from '../lib/permissions'
 import { offPerms } from '../lib/moduli'
@@ -39,12 +39,20 @@ export default function Roles() {
   }, [offKey])
   const visibleKeys = useMemo(() => groups.flatMap((g) => g.items.map(([k]) => k)), [groups])
 
+  // Список ни разу не загрузился (нет связи) — вместо «Ролей пока нет» строка об этом и
+  // «Обновить»: иначе владелец решил бы, что роли пропали
+  const [loadErr, setLoadErr] = useState(null)
+  const loadedRef = useRef(false)
   const load = useCallback(async () => {
     try {
       const list = await api.get('/roles')
       setRoles(list)
+      loadedRef.current = true
+      setLoadErr(null)
     } catch (e) {
-      toast(e.message, 'err')
+      // Список уже на экране (перечитывали) — он остаётся, о сбое говорит сообщение
+      if (loadedRef.current) toast(e.message, 'err')
+      else setLoadErr(e)
     } finally {
       setLoading(false)
     }
@@ -53,11 +61,34 @@ export default function Roles() {
     load()
   }, [load])
   useEffect(() => onChanged((keys) => keys.includes('roles') && load()), [load])
+  // Связь вернулась — перечитываем сами
+  const conn = useConnection()
+  const connWas = useRef(conn)
+  useEffect(() => {
+    if (connWas.current === 'error' && conn === 'ok') load()
+    connWas.current = conn
+  }, [conn, load])
+  const retry = () => {
+    setLoading(true)
+    load()
+  }
 
   const sel = roles.find((r) => r.id === selId) || roles[0] || null
-  // Выбрали другую роль — черновик берётся из неё
+  // Черновик берётся из роли, когда выбрали другую. Список ролей перечитывается и сам (роль
+  // завели на другом устройстве) — несохранённые галочки при этом остаются: раньше они молча
+  // сбрасывались, и «Сохранить права» пропадала. base — сохранённые права, с которых начат
+  // черновик: по ним видно, трогали ли галочки и изменились ли права роли где-то ещё
+  const baseRef = useRef({ id: null, perms: [] })
   useEffect(() => {
-    setDraft(sel ? sel.permissions : [])
+    const b = baseRef.current
+    const id = sel ? sel.id : null
+    const perms = sel ? sel.permissions : []
+    if (b.id === id && sameSet(b.perms, perms)) return
+    baseRef.current = { id, perms }
+    if (b.id !== id || sameSet(draft, b.perms)) setDraft(perms)
+    // Права этой роли сохранили в другом месте, а здесь галочки ещё не сохранены — черновик
+    // остаётся, человек узнаёт об этом и решает сам
+    else if (!sameSet(draft, perms)) toast(t('Права этой роли только что изменили в другом месте — ваши галочки ещё не сохранены'), 'err')
   }, [sel?.id, sel?.permissions]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const owner = sel?.id === OWNER_ROLE_ID
@@ -193,6 +224,14 @@ export default function Roles() {
     >
       <PrintSheet zagolovok={t('Роли и права')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />
       {getUser()?.register && <div className="note info" style={{ marginBottom: 12 }}>{t('Сотрудников, их пароли и роли заводят и меняют на главном компьютере магазина.')}</div>}
+      {loadErr && (
+        <div className="note err" role="alert" style={{ marginBottom: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ flex: '1 1 200px' }}>
+            {loadErr.status === 0 ? t('Нет связи — список не загружен') : `${t('Список не загрузился')}: ${t(loadErr.message)}`}
+          </span>
+          <button type="button" className="btn ghost sm" onClick={retry} disabled={loading}>{t('Обновить')}</button>
+        </div>
+      )}
       <div className="roles">
         <aside className="panel roles-list" data-tour="roles.list">
           <h2><span className="h2-title"><span className="ic"><LuShieldCheck size={17} /></span>{t('Роли')}</span></h2>
@@ -205,18 +244,23 @@ export default function Roles() {
             >
               <span className="role-item-main">
                 <b>{r.name}</b>
+                {/* role-item-n: на телефоне подпись переносится по точке, а не посреди «10 из 59» */}
                 <span className="tag-cat">
-                  {r.people} {t('чел.')} · {r.id === OWNER_ROLE_ID ? t('все права') : `${r.permissions.filter((k) => visibleKeys.includes(k)).length} ${t('из')} ${total}`}
+                  <span className="role-item-n">{r.people} {t('чел.')}</span> ·{' '}
+                  <span className="role-item-n">{r.id === OWNER_ROLE_ID ? t('все права') : `${r.permissions.filter((k) => visibleKeys.includes(k)).length} ${t('из')} ${total}`}</span>
                 </span>
               </span>
               {r.system && <span className="role-lock" title={t('системная')}><LuLock size={14} /></span>}
             </button>
           ))}
-          {!loading && roles.length === 0 && <div className="empty">{t('Ролей пока нет')}</div>}
+          {!loading && !loadErr && roles.length === 0 && <div className="empty">{t('Ролей пока нет')}</div>}
         </aside>
 
+        {/* dirty — есть несохранённые галочки: на телефоне «Сохранить права» тогда стоит внизу
+            экрана (m-lyudi.css), а не только над списком из шести десятков прав. owner — у
+            владельца на телефоне неактивной «Сохранить права» нет вовсе */}
         {sel && (
-          <section className="panel roles-editor" data-tour="roles.rights">
+          <section className={'panel roles-editor' + (dirty ? ' dirty' : '') + (owner ? ' owner' : '')} data-tour="roles.rights">
             <div className="roles-editor-head">
               <div className="roles-editor-title">
                 <h2>
@@ -237,7 +281,7 @@ export default function Roles() {
                     <LuTrash2 size={14} /> {t('Удалить')}
                   </button>
                 )}
-                <button className="btn" data-tour="roles.save" onClick={save} disabled={!dirty || saving}>
+                <button className="btn roles-save" data-tour="roles.save" onClick={save} disabled={!dirty || saving}>
                   <span className="ic"><LuCheck size={16} /></span> {saving ? t('Сохранение…') : t('Сохранить права')}
                 </button>
                 </>}

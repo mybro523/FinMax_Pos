@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { LuCheck, LuTriangleAlert, LuBanknote, LuQrCode, LuCreditCard, LuReceipt, LuEye, LuEyeOff } from 'react-icons/lu'
+import { LuCheck, LuTriangleAlert, LuBanknote, LuQrCode, LuCreditCard, LuReceipt, LuEye, LuEyeOff, LuX } from 'react-icons/lu'
 import { translate as tr } from '../lib/i18n'
 import NumberInput from './NumberInput'
 
@@ -145,6 +145,13 @@ export function Modal({ title, children, onClose, className, wide }) {
   return toOverlayHost(
     <div className={'overlay' + (className ? ' ' + className : '')} {...backdrop}>
       <div className={'modal' + (wide ? ' wide' : '')} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {/* Крестик — только на телефоне (index.css): окно там шторкой снизу, Escape нет, а у
+            многих окон нет своей кнопки «Закрыть» (17.11.2026) */}
+        {onClose && (
+          <button type="button" className="modal-x" onClick={onClose} aria-label={tr('Закрыть')} title={tr('Закрыть')}>
+            <LuX size={20} />
+          </button>
+        )}
         <h3>{title}</h3>
         {children}
       </div>
@@ -210,12 +217,17 @@ function DialogView({ req, onDone }) {
           <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.6, marginBottom: 16 }}>{opts.message}</p>
         )}
         {fields.map((f, i) => {
+          // readOnly — поле только показывает значение (17.11.2026: «Наличные по факту» при
+          // закрытии смены): изменить нельзя, фокуса и клавиатуры на телефоне нет
           const common = {
             id: 'dlg_' + f.name,
             value: vals[f.name],
             placeholder: f.placeholder,
-            autoFocus: i === 0,
-            onChange: (e) => setVals((v) => ({ ...v, [f.name]: e.target.value })),
+            autoFocus: i === 0 && !f.readOnly,
+            readOnly: !!f.readOnly,
+            tabIndex: f.readOnly ? -1 : undefined,
+            'aria-readonly': f.readOnly ? 'true' : undefined,
+            onChange: (e) => !f.readOnly && setVals((v) => ({ ...v, [f.name]: e.target.value })),
             onKeyDown: (e) => e.key === 'Enter' && ok(),
           }
           return (

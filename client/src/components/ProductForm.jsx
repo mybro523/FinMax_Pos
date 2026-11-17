@@ -15,6 +15,17 @@ import { generateEan13, isInternalBarcode } from '../lib/barcode'
 import { KG, gramsOfKg, isVesovoy, edinica, EDINICY, kgText } from '../lib/units'
 import { repackAsk, repackNeeded, r2, vesUpp } from '../lib/vesUpak'
 import { priceFromMarkup, markupOf } from '../lib/pricing'
+import { isDesktop } from '../lib/desktop'
+
+// Палец — основной указатель (телефон, планшет), и это не программа для Windows — как у
+// кнопки камеры (KameraKnopka)
+const palcem = () => {
+  try {
+    return !isDesktop && window.matchMedia('(pointer: coarse)').matches
+  } catch {
+    return false
+  }
+}
 
 // ── Карточка товара: одна форма на всю программу ──
 //
@@ -94,7 +105,7 @@ export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
       ...(repackAsk(f) && (f.repack === 'scale' || f.repack === 'keep') ? { repack: f.repack } : {}),
     }
   }
-  const unit = (f.unit || '').trim() || 'уп'
+  const unit = edinica({ unit: f.unit, unitsPerPack: f.unitsPerPack })
   // У штуки нет «штук внутри»: иначе одна штука продавалась бы частями
   const upp = unit === 'шт' && !(Number(f.unitsPerPack) > 1) ? 1 : Math.max(1, Number(f.unitsPerPack) || 1)
   // Своя цена за 1 шт (1.5.11): только у делимой упаковки; пусто или ноль — своей нет,
@@ -138,9 +149,14 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
 
   // Форма открывается под сканер: курсор сразу в штрихкоде, а не в названии.
   // На кассе штрихкод уже считан — там курсор нужен в названии.
+  // Телефон и планшет (палец — основной указатель; не программа для Windows): в штрихкод
+  // курсор сам не ставится. Сканера там нет — код считывают камерой (кнопка у поля), а
+  // курсор поднял бы клавиатуру на пол-окна, и при правке первая же цифра заменила бы
+  // выделенный штрихкод товара. Курсор в названии (касса, код уже считан) — остаётся
   useEffect(() => {
     const el = autoFocus === 'name' ? nameRef.current : barcodeRef.current
     if (!el) return
+    if (autoFocus !== 'name' && palcem()) return
     el.focus()
     // При правке код уже заполнен — скан заменит его целиком, а не допишет в конец
     el.select?.()
@@ -479,6 +495,7 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
                   {nameById(id)}
                   <button
                     type="button"
+                    className="pf-analog-x"
                     onClick={() => set('analogIds', analogIds.filter((x) => x !== id))}
                     aria-label={`${t('Убрать')}: ${nameById(id)}`}
                     style={{ background: 'none', border: 'none', color: 'var(--danger)', display: 'inline-flex', padding: 0 }}

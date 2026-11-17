@@ -751,7 +751,7 @@ export class SyncService {
     if (!shiftId) return
     const shift = await tx.shift.findUnique({ where: { id: shiftId } })
     if (!shift?.closedAt) return
-    await tx.shift.update({ where: { id: shift.id }, data: await shiftTotals(tx, shift, shift.countedCash ?? 0) })
+    await tx.shift.update({ where: { id: shift.id }, data: await shiftTotals(tx, shift) })
   }
 
   // ── Продажа ──
@@ -1288,7 +1288,7 @@ export class SyncService {
     if (ctx.actor && !mayCloseShift(shift, ctx.actor)) throw new Reject(NOT_YOUR_SHIFT)
     // Итоги считает сервер — по документам, которые к этому моменту уже пришли
     // (они идут в той же очереди раньше закрытия). Формула та же, что у сайта
-    const totals = await shiftTotals(tx, shift, p.countedCash)
+    const totals = await shiftTotals(tx, shift)
     await tx.shift.update({ where: { id: shift.id }, data: { closedAt: p.closedAt, ...totals } })
     return shift.id
   }
@@ -1924,14 +1924,14 @@ export class SyncService {
   // касса, а её больше нет. Тогда смену закрывает владелец. Если касса всё-таки
   // вернётся, её собственное закрытие ничего не изменит, а документы, сделанные в этой
   // смене, попадут в её итоги (см. recountClosed).
-  async closeDeviceShift(deviceId: string, countedCash: number) {
+  async closeDeviceShift(deviceId: string) {
     const closed = await this.prisma.$transaction(async (tx) => {
       // Под замком: чек, который касса присылает в эту же секунду, либо уже записан и
       // попадёт в итоги, либо дождётся закрытия и пересчитает их сам (recountClosed)
       const [open] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Shift" WHERE "deviceId" = ${deviceId} AND "closedAt" IS NULL FOR UPDATE`
       const shift = open ? await tx.shift.findUnique({ where: { id: open.id } }) : null
       if (!shift || shift.closedAt) throw new BadRequestException('На этой кассе нет открытой смены')
-      const totals = await shiftTotals(tx, shift, countedCash)
+      const totals = await shiftTotals(tx, shift)
       const r = await tx.shift.updateMany({ where: { id: shift.id, closedAt: null }, data: { closedAt: new Date(), ...totals } })
       if (r.count !== 1) throw new BadRequestException('Смена уже закрыта')
       return tx.shift.findUnique({ where: { id: shift.id }, include: { user: { select: { id: true, name: true } } } })

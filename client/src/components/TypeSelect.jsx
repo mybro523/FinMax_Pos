@@ -17,7 +17,7 @@ export function AddTypeBtn({ toast, options, onPicked }) {
   if (!can('settings.categories')) return null
   return (
     <>
-      <button type="button" className="btn icon" style={{ flexShrink: 0 }} title={t('Новый тип товара')} aria-label={t('Новый тип товара')} data-tour="pf.type-add" onClick={() => setOpen(true)}>
+      <button type="button" className="btn icon pf-add" style={{ flexShrink: 0 }} title={t('Новый тип товара')} aria-label={t('Новый тип товара')} data-tour="pf.type-add" onClick={() => setOpen(true)}>
         <LuPlus size={16} />
       </button>
       {open && <NewTypeModal toast={toast} options={options} onPicked={onPicked} onClose={() => setOpen(false)} />}

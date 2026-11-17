@@ -22,6 +22,6 @@ export class ShiftsController {
   @Post('close')
   @Perm('shift.open')
   close(@Body() dto: CloseShiftDto, @CurrentUser() u: any) {
-    return this.shifts.close(dto.countedCash, { role: u?.role, permissions: u?.permissions, tenantUserId: u?.tenantUserId ?? null })
+    return this.shifts.close({ role: u?.role, permissions: u?.permissions, tenantUserId: u?.tenantUserId ?? null })
   }
 }

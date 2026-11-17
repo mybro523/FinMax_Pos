@@ -29,7 +29,9 @@ test('дробные единицы: кг, л, м, м²; весы — тольк
   assert.ok(isVesovoy({ unit: 'кг' }) && isVesovoy({ unit: 'л' }) && isVesovoy({ unit: 'м' }) && isVesovoy({ unit: 'м²' }))
   assert.ok(!isVesovoy({ unit: 'рулон' }) && !isVesovoy({ unit: 'уп' }) && !isVesovoy({}))
   assert.ok(isKg({ unit: 'кг' }) && !isKg({ unit: 'л' }))
-  assert.equal(edinica({}), 'уп')
+  // Пусто — по умолчанию (17.11.2026): одна штука — «шт», упаковка из нескольких — «уп»
+  assert.equal(edinica({}), 'шт')
+  assert.equal(edinica({ unitsPerPack: 20 }), 'уп')
   assert.equal(edinica({ unit: 'рулон' }), 'рулон')
 })
 

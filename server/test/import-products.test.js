@@ -10,7 +10,8 @@ test('годные строки проходят, поля выравниваю�
   ])
   assert.equal(dropped, 0)
   assert.deepEqual(rows[0], { barcode: '4870204010060', name: 'Кока Кола 0,5л', price: 12.5, cost: 9, stock: 3, category: 'Напитки', unit: 'шт', own: false })
-  assert.deepEqual(rows[1], { barcode: '30056640', name: 'Rexona', price: 0, cost: 0, stock: 0, category: 'Прочее', unit: 'уп', own: false })
+  // Единица не указана — штуки (17.11.2026)
+  assert.deepEqual(rows[1], { barcode: '30056640', name: 'Rexona', price: 0, cost: 0, stock: 0, category: 'Прочее', unit: 'шт', own: false })
 })
 
 test('без названия, без штрихкода и повтор — отбрасываются, первая строка остаётся', () => {

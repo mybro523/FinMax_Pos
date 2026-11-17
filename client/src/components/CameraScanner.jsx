@@ -331,7 +331,8 @@ export default function CameraScanner({ onDetect, onClose }) {
             <div className="scan-hint" style={{ justifyContent: 'center', textAlign: 'center', marginTop: 10 }}>
               <span className="ic"><LuScanLine size={15} /></span>{hint}
             </div>
-            <button className="btn block" style={{ marginTop: 12, padding: 13, fontSize: 15 }} disabled={!ready} onClick={capture}>
+            {/* cam-snap: на узком телефоне подпись переносится, а не вылезает за кнопку (m-kassa.css) */}
+            <button className="btn block cam-snap" style={{ marginTop: 12, padding: 13, fontSize: 15 }} disabled={!ready} onClick={capture}>
               <span className="ic"><LuImage size={17} /></span> Сфотографировать и распознать
             </button>
           </>

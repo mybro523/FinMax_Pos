@@ -66,7 +66,7 @@ export class ShiftsService {
   // возвраты с позициями. К вечеру загруженного дня это сотни записей, и стандартных
   // пяти секунд Prisma не хватает: кассир не может закрыть смену и уйти домой,
   // а видит невнятный отказ базы. Даём столько же времени, сколько продаже.
-  async close(countedCash: number, actor?: ShiftCloser) {
+  async close(actor?: ShiftCloser) {
     return this.prisma.$transaction(async (tx) => {
       const shift = await tx.shift.findFirst({ where: WEB_SHIFT })
       if (!shift) throw new BadRequestException('Нет открытой смены')
@@ -77,7 +77,7 @@ export class ShiftsService {
       // получит отказ — «расход записан, а в отчёте смены его нет» не бывает
       await tx.$queryRaw`SELECT "id" FROM "Shift" WHERE "id" = ${shift.id} FOR UPDATE`
 
-      const totals = await shiftTotals(tx, shift, countedCash)
+      const totals = await shiftTotals(tx, shift)
 
       // Условное закрытие: если смену уже закрыл параллельный запрос — count=0
       const r = await tx.shift.updateMany({

@@ -125,7 +125,8 @@ export default function Incomes() {
       {can('incomes.create') && (
         <div className="panel" style={{ maxWidth: 900 }}>
           <h2><span className="h2-title"><span className="ic"><LuPlus size={17} /></span>{t('Новый доход')}</span></h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0 14px' }}>
+          {/* fin-form: на телефоне поля — в одну колонку (m-dengi.css) */}
+          <div className="fin-form" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0 14px' }}>
             <div className="field" data-tour="inc.date">
               <label htmlFor="incDate">{t('Дата')}</label>
               <input id="incDate" type="date" max={dayKey()} value={date} onChange={(e) => setDate(e.target.value || dayKey())} />
@@ -154,7 +155,8 @@ export default function Incomes() {
               onKeyDown={(e) => e.key === 'Enter' && submit()}
             />
           </div>
-          <div className="tag-cat" style={{ marginBottom: 12 }}>
+          {/* fin-link: на телефоне ссылка — под палец (m-dengi.css) */}
+          <div className="tag-cat fin-link" style={{ marginBottom: 12 }}>
             {t('Нужной статьи нет в списке?')} <Link to="/settings" className="linklike" style={{ fontSize: 12 }}>{t('Добавьте её в «Настройках»')}</Link>
           </div>
           <div className="modal-actions" style={{ justifyContent: 'flex-start' }}>
@@ -171,7 +173,8 @@ export default function Incomes() {
           <span className="tag-cat" data-tour="inc.total">{t('доходы за период')}: <b style={{ color: 'var(--green)' }}>{money(periodTotal)}</b></span>
         </h2>
         <JournalFilter controls={journal.controls} placeholder={t('Поиск по статье или примечанию…')}>
-          <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} style={{ maxWidth: 220 }} aria-label={t('Статья дохода')}>
+          {/* Ширина — из .journal-filter-bar select (220 px); на телефоне выбор — во всю строку */}
+          <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} aria-label={t('Статья дохода')}>
             <option value="all">{t('Все статьи')}</option>
             {filterCats.map((c) => <option key={c} value={c}>{t(c)}</option>)}
           </select>
@@ -180,7 +183,7 @@ export default function Incomes() {
           <JournalCount rows={journalRows.length} loading={journal.loading} />
         </div>
         <div className="table-cards-wrap">
-          <table className="table-cards">
+          <table className="table-cards inc-table">
             <thead>
               <tr><th>{t('Дата')}</th><th>{t('Статья')}</th><th>{t('Кто')}</th><th className="num">{t('Сумма')}</th><th></th></tr>
             </thead>
@@ -194,7 +197,7 @@ export default function Incomes() {
                   </td>
                   <td data-label={t('Кто')}>{e.user?.name || '—'}</td>
                   <td className="num" data-label={t('Сумма')} style={{ color: 'var(--green)', whiteSpace: 'nowrap' }}>{money(e.amount)}</td>
-                  <td className="num" style={{ whiteSpace: 'nowrap', justifyContent: 'flex-end' }}>
+                  <td className="num cell-actions" style={{ whiteSpace: 'nowrap', justifyContent: 'flex-end' }}>
                     {can('incomes.edit') && <>
                       <button className="btn ghost sm icon" onClick={() => setEditing(e)} title={t('Изменить')} aria-label={t('Изменить')}><LuPencil size={15} /></button>{' '}
                       <button className="btn ghost sm icon" onClick={() => remove(e)} title={t('Удалить')} aria-label={t('Удалить')}><LuTrash2 size={15} /></button>

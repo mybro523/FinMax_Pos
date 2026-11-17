@@ -49,7 +49,7 @@ export default function ChekPanel() {
         <label htmlFor="chk-footer">{t('Подпись внизу чека')}</label>
         <input id="chk-footer" value={r.footer} onChange={(e) => set({ footer: e.target.value })} placeholder={t('Будьте здоровы!')} autoComplete="off" />
       </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div className="set-btns" style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button className="btn" onClick={save}>{t('Сохранить')}</button>
       </div>
       <div style={{ borderTop: '1px solid var(--border)', marginTop: 14, paddingTop: 14 }}>

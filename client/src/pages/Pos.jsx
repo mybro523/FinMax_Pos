@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useDeferredValue, lazy, Suspense } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useDeferredValue, useSyncExternalStore, lazy, Suspense } from 'react'
 import {
   LuCamera, LuShoppingCart, LuPlus, LuMinus, LuTrash2, LuCheck, LuPrinter, LuScanLine, LuClock,
   LuTriangleAlert, LuX, LuLock, LuChevronRight, LuUndo2,
@@ -9,6 +9,7 @@ import { Modal, useToast, useDialog, PAYMENTS } from '../components/ui'
 // Грузим её только при нажатии «Камера», иначе она замедляла открытие Кассы каждый раз.
 const CameraScanner = lazy(() => import('../components/CameraScanner'))
 import KassaCatalog, { LIMIT } from '../components/KassaCatalog'
+import ChipsMore from '../components/ChipsMore'
 import Lightbox from '../components/Lightbox'
 import { useCollection, useFirstLoading, money, db, stockText, realId } from '../db/store'
 import { useAuth, useCan } from '../db/auth'
@@ -77,6 +78,28 @@ const CATS_KEY = 'apteka_kassa_cats'
 // Число то же, что в стилях кассы (index.css) и в туре (lib/tur.js): разойдутся —
 // и касса будет считать экран широким, пока на нём показан переключатель
 const UZKO = '(max-width: 1279px)'
+// Телефон (до 600 px, как в index.css и m-kassa.css): касса — одна колонка, которая листается
+// страницей, клавиатура — экранная. На нём курсор сам в поле сканера не возвращается
+// (см. vernutKursor). Шире 600 px — компьютер и программа: там всё как было
+const TELEFON = '(max-width: 600px)'
+const naTelefone = () => typeof window.matchMedia === 'function' && window.matchMedia(TELEFON).matches
+function useTelefon() {
+  return useSyncExternalStore(
+    (cb) => {
+      if (typeof window.matchMedia !== 'function') return () => {}
+      const mq = window.matchMedia(TELEFON)
+      mq.addEventListener('change', cb)
+      return () => mq.removeEventListener('change', cb)
+    },
+    naTelefone,
+    () => false,
+  )
+}
+// Слово валюты — так, как его пишет money() в суммах: «сомони» из «0 сомони»
+const valyuta = () => {
+  const s = money(0)
+  return s.slice(s.lastIndexOf(' ') + 1)
+}
 // Один сравниватель на всю кассу. localeCompare с указанием языка заводит его заново
 // на каждое сравнение, а каталог в настоящем магазине — это тысячи названий
 const poAlfavitu = new Intl.Collator('ru').compare
@@ -126,7 +149,7 @@ export default function Pos() {
       await synced
       setOpenCash('')
       toast(t('Смена открыта'))
-      focusScanner()
+      vernutKursor()
     } catch (e) {
       toast(t('Смена не открыта') + ': ' + t(e.message), 'err')
     } finally {
@@ -136,6 +159,7 @@ export default function Pos() {
   const t = useT()
   const toast = useToast()
   const dialog = useDialog()
+  const telefon = useTelefon()
   const phCode = auth?.pharmacy?.code || ''
 
   // ── Открытые чеки ──
@@ -208,6 +232,7 @@ export default function Pos() {
   // номер чека приходит с ним) и корзина, какой она была до оплаты
   const lastSaleRef = useRef(null)
   const [selId, setSelId] = useState(null) // выбранная строка чека — с ней работают клавиши
+  const probito = useRef(null) // товар, который только что пробили (см. selLine)
   const [cat, setCat] = useState(VSE)
   // Шапка категорий свёрнута или раскрыта — как оставили на этом компьютере в прошлый раз
   const [catsOpen, setCatsOpen] = useState(() => {
@@ -226,6 +251,17 @@ export default function Pos() {
       }
       return !v
     })
+  // Выбор категории. На телефоне раскрытый список плашек («Ещё») после выбора сворачивается
+  // до двух рядов, а экран встаёт на шапку каталога, если она ушла выше края: иначе товары
+  // выбранной категории оставались бы далеко внизу, под всеми плашками
+  const vybratKat = (c) => {
+    setCat(c)
+    if (!naTelefone()) return
+    requestAnimationFrame(() => {
+      const box = document.querySelector('.kc-cats-box')
+      if (box && box.getBoundingClientRect().top < 0) box.scrollIntoView({ block: 'start' })
+    })
+  }
   const [hi, setHi] = useState(0) // подсвеченная строка каталога
   const [pane, setPane] = useState('check') // на узком экране: 'check' | 'catalog'
   const [izm, setIzm] = useState(null) // что изменилось в чеке, пока он лежал: { id, text }
@@ -298,15 +334,41 @@ export default function Pos() {
   // Возвращаем фокус на поле сканера (нужно для USB-сканера), НО не вырываем его,
   // пока кассир печатает в другом поле — иначе вторая цифра в «Штук»/«Скидка»
   // улетала в поиск, потому что корзина меняется на каждое нажатие клавиши.
-  const focusScanner = useCallback(() => inputRef.current?.focus(), [])
+  //
+  // focusScanner — по клавише: Escape, знак с USB- или Bluetooth-сканера (обработчик клавиш
+  // ниже). Курсор нужен в поле сейчас же, иначе пропадёт начало штрихкода. На телефоне
+  // экран при этом к полю не прыгает: скан печатается и в поле за краем экрана, а новая
+  // строка чека показывается сама (см. selLine)
+  const focusScanner = useCallback(() => {
+    const el = inputRef.current
+    if (!el) return
+    if (naTelefone()) el.focus({ preventScroll: true })
+    else el.focus()
+  }, [])
+  // vernutKursor — после нажатия кнопки («+», «−», корзинка, способ оплаты, скидка на чек,
+  // строка каталога) и после окна. На телефоне — ничего (17.11.2026, проверка на телефоне):
+  // фокус уводил экран к самому верху, и кассир терял из виду строку или оплату, которую
+  // только что меняла, а на Android после каждого «+» ещё и выезжала клавиатура на пол-
+  // экрана. В поле сканера на телефоне нажимают сами; знак с подключённого сканера всё
+  // равно попадёт в поле — его ловит обработчик клавиш
+  const vernutKursor = useCallback(() => {
+    if (!naTelefone()) focusScanner()
+  }, [focusScanner])
+  // Enter в поле числа (штуки, вес, скидка) — набор окончен. На компьютере курсор
+  // возвращается к сканеру. На телефоне поле просто отпускает курсор: экранная клавиатура
+  // закрывается, а экран остаётся у строки, которую правили
+  const gotovoVPole = (e) => {
+    if (naTelefone()) e.currentTarget.blur()
+    else focusScanner()
+  }
   useEffect(() => {
     if (camera || newProduct || receipt || analogFor) return
     const el = document.activeElement
     const typingElsewhere =
       el && el !== inputRef.current &&
       (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
-    if (!typingElsewhere) focusScanner()
-  }, [cart, receipt, camera, newProduct, analogFor, focusScanner])
+    if (!typingElsewhere) vernutKursor()
+  }, [cart, receipt, camera, newProduct, analogFor, vernutKursor])
 
   // ── Защита числовых полей от «выстрела» сканера ──
   // Кассир мог поправить количество и, не нажав Enter, взяться за сканер. Тогда штрихкод
@@ -318,7 +380,8 @@ export default function Pos() {
   // следующие цифры улетали в поиск. Пока человек в поле, курсор его. Выстрел сканера
   // в поле числа и без таймера ловится ниже — по скорости набора и длине кода.
 
-  // 1) Enter/Tab — сразу возвращаем фокус на сканер.
+  // 1) Enter/Tab — сразу возвращаем фокус на сканер (на телефоне поле только отпускает
+  //    курсор — см. gotovoVPole).
 
   // Человек печатает с интервалами 150–400 мс, сканер «выстреливает» за единицы миллисекунд.
   // По этому признаку отличаем реальный ввод кассира от штрихкода и запоминаем как «чистое»
@@ -334,7 +397,7 @@ export default function Pos() {
   const onCellKey = (e, productId) => {
     if (e.key === 'Enter' || e.key === 'Tab') {
       e.preventDefault()
-      focusScanner()
+      gotovoVPole(e)
       return
     }
     const now = performance.now()
@@ -417,6 +480,7 @@ export default function Pos() {
         ]
       })
       setSelId(p.id)
+      probito.current = p.id
       return true
     },
     [toast, setCart, t],
@@ -489,6 +553,7 @@ export default function Pos() {
       // Только что добавленная строка становится выбранной: клавиши «+», «−»,
       // F2 и F4 относятся к тому, что кассир пробил последним
       setSelId(p.id)
+      probito.current = p.id
       return true
     },
     [toast, products, setCart, t, addWeight],
@@ -589,9 +654,9 @@ export default function Pos() {
         // другие формы того же товара, и искать их заново кассиру незачем
         beepError()
       }
-      focusScanner()
+      vernutKursor()
     },
-    [addProduct, toast, t, focusScanner],
+    [addProduct, toast, t, vernutKursor],
   )
 
   const moveHi = (d) => {
@@ -609,10 +674,16 @@ export default function Pos() {
     if (next) setSelId(next.productId)
   }
   // Чек на широком экране листается внутри себя: строка, которую только что пробили
-  // или выбрали стрелкой, не должна остаться за краем
+  // или выбрали стрелкой, не должна остаться за краем.
+  // На телефоне чек листается всей страницей, и экран едет только к только что пробитой
+  // строке (probito — её ставят addProduct и addWeight). Открыл кассир другой чек или убрал
+  // строку — выбранной становится последняя, но страница под пальцем не уезжает
   const selLine = sel?.productId
   useEffect(() => {
+    const svezhaya = probito.current === selLine
+    probito.current = null
     if (!selLine) return
+    if (!svezhaya && naTelefone()) return
     document.querySelector(`[data-line="${CSS.escape(selLine)}"]`)?.scrollIntoView({ block: 'nearest' })
   }, [selLine, cart.length])
   const changeSel = (d) => sel && changeQty(sel.productId, d)
@@ -879,21 +950,26 @@ export default function Pos() {
     .map((i) => products.find((p) => p.id === i.productId))
     .filter((p) => p && hasExpired(p))
 
+  // Подпись над «− 1 +» на карточке строки: упаковки (и мешки весового) — «Упаковок»,
+  // остальное — своей единицей: «Кол-во, шт», «Кол-во, рулон». После перехода на «шт»
+  // (17.11.2026) штучный товар стоял под «Упаковок», хотя упаковок у него нет
+  const podpisKolva = (i) => (packLabel(i) === 'уп' ? t('Упаковок') : `${t('Кол-во')}, ${t(packLabel(i))}`)
   const remove = (id) => setCart((c) => c.filter((i) => i.productId !== id))
   // «Очистить корзину» — покупатель передумал. Сам чек остаётся открытым, пустым
   const ochistit = () => {
     patch({ cart: [], received: '', discValue: '' })
     setIzm(null)
-    focusScanner()
+    vernutKursor()
   }
 
   const total = cart.reduce((s, i) => s + lineNet(i), 0)
   const discountTotal = cart.reduce((s, i) => s + Math.min(i.discount || 0, lineGross(i)), 0)
   // Сводка «Товаров»: каждая единица своим числом — «3 уп + 2 рулон + 5 шт + 1,5 кг».
-  // Килограммы с литрами, как и упаковки с рулонами, в одно число не складываются
+  // Килограммы с литрами, как и упаковки с рулонами, в одно число не складываются.
+  // Штуки из вскрытых пачек — в те же «шт», что и штучные товары: с переходом на «шт»
+  // (17.11.2026) сводка писала «2 шт + 2 уп + 3 шт» — одна единица двумя слагаемыми
   const poEdinicam = new Map()
   const dobavit = (u, n) => poEdinicam.set(u, (poEdinicam.get(u) || 0) + n)
-  let piecesCount = 0
   for (const i of cart) {
     if (vesOnly(i)) dobavit(edinica(i), lineUnits(i))
     else if (isVesovoy(i)) {
@@ -902,15 +978,12 @@ export default function Pos() {
       if (i.pieces) dobavit(edinica(i), i.pieces)
     } else {
       if (i.qty) dobavit(edinica(i), i.qty)
-      piecesCount += i.pieces || 0
+      if (i.pieces) dobavit('шт', i.pieces)
     }
   }
-  const countText = [
-    ...[...poEdinicam].map(([u, n]) => (isVesovoy({ unit: u }) ? `${kgText(n)} ${t(u)}` : `${n} ${t(u)}`)),
-    piecesCount ? `${piecesCount} ${t('шт')}` : '',
-  ]
-    .filter(Boolean)
-    .join(' + ') || `0 ${t('уп')}`
+  const countText = [...poEdinicam]
+    .map(([u, n]) => (isVesovoy({ unit: u }) ? `${kgText(n)} ${t(u)}` : `${n} ${t(u)}`))
+    .join(' + ') || `0 ${t('шт')}`
   // Сдача считается только для наличных: картой и в долг «получено» не бывает
   const sd = payment === 'cash' ? sdacha(total, received) : { state: 'none', diff: 0, received: null }
   const bills = payment === 'cash' ? kupyury(total) : []
@@ -1011,7 +1084,7 @@ export default function Pos() {
     if (!cart.length) {
       // Плодить пустые вкладки незачем: этот чек и так готов к следующему покупателю
       toast(t('Этот чек пока пуст — сканируйте товар'), 'err')
-      focusScanner()
+      vernutKursor()
       return
     }
     if (cheki.list.length >= MAX_CHEKOV) {
@@ -1266,6 +1339,16 @@ export default function Pos() {
     toast(t('Продажа отменена — товары снова в корзине'))
   }
 
+  // Клиент для долга. На телефоне под списком появляется строка с ним целиком (имя, долг,
+  // телефон) — экран подъезжает, чтобы она не осталась под полосой «Итого»
+  const vybratKlienta = (id) => {
+    setCustomerId(id)
+    if (!naTelefone() || !id) return
+    requestAnimationFrame(() => {
+      document.querySelector('[data-testid="kassa-klient-kto"]')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+  }
+
   async function addCustomer() {
     const r = await dialog.prompt({
       title: t('Новый клиент'),
@@ -1278,7 +1361,7 @@ export default function Pos() {
     if (!r || !r.name.trim()) return
     try {
       const c = await db.push('customers', { name: r.name.trim(), phone: (r.phone || '').trim() })
-      setCustomerId(c.id)
+      vybratKlienta(c.id)
       toast(t('Клиент добавлен'))
     } catch (e) {
       toast(e.message, 'err')
@@ -1321,6 +1404,24 @@ export default function Pos() {
       return
     }
     pay()
+  }
+  // Способ оплаты. На телефоне под кнопками появляется своё — сервисы перевода, список
+  // клиентов, «Получено» с купюрами — и оно часто оказывалось под полосой «Итого» у нижнего
+  // края: экран подъезжает ровно настолько, чтобы его было видно (запас под полосу — в
+  // m-kassa.css, scroll-margin)
+  const vybratOplatu = (key) => {
+    setPayment(key)
+    vernutKursor()
+    if (!naTelefone()) return
+    requestAnimationFrame(() => {
+      document
+        .querySelector('.kassa-oplata [data-tour="pos.pay-via"], .kassa-oplata [data-tour="pos.customer"], .kassa-oplata [data-tour="pos.received"]')
+        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+  }
+  // После купюры — курсор в «Получено», кроме телефона (см. кнопки купюр)
+  const kPoluchenomu = () => {
+    if (!naTelefone()) receivedRef.current?.focus()
   }
 
   // F9 — к оплате. Наличными: курсор встаёт в «Получено», Enter там проводит
@@ -1389,6 +1490,28 @@ export default function Pos() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // Окно чека закрыто («Готово», «Печать»): продажа окончена, чек пуст. На телефоне экран
+  // возвращается к полю сканера и камере — следующий покупатель начинается оттуда. Курсор в
+  // поле не ставится (клавиатура не выезжает, см. vernutKursor). «Отмена» продажи сюда не
+  // ведёт: товары вернулись в чек, и кассир остаётся там, где был
+  const zakrytOknoCheka = () => {
+    setReceipt(null)
+    if (naTelefone()) window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // Клиент, на которого пишется долг (оплата «В долг»)
+  const klient = payment === 'debt' && customerId ? customers.find((c) => c.id === customerId) || null : null
+
+  // ── Полоса «Итого + Провести продажу» на телефоне ──
+  // Есть что продавать — или смены нет: смену открывают отсюда (см. разметку полосы)
+  const mbar = cart.length > 0 || (canSell && noShift)
+  // Почему продажи закрыты — тем же текстом, что сообщение при попытке продать (pay)
+  const prichinaStop = canSell
+    ? undefined
+    : auth?.standalone
+      ? soloMessage(desk?.activation, t) || t(auth?.subscription?.message || '')
+      : auth?.subscription?.message || t('Продажи закрыты: подписка не оплачена')
+
   // Тур по кассе просит показать чек или каталог: на телефоне видно что-то одно
   useEffect(() => {
     const onPane = (e) => {
@@ -1404,7 +1527,7 @@ export default function Pos() {
       <div className="kassa-wrap">
       {/* Магазин без интернета: главный больше не принимает эту кассу (1.7.0) */}
       <RegisterAlert />
-      <div className={'kassa pane-' + pane}>
+      <div className={'kassa pane-' + pane + (mbar ? ' has-mbar' : '')}>
         {/* ── Сканер и каталог ──
             В разметке стоят первыми: на телефоне поле сканера должно быть сверху
             и видно всегда. На широком экране сетка ставит этот блок справа. */}
@@ -1429,7 +1552,9 @@ export default function Pos() {
                     onKeyDown={onScanKey}
                     placeholder={t('Наведите сканер на товар…')}
                     data-vkb-default
-                    autoFocus
+                    // На телефоне курсор в поле не ставится и при входе: на Android он сразу
+                    // поднимал клавиатуру на пол-экрана (см. vernutKursor)
+                    autoFocus={!telefon}
                   />
                 </div>
                 <button className="btn ghost" data-tour="pos.camera" title={t('Камера')} aria-label={t('Камера')} onClick={() => { unlockAudio(); setCamera(true) }}>
@@ -1471,13 +1596,18 @@ export default function Pos() {
                   <span className="kc-cats-title">{t('Категории')}: <b>{cat === VSE ? t('Все') : t(cat)}</b></span>
                   <span className="kc-cats-hint">{catsOpen ? t('свернуть') : t('развернуть')}</span>
                 </button>
+                {/* На телефоне плашек — не больше двух рядов, остальные по «Ещё» (ChipsMore):
+                    сотня категорий иначе отодвинула бы сам список товаров на несколько экранов.
+                    Ключ на телефоне — категория: после выбора ряд рождается заново, свёрнутым
+                    до двух рядов (см. vybratKat). На компьютере ряд листается внутри себя —
+                    там он не пересоздаётся, иначе прокрутка плашек сбрасывалась бы */}
                 {catsOpen && (
-                  <div className="chips kc-cats" id="kc-cats">
-                    <button className={'chip ' + (cat === VSE ? 'active' : '')} onMouseDown={(e) => e.preventDefault()} onClick={() => setCat(VSE)}>{t('Все')}</button>
+                  <ChipsMore className="kc-cats" id="kc-cats" key={telefon ? cat : 'kc-cats'}>
+                    <button className={'chip ' + (cat === VSE ? 'active' : '')} onMouseDown={(e) => e.preventDefault()} onClick={() => vybratKat(VSE)}>{t('Все')}</button>
                     {cats.map((c) => (
-                      <button key={c} className={'chip ' + (cat === c ? 'active' : '')} onMouseDown={(e) => e.preventDefault()} onClick={() => setCat(c)}>{t(c)}</button>
+                      <button key={c} className={'chip ' + (cat === c ? 'active' : '')} onMouseDown={(e) => e.preventDefault()} onClick={() => vybratKat(c)}>{t(c)}</button>
                     ))}
-                  </div>
+                  </ChipsMore>
                 )}
               </div>
             )}
@@ -1599,7 +1729,7 @@ export default function Pos() {
                         {/* Весовой без мешка упаковками не продаётся: вес вводится в колонке
                             «Штук», как штуки (1.5.11). В мешке (1.5.12) — мешки здесь, килограммы
                             в «Штук». На карточке телефона пустая клетка не видна */}
-                        <td className={'kt-qty' + (vesOnly(i) ? ' kt-empty' : '')} data-label={vesOnly(i) ? undefined : t('Упаковок')}>
+                        <td className={'kt-qty' + (vesOnly(i) ? ' kt-empty' : '')} data-label={vesOnly(i) ? undefined : podpisKolva(i)}>
                           {vesOnly(i) ? (
                             <span className="tag-cat">—</span>
                           ) : (
@@ -1610,7 +1740,13 @@ export default function Pos() {
                             </div>
                           )}
                         </td>
-                        <td className="kt-pcs" data-label={isVesovoy(i) ? (isKg(i) ? t('Вес, кг') : `${t('Кол-во')}, ${t(edinica(i))}`) : t('Штук')} data-tour="pos.pieces">
+                        {/* Товар не делится и не весовой — в клетке только прочерк: на карточке
+                            телефона её нет (kt-empty), поле скидки встаёт рядом с упаковками */}
+                        <td
+                          className={'kt-pcs' + (!isVesovoy(i) && !isDiv(i) ? ' kt-empty' : '')}
+                          data-label={isVesovoy(i) ? (isKg(i) ? t('Вес, кг') : `${t('Кол-во')}, ${t(edinica(i))}`) : t('Штук')}
+                          data-tour="pos.pieces"
+                        >
                           {isVesovoy(i) ? (
                             <span className="ves-cell">
                               <NumberInput
@@ -1647,7 +1783,7 @@ export default function Pos() {
                             <span className="tag-cat">—</span>
                           )}
                         </td>
-                        <td className="kt-disc" data-label={t('Скидка')} data-tour="pos.discount">
+                        <td className={'kt-disc' + (can('pos.discount') ? '' : ' kt-empty')} data-label={t('Скидка')} data-tour="pos.discount">
                           {can('pos.discount') ? (
                             <NumberInput
                               className="disc-input inp-discount"
@@ -1702,17 +1838,19 @@ export default function Pos() {
                     className="cs-input inp-chek-discount"
                     value={chek.discValue}
                     onChange={(e) => setObshchaya(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); focusScanner() } }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); gotovoVPole(e) } }}
                     placeholder="0"
                     aria-label={t('Скидка на чек')}
                     title={t('Скидка на весь чек: сумма или процент. Разложится по строкам')}
                   />
+                  {/* Валюта — тем же словом, что в суммах рядом (money): на таджикском перевод
+                      давал «сомонӣ», а все суммы на экране пишут «сомони» */}
                   <div className="cs-mode" role="group" aria-label={t('Сумма или процент')}>
-                    <button type="button" className={chek.discMode === 'sum' ? 'active' : ''} onClick={() => { setDiscMode('sum'); focusScanner() }}>{t('сомони')}</button>
-                    <button type="button" className={chek.discMode === 'pct' ? 'active' : ''} onClick={() => { setDiscMode('pct'); focusScanner() }}>%</button>
+                    <button type="button" className={chek.discMode === 'sum' ? 'active' : ''} onClick={() => { setDiscMode('sum'); vernutKursor() }}>{valyuta()}</button>
+                    <button type="button" className={chek.discMode === 'pct' ? 'active' : ''} onClick={() => { setDiscMode('pct'); vernutKursor() }}>%</button>
                   </div>
                   {obshchaya && (
-                    <button type="button" className="cs-x" onClick={() => { setObshchaya(''); focusScanner() }} title={t('Снять скидку с чека')} aria-label={t('Снять скидку с чека')}>
+                    <button type="button" className="cs-x" onClick={() => { setObshchaya(''); vernutKursor() }} title={t('Снять скидку с чека')} aria-label={t('Снять скидку с чека')}>
                       <LuX size={14} />
                     </button>
                   )}
@@ -1727,7 +1865,7 @@ export default function Pos() {
             <div className="kassa-oplata">
               <div className="pay-methods" data-tour="pos.pay-methods">
                 {Object.entries(PAYMENTS).filter(([key]) => key !== 'debt' || can('pos.debt')).map(([key, m]) => (
-                  <button key={key} className={payment === key ? 'active' : ''} onClick={() => { setPayment(key); focusScanner() }}>
+                  <button key={key} className={payment === key ? 'active' : ''} onClick={() => vybratOplatu(key)}>
                     <span className="ic"><m.Icon size={19} /></span>{t(m.label)}
                   </button>
                 ))}
@@ -1743,7 +1881,7 @@ export default function Pos() {
                           key={s.id}
                           className={'chip ' + ((payVia || payServices[0]?.name) === s.name ? 'active' : '')}
                           onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => { setPayVia(s.name); focusScanner() }}
+                          onClick={() => { setPayVia(s.name); vernutKursor() }}
                         >
                           {s.name}
                         </button>
@@ -1758,8 +1896,9 @@ export default function Pos() {
               {payment === 'debt' && (
                 <div className="field" data-tour="pos.customer">
                   <label>{t('Клиент')}</label>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+                  {/* kassa-klient: список не шире строки, сколько бы ни было в имени клиента (m-kassa.css) */}
+                  <div className="kassa-klient" style={{ display: 'flex', gap: 8 }}>
+                    <select value={customerId} onChange={(e) => vybratKlienta(e.target.value)}>
                       <option value="">{t('— выберите —')}</option>
                       {customers.map((c) => (
                         <option key={c.id} value={c.id}>{c.name} {c.debt ? `(${t('долг')} ${money(c.debt)})` : ''}</option>
@@ -1767,6 +1906,18 @@ export default function Pos() {
                     </select>
                     {can('customers.create') && <button className="btn ghost icon" onClick={addCustomer} aria-label={t('Новый клиент')}><LuPlus size={17} /></button>}
                   </div>
+                  {/* Телефон: в узком списке выбранный клиент обрезан на полуслове — «Магазин
+                      «Сомон» (оп…». Под списком он целиком, с текущим долгом и телефоном: видно,
+                      тому ли клиенту пишется долг */}
+                  {telefon && klient && (
+                    <div className="kassa-klient-kto" data-testid="kassa-klient-kto">
+                      <b>{klient.name}</b>
+                      <span>
+                        {klient.debt ? `${t('Текущий долг')}: ${money(klient.debt)}` : t('нет долга')}
+                        {klient.phone ? ` · ${klient.phone}` : ''}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1790,10 +1941,14 @@ export default function Pos() {
                   </div>
                   {bills.length > 0 && (
                     <div className="kp-bills">
-                      {/* Одно нажатие вместо набора суммы: покупатель дал купюру — нажали её */}
-                      <button onClick={() => { setReceived(String(Math.round(total * 100) / 100)); receivedRef.current?.focus() }}>{t('Без сдачи')}</button>
+                      {/* Одно нажатие вместо набора суммы: покупатель дал купюру — нажали её.
+                          На компьютере курсор встаёт в «Получено» — Enter там проводит продажу.
+                          На телефоне нет: курсор в поле поднимал цифровую клавиатуру, и она
+                          закрывала «Провести продажу», хотя купюры для того и сделаны, чтобы
+                          ничего не печатать */}
+                      <button onClick={() => { setReceived(String(Math.round(total * 100) / 100)); kPoluchenomu() }}>{t('Без сдачи')}</button>
                       {bills.map((b) => (
-                        <button key={b} onClick={() => { setReceived(String(b)); receivedRef.current?.focus() }}>{b}</button>
+                        <button key={b} onClick={() => { setReceived(String(b)); kPoluchenomu() }}>{b}</button>
                       ))}
                     </div>
                   )}
@@ -1829,6 +1984,45 @@ export default function Pos() {
           </div>
         </div>
       </div>
+      {/* ── Телефон: итог и «Провести продажу» всегда внизу (17.11.2026, просьба владельца) ──
+          На узком экране панель оплаты стоит под чеком: с длинным чеком до неё надо листать.
+          Полоса над нижней — та же кнопка (тот же pay и те же условия) и сумма к оплате; кнопка
+          в панели на телефоне спрятана (index.css). На компьютере полосы нет. Пустой чек —
+          полосы нет: продавать нечего (кроме «смены нет», см. ниже).
+          Продать нельзя — кнопка говорит почему: бледная выключенная кнопка без слов выглядела
+          поломкой, а объяснение стояло в самом низу панели. Смены нет — «Открыть смену» (то же
+          окно, что при входе в кассу), и тогда полоса стоит даже при пустом чеке: кассир,
+          закрывший окно при входе, открывает смену отсюда, не листая. Продажи закрыты — так и
+          написано, подробности — в заметке внизу панели */}
+      {mbar && (
+        <div className="kassa-mbar" data-testid="kassa-mbar">
+          <div className="kmb-sum">
+            <span>{t('Итого')}</span>
+            <SummaPolosa text={money(total)} />
+            {/* Сумма — неразрывно: узкая колонка переносит строку после «Не хватает» */}
+            {sd.state === 'short' && <small>{t('Не хватает')} <span className="kmb-nw">{money(-sd.diff)}</span></small>}
+          </div>
+          {/* Метка тура та же, что у кнопки в панели: тур берёт видимую из двух */}
+          {!canSell ? (
+            <button className="btn gold kmb-pay kmb-stop" data-tour="pos.pay" data-testid="kmb-closed" disabled title={prichinaStop}>
+              <span className="ic"><LuLock size={17} /></span> {t('Продажи закрыты')}
+            </button>
+          ) : noShift ? (
+            <button className="btn gold kmb-pay" data-tour="pos.pay" data-testid="kmb-smena" onClick={() => setNoShiftModal(true)}>
+              <span className="ic"><LuClock size={17} /></span> {can('shift.open') ? t('Открыть смену') : t('Смена не открыта')}
+            </button>
+          ) : (
+            <button
+              className="btn gold kmb-pay"
+              data-tour="pos.pay"
+              disabled={!cart.length || paying || !smena || sd.state === 'short'}
+              onClick={pay}
+            >
+              <span className="ic"><LuCheck size={18} /></span> {paying ? t('Проведение…') : t('Провести продажу')}
+            </button>
+          )}
+        </div>
+      )}
       {/* Кто работает, экранная клавиатура и блокировка — в полосе внизу окна, она
           теперь одна на весь проект (components/AppFoot.jsx). Открытые чеки хранятся
           на устройстве при каждом изменении, поэтому блокировка их не теряет; экранная
@@ -1880,13 +2074,15 @@ export default function Pos() {
               ? t('Продавать этот товар нельзя — уберите его с полки и спишите. Есть аналоги в наличии:')
               : t('Есть аналоги в наличии — нажмите, чтобы добавить в корзину:')}
           </div>
-          <table>
+          {/* На телефоне — карточками (table-cards): название крупно, цена и остаток с подписями;
+              нажатие на карточку, как и на строку, кладёт аналог в корзину */}
+          <table className="table-cards">
             <tbody>
               {analogFor.analogs.map((a) => (
                 <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => { addProduct(a); setAnalogFor(null) }}>
-                  <td><b>{a.name}</b>{a.dosage ? <div className="tag-cat">{a.dosage}</div> : null}</td>
-                  <td className="num">{money(a.price)}</td>
-                  <td className="num"><span className="badge ok">{stockText(a)}</span></td>
+                  <td className="cell-main"><b>{a.name}</b>{a.dosage ? <div className="tag-cat">{a.dosage}</div> : null}</td>
+                  <td className="num" data-label={t('Цена')}>{money(a.price)}</td>
+                  <td className="num" data-label={t('Остаток')}><span className="badge ok">{stockText(a)}</span></td>
                 </tr>
               ))}
             </tbody>
@@ -1894,7 +2090,7 @@ export default function Pos() {
           <div className="modal-actions"><button className="btn ghost" onClick={() => setAnalogFor(null)}>{t('Закрыть')}</button></div>
         </Modal>
       )}
-      {receipt && <Receipt sale={receipt} onClose={() => setReceipt(null)} onCancel={can('returns.create') ? otmenitProdazhu : null} />}
+      {receipt && <Receipt sale={receipt} onClose={zakrytOknoCheka} onCancel={can('returns.create') ? otmenitProdazhu : null} />}
       {/* Продажа не записалась. Окно — после чека, чтобы лечь поверх него: кассир
           должен увидеть отказ, а не закрыть его вместе с чеком одним Escape.
           Закрыть окно любым способом — значит вернуть товары в корзину, как в нём
@@ -1983,6 +2179,14 @@ function SummaItogo({ text }) {
       {i > 0 ? <><b>{text.slice(0, i)}</b> <small>{text.slice(i + 1)}</small></> : <b>{text}</b>}
     </span>
   )
+}
+
+// ── Сумма в полосе внизу телефона: число крупно, «сомони» мельче, как в табло «Итого» ──
+// Полоса узкая: длинная сумма целиком крупным шрифтом отнимала место у кнопки рядом,
+// и «Провести продажу» ломалась на две строки
+function SummaPolosa({ text }) {
+  const i = text.lastIndexOf(' ')
+  return <b>{i > 0 ? <>{text.slice(0, i)} <em className="kmb-cur">{text.slice(i + 1)}</em></> : text}</b>
 }
 
 // ── Незнакомый штрихкод у кассира ──

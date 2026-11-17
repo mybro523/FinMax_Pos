@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useLocation } from 'react-router-dom'
 import {
   LuShoppingCart, LuPackagePlus, LuCreditCard, LuClipboardList, LuTrendingUp, LuServer, LuRefreshCw,
   LuKeyRound, LuUser, LuPalette, LuLanguages, LuSun, LuMoon, LuDatabaseBackup, LuDownload, LuTriangleAlert,
-  LuTags, LuPlus, LuPencil, LuTrash2, LuUpload, LuShapes,
+  LuTags, LuPlus, LuPencil, LuTrash2, LuUpload, LuShapes, LuArrowUp,
   LuCalendarClock, LuHandCoins, LuQrCode, LuReceiptText, LuMonitorSmartphone, LuWallet, LuCoins, LuType,
 } from 'react-icons/lu'
 import Layout from '../components/Layout'
@@ -85,6 +85,22 @@ function Podpiska({ t }) {
   )
 }
 
+// Телефон (до 600 px, как блок «Телефон 320–450» в index.css): внизу длинного раздела —
+// кнопка «↑ Разделы настроек»
+const UZKO = '(max-width: 600px)'
+function useUzko() {
+  return useSyncExternalStore(
+    (cb) => {
+      if (typeof window.matchMedia !== 'function') return () => {}
+      const mq = window.matchMedia(UZKO)
+      mq.addEventListener('change', cb)
+      return () => mq.removeEventListener('change', cb)
+    },
+    () => typeof window.matchMedia === 'function' && window.matchMedia(UZKO).matches,
+    () => false,
+  )
+}
+
 export default function Settings() {
   const t = useT()
   const lang = useLang()
@@ -159,7 +175,8 @@ export default function Settings() {
       toast(t('Пароль изменён'))
       setPw({ oldPassword: '', newPassword: '', confirm: '' })
     } catch (e) {
-      toast(e.message, 'err')
+      // Ответ сервера по-русски («Текущий пароль неверный») — по-таджикски из словаря
+      toast(t(e.message), 'err')
     } finally {
       setSaving(false)
     }
@@ -205,10 +222,41 @@ export default function Settings() {
     }
   }
 
+  // ── «↑ Разделы настроек» внизу длинного раздела (только телефон, 18.11.2026) ──
+  // На телефоне разделы стоят сеткой над содержимым, а длинный раздел (десятки категорий,
+  // «Деньги», «Кассы») занимает несколько экранов: чтобы перейти в соседний, листали к самому
+  // верху. Кнопка есть, только когда раздел выше экрана — у короткого разделы и так видны.
+  // На компьютере разделы закреплены слева, кнопки нет
+  const uzko = useUzko()
+  const navRef = useRef(null)
+  const bodyRef = useRef(null)
+  const [dlinno, setDlinno] = useState(false)
+  useLayoutEffect(() => {
+    const el = bodyRef.current
+    if (!uzko || !el) {
+      setDlinno(false)
+      return undefined
+    }
+    // Сразу при смене раздела (до отрисовки — кнопка не мелькает) и потом при любой перемене
+    // высоты без смены раздела: добавили категорию, загрузились кассы
+    const check = () => setDlinno(el.getBoundingClientRect().height > window.innerHeight)
+    check()
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(check) : null
+    ro?.observe(el)
+    return () => ro?.disconnect()
+  }, [uzko, active])
+  const kRazdelam = () => {
+    const nav = navRef.current
+    if (!nav) return
+    nav.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    // Фокус — на выбранный раздел: с клавиатуры и экранного чтеца следующий шаг тоже там
+    nav.querySelector('.set-nav-btn.active')?.focus({ preventScroll: true })
+  }
+
   return (
     <Layout title={t('Настройки')} subtitle={t('Профиль и система')}>
       <div className="set-wrap">
-        <nav className="set-nav" data-tour="set.nav" aria-label={t('Разделы настроек')}>
+        <nav ref={navRef} className="set-nav" data-tour="set.nav" aria-label={t('Разделы настроек')}>
           {razdely.map((r) => (
             <button
               key={r.id}
@@ -223,7 +271,7 @@ export default function Settings() {
           ))}
         </nav>
 
-        <div className="set-body">
+        <div ref={bodyRef} className="set-body">
           {active === 'shrift' && <ShriftPanel />}
           {active === 'profil' && (
             <>
@@ -250,7 +298,7 @@ export default function Settings() {
                 <h2><span className="h2-title"><span className="ic"><LuPalette size={17} /></span>{t('Оформление')}</span></h2>
                 <div className="field" data-tour="set.lang">
                   <label><LuLanguages size={13} style={{ verticalAlign: '-2px' }} /> {t('Язык')}</label>
-                  <div className="chips">
+                  <div className="chips set-chips">
                     {LANGS.map((l) => (
                       <button key={l.key} className={'chip ' + (lang === l.key ? 'active' : '')} onClick={() => setLang(l.key)}>{l.label}</button>
                     ))}
@@ -258,7 +306,7 @@ export default function Settings() {
                 </div>
                 <div className="field" data-tour="set.theme" style={{ marginBottom: 0 }}>
                   <label>{t('Тема')}</label>
-                  <div className="chips">
+                  <div className="chips set-chips">
                     <button className={'chip ' + (theme === 'light' ? 'active' : '')} onClick={() => setTheme('light')}><LuSun size={13} style={{ verticalAlign: '-2px' }} /> {t('Светлая')}</button>
                     <button className={'chip ' + (theme === 'dark' ? 'active' : '')} onClick={() => setTheme('dark')}><LuMoon size={13} style={{ verticalAlign: '-2px' }} /> {t('Тёмная')}</button>
                   </div>
@@ -402,7 +450,7 @@ export default function Settings() {
                 </div>
               )}
 
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+              <div className="set-btns" style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                 <button className="btn" onClick={downloadBackup} disabled={backing}>
                   <span className="ic"><LuDownload size={16} /></span> {backing ? t('Готовим копию…') : t('Скачать копию')}
                 </button>
@@ -416,6 +464,12 @@ export default function Settings() {
             </div>
           )}
         </div>
+
+        {uzko && dlinno && (
+          <button type="button" className="btn ghost set-up" onClick={kRazdelam} data-testid="set-up">
+            <span className="ic"><LuArrowUp size={16} /></span> {t('Разделы настроек')}
+          </button>
+        )}
       </div>
 
       {restoring && <RestoreBox onClose={() => setRestoring(false)} />}
@@ -487,7 +541,7 @@ function RestoreBox({ onClose }) {
   const ready = !!dump && word.trim() === CONFIRM_WORD && !busy
 
   return (
-    <Modal title={t('Восстановление из копии')} onClose={busy ? undefined : onClose}>
+    <Modal title={t('Восстановление из копии')} onClose={busy ? undefined : onClose} className="set-restore">
       <div className="note err" style={{ display: 'flex', gap: 9, marginBottom: 14 }}>
         <LuTriangleAlert size={16} style={{ flexShrink: 0, marginTop: 2 }} />
         <span>{t('Все текущие данные магазина будут заменены содержимым файла: товары, продажи, приходы, долги, смены. Отменить это нельзя.')}</span>
@@ -592,13 +646,14 @@ function PayServicesPanel() {
           <span className="ic"><LuPlus size={16} /></span> {t('Добавить')}
         </button>
       </div>
-      <table>
+      {/* На телефоне — карточками в одну строку: название и кнопка рядом (set-list) */}
+      <table className="table-cards set-list">
         <thead><tr><th>{t('Сервис')}</th><th></th></tr></thead>
         <tbody>
           {services.map((s) => (
             <tr key={s.id}>
-              <td><b>{s.name}</b></td>
-              <td className="num">
+              <td className="cell-main" data-label={t('Сервис')}><b>{s.name}</b></td>
+              <td className="num cell-actions">
                 <button className="btn ghost sm icon" onClick={() => remove(s)} title={t('Убрать')} aria-label={`${t('Убрать')}: ${s.name}`}><LuTrash2 size={15} /></button>
               </td>
             </tr>
@@ -670,15 +725,15 @@ function ExpenseCategoriesPanel() {
         </button>
       </div>
 
-      <table>
+      <table className="table-cards set-list">
         <thead>
           <tr><th>{t('Статья')}</th><th></th></tr>
         </thead>
         <tbody>
           {categories.map((c) => (
             <tr key={c.id}>
-              <td><b>{t(c.name)}</b></td>
-              <td className="num">
+              <td className="cell-main" data-label={t('Статья')}><b>{t(c.name)}</b></td>
+              <td className="num cell-actions">
                 <button className="btn ghost sm icon" onClick={() => remove(c)} title={t('Убрать')} aria-label={`${t('Убрать')}: ${t(c.name)}`}><LuTrash2 size={15} /></button>
               </td>
             </tr>
@@ -750,15 +805,15 @@ function IncomeCategoriesPanel() {
         </button>
       </div>
 
-      <table>
+      <table className="table-cards set-list">
         <thead>
           <tr><th>{t('Статья')}</th><th></th></tr>
         </thead>
         <tbody>
           {categories.map((c) => (
             <tr key={c.id}>
-              <td><b>{t(c.name)}</b></td>
-              <td className="num">
+              <td className="cell-main" data-label={t('Статья')}><b>{t(c.name)}</b></td>
+              <td className="num cell-actions">
                 <button className="btn ghost sm icon" onClick={() => remove(c)} title={t('Убрать')} aria-label={`${t('Убрать')}: ${t(c.name)}`}><LuTrash2 size={15} /></button>
               </td>
             </tr>
@@ -769,6 +824,10 @@ function IncomeCategoriesPanel() {
     </div>
   )
 }
+
+// Название категории и типа товара — не длиннее, чем принимает сервер (categories/dto.ts,
+// producttypes): иначе запись мелькала в списке и пропадала с ошибкой
+const NAME_MAX = 40
 
 // ── Категории товаров ──
 // Список задаёт владелец, и он тут же уходит во все формы, фильтры и приёмку:
@@ -792,23 +851,28 @@ function CategoriesPanel() {
     if (categories.some((c) => c.name.toLowerCase() === value.toLowerCase())) {
       return toast(t('Такая категория уже есть'), 'err')
     }
-    // Мгновенно: категория появляется в списке и во всех формах сразу
-    db.push('categories', { name: value, noExpiry }).catch((e) => toast(e.message, 'err'))
+    // Мгновенно: категория появляется в списке и во всех формах сразу. «Добавлена» — после
+    // ответа сервера: раньше тост шёл первым, и при отказе (длинное название) за ним следовала ошибка
+    db.push('categories', { name: value, noExpiry })
+      .then(() => toast(t('Категория добавлена')))
+      .catch((e) => toast(t(e.message), 'err'))
     setName('')
     setNoExpiry(false)
-    toast(t('Категория добавлена'))
   }
 
   async function rename(c) {
     const r = await dialog.prompt({
       title: t('Переименовать категорию'),
       message: `${t('Товаров в категории')}: ${countIn(c.name)}. ${t('Они переедут в новую категорию автоматически.')}`,
-      fields: [{ name: 'name', label: t('Новое название'), defaultValue: c.name }],
+      fields: [{ name: 'name', label: t('Новое название'), defaultValue: c.name, maxLength: NAME_MAX }],
       confirmText: t('Переименовать'),
     })
     if (!r || !r.name.trim() || r.name.trim() === c.name) return
-    db.update('categories', c.id, { name: r.name.trim() }).catch((e) => toast(e.message, 'err'))
-    toast(t('Категория переименована'))
+    // Окно длину не ограничивает — проверяем здесь, как сервер, чтобы название не мелькало и не откатывалось
+    if (r.name.trim().length > NAME_MAX) return toast(t('Название: не длиннее 40 символов'), 'err')
+    db.update('categories', c.id, { name: r.name.trim() })
+      .then(() => toast(t('Категория переименована')))
+      .catch((e) => toast(t(e.message), 'err'))
   }
 
   function toggleExpiry(c) {
@@ -829,8 +893,9 @@ function CategoriesPanel() {
       confirmText: t('Удалить'),
     })
     if (!ok) return
-    db.remove('categories', c.id).catch((e) => toast(e.message, 'err'))
-    toast(t('Категория удалена'))
+    db.remove('categories', c.id)
+      .then(() => toast(t('Категория удалена')))
+      .catch((e) => toast(t(e.message), 'err'))
   }
 
   return (
@@ -840,44 +905,52 @@ function CategoriesPanel() {
         {t('Категории видны в карточке товара, в фильтрах, на кассе, при приёмке и в пересчёте остатков. Изменения появляются на всех устройствах сразу.')}
       </p>
 
-      <div className="row" style={{ alignItems: 'flex-end' }}>
-        <div className="field" style={{ flex: 1 }}>
-          <label>{t('Новая категория')}</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && add()}
-            placeholder={t('Напр. Перевязка')}
-          />
+      {/* Поле, «Добавить» и отметка — одной формой: на телефоне отметка встаёт между полем и
+          кнопкой (styles/m-nastroyki.css), чтобы её видели до «Добавить» */}
+      <div className="set-add">
+        <div className="row" style={{ alignItems: 'flex-end' }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label htmlFor="newCategory">{t('Новая категория')}</label>
+            <input
+              id="newCategory"
+              value={name}
+              maxLength={NAME_MAX}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && add()}
+              placeholder={t('Напр. Перевязка')}
+            />
+          </div>
+          <button className="btn" onClick={add} style={{ marginBottom: 14 }}>
+            <span className="ic"><LuPlus size={16} /></span> {t('Добавить')}
+          </button>
         </div>
-        <button className="btn" onClick={add} style={{ marginBottom: 14 }}>
-          <span className="ic"><LuPlus size={16} /></span> {t('Добавить')}
-        </button>
+        {srokOn && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, color: 'var(--muted)', marginBottom: 14 }}>
+            <input type="checkbox" checked={noExpiry} onChange={(e) => setNoExpiry(e.target.checked)} style={{ width: 16, height: 16 }} />
+            {t('срок годности не нужен (бинты, вата, приборы)')}
+          </label>
+        )}
       </div>
-      {srokOn && (
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, color: 'var(--muted)', marginBottom: 14 }}>
-          <input type="checkbox" checked={noExpiry} onChange={(e) => setNoExpiry(e.target.checked)} style={{ width: 16, height: 16 }} />
-          {t('срок годности не нужен (бинты, вата, приборы)')}
-        </label>
-      )}
 
-      <table>
+      {/* На телефоне четыре колонки не помещались (кнопки правки уходили за край) — карточками:
+          название и кнопки сверху, «Товаров» и «Срок годности» подписями ниже */}
+      <table className="table-cards set-list">
         <thead>
           <tr><th>{t('Категория')}</th><th className="num">{t('Товаров')}</th>{srokOn && <th>{t('Срок годности')}</th>}<th></th></tr>
         </thead>
         <tbody>
           {categories.map((c) => (
             <tr key={c.id}>
-              <td><b>{c.name}</b></td>
-              <td className="num">{countIn(c.name)}</td>
+              <td className="cell-main" data-label={t('Категория')}><b>{c.name}</b></td>
+              <td className="num" data-label={t('Товаров')}>{countIn(c.name)}</td>
               {srokOn && (
-                <td>
+                <td data-label={t('Срок годности')}>
                   <button className="btn ghost sm" onClick={() => toggleExpiry(c)} title={t('Нажмите, чтобы изменить')}>
                     {c.noExpiry ? t('не нужен') : t('обязателен')}
                   </button>
                 </td>
               )}
-              <td className="num" style={{ whiteSpace: 'nowrap' }}>
+              <td className="num cell-actions" style={{ whiteSpace: 'nowrap' }}>
                 <button className="btn ghost sm icon" onClick={() => rename(c)} title={t('Переименовать')}><LuPencil size={15} /></button>{' '}
                 <button className="btn ghost sm icon" onClick={() => remove(c)} title={t('Удалить')}><LuTrash2 size={15} /></button>
               </td>
@@ -909,22 +982,26 @@ function ProductTypesPanel() {
     const value = name.trim()
     if (!value) return toast(t('Укажите название типа товара'), 'err')
     if (types.some((x) => x.name.toLowerCase() === value.toLowerCase())) return toast(t('Такой тип товара уже есть'), 'err')
-    db.push('productTypes', { name: value, analogs }).catch((e) => toast(t(e.message), 'err'))
+    // Тост — после ответа сервера, как у категорий
+    db.push('productTypes', { name: value, analogs })
+      .then(() => toast(t('Тип товара добавлен')))
+      .catch((e) => toast(t(e.message), 'err'))
     setName('')
     setAnalogs(false)
-    toast(t('Тип товара добавлен'))
   }
 
   async function rename(x) {
     const r = await dialog.prompt({
       title: t('Переименовать тип товара'),
       message: `${t('Товаров этого типа')}: ${countIn(x.name)}. ${t('Они получат новое название типа автоматически.')}`,
-      fields: [{ name: 'name', label: t('Новое название'), defaultValue: x.name }],
+      fields: [{ name: 'name', label: t('Новое название'), defaultValue: x.name, maxLength: NAME_MAX }],
       confirmText: t('Переименовать'),
     })
     if (!r || !r.name.trim() || r.name.trim() === x.name) return
-    db.update('productTypes', x.id, { name: r.name.trim() }).catch((e) => toast(t(e.message), 'err'))
-    toast(t('Тип товара переименован'))
+    if (r.name.trim().length > NAME_MAX) return toast(t('Название: не длиннее 40 символов'), 'err')
+    db.update('productTypes', x.id, { name: r.name.trim() })
+      .then(() => toast(t('Тип товара переименован')))
+      .catch((e) => toast(t(e.message), 'err'))
   }
 
   function toggleAnalogs(x) {
@@ -941,8 +1018,9 @@ function ProductTypesPanel() {
       confirmText: t('Удалить'),
     })
     if (!ok) return
-    db.remove('productTypes', x.id).catch((e) => toast(t(e.message), 'err'))
-    toast(t('Тип товара удалён'))
+    db.remove('productTypes', x.id)
+      .then(() => toast(t('Тип товара удалён')))
+      .catch((e) => toast(t(e.message), 'err'))
   }
 
   return (
@@ -952,35 +1030,38 @@ function ProductTypesPanel() {
         {t('Тип выбирают в карточке товара. Отметка «с аналогами» открывает в карточке поле «Аналоги» — для медицинских товаров и всего, у чего есть замены.')}
       </p>
 
-      <div className="row" style={{ alignItems: 'flex-end' }}>
-        <div className="field" style={{ flex: 1 }}>
-          <label htmlFor="newProductType">{t('Новый тип товара')}</label>
-          <input id="newProductType" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder={t('Напр. Детские товары')} />
+      {/* Как у категорий: на телефоне отметка — между полем и «Добавить» */}
+      <div className="set-add">
+        <div className="row" style={{ alignItems: 'flex-end' }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label htmlFor="newProductType">{t('Новый тип товара')}</label>
+            <input id="newProductType" value={name} maxLength={NAME_MAX} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder={t('Напр. Детские товары')} />
+          </div>
+          <button className="btn" onClick={add} style={{ marginBottom: 14 }}>
+            <span className="ic"><LuPlus size={16} /></span> {t('Добавить')}
+          </button>
         </div>
-        <button className="btn" onClick={add} style={{ marginBottom: 14 }}>
-          <span className="ic"><LuPlus size={16} /></span> {t('Добавить')}
-        </button>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, color: 'var(--muted)', marginBottom: 14 }}>
+          <input type="checkbox" checked={analogs} onChange={(e) => setAnalogs(e.target.checked)} style={{ width: 16, height: 16 }} />
+          {t('с аналогами — в карточке появится поле «Аналоги»')}
+        </label>
       </div>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, color: 'var(--muted)', marginBottom: 14 }}>
-        <input type="checkbox" checked={analogs} onChange={(e) => setAnalogs(e.target.checked)} style={{ width: 16, height: 16 }} />
-        {t('с аналогами — в карточке появится поле «Аналоги»')}
-      </label>
 
-      <table>
+      <table className="table-cards set-list">
         <thead>
           <tr><th>{t('Тип товара')}</th><th className="num">{t('Товаров')}</th><th>{t('Аналоги')}</th><th></th></tr>
         </thead>
         <tbody>
           {types.map((x) => (
             <tr key={x.id}>
-              <td><b>{t(x.name)}</b></td>
-              <td className="num">{countIn(x.name)}</td>
-              <td>
+              <td className="cell-main" data-label={t('Тип товара')}><b>{t(x.name)}</b></td>
+              <td className="num" data-label={t('Товаров')}>{countIn(x.name)}</td>
+              <td data-label={t('Аналоги')}>
                 <button className={'btn ghost sm' + (x.analogs ? ' on' : '')} onClick={() => toggleAnalogs(x)} title={t('Нажмите, чтобы изменить')} aria-pressed={!!x.analogs}>
                   {x.analogs ? t('есть') : t('нет')}
                 </button>
               </td>
-              <td className="num" style={{ whiteSpace: 'nowrap' }}>
+              <td className="num cell-actions" style={{ whiteSpace: 'nowrap' }}>
                 <button className="btn ghost sm icon" onClick={() => rename(x)} title={t('Переименовать')} aria-label={`${t('Переименовать')}: ${x.name}`}><LuPencil size={15} /></button>{' '}
                 <button className="btn ghost sm icon" onClick={() => remove(x)} title={t('Удалить')} aria-label={`${t('Удалить')}: ${x.name}`}><LuTrash2 size={15} /></button>
               </td>

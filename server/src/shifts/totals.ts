@@ -75,11 +75,11 @@ export async function setSupplierRefund(tx: Tx, shiftId: string) {
   return supplierRefund
 }
 
-export async function shiftTotals(
-  tx: Tx,
-  shift: { id: string; openingCash: Prisma.Decimal | number | string },
-  countedCash: Prisma.Decimal | number | string,
-) {
+// 17.11.2026 (владелец): «Наличные в кассе по факту» при закрытии смены изменить нельзя —
+// факт всегда равен ожидаемому, расхождения нет. Сумму считает сервер; что прислали сайт или
+// касса (прежние версии ещё присылают свою), не важно. Недостачу отмечают изъятием до
+// закрытия смены
+export async function shiftTotals(tx: Tx, shift: { id: string; openingCash: Prisma.Decimal | number | string }) {
   // Продажи именно этой смены — по shiftId (а не по диапазону дат)
   const sales = await tx.sale.findMany({ where: { shiftId: shift.id }, include: { items: true } })
 
@@ -148,10 +148,8 @@ export async function shiftTotals(
     .minus(expenseCash)
     .minus(supplierCash)
     .minus(cashOut)
-  const difference = D(countedCash).minus(expectedCash)
-
   return {
-    countedCash: D(countedCash),
+    countedCash: expectedCash,
     totalSales,
     salesCash,
     salesCard,
@@ -171,6 +169,6 @@ export async function shiftTotals(
     discount,
     count: sales.length,
     expectedCash,
-    difference,
+    difference: D(0),
   }
 }

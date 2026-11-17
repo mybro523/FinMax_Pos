@@ -1,8 +1,8 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import {
   LuPlus, LuLogOut, LuRefreshCw, LuTriangleAlert, LuKeyRound,
   LuBanknote, LuPause, LuPlay, LuLogIn, LuScrollText, LuTrash2, LuPencil, LuCheck,
-  LuPhone, LuSettings, LuSun, LuMoon, LuFileSpreadsheet,
+  LuPhone, LuSettings, LuSun, LuMoon, LuFileSpreadsheet, LuCopy,
 } from 'react-icons/lu'
 import { Modal, useToast, useDialog } from '../components/ui'
 import NumberInput from '../components/NumberInput'
@@ -22,6 +22,49 @@ import TovaryIzExcel from '../components/TovaryIzExcel'
 // Библиотека диаграмм весит около 370 КБ — грузим её после того, как показаны
 // числа и список магазинов
 const RevenueChart = lazy(() => import('../components/RevenueChart'))
+
+// ── Телефон (окно до 600 px, 18.11.2026) ──
+// На телефоне у панели другая разметка, не только вид: поиск и «Требуют внимания» — сразу под
+// шапкой, подписи под значками шапки, «Закрыть» внизу длинных окон, номера клиентов — ссылками
+// для звонка. Стилями такого не сделать, поэтому ширину спрашиваем сами — через matchMedia:
+// браузер сообщает только о пересечении границы. На компьютере разметка прежняя.
+const PHONE = '(max-width: 600px)'
+function usePhone() {
+  return useSyncExternalStore(
+    (cb) => {
+      if (typeof window.matchMedia !== 'function') return () => {}
+      const mq = window.matchMedia(PHONE)
+      mq.addEventListener('change', cb)
+      return () => mq.removeEventListener('change', cb)
+    },
+    () => typeof window.matchMedia === 'function' && window.matchMedia(PHONE).matches,
+    () => false,
+  )
+}
+
+// Номер клиента на телефоне — ссылкой: касание сразу набирает его. Экран отвечает на вопрос
+// «кому звонить», и переписывать номер вручную незачем. В поле бывает и два номера через
+// запятую — каждый своей ссылкой. stop: строка списка нажимается целиком и открывает карточку,
+// а касание номера должно звонить, а не открывать её
+function Tel({ phone, stop }) {
+  const parts = String(phone || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean)
+  if (!parts.length) return '—'
+  return parts.map((s, i) => {
+    const dial = s.replace(/[^\d+]/g, '')
+    return (
+      <span key={i}>
+        {i > 0 && ', '}
+        {dial.replace(/\D/g, '').length >= 5 ? (
+          <a className="admin-tel" href={'tel:' + dial} onClick={stop ? (e) => e.stopPropagation() : undefined}>
+            <LuPhone size={14} /> {s}
+          </a>
+        ) : (
+          s
+        )}
+      </span>
+    )
+  })
+}
 
 // ── Настройки панели ──
 // Тема и язык у панели свои, отдельные от магазина: владелец может держать
@@ -134,8 +177,14 @@ export default function Admin() {
   const toast = useToast()
   const dialog = useDialog()
   const me = useAuth()
+  const phone = usePhone()
 
   const [list, setList] = useState([])
+  // Поиск магазина (на телефоне): карточка магазина там высотой в пол-экрана, и при полусотне
+  // клиентов нужного перед звонком пришлось бы искать по двенадцати тысячам пикселей прокрутки
+  const [find, setFind] = useState('')
+  // Журнал на телефоне — по 50 записей: двести карточек подряд — тридцать тысяч пикселей
+  const [zhurnalShown, setZhurnalShown] = useState(50)
   // Сводка по сервису: деньги и клиенты. Считается на сервере одним запросом
   // к базе панели, без походов в схемы магазинов.
   const [sum, setSum] = useState(null)
@@ -223,6 +272,20 @@ export default function Admin() {
     }
   }, [list])
 
+  // Найденные магазины: по названию, коду, владельцу, городу и телефону. Номер ищется и по одним
+  // цифрам — «93777» находит «+992 93 777 12 12». Поиск есть только на телефоне (на компьютере
+  // список виден целиком), поэтому на компьютере запрос всегда пустой
+  const q = phone ? find.trim().toLowerCase() : ''
+  const found = useMemo(() => {
+    if (!q) return null
+    const digits = q.replace(/\D/g, '')
+    return [...urgent, ...rest].filter(
+      (p) =>
+        [p.name, p.code, p.ownerName, p.city, p.phone].some((v) => String(v || '').toLowerCase().includes(q)) ||
+        (digits.length >= 3 && String(p.phone || '').replace(/\D/g, '').includes(digits)),
+    )
+  }, [q, urgent, rest])
+
   // Заведение магазина — единственное место в панели, где работа идёт долго:
   // создать схему, прогнать миграции, настроить, завести владельца. Держать окно
   // открытым всё это время незачем — оно закрывается сразу, а работа продолжается.
@@ -271,8 +334,27 @@ export default function Admin() {
   async function openJournal() {
     try {
       setJournal(await api.get('/admin/audit?limit=200'))
+      setZhurnalShown(50)
     } catch (e) {
       toast(e.message, 'err')
+    }
+  }
+
+  // «Выйти» на телефоне — с вопросом: там это значок рядом с другими, промах пальцем выкидывал
+  // из панели, а пароль владельца сервиса длинный. На компьютере выходит сразу, как и было
+  async function leave() {
+    if (phone && !(await dialog.confirm({ title: t('Выйти из панели?'), confirmText: t('Выйти') }))) return
+    logout()
+  }
+
+  // Логин и пароль нового магазина — одной запиской, чтобы сразу переслать клиенту
+  async function copyCreated() {
+    const text = `${t('Магазин')}: ${created.name}\n${t('Логин')}: ${created.ownerLogin}\n${t('Пароль')}: ${created.ownerPassword}`
+    try {
+      await navigator.clipboard.writeText(text)
+      toast(t('Скопировано'))
+    } catch {
+      toast(t('Скопировать не получилось — перепишите логин и пароль вручную'), 'err')
     }
   }
 
@@ -307,9 +389,10 @@ export default function Admin() {
       </tr>
     ))
 
+  // admin-row: строка нажимается — на телефоне у карточки стрелка в углу (m-admin.css)
   const rows = (items) =>
     items.map((p) => (
-      <tr key={p.id} style={{ cursor: 'pointer' }} onClick={() => setOpenId(p.id)}>
+      <tr key={p.id} className="admin-row" style={{ cursor: 'pointer' }} onClick={() => setOpenId(p.id)}>
         <td data-label={t('Код')}>
           <b style={{ letterSpacing: 0.4 }}>{p.code}</b>
           {online.includes(p.code) && <span className="live-dot" title={t('Сейчас работают')} />}
@@ -320,13 +403,15 @@ export default function Admin() {
         </td>
         <td data-label={t('Владелец')}>
           {p.ownerName || '—'}
-          {p.phone && <div className="tag-cat">{p.phone}</div>}
+          {p.phone && <div className="tag-cat">{phone ? <Tel phone={p.phone} stop /> : p.phone}</div>}
         </td>
         <td data-label={t('Оплачено до')}>
           {tjMoment(p.paidUntil)}
+          {/* Заметка о звонке на компьютере — первые 24 знака, целиком — в подсказке. На телефоне
+              подсказки нет: там заметка целиком, в две строки с многоточием (admin-zvonok, m-admin.css) */}
           {p.calledAt && (
-            <div className="tag-cat" title={p.callNote || ''}>
-              ☎ {fmtDate(p.calledAt)}{p.callNote ? ': ' + p.callNote.slice(0, 24) : ''}
+            <div className={'tag-cat' + (phone ? ' admin-zvonok' : '')} title={p.callNote || ''}>
+              ☎ {fmtDate(p.calledAt)}{p.callNote ? ': ' + (phone ? p.callNote : p.callNote.slice(0, 24)) : ''}
             </div>
           )}
         </td>
@@ -354,6 +439,64 @@ export default function Admin() {
       </tr>
     ))
 
+  // Блоки главного экрана — отдельно: на компьютере и на телефоне они стоят в разном порядке
+  const svodka = sum && (
+    <Svodka
+      s={sum}
+      t={t}
+      onPick={async (kind) => {
+        setPick(kind)
+        if (kind === 'month' && !payments.length) {
+          try {
+            setPayments(await api.get('/admin/pharmacies/payments?days=62'))
+          } catch (e) {
+            toast(e.message, 'err')
+          }
+        }
+      }}
+    />
+  )
+  const chart = sum && (
+    <Suspense fallback={null}>
+      <RevenueChart data={sum.byMonth} />
+    </Suspense>
+  )
+  const urgentPanel = urgent.length > 0 && (
+    <div className="panel" style={{ padding: 0, marginBottom: 16 }}>
+      <h2 style={{ padding: '14px 16px 0' }}>
+        <span className="h2-title">
+          <span className="ic" style={{ color: 'var(--warn)' }}><LuTriangleAlert size={17} /></span>
+          {t('Требуют внимания')}
+        </span>
+      </h2>
+      {/* table-cards-wrap: на телефоне карточки магазинов отступают от краёв панели,
+          иначе их рамка сливалась с рамкой панели; на компьютере обёртка ничего не меняет */}
+      <div className="table-cards-wrap">
+        <table className="table-cards">
+          <thead>{head}</thead>
+          <tbody>{rows(urgent)}</tbody>
+        </table>
+      </div>
+    </div>
+  )
+  const allPanel = (
+    // admin-all: на телефоне после списка идёт график — им нужен зазор (m-admin.css)
+    <div className="panel admin-all" style={{ padding: 0 }}>
+      <div className="table-cards-wrap">
+        <table className="table-cards">
+          <thead>{head}</thead>
+          <tbody>
+            {pendingRows()}
+            {rows(rest)}
+            {!loading && list.length === 0 && pending.length === 0 && (
+              <tr><td colSpan="6" className="empty">{t('Магазинов пока нет. Нажмите «Завести магазин».')}</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+
   return (
     // admin-app: у панели своя разметка без бокового меню, и правила для узких
     // экранов ей нужны свои — общие написаны под разделы магазина
@@ -367,74 +510,85 @@ export default function Admin() {
               <div className="sub">{list.length} {t('в обслуживании')} · {me?.name}</div>
             </div>
           </div>
+          {/* На телефоне под значками — короткие подписи (admin-cap): подсказка title там не
+              показывается, и «Коды активации» искали наугад. «Выйти» на телефоне — отдельно,
+              в углу шапки (admin-logout, m-admin.css), а не рядом с «Завести магазин» */}
           <div className="topbar-actions">
-            <button className="btn ghost icon" onClick={load} title={t('Обновить')}><LuRefreshCw size={16} /></button>
-            <button className="btn ghost" onClick={() => setKody(true)} title={t('Коды активации')} data-testid="admin-licences">
+            <button className={'btn ghost icon' + (phone ? ' admin-capbtn' : '')} onClick={load} title={t('Обновить')}>
+              <LuRefreshCw size={16} />
+              {phone && <span className="admin-cap">{t('Обновить')}</span>}
+            </button>
+            <button className={'btn ghost' + (phone ? ' admin-capbtn' : '')} onClick={() => setKody(true)} title={t('Коды активации')} data-testid="admin-licences">
               <span className="ic"><LuKeyRound size={16} /></span> <span className="btn-text">{t('Коды активации')}</span>
+              {phone && <span className="admin-cap">{t('Коды')}</span>}
             </button>
-            <button className="btn ghost" onClick={openJournal} title={t('Журнал')}>
+            <button className={'btn ghost' + (phone ? ' admin-capbtn' : '')} onClick={openJournal} title={t('Журнал')}>
               <span className="ic"><LuScrollText size={16} /></span> <span className="btn-text">{t('Журнал')}</span>
+              {phone && <span className="admin-cap">{t('Журнал')}</span>}
             </button>
-            <button className="btn ghost icon" onClick={() => setNastroyki(true)} title={t('Настройки панели')}>
+            <button className={'btn ghost icon' + (phone ? ' admin-capbtn' : '')} onClick={() => setNastroyki(true)} title={t('Настройки панели')}>
               <LuSettings size={16} />
+              {phone && <span className="admin-cap">{t('Настройки')}</span>}
             </button>
             <button className="btn" onClick={() => setForm({ ...emptyNew })} title={t('Завести магазин')}>
               <span className="ic"><LuPlus size={16} /></span> <span className="btn-text">{t('Завести магазин')}</span>
             </button>
-            <button className="btn ghost icon" onClick={logout} title={t('Выйти')}><LuLogOut size={16} /></button>
+            <button className={'btn ghost icon' + (phone ? ' admin-capbtn admin-logout' : '')} onClick={leave} title={t('Выйти')}>
+              <LuLogOut size={16} />
+              {phone && <span className="admin-cap">{t('Выйти')}</span>}
+            </button>
           </div>
         </header>
 
         <main className="content">
-          {sum && (
-            <Svodka
-              s={sum}
-              t={t}
-              onPick={async (kind) => {
-                setPick(kind)
-                if (kind === 'month' && !payments.length) {
-                  try {
-                    setPayments(await api.get('/admin/pharmacies/payments?days=62'))
-                  } catch (e) {
-                    toast(e.message, 'err')
-                  }
-                }
-              }}
-            />
+          {phone ? (
+            // ── Телефон: сначала ответ на «кому звонить сегодня» ──
+            // Поиск и «Требуют внимания» — сразу под шапкой, затем сводка, все магазины и
+            // график. Раньше до первой карточки магазина было полтора экрана сводки и графика
+            <>
+              <div className="admin-find">
+                <input
+                  type="search"
+                  value={find}
+                  onChange={(e) => setFind(e.target.value)}
+                  placeholder={t('Найти: название, код или телефон')}
+                  aria-label={t('Поиск')}
+                  enterKeyHint="search"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  data-testid="admin-find"
+                />
+              </div>
+              {found ? (
+                <div className="panel" style={{ padding: 0 }}>
+                  <div className="table-cards-wrap">
+                    <table className="table-cards">
+                      <thead>{head}</thead>
+                      <tbody>
+                        {rows(found)}
+                        {found.length === 0 && <tr><td colSpan="6" className="empty">{t('Ничего не найдено')}</td></tr>}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {urgentPanel}
+                  {svodka}
+                  {allPanel}
+                  {chart}
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              {svodka}
+              {chart}
+              {urgentPanel}
+              {allPanel}
+            </>
           )}
-          {sum && (
-            <Suspense fallback={null}>
-              <RevenueChart data={sum.byMonth} />
-            </Suspense>
-          )}
-
-          {urgent.length > 0 && (
-            <div className="panel" style={{ padding: 0, marginBottom: 16 }}>
-              <h2 style={{ padding: '14px 16px 0' }}>
-                <span className="h2-title">
-                  <span className="ic" style={{ color: 'var(--warn)' }}><LuTriangleAlert size={17} /></span>
-                  {t('Требуют внимания')}
-                </span>
-              </h2>
-              <table className="table-cards">
-                <thead>{head}</thead>
-                <tbody>{rows(urgent)}</tbody>
-              </table>
-            </div>
-          )}
-
-          <div className="panel" style={{ padding: 0 }}>
-            <table className="table-cards">
-              <thead>{head}</thead>
-              <tbody>
-                {pendingRows()}
-                {rows(rest)}
-                {!loading && list.length === 0 && pending.length === 0 && (
-                  <tr><td colSpan="6" className="empty">{t('Магазинов пока нет. Нажмите «Завести магазин».')}</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
         </main>
       </div>
 
@@ -449,6 +603,7 @@ export default function Admin() {
           toast={toast}
           dialog={dialog}
           t={t}
+          phone={phone}
         />
       )}
 
@@ -458,6 +613,7 @@ export default function Admin() {
           list={list}
           payments={payments}
           t={t}
+          phone={phone}
           onClose={() => setPick(null)}
           onOpen={(id) => {
             if (!id) return
@@ -468,21 +624,24 @@ export default function Admin() {
       )}
 
       {nastroyki && <Nastroyki onClose={() => setNastroyki(false)} />}
-      {kody && <KodyAktivacii onClose={() => setKody(false)} />}
-      {form && <NewPharmacy form={form} setForm={setForm} onStart={startCreate} toast={toast} t={t} />}
+      {kody && <KodyAktivacii phone={phone} onClose={() => setKody(false)} />}
+      {form && <NewPharmacy form={form} setForm={setForm} onStart={startCreate} toast={toast} t={t} phone={phone} />}
 
       {created && (
-        <Modal className="admin-modal" title={t('Магазин заведён')} onClose={() => setCreated(null)}>
+        // На телефоне это окно закрывается только кнопкой: затемнение над шторкой — больше
+        // половины экрана, случайное касание (хотя бы при прокрутке) закрывало окно, а пароль
+        // больше нигде не показывается. admin-created: плитки в столбик, логин и пароль крупно
+        <Modal className="admin-modal admin-created" title={t('Магазин заведён')} onClose={phone ? undefined : () => setCreated(null)}>
           <div className="note err" style={{ display: 'flex', gap: 9, marginBottom: 16 }}>
             <LuTriangleAlert size={16} style={{ flexShrink: 0, marginTop: 2 }} />
             <span>{t('Запишите пароль сейчас. Он больше нигде не показывается — потом его можно только задать заново.')}</span>
           </div>
           <div className="mini-cards" style={{ marginBottom: 16 }}>
             <div className="mini-card"><div className="m-label">{t('Магазин')}</div><div className="m-value sm">{created.name}</div></div>
-            <div className="mini-card"><div className="m-label">{t('Логин')}</div><div className="m-value sm">{created.ownerLogin}</div></div>
+            <div className="mini-card"><div className="m-label">{t('Логин')}</div><div className="m-value sm admin-secret" data-testid="created-login">{created.ownerLogin}</div></div>
             <div className="mini-card">
               <div className="m-label"><LuKeyRound size={11} style={{ verticalAlign: '-1px' }} /> {t('Пароль')}</div>
-              <div className="m-value sm" style={{ letterSpacing: 1 }}>{created.ownerPassword}</div>
+              <div className="m-value sm admin-secret" style={{ letterSpacing: 1 }} data-testid="created-password">{created.ownerPassword}</div>
             </div>
           </div>
           {created.imported && (
@@ -492,6 +651,12 @@ export default function Admin() {
             </div>
           )}
           <div className="modal-actions">
+            {/* На телефоне логин и пароль чаще всего тут же пересылают клиенту в мессенджер */}
+            {phone && (
+              <button type="button" className="btn ghost" onClick={copyCreated} data-testid="created-copy">
+                <span className="ic"><LuCopy size={16} /></span> {t('Скопировать логин и пароль')}
+              </button>
+            )}
             <button className="btn" onClick={() => setCreated(null)}>{t('Записал')}</button>
           </div>
         </Modal>
@@ -499,11 +664,13 @@ export default function Admin() {
 
       {journal && (
         <Modal className="admin-modal" title={t('Журнал действий')} onClose={() => setJournal(null)} wide>
-          <div style={{ maxHeight: '60vh', overflow: 'auto' }}>
-            <table className="table-cards">
+          {/* admin-zhurnal: на телефоне своя прокрутка внутри окна-шторки не нужна — листается само окно.
+              admin-log: там же запись — серой строкой «время · кто · магазин» над «что сделал» */}
+          <div className="admin-zhurnal" style={{ maxHeight: '60vh', overflow: 'auto' }}>
+            <table className="table-cards admin-log">
               <thead><tr><th>{t('Время')}</th><th>{t('Кто')}</th><th>{t('Магазин')}</th><th>{t('Что сделал')}</th></tr></thead>
               <tbody>
-                {journal.map((a) => (
+                {(phone ? journal.slice(0, zhurnalShown) : journal).map((a) => (
                   <tr key={a.id}>
                     <td className="tag-cat" data-label={t('Время')} style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(a.createdAt)}</td>
                     <td data-label={t('Кто')}>{a.accountName || '—'}</td>
@@ -515,6 +682,11 @@ export default function Admin() {
               </tbody>
             </table>
           </div>
+          {phone && journal.length > zhurnalShown && (
+            <button type="button" className="btn ghost block admin-more" onClick={() => setZhurnalShown((n) => n + 50)}>
+              {t('Показать ещё')} · {journal.length - zhurnalShown}
+            </button>
+          )}
         </Modal>
       )}
     </div>
@@ -522,42 +694,63 @@ export default function Admin() {
 }
 
 // ── Заведение нового магазина ──
-function NewPharmacy({ form, setForm, onStart, toast, t }) {
+function NewPharmacy({ form, setForm, onStart, toast, t, phone }) {
   // Окно уже закрыли (картинка дорабатывалась после «Отмена» или «Завести») — не открываем его снова
   const set = (k, v) => setForm((f) => f && { ...f, [k]: v })
   // Картинка логотипа ещё готовится — «Завести» ждёт её, иначе магазин завёлся бы без логотипа
   const [logoBusy, setLogoBusy] = useState(false)
+  // Ошибка проверки на телефоне: { field, msg }. Там она стоит под самим полем, пока его не
+  // исправят: всплывающее сообщение исчезает через две с половиной секунды, лежит поверх
+  // кнопок, а поле с ошибкой — экраном выше
+  const [err, setErr] = useState(null)
+  const fix = (k, v) => {
+    set(k, v)
+    if (err?.field === k) setErr(null)
+  }
 
   // Всё, что можно проверить здесь, проверяется здесь: окно закрывается сразу,
   // и отказ, пришедший через полминуты, унёс бы с собой всё введённое. Сервер
   // проверяет то же самое ещё раз — он никому не верит на слово, и правильно.
   function submit() {
+    const fail = (field, msg) => {
+      if (!phone) return toast(msg, 'err')
+      setErr({ field, msg })
+      // К полю с ошибкой — сразу, с клавиатурой: его и надо исправить
+      document.getElementById('np-' + field)?.focus()
+    }
     const code = form.code.trim().toLowerCase()
     if (!CODE_RE.test(code)) {
-      return toast(t('Код магазина: латинские буквы, цифры и дефис, от 2 до 31 символа. Например: shifo'), 'err')
+      return fail('code', t('Код магазина: латинские буквы, цифры и дефис, от 2 до 31 символа. Например: shifo'))
     }
-    if (!form.name.trim()) return toast(t('Укажите название магазина'), 'err')
+    if (!form.name.trim()) return fail('name', t('Укажите название магазина'))
     const pw = form.ownerPassword.trim()
-    if (pw && pw.length < 6) return toast(t('Пароль слишком короткий (минимум 6 символов)'), 'err')
+    if (pw && pw.length < 6) return fail('ownerPassword', t('Пароль слишком короткий (минимум 6 символов)'))
     onStart()
   }
+  const errUnder = (field) => err?.field === field && <div className="note err admin-field-err" role="alert">{err.msg}</div>
+  // Код, логин и пароль: клавиатура телефона не ставит сама заглавную и не «исправляет» слово —
+  // иначе логин заводился бы как «Shifo», а пароль подменялся бы словарём
+  const latin = { autoCapitalize: 'none', autoCorrect: 'off', spellCheck: false }
   return (
     <Modal className="admin-modal" title={t('Новый магазин')} onClose={() => setForm(null)}>
       <div className="row">
         <div className="field" style={{ flex: 1 }}>
-          <label>{t('Код магазина')}</label>
-          <input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="shifo" autoFocus />
+          <label htmlFor="np-code">{t('Код магазина')}</label>
+          <input id="np-code" value={form.code} onChange={(e) => fix('code', e.target.value)} placeholder="shifo" autoFocus {...latin} />
+          {errUnder('code')}
         </div>
         <div className="field" style={{ flex: 2 }}>
-          <label>{t('Название')}</label>
-          <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Магазин Шифо" />
+          <label htmlFor="np-name">{t('Название')}</label>
+          <input id="np-name" value={form.name} onChange={(e) => fix('name', e.target.value)} placeholder="Магазин Шифо" />
+          {errUnder('name')}
         </div>
       </div>
       <div className="row">
         <div className="field" style={{ flex: 1 }}><label>{t('Владелец')}</label>
           <input value={form.ownerName} onChange={(e) => set('ownerName', e.target.value)} /></div>
+        {/* type="tel": на телефоне открывается цифровая клавиатура, а не буквенная */}
         <div className="field" style={{ flex: 1 }}><label>{t('Телефон')}</label>
-          <input value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+992 …" /></div>
+          <input type="tel" inputMode="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+992 …" /></div>
       </div>
       <div className="row">
         <div className="field" style={{ flex: 1 }}><label>{t('Город')}</label>
@@ -568,19 +761,24 @@ function NewPharmacy({ form, setForm, onStart, toast, t }) {
 
       <LogoField value={form.logo} onChange={(v) => set('logo', v)} onBusy={setLogoBusy} toast={toast} t={t} />
 
-      <ModuliVybor value={form.modulesOff} onChange={(v) => set('modulesOff', v)} t={t} testid="new-moduli" />
+      {/* compact: на телефоне 14 галочек свёрнуты в строку «все включены · Изменить» — список
+          занимал полтора экрана формы */}
+      <ModuliVybor value={form.modulesOff} onChange={(v) => set('modulesOff', v)} t={t} testid="new-moduli" compact={phone} />
 
       <div className="note info" style={{ marginBottom: 14 }}>
         {t('Под этим логином войдёт владелец магазина. Пароль можно не задавать — он придумается и покажется один раз.')}
       </div>
       <div className="row">
         <div className="field" style={{ flex: 1 }}><label>{t('Логин владельца')}</label>
-          <input value={form.ownerLogin} onChange={(e) => set('ownerLogin', e.target.value)} placeholder={form.code || 'shifo'} /></div>
-        <div className="field" style={{ flex: 1 }}><label>{t('Пароль')}</label>
-          <input value={form.ownerPassword} onChange={(e) => set('ownerPassword', e.target.value)} placeholder={t('придумается сам')} /></div>
+          <input value={form.ownerLogin} onChange={(e) => set('ownerLogin', e.target.value)} placeholder={form.code || 'shifo'} {...latin} /></div>
+        <div className="field" style={{ flex: 1 }}><label htmlFor="np-ownerPassword">{t('Пароль')}</label>
+          <input id="np-ownerPassword" value={form.ownerPassword} onChange={(e) => fix('ownerPassword', e.target.value)} placeholder={t('придумается сам')} {...latin} />
+          {errUnder('ownerPassword')}
+        </div>
       </div>
 
-      <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14, marginBottom: 16, opacity: form.tovary ? 0.5 : 1 }}>
+      {/* admin-demo: на телефоне строка с галочкой — под палец (m-admin.css) */}
+      <label className="admin-demo" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14, marginBottom: 16, opacity: form.tovary ? 0.5 : 1 }}>
         <input type="checkbox" style={{ width: 18, height: 18, flex: 'none', margin: 0 }} checked={form.demo && !form.tovary} disabled={!!form.tovary} onChange={(e) => set('demo', e.target.checked)} />
         {t('Заполнить демонстрационными товарами и продажами')}
       </label>
@@ -613,7 +811,7 @@ function NewPharmacy({ form, setForm, onStart, toast, t }) {
 const seenCards = new Map()
 const seenUsage = new Map()
 
-function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, t }) {
+function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, t, phone }) {
   // ── Открываем сразу тем, что уже знаем ──
   // Название, код, срок оплаты, состояние — всё это лежит в строке списка, по которой
   // только что щёлкнули. Раньше карточка ждала сервер с нуля и показывала «Загрузка…»
@@ -733,7 +931,15 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
   async function markCalled() {
     const r = await dialog.prompt({
       title: t('Отметить звонок'),
-      message: `${ph.name}${ph.phone ? ' · ' + ph.phone : ''}`,
+      // На телефоне номер — ссылкой: позвонить можно прямо отсюда, а потом записать, что сказали
+      message: phone && ph.phone ? (
+        <>
+          {ph.name}
+          <span className="admin-tel-line"><Tel phone={ph.phone} /></span>
+        </>
+      ) : (
+        `${ph.name}${ph.phone ? ' · ' + ph.phone : ''}`
+      ),
       fields: [{ name: 'note', label: t('Что сказали'), placeholder: t('обещал оплатить в пятницу') }],
       confirmText: t('Записать'),
     })
@@ -764,10 +970,17 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
       danger: true,
       confirmText: t('Удалить'),
     })
-    if (!r || r.code.trim() !== ph.code) return
+    if (!r) return
+    // Коды магазинов всегда строчные, а клавиатура телефона сама ставит заглавную первую
+    // букву («Bahor»). Сравниваем без регистра, как и сервер; не совпал — говорим об этом:
+    // раньше окно молча закрывалось, и было непонятно, удалён магазин или нет
+    if (r.code.trim().toLowerCase() !== ph.code) {
+      toast(t('Код не совпал — магазин не удалён'), 'err')
+      return
+    }
     try {
       // Удаление стирает схему со всем содержимым — на большом магазине это не мгновение
-      await api.del(`/admin/pharmacies/${id}?confirm=${encodeURIComponent(r.code.trim())}`, {
+      await api.del(`/admin/pharmacies/${id}?confirm=${encodeURIComponent(ph.code)}`, {
         timeout: LONG_TIMEOUT_MS,
       })
       toast(t('Магазин удалён'))
@@ -814,7 +1027,8 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 18 }}>
+      {/* admin-card-acts: на телефоне кнопки встают ровной сеткой в два столбца (m-admin.css) */}
+      <div className="admin-card-acts" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 18 }}>
         <button className="btn" onClick={() => setPay({ ...emptyPay })} disabled={busy}>
           <span className="ic"><LuBanknote size={16} /></span> {t('Продлить')}
         </button>
@@ -871,7 +1085,7 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
           }
         />
         <Kv label={t('Владелец')} value={ph.ownerName || '—'} />
-        <Kv label={t('Телефон')} value={ph.phone || '—'} />
+        <Kv label={t('Телефон')} value={phone ? <Tel phone={ph.phone} /> : ph.phone || '—'} />
         <Kv label={t('Город')} value={ph.city || '—'} />
         <Kv label={t('Модули')} value={<span data-testid="card-moduli">{moduliText(ph.modulesOff, t)}</span>} />
         {ph.note && <Kv label={t('Примечание')} value={ph.note} />}
@@ -924,12 +1138,14 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
 
       {ph.audit.length > 0 && (
         <Section title={t('Что делали с этим магазином')}>
-          <table className="table-cards">
+          {/* admin-log: на телефоне — компактной записью, как в журнале действий */}
+          <table className="table-cards admin-log">
             <tbody>
               {ph.audit.map((a) => (
                 <tr key={a.id}>
-                  <td className="tag-cat" style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(a.createdAt)}</td>
-                  <td className="tag-cat">{a.accountName || '—'}</td>
+                  {/* Подписи — как у колонок журнала действий: на телефоне строка становится карточкой */}
+                  <td className="tag-cat" data-label={t('Время')} style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(a.createdAt)}</td>
+                  <td className="tag-cat" data-label={t('Кто')}>{a.accountName || '—'}</td>
                   <td className="cell-main">{a.detail || a.action}</td>
                 </tr>
               ))}
@@ -1004,19 +1220,22 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
 
       {edit && (
         <Modal className="admin-modal" title={t('Изменить магазин')} onClose={() => setEdit(null)}>
+          {/* На телефоне без автофокуса: клавиатура выезжала сразу и закрывала пол-экрана, хотя
+              здесь обычно меняют срок, модули или логотип, а не название */}
           <div className="field"><label>{t('Название')}</label>
-            <input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} autoFocus /></div>
+            <input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} autoFocus={!phone} /></div>
           <div className="row">
             <div className="field" style={{ flex: 1 }}><label>{t('Владелец')}</label>
               <input value={edit.ownerName} onChange={(e) => setEdit({ ...edit, ownerName: e.target.value })} /></div>
             <div className="field" style={{ flex: 1 }}><label>{t('Телефон')}</label>
-              <input value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} /></div>
+              <input type="tel" inputMode="tel" value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} /></div>
           </div>
           <div className="row">
             <div className="field" style={{ flex: 1 }}><label>{t('Город')}</label>
               <input value={edit.city} onChange={(e) => setEdit({ ...edit, city: e.target.value })} /></div>
             <div className="field" style={{ flex: 1 }}><label>{t('Оплачено до')}</label>
-              <div style={{ display: 'flex', gap: 8 }}>
+              {/* admin-srok: на телефоне поле часа вылезало за край окна — там дата и час делят ряд сеткой */}
+              <div className="admin-srok" style={{ display: 'flex', gap: 8 }}>
                 <input type="date" style={{ flex: 1 }} value={edit.paidUntil}
                   onChange={(e) => setEdit({ ...edit, paidUntil: e.target.value })} />
                 <input type="time" style={{ width: 110 }} value={edit.paidTime}
@@ -1037,7 +1256,7 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
             toast={toast}
             t={t}
           />
-          <ModuliVybor value={edit.modulesOff} onChange={(v) => setEdit((e) => e && { ...e, modulesOff: v })} t={t} testid="edit-moduli" />
+          <ModuliVybor value={edit.modulesOff} onChange={(v) => setEdit((e) => e && { ...e, modulesOff: v })} t={t} testid="edit-moduli" compact={phone} />
           <div className="note info" style={{ marginBottom: 14 }}>
             {t('Дату меняют, когда ошиблись при вводе, дают бесплатное продление или закрывают сразу. Обычную оплату лучше проводить кнопкой «Продлить» — она попадёт в историю оплат.')}
           </div>
@@ -1097,21 +1316,37 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
 // Каждая карточка нажимается и раскрывается списком. Число само по себе говорит
 // «двое не заплатили», но звонить надо конкретным людям — а за ними иначе пришлось
 // бы искать по всему списку глазами.
-function Svodka({ s, t, onPick }) {
-  const { money: m, clients: c } = s
-  const diff = m.prevMonth > 0 ? Math.round(((m.thisMonth - m.prevMonth) / m.prevMonth) * 100) : null
-
-  const Card = ({ kind, label, value, note, danger }) => (
-    <button className="mini-card svodka-card" onClick={() => onPick(kind)} title={t('Показать список')}>
+// Плитка сводки — отдельным компонентом, а не внутри Svodka. Объявленная внутри, она при каждой
+// перерисовке была бы новым компонентом, и React пересоздавал бы все семь кнопок, а панель
+// перерисовывается сама по событиям связи. Касание, пришедшееся на такую замену (палец опустился
+// на старую кнопку, поднялся над новой), на телефоне терялось — плитка «не нажималась»
+// sum — денежная плитка: на телефоне она во всю ширину, а «сомони» — мельче числа (svodka-money,
+// cur в m-admin.css). На компьютере разметка даёт тот же вид, что и прежде
+function SvodkaCard({ kind, label, value, note, danger, sum, onPick, t }) {
+  const cut = sum ? /^(.*) (\S+)$/.exec(value) : null
+  return (
+    <button className={'mini-card svodka-card' + (sum ? ' svodka-money' : '')} onClick={() => onPick(kind)} title={t('Показать список')}>
       <div className="m-label">{label}</div>
-      <div className="m-value" style={danger ? { color: 'var(--danger)' } : undefined}>{value}</div>
+      <div className="m-value" style={danger ? { color: 'var(--danger)' } : undefined}>
+        {cut ? <>{cut[1]} <span className="cur">{cut[2]}</span></> : value}
+      </div>
       <div className="tag-cat">{note}</div>
     </button>
   )
+}
+
+function Svodka({ s, t, onPick }) {
+  const { money: m, clients: c } = s
+  const diff = m.prevMonth > 0 ? Math.round(((m.thisMonth - m.prevMonth) / m.prevMonth) * 100) : null
+  // Общее у всех плиток: что делать по нажатию и перевод
+  const own = { onPick, t }
 
   return (
-    <div className="mini-cards" style={{ marginBottom: 16 }}>
-      <Card
+    // admin-svodka: на телефоне деньги — строками во всю ширину, клиенты — по две плитки в ряд
+    <div className="mini-cards admin-svodka" style={{ marginBottom: 16 }}>
+      <SvodkaCard
+        {...own}
+        sum
         kind="month"
         label={t('Доход за этот месяц')}
         value={money(m.thisMonth)}
@@ -1126,28 +1361,33 @@ function Svodka({ s, t, onPick }) {
           </>
         }
       />
-      <Card kind="expected" label={t('Ожидается за 30 дней')} value={money(m.expected30)} note={t('если все продлят')} />
-      <Card
+      <SvodkaCard {...own} sum kind="expected" label={t('Ожидается за 30 дней')} value={money(m.expected30)} note={t('если все продлят')} />
+      <SvodkaCard
+        {...own}
+        sum
         kind="all"
         label={t('Доход за всё время')}
         value={money(m.allTime)}
         note={`${t('средний платёж')} ${money(m.avgPayment)}`}
       />
-      <Card kind="paying" label={t('Платят')} value={c.paying} note={`${t('из')} ${c.total} ${t('всего')}`} />
-      <Card
+      <SvodkaCard {...own} kind="paying" label={t('Платят')} value={c.paying} note={`${t('из')} ${c.total} ${t('всего')}`} />
+      <SvodkaCard
+        {...own}
         kind="trial"
         label={t('Пробный период')}
         value={c.trial}
         note={`+${c.newThisMonth} ${t('новых за месяц')}`}
       />
-      <Card
+      <SvodkaCard
+        {...own}
         kind="expired"
         label={t('Срок вышел')}
         value={c.expired + c.blocked}
         danger={c.expired + c.blocked > 0}
         note={`${t('работа остановлена')}`}
       />
-      <Card
+      <SvodkaCard
+        {...own}
         kind="silent"
         label={t('Оплачены, но молчат')}
         value={c.silent}
@@ -1161,7 +1401,7 @@ function Svodka({ s, t, onPick }) {
 // ── Расшифровка карточки ──
 // Число в сводке говорит «двое не заплатили». Звонить надо людям, а не числам —
 // поэтому здесь список с телефонами, и щелчок по строке открывает карточку клиента.
-function SvodkaDetail({ kind, list, payments, onClose, onOpen, t }) {
+function SvodkaDetail({ kind, list, payments, onClose, onOpen, t, phone }) {
   const titles = {
     month: t('Платежи за этот месяц'),
     expected: t('Кому продлевать в ближайшие 30 дней'),
@@ -1172,7 +1412,6 @@ function SvodkaDetail({ kind, list, payments, onClose, onOpen, t }) {
     silent: t('Оплачены, но не торгуют'),
   }
 
-  const now = Date.now()
   const month = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime()
   const withStatus = list.map((p) => ({ ...p, _s: statusOf(p) }))
 
@@ -1210,7 +1449,7 @@ function SvodkaDetail({ kind, list, payments, onClose, onOpen, t }) {
           </thead>
           <tbody>
             {rows.map((p) => (
-              <tr key={p.id} style={{ cursor: 'pointer' }} onClick={() => onOpen(p.pharmacy?.id)}>
+              <tr key={p.id} className="admin-row" style={{ cursor: 'pointer' }} onClick={() => onOpen(p.pharmacy?.id)}>
                 <td className="tag-cat" data-label={t('Дата')}>{fmtDate(p.createdAt)}</td>
                 <td className="cell-main" data-label={t('Клиент')}>{p.pharmacy?.name || '—'}<div className="tag-cat">{p.pharmacy?.code}</div></td>
                 <td className="num" data-label={t('Сумма')}><b>{money(p.amount)}</b></td>
@@ -1232,9 +1471,9 @@ function SvodkaDetail({ kind, list, payments, onClose, onOpen, t }) {
           </thead>
           <tbody>
             {rows.map((p) => (
-              <tr key={p.id} style={{ cursor: 'pointer' }} onClick={() => onOpen(p.id)}>
+              <tr key={p.id} className="admin-row" style={{ cursor: 'pointer' }} onClick={() => onOpen(p.id)}>
                 <td className="cell-main" data-label={t('Клиент')}>{p.name}<div className="tag-cat">{p.code}</div></td>
-                <td className="tag-cat" data-label={t('Телефон')}>{p.phone || '—'}</td>
+                <td className="tag-cat" data-label={t('Телефон')}>{phone && p.phone ? <Tel phone={p.phone} stop /> : p.phone || '—'}</td>
                 <td data-label={t('Оплачено до')}>{tjMoment(p.paidUntil)}</td>
                 <td className="num" data-label={t('Принёс')}>{money(p.paid || 0)}</td>
                 <td className="cell-state" data-label={t('Состояние')}>
@@ -1250,7 +1489,10 @@ function SvodkaDetail({ kind, list, payments, onClose, onOpen, t }) {
           </tbody>
         </table>
       )}
-      <div className="tag-cat" style={{ marginTop: 10 }}>{t('Щёлкните по строке, чтобы открыть карточку клиента')}</div>
+      {/* На телефоне строк нет — есть карточки, и по ним не щёлкают, а нажимают */}
+      <div className="tag-cat" style={{ marginTop: 10 }}>
+        {phone ? t('Нажмите на клиента, чтобы открыть его карточку') : t('Щёлкните по строке, чтобы открыть карточку клиента')}
+      </div>
     </Modal>
   )
 }
@@ -1272,6 +1514,8 @@ function Section({ title, children }) {
   )
 }
 
+// На телефоне подпись стоит над значением (m-admin.css): рядом с подписью длинная ссылка или
+// почта в примечании не переносилась и уводила всю карточку вбок
 function Kv({ label, value }) {
   return (
     <div className="kv" style={{ display: 'flex', gap: 10, fontSize: 14, padding: '3px 0' }}>

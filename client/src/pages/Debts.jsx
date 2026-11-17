@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { LuUserPlus, LuTrash2, LuReceipt, LuBanknote, LuChevronRight, LuPrinter } from 'react-icons/lu'
 import Layout from '../components/Layout'
+import StickyBar, { useTelefon } from '../components/StickyBar'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import TicketView from '../components/TicketView'
@@ -34,7 +35,20 @@ export default function Debts() {
   const can = useCan()
   const isFounder = can('customers.delete')
   const totalDebt = customers.reduce((s, c) => s + (c.debt || 0), 0)
-  const pg = usePagination(customers, 10)
+  // На телефоне над списком — поиск клиента по имени или телефону, закреплённый вверху:
+  // карточка клиента высокая, и при десятке должников нужного приходилось долго листать.
+  // На компьютере список прежний, без поиска
+  const phone = useTelefon()
+  const [q, setQ] = useState('')
+  const z = phone ? q.trim().toLowerCase() : ''
+  const zCifry = z.replace(/\D/g, '')
+  const spisok = z
+    ? customers.filter((c) => (c.name || '').toLowerCase().includes(z) || (zCifry && String(c.phone || '').replace(/\D/g, '').includes(zCifry)))
+    : customers
+  const pg = usePagination(spisok, 10, z)
+  // Подсветка тура «Погасить» на телефоне — только у первого клиента с долгом: карточки
+  // разные, и общая рамка вокруг кнопок всех карточек перечёркивала список полосой
+  const firstPay = pg.slice.findIndex((c) => c.debt > 0)
 
   // ── Выгрузка и печать: все клиенты и их долги ──
   const exCols = [
@@ -109,27 +123,39 @@ export default function Debts() {
     >
       <PrintSheet zagolovok={t('Долги клиентов')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />
       <div className="panel" data-tour="debt.list" style={{ padding: 0 }}>
-        <table>
+        {phone && customers.length > 0 && (
+          <StickyBar panel pad="12px 12px 6px" className="debt-poisk">
+            <div className="toolbar">
+              <input className="search" placeholder={t('Имя или телефон…')} aria-label={t('Поиск')} value={q} onChange={(e) => setQ(e.target.value)} data-testid="debt-search" />
+            </div>
+          </StickyBar>
+        )}
+        {/* На телефоне клиенты — карточками (index.css, .table-cards): нажатие на карточку
+            открывает историю, как строка на компьютере */}
+        <div className="table-cards-wrap">
+        <table className="table-cards debt-list">
           <thead><tr><th>{t('Клиент')}</th><th>{t('Телефон')}</th><th className="num">{t('Долг')}</th><th></th></tr></thead>
           <tbody>
-            {pg.slice.map((c) => (
+            {pg.slice.map((c, n) => (
               <tr key={c.id} className="clickable" onClick={() => setDetail(c)} title={t('Показать историю')}>
-                <td><b>{c.name}</b> <LuChevronRight size={13} style={{ verticalAlign: '-2px', color: 'var(--muted-2)' }} /></td>
-                <td className="tag-cat">{c.phone || '—'}</td>
-                <td className="num">
+                <td className="cell-main"><b>{c.name}</b> <LuChevronRight size={13} style={{ verticalAlign: '-2px', color: 'var(--muted-2)' }} /></td>
+                <td className="tag-cat" data-label={t('Телефон')}>{c.phone || '—'}</td>
+                <td className="num" data-label={t('Долг')}>
                   {c.debt > 0
                     ? <span className="badge debt">{money(c.debt)}</span>
                     : <span className="badge ok">{t('нет долга')}</span>}
                 </td>
-                <td className="num" onClick={(e) => e.stopPropagation()}>
-                  {c.debt > 0 && can('debts.pay') && <button className="btn ghost sm" data-tour="debt.pay" onClick={() => pay(c)}>{t('Погасить')}</button>}{' '}
+                <td className="num cell-actions" onClick={(e) => e.stopPropagation()}>
+                  {c.debt > 0 && can('debts.pay') && <button className="btn ghost sm" data-tour={!phone || n === firstPay ? 'debt.pay' : undefined} onClick={() => pay(c)}>{t('Погасить')}</button>}{' '}
                   {isFounder && <button className="btn ghost sm icon" onClick={() => remove(c)}><LuTrash2 size={15} /></button>}
                 </td>
               </tr>
             ))}
             {customers.length === 0 && <tr><td colSpan="4" className="empty">{t('Клиентов с долгами нет. Долг появляется при продаже «В долг» на кассе.')}</td></tr>}
+            {customers.length > 0 && spisok.length === 0 && <tr><td colSpan="4" className="empty">{t('Ничего не найдено')}</td></tr>}
           </tbody>
         </table>
+        </div>
         <Pagination {...pg} />
       </div>
 
@@ -186,7 +212,8 @@ function CustomerHistory({ customer, sales, payments, returns, products, canPay,
   })
 
   return (
-    <Modal wide title={<><span className="ic"><LuReceipt size={18} /></span>{customer.name}</>} onClose={onClose}>
+    // debt-okno — правила для телефона (styles/m-smena.css)
+    <Modal wide className="debt-okno" title={<><span className="ic"><LuReceipt size={18} /></span>{customer.name}</>} onClose={onClose}>
       <div className="tag-cat" style={{ marginBottom: 12 }}>{customer.phone || tr('без телефона')}</div>
 
       <div className="mini-cards">
@@ -202,7 +229,9 @@ function CustomerHistory({ customer, sales, payments, returns, products, canPay,
         {vid === 'debt' ? tr('Покупки в долг') : vid === 'return' ? tr('Возвраты') : vid === 'pay' ? tr('Погашения') : tr('История операций')}
         {vid && <button className="btn ghost sm" style={{ marginLeft: 8 }} onClick={() => setVid('')}>{tr('Показать все')}</button>}
       </h2>
-      <div style={{ maxHeight: '46vh', overflow: 'auto' }}>
+      {/* okno-spisok: на телефоне у списка нет своей прокрутки — шторка листается целиком
+          (m-otchety.css). Иначе на низком экране листались и окно, и список внутри него */}
+      <div className="okno-spisok" style={{ maxHeight: '46vh', overflow: 'auto' }}>
         <table>
           <tbody>
             {events.map((e, n) => (

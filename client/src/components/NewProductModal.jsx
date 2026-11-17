@@ -42,7 +42,8 @@ export default function NewProductModal({ barcode, name = '', note, confirmText,
             <span className="ic"><LuClock size={16} /></span> {tr('Добавить позже')}
           </button>
         ) : <span />}
-        <div style={{ display: 'flex', gap: 10 }}>
+        {/* На телефоне «Отмена» и «Сохранить» — своим рядом во всю ширину (m-tovary.css) */}
+        <div className="np-acts" style={{ display: 'flex', gap: 10 }}>
           <button className="btn ghost" onClick={onClose} disabled={saving}>{tr('Отмена')}</button>
           <button className="btn" onClick={submit} disabled={saving}>{saving ? tr('Сохранение…') : confirmText}</button>
         </div>

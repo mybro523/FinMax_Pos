@@ -30,7 +30,8 @@ export default class ErrorBoundary extends Component {
             <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.6, marginBottom: 18 }}>
               Произошла ошибка при отображении страницы. Данные не потеряны — попробуйте обновить.
             </p>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+            {/* flexWrap: на телефоне (320 px) две кнопки в ряд не помещаются — вторая встаёт ниже */}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
               <button className="btn ghost" onClick={this.reset}>
                 <span className="ic"><LuRotateCw size={16} /></span> Попробовать снова
               </button>

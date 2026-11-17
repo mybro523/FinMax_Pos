@@ -34,11 +34,13 @@ export function AddCategoryBtn({ dialog, toast, options, onPicked }) {
   const can = useCan()
   if (!can('settings.categories') || !dialog) return null
   return (
+    // pf-add — на телефоне квадрат под палец (m-tovary.css)
     <button
       type="button"
-      className="btn icon"
+      className="btn icon pf-add"
       style={{ flexShrink: 0 }}
       title={tr('Новая категория')}
+      aria-label={tr('Новая категория')}
       onClick={() => addCategoryDialog({ dialog, toast, options, onPicked })}
     >
       <LuPlus size={16} />

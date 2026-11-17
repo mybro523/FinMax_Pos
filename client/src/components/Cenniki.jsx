@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { LuMinus, LuPlus, LuPrinter, LuReceiptText } from 'react-icons/lu'
 import { Modal, useToast } from './ui'
 import PrintDoc from './PrintDoc'
 import NumberInput from './NumberInput'
-import { StickerPages, canvasMeasure } from './Nakleyka'
+import { StickerPages, canvasMeasure, useMestoObraztsa, useUzko, vmestit } from './Nakleyka'
 import { money } from '../db/store'
 import { getUser } from '../db/auth'
 import { fmtDate, serverNow } from '../lib/time'
 import { pechat, pechatNakleyki } from '../lib/pechat'
+import { edinica } from '../lib/units'
 import { labelConfig, labelPrinterOf } from '../lib/print'
 import { pageOf, rotOf, savedRot, savedSize, sizeOf, sizeText } from '../lib/nakleyka'
 import { isDesktop } from '../lib/desktop'
@@ -139,7 +140,7 @@ export function Cennik({ product, shop, date, fit }) {
           <div className="cn-lbl">{t('Наименование')}:</div>
           <div className="cn-name"><span>{product.name}</span></div>
           <div className="cn-row">
-            <span>{t('Ед.')}: <b>{t(product.unit || 'уп')}</b></span>
+            <span>{t('Ед.')}: <b>{t(edinica(product))}</b></span>
             <span>{t('Код')}: <b className="cn-code">{product.barcode || '—'}</b></span>
           </div>
           <div className="cn-lbl">{t('Цена, сомони')}:</div>
@@ -295,7 +296,7 @@ export function RazmerCennika({ value, onChange, nk }) {
             </div>
           </div>
           {f.vid === 'custom' && (
-            <div className="row" style={{ maxWidth: 420 }}>
+            <div className="row cn-mm" style={{ maxWidth: 420 }}>
               <PoleMm label={t('Ширина, мм')} value={f.w} lo={LIMITS.wMin} hi={LIMITS.wMax} onChange={(w) => set({ w })} testid="cn-w" />
               <PoleMm label={t('Высота, мм')} value={f.h} lo={LIMITS.hMin} hi={LIMITS.hMax} onChange={(h) => set({ h })} testid="cn-h" />
             </div>
@@ -337,26 +338,29 @@ export function useRazmerCennika() {
   return [sel, choose]
 }
 
-// Образец на экране — первый ценник (как ляжет на бумагу); большой уменьшается, чтобы влез
+// Образец на экране — первый ценник (как ляжет на бумагу); большой уменьшается, чтобы влез.
+// На телефоне — ещё и под ширину экрана (useMestoObraztsa): иначе листался бы вбок
 export function CennikPreview({ product, razmer, nk }) {
   const f = formatOf(razmer)
   const L = useMemo(() => cennikLayout(f), [f.kuda, f.vid, f.w, f.h, f.font]) // eslint-disable-line react-hooks/exhaustive-deps
   const N = useMemo(() => cennikNaNakleyke(nk, f.font), [nk?.size?.w, nk?.size?.h, nk?.rot, nk?.dx, nk?.dy, f.font]) // eslint-disable-line react-hooks/exhaustive-deps
+  const ref = useRef(null)
+  const mesto = useMestoObraztsa(ref)
   const shop = getUser()?.pharmacy?.name || ''
   const date = fmtDate(serverNow())
   if (f.kuda === 'nk') {
-    const zoom = Math.min(2, 560 / (N.boxW * 3.78), 400 / (N.boxH * 3.78))
+    const zoom = vmestit(Math.min(2, 560 / (N.boxW * 3.78), 400 / (N.boxH * 3.78)), N.boxW, mesto)
     return (
-      <div className="cn-preview" data-testid="cn-preview">
+      <div className="cn-preview" data-testid="cn-preview" ref={ref}>
         <div className="cn-nk-zoom" style={{ zoom }}>
           <CennikNakleyka product={product} N={N} shop={shop} date={date} />
         </div>
       </div>
     )
   }
-  const zoom = Math.min(1.35, 640 / (L.w * 3.78), 420 / (L.h * 3.78))
+  const zoom = vmestit(Math.min(1.35, 640 / (L.w * 3.78), 420 / (L.h * 3.78)), L.w, mesto)
   return (
-    <div className="cn-preview" data-testid="cn-preview">
+    <div className="cn-preview" data-testid="cn-preview" ref={ref}>
       <div className="cn-page" style={{ ...pageStyle(L), gridTemplateColumns: `${L.w}mm`, zoom }}>
         <Cennik product={product} shop={shop} date={date} fit={L} />
       </div>
@@ -378,6 +382,8 @@ export default function CennikiModal({ products, onClose, title }) {
   const f = formatOf(razmer)
   const sheets = Math.ceil(total / cennikLayout(f).perPage)
   const name = title || t('Ценники')
+  const uzko = useUzko()
+  const obrazec = list[0] ? <CennikPreview product={list[0]} razmer={razmer} nk={nk} /> : null
   async function doPrint() {
     if (busy || total < 1) return
     setBusy(true)
@@ -390,20 +396,25 @@ export default function CennikiModal({ products, onClose, title }) {
       setBusy(false)
     }
   }
+  // На телефоне (m-tovary.css, .cn-okno): образец — над списком, у товара одна короткая строка
+  // (название и цена слева, «сколько» справа), «Печать» прижата к низу окна. Отмеченных бывают
+  // сотни — «Печать» и образец иначе уезжали на десятки экранов вниз
   return (
-    <Modal className="label-print" title={<><span className="ic"><LuReceiptText size={18} /></span>{name}</>} onClose={onClose} wide>
+    <Modal className="label-print cn-okno" title={<><span className="ic"><LuReceiptText size={18} /></span>{name}</>} onClose={onClose} wide>
       <RazmerCennika value={razmer} onChange={setRazmer} nk={nk} />
+      {uzko && obrazec}
+      {/* На телефоне — без своей прокрутки: листается всё окно (m-tovary.css) */}
       <div className="cn-rows" data-testid="cn-rows">
-        <table>
+        <table className="table-cards">
           <thead>
             <tr><th>{t('Товар')}</th><th className="num">{t('Цена')}</th><th style={{ width: 110 }}>{t('Сколько')}</th></tr>
           </thead>
           <tbody>
             {list.map((p) => (
               <tr key={p.id}>
-                <td><b>{p.name}</b><div className="tag-cat">{p.barcode || '—'}</div></td>
-                <td className="num">{money(p.price)}</td>
-                <td>
+                <td className="cell-main"><b>{p.name}</b><div className="tag-cat">{p.barcode || '—'}</div></td>
+                <td className="num cn-price" data-label={t('Цена')}>{money(p.price)}</td>
+                <td className="cn-qty" data-label={t('Сколько')}>
                   <NumberInput integer className="disc-input" style={{ width: 80 }} value={counts[p.id] ?? ''} onChange={(e) => setCounts((c) => ({ ...c, [p.id]: e.target.value }))} aria-label={`${t('Сколько')}: ${p.name}`} />
                 </td>
               </tr>
@@ -411,12 +422,12 @@ export default function CennikiModal({ products, onClose, title }) {
           </tbody>
         </table>
       </div>
-      <div className="tag-cat" style={{ margin: '10px 0' }} data-testid="cn-total">
+      <div className="tag-cat cn-total" style={{ margin: '10px 0' }} data-testid="cn-total">
         {t('Ценников')}: {total}
         {f.kuda === 'a4' ? ` · ${t('листов A4')}: ${sheets}` : ` · ${t('наклеек')}: ${total}`}
         {total >= MAX_CENNIKOV ? ` · ${t('за один раз — не больше')} ${MAX_CENNIKOV}` : ''}
       </div>
-      {list[0] && <CennikPreview product={list[0]} razmer={razmer} nk={nk} />}
+      {!uzko && obrazec}
       <CennikiDoc rows={rows} razmer={razmer} nk={nk} title={name} />
       <div className="modal-actions">
         <button className="btn ghost" onClick={onClose}>{t('Закрыть')}</button>

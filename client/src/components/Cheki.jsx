@@ -50,7 +50,8 @@ export function ChekOkno({ row, products, onClose, onBack }) {
   const print = () => pechatTicket(ticket).catch((e) => toast(t(e.message), 'err'))
   const vozvraty = (row.vozvraty || []).filter((r) => !isOtmena(r))
   return (
-    <Modal title={<><span className="ic"><LuReceipt size={18} /></span>{t('Чек')} № {chekNomer(s.date)}</>} onClose={onBack || onClose}>
+    // chek-okno — правила для телефона (styles/m-smena.css)
+    <Modal className="chek-okno" title={<><span className="ic"><LuReceipt size={18} /></span>{t('Чек')} № {chekNomer(s.date)}</>} onClose={onBack || onClose}>
       {row.otmena && (
         <div className="note err" style={{ marginBottom: 12 }}>
           {t('Чек отменён')} {fmtDateTime(row.otmena.date)}{row.otmena.user?.name ? ` · ${row.otmena.user.name}` : ''} —{' '}
@@ -98,7 +99,9 @@ export function ChekiOkno({ title, sales, returns, onClose, top, empty }) {
         {list.itogo.otmeneno > 0 ? ` · ${t('Отменено чеков')}: ${list.itogo.otmeneno}` : ''}
         {rows.length > 0 ? ` · ${t('нажмите на чек, чтобы открыть его')}` : ''}
       </div>
-      <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+      {/* okno-spisok: на телефоне у списка нет своей прокрутки — шторка листается целиком
+          (m-otchety.css). Второй ящик внутри оставлял на экране полторы карточки чека */}
+      <div className="okno-spisok" style={{ maxHeight: '56vh', overflow: 'auto' }}>
         <table className="table-cards" data-testid="cheki-list">
           <thead>
             <tr>
@@ -124,7 +127,9 @@ export function ChekiOkno({ title, sales, returns, onClose, top, empty }) {
                 <td data-label={t('Время')} style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.date)}</td>
                 <td data-label={t('Кассир')}>{r.cashier || '—'}</td>
                 <td data-label={t('Оплата')}>
-                  {payLabel(r.payment, t)}{r.payVia ? <span className="tag-cat"> · {r.payVia}</span> : null}
+                  {/* Способ и сервис — одним куском: в карточке на телефоне «· Alif» иначе уезжал
+                      отдельной строкой под «Перевод» */}
+                  <span>{payLabel(r.payment, t)}{r.payVia ? <span className="tag-cat"> · {r.payVia}</span> : null}</span>
                   {r.customer ? <div className="tag-cat">{r.customer}</div> : null}
                 </td>
                 <td className="num" data-label={t('Позиций')}>{r.positions}</td>
@@ -149,7 +154,8 @@ export function ChekiOkno({ title, sales, returns, onClose, top, empty }) {
 export function RasshifrovkaOkno({ title, Icon, rows, itog, note, children, onClose }) {
   const t = useT()
   return (
-    <Modal title={<>{Icon && <span className="ic"><Icon size={18} /></span>}{title}</>} onClose={onClose}>
+    // rassh-okno — правила для телефона (styles/m-smena.css): суммы не рвутся на две строки
+    <Modal className="rassh-okno" title={<>{Icon && <span className="ic"><Icon size={18} /></span>}{title}</>} onClose={onClose}>
       {note && <p style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.6, marginTop: 0 }}>{note}</p>}
       {(rows || []).filter(Boolean).map((r, i) => (
         <div className="total-row" key={i}>

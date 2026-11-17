@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Link } from 'react-router-dom'
 import {
   LuSearch, LuCircleHelp, LuListChecks, LuTriangleAlert, LuArrowRight, LuPlay, LuCircleCheck, LuGraduationCap,
 } from 'react-icons/lu'
 import Layout, { NAV } from '../components/Layout'
+import ChipsMore from '../components/ChipsMore'
 import { useAuth } from '../db/auth'
 import { useT, useLang } from '../lib/i18n'
 import { urokiFor, ekranFor } from '../lib/obuchenie'
@@ -25,15 +26,44 @@ import { startTour, useToursDone, OBSHIY } from '../lib/tur'
 
 const menuInfo = (to) => NAV.find((n) => n.to === to) || {}
 
+// Телефон (до 600 px, как в index.css). На нём список уроков — не столбик на полтора экрана,
+// а два ряда кнопок и «Ещё» (17.11.2026, просьба владельца: длинные ряды — два ряда и «Ещё»)
+const UZKO = '(max-width: 600px)'
+function useUzko() {
+  return useSyncExternalStore(
+    (cb) => {
+      if (typeof window.matchMedia !== 'function') return () => {}
+      const mq = window.matchMedia(UZKO)
+      mq.addEventListener('change', cb)
+      return () => mq.removeEventListener('change', cb)
+    },
+    () => typeof window.matchMedia === 'function' && window.matchMedia(UZKO).matches,
+    () => false,
+  )
+}
+
 export default function Obuchenie() {
   const t = useT()
   const lang = useLang()
   const user = useAuth()
+  const uzko = useUzko()
+  const bodyRef = useRef(null)
 
   const done = useToursDone()
   const uroki = useMemo(() => urokiFor(user), [user])
   const [openTo, setOpenTo] = useState(uroki[0]?.to || '/pos')
   const [q, setQ] = useState('')
+
+  // На телефоне урок стоит под списком: выбрали урок из раскрытого списка — экран сам
+  // доезжает до него, иначе нажатие выглядело бы так, будто ничего не произошло
+  function vybrat(to) {
+    setOpenTo(to)
+    if (!uzko) return
+    requestAnimationFrame(() => {
+      const el = bodyRef.current
+      if (el && el.getBoundingClientRect().top > window.innerHeight * 0.55) el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    })
+  }
 
   // Текст урока: сначала словарь уроков, потом общий — в уроках встречаются
   // и названия кнопок, которые уже переведены для самого интерфейса
@@ -60,6 +90,26 @@ export default function Obuchenie() {
   const Icon = info.Icon || LuCircleHelp
   const пройдено = uroki.filter((u) => done.includes(u.to)).length
 
+  const кнопки = найдено.map((u) => {
+    const m = menuInfo(u.to)
+    const I = m.Icon || LuCircleHelp
+    return (
+      <button
+        key={u.to}
+        className={'uch-item' + (urok && u.to === urok.to ? ' active' : '')}
+        onClick={() => vybrat(u.to)}
+      >
+        <span className="ic"><I size={16} /></span>
+        <span className="uch-item-name">{t(m.label || u.to)}</span>
+        {done.includes(u.to) && (
+          <span className="uch-done" title={t('пройдено')} aria-label={t('пройдено')}>
+            <LuCircleCheck size={15} />
+          </span>
+        )}
+      </button>
+    )
+  })
+
   return (
     <Layout
       title={t('Обучение')}
@@ -75,10 +125,12 @@ export default function Obuchenie() {
         <div className="panel uch-list">
           <div className="uch-search">
             <LuSearch size={15} />
+            {/* На телефоне подсказка с примерами не помещалась и обрывалась посреди слова
+                («…скидка, см…») — там она короче */}
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder={t('Найти: возврат, скидка, смена…')}
+              placeholder={uzko ? t('Поиск по обучению') : t('Найти: возврат, скидка, смена…')}
               aria-label={t('Поиск по обучению')}
             />
           </div>
@@ -89,32 +141,19 @@ export default function Obuchenie() {
 
           {найдено.length === 0 && <div className="empty">{t('Ничего не нашлось. Попробуйте другое слово.')}</div>}
 
-          <nav>
-            {найдено.map((u) => {
-              const m = menuInfo(u.to)
-              const I = m.Icon || LuCircleHelp
-              return (
-                <button
-                  key={u.to}
-                  className={'uch-item' + (urok && u.to === urok.to ? ' active' : '')}
-                  onClick={() => setOpenTo(u.to)}
-                >
-                  <span className="ic"><I size={16} /></span>
-                  <span className="uch-item-name">{t(m.label || u.to)}</span>
-                  {done.includes(u.to) && (
-                    <span className="uch-done" title={t('пройдено')} aria-label={t('пройдено')}>
-                      <LuCircleCheck size={15} />
-                    </span>
-                  )}
-                </button>
-              )
-            })}
-          </nav>
+          {/* На телефоне — два ряда кнопок и «Ещё» (ChipsMore), на компьютере — столбик */}
+          {uzko ? (
+            <nav className="uch-nav-uzko">
+              <ChipsMore className="uch-chips">{кнопки}</ChipsMore>
+            </nav>
+          ) : (
+            <nav>{кнопки}</nav>
+          )}
         </div>
 
         {/* ── Справа: сам урок ── */}
         {urok && (
-          <div className="panel uch-body">
+          <div className="panel uch-body" ref={bodyRef}>
             <h2>
               <span className="h2-title">
                 <span className="ic"><Icon size={18} /></span>

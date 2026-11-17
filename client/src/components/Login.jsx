@@ -60,6 +60,9 @@ export default function Login() {
   const lang = useLang()
   const [name, setName] = useState('')
   const [pw, setPw] = useState('')
+  // Ошибка входа хранится по-русски (ключ словаря) и переводится при показе: переключили
+  // язык после ошибки — переводится и она, а не остаётся «Неверное имя или пароль» среди
+  // таджикской формы
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [kb, setKb] = useState(false)
@@ -127,7 +130,7 @@ export default function Login() {
     try {
       await login_(login, password)
     } catch (e) {
-      setErr(e.message || t('Не удалось войти'))
+      setErr(e.message || 'Не удалось войти')
     }
   }
   async function login_(n, p) {
@@ -147,7 +150,7 @@ export default function Login() {
       // ушёл из «Настроек»), и после входа кассир оказался бы там
       await login_(name.trim(), pw)
     } catch (e) {
-      setErr(e.message ? t(e.message) : t('Не удалось войти'))
+      setErr(e.message || 'Не удалось войти')
     } finally {
       setBusy(false)
     }
@@ -245,7 +248,9 @@ export default function Login() {
 
           <div className="field">
             <label htmlFor="lg-name">{t('Логин')}</label>
-            <input id="lg-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('Введите логин')} autoFocus autoComplete="username" />
+            {/* Телефон не делает первую букву заглавной и не «исправляет» логин (17.11.2026):
+                «Test» вместо «test» не входил */}
+            <input id="lg-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('Введите логин')} autoFocus autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
           </div>
           <div className="field">
             <label htmlFor="lg-pw">{t('Пароль')}</label>
@@ -255,7 +260,7 @@ export default function Login() {
           {note && !err && <div className="note ok auth-err" role="status" data-testid="solo-note"><span>{note}</span></div>}
           {err && (
             <div className="note err auth-err" role="alert">
-              <LuTriangleAlert size={16} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{err}</span>
+              <LuTriangleAlert size={16} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{t(err)}</span>
             </div>
           )}
 

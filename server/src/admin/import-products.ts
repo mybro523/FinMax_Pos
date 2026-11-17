@@ -71,7 +71,8 @@ export function cleanImport(items: unknown): { rows: CleanRow[]; dropped: number
       cost: money(it?.cost),
       stock,
       category: str(it?.category, 60) || 'Прочее',
-      unit: str(it?.unit, 12) || 'уп',
+      // Единица не указана — штуки (17.11.2026)
+      unit: str(it?.unit, 12) || 'шт',
       own: it?.own === true,
     })
   }

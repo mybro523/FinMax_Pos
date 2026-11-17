@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { LuClipboardList, LuPackage, LuWallet, LuCircleCheck } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import Metric from '../components/Metric'
-import StickyBar from '../components/StickyBar'
+import StickyBar, { useTelefon } from '../components/StickyBar'
 import { Modal } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
@@ -23,6 +23,10 @@ import { BEZ_POSTAVSHIKA, otborZayavki, postavshikiTovarov, sPostavshikom, spiso
 // поставщик, категория. Карточки, Excel и печать считают только отобранное — так заявку
 // делают одному поставщику, и его имя стоит в заголовке листа.
 
+// Остаток словами с переведёнными единицами: stockText (db/store.js) пишет их по-русски, и
+// по-таджикски в карточке стояло «12 шт» рядом с переведённым «432 дона». По-русски — как было
+const ostatokText = (p, t) => stockText(p).replace(/[^\d\s.,+-]+/g, (w) => t(w))
+
 export default function Orders() {
   const products = useCollection('products')
   // Журнал приходов — только тому, кому он разрешён: без права сервер отказывал бы на каждом
@@ -31,6 +35,8 @@ export default function Orders() {
   const arrivals = useCollectionIf('arrivals', can('arrivals.view'))
   const suppliers = useCollection('suppliers')
   const t = useT()
+  const telefon = useTelefon()
+  const ostatok = (p) => ostatokText(p, t)
   // Поставщики товаров с сервера — по приходам за всё время. Нет ответа (нет связи,
   // сервер прежней версии) — по журналу приходов этого устройства
   const [server, setServer] = useState(null)
@@ -88,7 +94,7 @@ export default function Orders() {
     { header: t('Сумма'), key: 'sum', width: 14, money: true },
   ]
   const exRows = rows.map((p) => ({
-    name: p.name, barcode: p.barcode || '', supplier: p.supplier || '—', cat: p.category || '', stock: stockText(p), min: p.minStock, need: p.need, unit: t(p.unit || ''),
+    name: p.name, barcode: p.barcode || '', supplier: p.supplier || '—', cat: p.category || '', stock: ostatok(p), min: p.minStock, need: p.need, unit: t(p.unit || ''),
     cost: kop(Number(p.cost) || 0), sum: kop((Number(p.cost) || 0) * p.need),
   }))
   const exItogi = { name: t('Итого'), need: units, sum: kop(total) }
@@ -102,6 +108,36 @@ export default function Orders() {
   const exportExcel = () =>
     skachatXlsx({ fayl: exZag, zagolovok: `${getUser()?.pharmacy?.name || ''} — ${exZag}`, podzag: exPodzag, cols: exCols, rows: exRows, itogi: exItogi })
 
+  // ── Поиск и отбор ──
+  const poisk = (
+    <div className="search kamera-pole">
+      <input
+        data-testid="ord-search"
+        placeholder={t('Название или штрихкод…')}
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        aria-label={t('Поиск')}
+      />
+      <KameraKnopka onCode={setQ} testid="kamera-orders" />
+    </div>
+  )
+  const otbor = (
+    <>
+      <select value={supOk ? sup : ''} onChange={(e) => setSup(e.target.value)} aria-label={t('Поставщик')} data-testid="ord-sup" style={{ maxWidth: 260 }}>
+        <option value="">{t('Все поставщики')}</option>
+        {sups.list.map((s) => <option key={s.key} value={s.key}>{s.name} ({s.count})</option>)}
+        {sups.none > 0 && <option value={BEZ_POSTAVSHIKA}>{t('Без поставщика')} ({sups.none})</option>}
+      </select>
+      <select value={catOk ? cat : ''} onChange={(e) => setCat(e.target.value)} aria-label={t('Категория')} data-testid="ord-cat" style={{ maxWidth: 220 }}>
+        <option value="">{t('Все категории')}</option>
+        {cats.map((c) => <option key={c.name} value={c.name}>{t(c.name)} ({c.count})</option>)}
+      </select>
+      {filtered && (
+        <button className="btn ghost sm" onClick={() => { setQ(''); setSup(''); setCat('') }}>{t('Сбросить')}</button>
+      )}
+    </>
+  )
+
   return (
     <Layout
       title={t('Авто-заявка')}
@@ -113,7 +149,8 @@ export default function Orders() {
         <div className="panel" data-tour="ord.list"><div className="empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}><LuCircleCheck size={34} style={{ color: 'var(--green)' }} />{t('Все остатки в норме — заявка не требуется')}</div></div>
       ) : (
         <>
-          <div className="cards three" data-tour="ord.cards" style={{ marginBottom: 16 }}>
+          {/* ord-cards: на телефоне две карточки в ряд, сумма — во всю ширину (m-dengi.css) */}
+          <div className="cards three ord-cards" data-tour="ord.cards" style={{ marginBottom: 16 }}>
             <Metric label={t('Позиций к заказу')} value={rows.length} Icon={LuClipboardList} sub={filtered ? `${t('из')} ${low.length}` : t('подробнее')} onClick={() => setOkno('pozicii')} testid="card-ord-pozicii" />
             <Metric label={t('Единиц товара')} value={units} Icon={LuPackage} sub={t('подробнее')} onClick={() => setOkno('edinicy')} testid="card-ord-edinicy" />
             <Metric label={t('Сумма заявки')} value={money(total)} Icon={LuWallet} sub={t('по поставщикам')} onClick={() => setOkno('summa')} testid="card-ord-summa" />
@@ -121,34 +158,27 @@ export default function Orders() {
           {okno && <ZayavkaOkno vid={okno} rows={rows} total={total} units={units} onClose={() => setOkno(null)} />}
 
           <div className="panel" data-tour="ord.list" style={{ padding: 0 }}>
-            <StickyBar panel pad="16px 16px 14px">
-              <div className="toolbar tools-wrap" data-tour="ord.filters">
-                <div className="search kamera-pole">
-                  <input
-                    data-testid="ord-search"
-                    placeholder={t('Название или штрихкод…')}
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    aria-label={t('Поиск')}
-                  />
-                  <KameraKnopka onCode={setQ} testid="kamera-orders" />
+            {telefon ? (
+              // Телефон (17.11.2026): закреплён один поиск — с выборами полоса занимала до
+              // трети экрана. Поставщик и категория — под ним, каждый во всю строку: по два в
+              // ряд имя поставщика срезалось, а оно же стоит в заголовке заявки (m-dengi.css).
+              // Метка тура — на обоих: шаг «Поиск и отбор» подсвечивает их вместе
+              <>
+                <StickyBar panel pad="12px 16px 10px">
+                  <div className="toolbar tools-wrap" data-tour="ord.filters">{poisk}</div>
+                </StickyBar>
+                <div className="toolbar tools-wrap ord-otbor" data-tour="ord.filters">{otbor}</div>
+              </>
+            ) : (
+              <StickyBar panel pad="16px 16px 14px">
+                <div className="toolbar tools-wrap" data-tour="ord.filters">
+                  {poisk}
+                  {otbor}
                 </div>
-                <select value={supOk ? sup : ''} onChange={(e) => setSup(e.target.value)} aria-label={t('Поставщик')} data-testid="ord-sup" style={{ maxWidth: 260 }}>
-                  <option value="">{t('Все поставщики')}</option>
-                  {sups.list.map((s) => <option key={s.key} value={s.key}>{s.name} ({s.count})</option>)}
-                  {sups.none > 0 && <option value={BEZ_POSTAVSHIKA}>{t('Без поставщика')} ({sups.none})</option>}
-                </select>
-                <select value={catOk ? cat : ''} onChange={(e) => setCat(e.target.value)} aria-label={t('Категория')} data-testid="ord-cat" style={{ maxWidth: 220 }}>
-                  <option value="">{t('Все категории')}</option>
-                  {cats.map((c) => <option key={c.name} value={c.name}>{t(c.name)} ({c.count})</option>)}
-                </select>
-                {filtered && (
-                  <button className="btn ghost sm" onClick={() => { setQ(''); setSup(''); setCat('') }}>{t('Сбросить')}</button>
-                )}
-              </div>
-            </StickyBar>
+              </StickyBar>
+            )}
             <div className="table-cards-wrap">
-              <table className="table-cards" data-testid="ord-table">
+              <table className="table-cards ord-table" data-testid="ord-table">
                 <thead>
                   <tr>
                     <th>{t('Товар')}</th><th>{t('Поставщик')}</th><th>{t('Категория')}</th><th className="num">{t('Остаток')}</th>
@@ -161,7 +191,7 @@ export default function Orders() {
                       <td className="cell-main"><b>{p.name}</b><div className="tag-cat">{p.barcode}</div></td>
                       <td data-label={t('Поставщик')}>{p.supplier || <span className="tag-cat">{t('Без поставщика')}</span>}</td>
                       <td data-label={t('Категория')}>{p.category ? t(p.category) : '—'}</td>
-                      <td className="num" data-label={t('Остаток')}><span className="badge low">{stockText(p)}</span></td>
+                      <td className="num" data-label={t('Остаток')}><span className="badge low">{ostatok(p)}</span></td>
                       <td className="num" data-label={t('Минимум')}>{p.minStock}</td>
                       <td className="num" data-label={t('Заказать')}><b>{p.need} {t(p.unit || '')}</b></td>
                       <td className="num" data-label={t('Сумма')}>{money(p.cost * p.need)}</td>
@@ -198,11 +228,17 @@ function ZayavkaOkno({ vid, rows, total, units, onClose }) {
     return (
       <Modal wide title={t('Сумма заявки по поставщикам')} onClose={onClose}>
         <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
-          <table data-testid="ord-okno">
+          {/* На телефоне — карточками: в окне шириной с экран колонки не помещались */}
+          <table data-testid="ord-okno" className="table-cards ord-table">
             <thead><tr><th>{t('Поставщик')}</th><th className="num">{t('Позиций')}</th><th className="num">{t('Заказать')}</th><th className="num">{t('Сумма')}</th></tr></thead>
             <tbody>
               {list.map((x) => (
-                <tr key={x.name}><td><b>{x.name}</b></td><td className="num">{x.count}</td><td className="num">{x.need}</td><td className="num">{money(x.sum)}</td></tr>
+                <tr key={x.name}>
+                  <td className="cell-main"><b>{x.name}</b></td>
+                  <td className="num" data-label={t('Позиций')}>{x.count}</td>
+                  <td className="num" data-label={t('Заказать')}>{x.need}</td>
+                  <td className="num" data-label={t('Сумма')}>{money(x.sum)}</td>
+                </tr>
               ))}
             </tbody>
           </table>
@@ -216,16 +252,16 @@ function ZayavkaOkno({ vid, rows, total, units, onClose }) {
   return (
     <Modal wide title={vid === 'edinicy' ? t('Единиц товара к заказу') : t('Позиций к заказу')} onClose={onClose}>
       <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
-        <table data-testid="ord-okno">
+        <table data-testid="ord-okno" className="table-cards ord-table">
           <thead><tr><th>{t('Товар')}</th><th>{t('Поставщик')}</th><th className="num">{t('Остаток')}</th><th className="num">{t('Заказать')}</th><th className="num">{t('Сумма')}</th></tr></thead>
           <tbody>
             {list.map((p) => (
               <tr key={p.id}>
-                <td><b>{p.name}</b>{p.barcode ? <div className="tag-cat">{p.barcode}</div> : null}</td>
-                <td>{p.supplier || <span className="tag-cat">{t('Без поставщика')}</span>}</td>
-                <td className="num">{stockText(p)}</td>
-                <td className="num"><b>{p.need} {t(p.unit || '')}</b></td>
-                <td className="num">{money(p.cost * p.need)}</td>
+                <td className="cell-main"><b>{p.name}</b>{p.barcode ? <div className="tag-cat">{p.barcode}</div> : null}</td>
+                <td data-label={t('Поставщик')}>{p.supplier || <span className="tag-cat">{t('Без поставщика')}</span>}</td>
+                <td className="num" data-label={t('Остаток')}>{ostatokText(p, t)}</td>
+                <td className="num" data-label={t('Заказать')}><b>{p.need} {t(p.unit || '')}</b></td>
+                <td className="num" data-label={t('Сумма')}>{money(p.cost * p.need)}</td>
               </tr>
             ))}
             {list.length === 0 && <tr><td colSpan="5" className="empty">{t('Ничего не найдено')}</td></tr>}

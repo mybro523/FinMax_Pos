@@ -156,9 +156,11 @@ export function unitsText(units, x, t = (s) => s) {
   return loose > 0 ? `${packs} ${t(packLabel(x))} + ${pieceAmount(loose, x)} ${t(pieceLabel(x))}` : `${packs} ${t(packLabel(x))}`
 }
 
-// Подпись единицы рядом с числом: «кг», «л», «уп», «рулон». Пусто — «уп»,
-// как у товаров, заведённых до появления выбора единицы
-export const edinica = (x) => String(x?.unit || '').trim() || 'уп'
+// Подпись единицы рядом с числом: «кг», «л», «уп», «рулон». Пусто — единица по умолчанию.
+// 17.11.2026 (владелец): по умолчанию — штуки; упаковка из нескольких штук — «уп». До этого
+// пустая единица показывалась «уп» (так её завёл бы прежний сервер)
+export const edinicaPoUmolchaniyu = (x) => (uppOf(x) > 1 ? 'уп' : 'шт')
+export const edinica = (x) => String(x?.unit || '').trim() || edinicaPoUmolchaniyu(x)
 
 // ── Единицы для выбора в карточке товара ──
 // drob — продаётся дробно (тысячными долями). Остальные — целыми, и у них может
@@ -191,8 +193,10 @@ export const kgText = (units) => String(num(units) / KG).replace('.', ',')
 export function edinicaStroki(i, product) {
   const own = String(i?.unit || '').trim()
   if (own) return own
-  if (product) return String(product.unit || '').trim() || 'уп'
-  return uppOf(i) === KG ? 'кг' : 'уп'
+  // Карточка без единицы: упаковка — карточки или строки, что больше (строка помнит упаковку,
+  // с которой товар продали, — 1.5.12)
+  if (product) return edinica({ unit: product.unit, unitsPerPack: Math.max(uppOf(product), uppOf(i)) })
+  return uppOf(i) === KG ? 'кг' : edinicaPoUmolchaniyu(i)
 }
 // Строки документа с единицей у каждой. products — список товаров или Map(id → товар)
 export function sEdinicami(items, products) {

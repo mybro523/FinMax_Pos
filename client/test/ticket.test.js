@@ -28,7 +28,9 @@ const sale = {
 
 test('количество и цена: упаковки — по цене упаковки, штуки — по цене штуки', () => {
   setLang('ru')
-  assert.equal(qtyPriceText({ qty: 2, pieces: 0, unitsPerPack: 1, price: 150 }, t, money), '2 уп × 150 с.')
+  // Без единицы и по одной штуке — «шт» (17.11.2026: по умолчанию — штуки)
+  assert.equal(qtyPriceText({ qty: 2, pieces: 0, unitsPerPack: 1, price: 150 }, t, money), '2 шт × 150 с.')
+  assert.equal(qtyPriceText({ qty: 2, pieces: 0, unitsPerPack: 1, unit: 'уп', price: 150 }, t, money), '2 уп × 150 с.')
   assert.equal(qtyPriceText({ qty: 0, pieces: 5, unitsPerPack: 20, price: 200 }, t, money), '5 шт × 10 с.')
   // Упаковка и три штуки — всё в штуках: иначе перемножить нечего
   assert.equal(qtyPriceText({ qty: 1, pieces: 3, unitsPerPack: 10, price: 50 }, t, money), '13 шт × 5 с.')
@@ -39,7 +41,7 @@ test('чек продажи: шапка, позиции, скидка, итог,
   const ticket = saleTicket(sale, opts)
   assert.deepEqual(ticket.head, ['Магазин №1', 'дата:2026-10-04'])
   assert.deepEqual(ticket.rows, [
-    { name: 'Нурофен', sub: '2 уп × 150 с.', value: '300 с.' },
+    { name: 'Нурофен', sub: '2 шт × 150 с.', value: '300 с.' },
     { name: 'Парацетамол', sub: '5 шт × 10 с. · скидка −5 с.', value: '45 с.' },
   ])
   assert.deepEqual(ticket.totals, [
@@ -140,7 +142,7 @@ test('на таджикском чек печатается таджикским
     assert.equal(ticket.tail.at(-3), 'Ташаккур барои харид!')
     assert.equal(ticket.tail.at(-2), 'Магазин №1', 'название магазина не переводится')
     assert.equal(ticket.tail.at(-1), 'www.finmaxpos.tj', 'адрес сайта не переводится')
-    assert.equal(ticket.rows[0].sub, '2 қуттӣ × 150 с.')
+    assert.equal(ticket.rows[0].sub, '2 дона × 150 с.')
   } finally {
     setLang('ru')
   }

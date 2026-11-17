@@ -66,7 +66,7 @@ export function razobrat(raw) {
         price: num(i.price),
         cost: num(i.cost),
         unitsPerPack: uppOf(i),
-        unit: i.unit || 'уп',
+        unit: edinica(i),
         stock: num(i.stock),
         looseUnits: num(i.looseUnits),
         qty: Math.max(0, Math.trunc(num(i.qty))),

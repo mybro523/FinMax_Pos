@@ -111,42 +111,48 @@ export default function Sklad() {
       title={t('Склад')}
       actions={
         <>
-          {can('arrivals.create') && (
-            <button type="button" className="btn ghost" data-tour="sklad.prihod" data-testid="sklad-prihod" onClick={() => nav('/arrivals?kuda=sklad')}>
-              <span className="ic"><LuPackagePlus size={16} /></span> {t('Приход на склад')}
-            </button>
-          )}
-          {mozhno && (
-            <button type="button" className="btn ghost" data-tour="sklad.edit" data-testid="sklad-edit-btn" onClick={() => setOkno({ kind: 'edit' })}>
-              <span className="ic"><LuPencil size={16} /></span> {t('Поправить остаток')}
-            </button>
-          )}
-          {mozhno && (
-            <button type="button" className="btn" data-tour="sklad.to-shop" data-testid="sklad-to-shop" onClick={() => setOkno({ kind: 'perenos' })}>
-              <span className="ic"><LuStore size={16} /></span> {t('В магазин')}
-            </button>
-          )}
+          {/* Обёртка на компьютере раскладку не меняет (display: contents). На телефоне
+              (m-tovary.css) «Экспорт» и «Печать» — значками в строке названия, а эти три —
+              ровной сеткой: «Приход» и «Поправить» рядом, «В магазин» во всю ширину */}
+          <span className="sklad-acts" style={{ display: 'contents' }}>
+            {can('arrivals.create') && (
+              <button type="button" className="btn ghost" data-tour="sklad.prihod" data-testid="sklad-prihod" onClick={() => nav('/arrivals?kuda=sklad')}>
+                <span className="ic"><LuPackagePlus size={16} /></span> {t('Приход на склад')}
+              </button>
+            )}
+            {mozhno && (
+              <button type="button" className="btn ghost" data-tour="sklad.edit" data-testid="sklad-edit-btn" onClick={() => setOkno({ kind: 'edit' })}>
+                <span className="ic"><LuPencil size={16} /></span> {t('Поправить остаток')}
+              </button>
+            )}
+            {mozhno && (
+              <button type="button" className="btn" data-tour="sklad.to-shop" data-testid="sklad-to-shop" onClick={() => setOkno({ kind: 'perenos' })}>
+                <span className="ic"><LuStore size={16} /></span> {t('В магазин')}
+              </button>
+            )}
+          </span>
           <ExportPechat onExcel={exportExcel} />
         </>
       }
     >
       <PrintSheet zagolovok={t('Склад')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />
 
-      <div className="cards" data-tour="sklad.cards" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 16 }}>
+      {/* Три в ряд — на компьютере; на телефоне столбиком (m-tovary.css, .sklad-cards) */}
+      <div className="cards sklad-cards" data-tour="sklad.cards" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 16 }}>
         <Metric testid="card-sklad-tovary" label={t('Товаров на складе')} value={itogo.tovarov} Icon={LuBoxes} tint="blue" sub={itogo.tovarov ? t('наименований') : t('На складе пока пусто')} onClick={() => setOkno({ kind: 'card', what: 'units' })} />
         <Metric testid="card-sklad-value" label={t('Остаток по цене продажи')} value={money(itogo.value)} Icon={LuWallet} tint="accent" sub={t('нажмите для деталей')} onClick={() => setOkno({ kind: 'card', what: 'value' })} />
         <Metric testid="card-sklad-cost" label={t('По закупке')} value={money(itogo.cost)} Icon={LuBanknote} tint="green" sub={t('нажмите для деталей')} onClick={() => setOkno({ kind: 'card', what: 'cost' })} />
       </div>
 
       <StickyBar>
-        <div className="chips">
+        <div className="chips sklad-tabs">
           <button className={'chip ' + (tab === 'tovary' ? 'active' : '')} data-testid="sklad-tab-tovary" onClick={() => setTab('tovary')}><LuWarehouse size={13} style={{ verticalAlign: '-2px' }} /> {t('Товары на складе')}</button>
           <button className={'chip ' + (tab === 'istoriya' ? 'active' : '')} data-tour="sklad.history" data-testid="sklad-tab-istoriya" onClick={() => setTab('istoriya')}><LuHistory size={13} style={{ verticalAlign: '-2px' }} /> {t('История')}</button>
         </div>
         {tab === 'tovary' && (
           <label className="prh-sheet-search" style={{ marginTop: 10, maxWidth: 420 }}>
             <LuSearch size={15} aria-hidden="true" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Название или штрихкод…')} aria-label={t('Поиск товара на складе')} data-testid="sklad-q" />
+            <input className="tovar-poisk" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Название или штрихкод…')} aria-label={t('Поиск товара на складе')} data-testid="sklad-q" />
             <KameraKnopka onCode={setQ} testid="kamera-sklad" />
           </label>
         )}
@@ -155,7 +161,7 @@ export default function Sklad() {
       {tab === 'tovary' ? (
         <div className="panel" style={{ padding: 0 }}>
           <div className="table-cards-wrap">
-            <table className="table-cards" data-tour="sklad.table" data-testid="sklad-table">
+            <table className="table-cards sklad-table" data-tour="sklad.table" data-testid="sklad-table">
               <thead>
                 <tr>
                   <th>{t('Товар')}</th><th className="num">{t('На складе')}</th><th className="num">{t('В магазине')}</th>{srokOn && <th>{t('Ближайший срок')}</th>}
@@ -170,12 +176,12 @@ export default function Sklad() {
                       <div className="tag-cat">{r.product.barcode}{r.product.category ? ` · ${t(r.product.category)}` : ''}</div>
                     </td>
                     <td className="num" data-label={t('На складе')}><b>{unitsText(r.units, r.product, t)}</b></td>
-                    <td className="num" data-label={t('В магазине')}>{stockText(r.product)}</td>
+                    <td className="num" data-label={t('В магазине')}>{stockText(r.product, t)}</td>
                     {srokOn && <td data-label={t('Ближайший срок')}>{r.expiry ? fmtDate(r.expiry) : '—'}</td>}
                     <td className="num" data-label={t('По закупке')}>{money(r.cost)}</td>
                     <td className="num" data-label={t('По цене продажи')}><b>{money(r.value)}</b></td>
                     {mozhno && (
-                      <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                      <td className="num cell-actions" style={{ whiteSpace: 'nowrap' }}>
                         <button type="button" className="btn ghost sm" data-testid="sklad-row-edit" onClick={() => setOkno({ kind: 'edit', productId: r.productId })} title={t('Поправить остаток')}>
                           <LuPencil size={14} />
                         </button>
@@ -191,8 +197,8 @@ export default function Sklad() {
                 <tfoot>
                   <tr className="zak-total">
                     <td colSpan={srokOn ? 4 : 3}>{t('Итого')} · {t('Товаров')}: {list.length}</td>
-                    <td className="num">{money(exItog.cost)}</td>
-                    <td className="num">{money(exItog.value)}</td>
+                    <td className="num" data-label={t('По закупке')}>{money(exItog.cost)}</td>
+                    <td className="num" data-label={t('По цене продажи')}>{money(exItog.value)}</td>
                     {mozhno && <td></td>}
                   </tr>
                 </tfoot>
@@ -256,16 +262,17 @@ function CardOkno({ what, rows, itogo, onClose }) {
       <div className="tag-cat" style={{ marginBottom: 8 }}>
         {t('Товаров')}: {itogo.tovarov} · {t('по закупке')} {money(itogo.cost)} · {t('по цене продажи')} {money(itogo.value)}
       </div>
-      <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
-        <table data-testid="sklad-card-okno">
+      {/* На телефоне список — карточками и без своей прокрутки: листается всё окно */}
+      <div className="okno-list" style={{ maxHeight: '56vh', overflow: 'auto' }}>
+        <table className="table-cards" data-testid="sklad-card-okno">
           <thead><tr><th>{t('Товар')}</th><th className="num">{t('На складе')}</th><th className="num">{t('По закупке')}</th><th className="num">{t('По цене продажи')}</th></tr></thead>
           <tbody>
             {sorted.map((r) => (
               <tr key={r.productId}>
-                <td><b>{r.product.name}</b>{r.product.dosage ? <span className="tag-cat"> · {r.product.dosage}</span> : null}</td>
-                <td className="num">{unitsText(r.units, r.product, t)}</td>
-                <td className="num" style={key === 'cost' ? { fontWeight: 700 } : undefined}>{money(r.cost)}</td>
-                <td className="num" style={key === 'value' ? { fontWeight: 700 } : undefined}>{money(r.value)}</td>
+                <td className="cell-main"><b>{r.product.name}</b>{r.product.dosage ? <span className="tag-cat"> · {r.product.dosage}</span> : null}</td>
+                <td className="num" data-label={t('На складе')}>{unitsText(r.units, r.product, t)}</td>
+                <td className="num" data-label={t('По закупке')} style={key === 'cost' ? { fontWeight: 700 } : undefined}>{money(r.cost)}</td>
+                <td className="num" data-label={t('По цене продажи')} style={key === 'value' ? { fontWeight: 700 } : undefined}>{money(r.value)}</td>
               </tr>
             ))}
             {!sorted.length && <tr><td colSpan="4" className="empty">{t('На складе пока пусто')}</td></tr>}
@@ -287,8 +294,8 @@ function DocOkno({ doc, title, productById, onClose }) {
         {doc.supplier ? `${doc.supplier} · ` : ''}{doc.who ? `${t('Кто')}: ${doc.who} · ` : ''}{t('Позиций')}: {doc.items.length} · {t('по закупке')} {money(doc.total)}
         {doc.note ? ` · ${doc.note}` : ''}
       </div>
-      <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
-        <table data-testid="sklad-doc-okno">
+      <div className="okno-list" style={{ maxHeight: '56vh', overflow: 'auto' }}>
+        <table className="table-cards" data-testid="sklad-doc-okno">
           <thead><tr><th>{t('Товар')}</th><th className="num">{t('Количество')}</th><th className="num">{t('Закупочная')}</th>{srok && <th>{t('Срок')}</th>}</tr></thead>
           <tbody>
             {doc.items.map((i, n) => {
@@ -296,12 +303,12 @@ function DocOkno({ doc, title, productById, onClose }) {
               const kol = p ? unitsText(Math.abs(i.units), p, t) : `${Math.abs(i.units)} ${t('шт')}`
               return (
                 <tr key={n}>
-                  <td><b>{i.name || p?.name || '—'}</b></td>
-                  <td className="num" style={doc.kind === 'edit' ? { color: i.units < 0 ? 'var(--danger)' : 'var(--green)' } : undefined}>
+                  <td className="cell-main"><b>{i.name || p?.name || '—'}</b></td>
+                  <td className="num" data-label={t('Количество')} style={doc.kind === 'edit' ? { color: i.units < 0 ? 'var(--danger)' : 'var(--green)' } : undefined}>
                     {doc.kind === 'edit' ? (i.units < 0 ? '−' : '+') : ''}{kol}
                   </td>
-                  <td className="num">{money(i.cost)}</td>
-                  {srok && <td>{i.expiryDate ? fmtDate(i.expiryDate) : '—'}</td>}
+                  <td className="num" data-label={t('Закупочная')}>{money(i.cost)}</td>
+                  {srok && <td data-label={t('Срок')}>{i.expiryDate ? fmtDate(i.expiryDate) : '—'}</td>}
                 </tr>
               )
             })}
@@ -362,15 +369,17 @@ function EditOkno({ products, batches, productId, onClose }) {
         <>
           <label className="prh-sheet-search" style={{ marginBottom: 10 }}>
             <LuSearch size={15} aria-hidden="true" />
-            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Название или штрихкод…')} aria-label={t('Найти товар')} data-testid="sklad-edit-q" />
+            <input className="tovar-poisk" autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Название или штрихкод…')} aria-label={t('Найти товар')} data-testid="sklad-edit-q" />
             <KameraKnopka onCode={setQ} testid="kamera-sklad-edit" />
           </label>
-          <div style={{ maxHeight: '46vh', overflow: 'auto' }}>
-            <table>
+          {/* На телефоне найденное — карточками (нажатие по карточке выбирает товар) и без
+              своей прокрутки: листается всё окно */}
+          <div className="okno-list" style={{ maxHeight: '46vh', overflow: 'auto' }}>
+            <table className="table-cards">
               <tbody>
                 {found.map((x) => (
                   <tr key={x.id} className="clickable" data-testid="sklad-edit-pick" onClick={() => pick(x)}>
-                    <td><b>{x.name}</b>{x.dosage ? <span className="tag-cat"> · {x.dosage}</span> : null}<div className="tag-cat">{x.barcode}</div></td>
+                    <td className="cell-main"><b>{x.name}</b>{x.dosage ? <span className="tag-cat"> · {x.dosage}</span> : null}<div className="tag-cat">{x.barcode}</div></td>
                     <td className="num tag-cat">{t('на складе')} {unitsText(skladUnitsOf(batches, x.id), x, t)}</td>
                   </tr>
                 ))}
@@ -383,7 +392,9 @@ function EditOkno({ products, batches, productId, onClose }) {
         </>
       ) : (
         <>
-          <div className="total-row"><span><b>{p.name}</b>{p.dosage ? <span className="tag-cat"> · {p.dosage}</span> : null}</span>{!productId && <button className="btn ghost sm" onClick={() => setPid('')}>{t('Другой товар')}</button>}</div>
+          {/* Название словом без пробелов бывает длиннее окна: на телефоне переносится, а «Другой
+              товар» остаётся на виду (m-tovary.css, .sklad-edit-name) */}
+          <div className="total-row"><span className="sklad-edit-name"><b>{p.name}</b>{p.dosage ? <span className="tag-cat"> · {p.dosage}</span> : null}</span>{!productId && <button className="btn ghost sm" onClick={() => setPid('')}>{t('Другой товар')}</button>}</div>
           <div className="total-row"><span>{t('Сейчас на складе')}</span><b>{unitsText(est, p, t)}</b></div>
           <div className="field" style={{ marginTop: 10 }}>
             <label>{t('Сколько лежит на самом деле')}</label>
@@ -395,7 +406,7 @@ function EditOkno({ products, batches, productId, onClose }) {
             </div>
           )}
           {bolshe && (
-            <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <div className="row sklad-edit-row" style={{ gap: 10, flexWrap: 'wrap' }}>
               <div className="field" style={{ flex: '1 1 160px' }}>
                 <label>{t('Закупочная за')} {t(packLabel(p))}</label>
                 <NumberInput value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0" data-testid="sklad-edit-cost" />

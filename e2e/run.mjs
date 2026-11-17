@@ -897,7 +897,9 @@ async function main() {
     eq(s.count, 1, 'один чек')
     eqMoney(s.salesCash, 100, 'наличными')
     eqMoney(s.expectedCash, 200, '100 на начало + 100 наличными')
-    eqMoney(s.difference, -5, 'в кассе на 5 меньше')
+    // 17.11.2026: сумму «по факту» сервер не берёт — факт равен ожидаемому
+    eqMoney(s.countedCash, 200, 'факт — ожидаемое, а не присланные кассой 195')
+    eqMoney(s.difference, 0, 'расхождения нет')
     eq((await push(KASSA_A, [close])).results[0].status, 'duplicate', 'повторное закрытие ничего не меняет')
   })
 
@@ -1490,8 +1492,9 @@ async function main() {
     const after = (await get('/shifts')).find((s) => s.id === sh.id)
     eq(after.count, 2, 'опоздавший чек — в итогах смены')
     eqMoney(after.expectedCash, 250, '50 + 100 + 100')
-    eqMoney(after.countedCash, 150, 'пересчитанные наличные — те, что указал владелец, а не касса задним числом')
-    eqMoney(after.difference, -100, 'и разница это показывает')
+    // 17.11.2026: факт всегда равен ожидаемому — и после опоздавшего чека тоже
+    eqMoney(after.countedCash, 250, 'факт — ожидаемое, а не присланные кассой 999')
+    eqMoney(after.difference, 0, 'расхождения нет')
   })
 
   // ────────────────────────────────────────────────────────────
@@ -1749,7 +1752,9 @@ async function main() {
     const after = await shiftById(regShift.id)
     eqMoney(after.expenseCash, 45, 'он вошёл в итоги закрытой смены')
     eqMoney(after.expectedCash, 155, '200 − 45')
-    eqMoney(after.difference, 5, 'и разница это показывает')
+    // 17.11.2026: факт пересчитан вместе с ожидаемым — расхождения нет
+    eqMoney(after.countedCash, 155, 'факт — ожидаемое')
+    eqMoney(after.difference, 0, 'расхождения нет')
   })
 
   await check('расходы и их статьи попадают в резервную копию', async () => {
@@ -1963,7 +1968,9 @@ async function main() {
     eqMoney(closed.refundCash, 0, 'из ящика на возвраты ничего не ушло')
     // 1000 на начало + 30 наличными + 200 внесено − 150 поставщику − 300 изъято
     eqMoney(closed.expectedCash, 780, 'ожидалось в кассе')
-    eqMoney(closed.difference, 150, 'насчитали больше')
+    // 17.11.2026: присланные 930 сервер не берёт — факт равен ожидаемому
+    eqMoney(closed.countedCash, 780, 'факт — ожидаемое')
+    eqMoney(closed.difference, 0, 'расхождения нет')
     // После закрытия операции смены не меняются
     await rejects(() => del('/cash-moves/' + cashIn.id), /уже закрыта/i, 'внесение закрытой смены')
     await rejects(() => del('/supplier-payments/' + cashPayment.id), /уже закрыта/i, 'оплата поставщику закрытой смены')

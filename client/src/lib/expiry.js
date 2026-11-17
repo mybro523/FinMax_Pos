@@ -1,5 +1,6 @@
 // ── Срок годности товаров ──
 import { startOfDay } from './time'
+import { translate } from './i18n.js'
 
 export const EXPIRY_WARN_DAYS = 30 // предупреждаем за 30 дней
 
@@ -28,10 +29,11 @@ export function expiringProducts(products) {
     .sort((a, b) => a.s.days - b.s.days)
 }
 
+// На языке интерфейса (17.11.2026: по-таджикски в карточках оставалось русское «5 дн.»)
 export function expiryLabel(days) {
   if (days === null) return ''
-  if (days < 0) return `просрочен ${-days} дн.`
-  if (days === 0) return 'истекает сегодня'
-  if (days === 1) return 'остался 1 день'
-  return `${days} дн.`
+  if (days < 0) return `${translate('просрочен')} ${-days} ${translate('дн.')}`
+  if (days === 0) return translate('истекает сегодня')
+  if (days === 1) return translate('остался 1 день')
+  return `${days} ${translate('дн.')}`
 }

@@ -18,7 +18,8 @@ model Product {
   price        Decimal       @default(0) @db.Decimal(12, 2) // цена продажи
   stock        Int           @default(0) // целые (невскрытые) упаковки
   minStock     Int           @default(5)
-  unit         String        @default("уп")
+  // По умолчанию — штуки (17.11.2026, миграция 20261117_sht_po_umolchaniyu)
+  unit         String        @default("шт")
   // Штук в одной упаковке (для поштучной продажи). У дробного товара (кг, л, м, м²) — граммов
   // (тысячных): без мешка 1000, мешок муки 50 кг — 50 000 (1.5.12)
   unitsPerPack Int           @default(1)

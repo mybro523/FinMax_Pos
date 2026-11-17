@@ -45,8 +45,8 @@ export class SyncController {
   // Смену кассы, которая сама её уже не закроет (компьютер сломался), закрывает владелец
   @Post('devices/:id/close-shift')
   @Perm('settings.devices')
-  closeShift(@Param('id') id: string, @Body() dto: CloseDeviceShiftDto) {
-    return this.sync.closeDeviceShift(id, dto.countedCash)
+  closeShift(@Param('id') id: string, @Body() _dto: CloseDeviceShiftDto) {
+    return this.sync.closeDeviceShift(id)
   }
 
   // Журнал движений товара: что приходило и уходило и сколько по журналу на полке

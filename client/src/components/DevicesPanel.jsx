@@ -54,22 +54,20 @@ export default function DevicesPanel() {
 
   // Смену кассы обычно закрывает сама касса. Но компьютер может сломаться, программу
   // могут переустановить — и смена осталась бы открытой навсегда. Тогда её закрывает
-  // владелец: вводит, сколько наличных в ящике, как при обычном закрытии
+  // владелец. Сумму «по факту» не вводят (17.11.2026): её считает сервер, она равна ожидаемой
   async function closeShift(d) {
-    const r = await dialog.prompt({
+    const ok = await dialog.confirm({
       title: `${t('Закрыть смену')}: ${d.name}`,
-      message: t('Закрывайте смену отсюда, только если сама касса закрыть её уже не может: компьютер сломался или программу переустановили. Чеки, которые касса ещё пришлёт, попадут в итоги этой смены.'),
-      fields: [{ name: 'cash', label: t('Наличных в ящике кассы'), type: 'number', defaultValue: '' }],
+      message: `${t('Закрывайте смену отсюда, только если сама касса закрыть её уже не может: компьютер сломался или программу переустановили. Чеки, которые касса ещё пришлёт, попадут в итоги этой смены.')} ${t('Сумма по факту считается сама и равна ожидаемой.')}`,
       confirmText: t('Закрыть смену'),
       danger: true,
     })
-    if (!r) return
-    const countedCash = Number(String(r.cash).replace(',', '.'))
-    if (!Number.isFinite(countedCash) || countedCash < 0 || String(r.cash).trim() === '') return toast(t('Укажите, сколько наличных в ящике'), 'err')
+    if (!ok) return
     try {
-      const closed = await api.post(`/sync/devices/${d.id}/close-shift`, { countedCash })
+      // Суммы в запросе нет: факт сервер считает сам (server/src/shifts/totals.ts)
+      const closed = await api.post(`/sync/devices/${d.id}/close-shift`, {})
       setList((cur) => cur.map((x) => (x.id === d.id ? { ...x, openShift: null } : x)))
-      toast(`${t('Смена закрыта')}. ${t('Разница')}: ${money(closed.difference)}`)
+      toast(`${t('Смена закрыта')}. ${t('В кассе')}: ${money(closed.expectedCash)}`)
     } catch (e) {
       toast(e.message, 'err')
     }
@@ -83,30 +81,32 @@ export default function DevicesPanel() {
       <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7, marginBottom: 12 }}>
         {t('Компьютеры, на которых стоит программа для Windows. У каждой кассы своя смена; чеки, пробитые без интернета, уходят на сервер сами.')}
       </p>
-      <table className="table-cards">
+      {/* На телефоне — карточками: название и «Переименовать» сверху, остальное подписями ниже */}
+      <table className="table-cards set-list">
         <thead>
           <tr><th>{t('Касса')}</th><th>{t('Была на связи')}</th><th>{t('Кто работал')}</th><th>{t('Смена')}</th><th>{t('Версия')}</th><th></th></tr>
         </thead>
         <tbody>
           {list.map((d) => (
             <tr key={d.id} data-device={d.id}>
-              <td data-label={t('Касса')}><b>{d.name}</b></td>
+              <td className="cell-main" data-label={t('Касса')}><b>{d.name}</b></td>
               <td data-label={t('Была на связи')}>{fmtShort(d.lastSeenAt)}</td>
               <td data-label={t('Кто работал')}>{d.lastLogin || '—'}</td>
               <td data-label={t('Смена')}>
                 {d.openShift ? (
-                  <>
+                  // Одной обёрткой: в карточке время и «Закрыть смену» стоят вместе справа от подписи
+                  <div className="dev-smena">
                     {t('открыта с')} {fmtShort(d.openShift.openedAt)}
                     <div>
                       <button className="btn ghost sm" onClick={() => closeShift(d)} data-testid="close-device-shift">{t('Закрыть смену')}</button>
                     </div>
-                  </>
+                  </div>
                 ) : (
                   '—'
                 )}
               </td>
               <td data-label={t('Версия')}>{d.appVersion || '—'}</td>
-              <td className="num">
+              <td className="num cell-actions">
                 <button className="btn ghost sm" onClick={() => rename(d)} title={t('Переименовать')} aria-label={t('Переименовать')}>
                   <LuPencil size={15} />
                 </button>

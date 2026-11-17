@@ -30,8 +30,9 @@ const PERIODS = [
 const valueOf = stockValue
 const costValOf = stockCost
 
+// mc-otchet — вид на телефоне (m-otchety.css)
 function MC({ label, v, color }) {
-  return <div className="mini-card"><div className="m-label">{label}</div><div className="m-value sm" style={color ? { color } : undefined}>{v}</div></div>
+  return <div className="mini-card mc-otchet"><div className="m-label">{label}</div><div className="m-value sm" style={color ? { color } : undefined}>{v}</div></div>
 }
 
 // ── Отчёт о прибылях и убытках (прибыли и убытки) ──
@@ -139,8 +140,9 @@ function OpuModal({ kind, d, onClose }) {
   }
   const v = VIDY[kind]
   if (!v) return null
+  // okno-itogi — строки «подпись — сумма» на телефоне (m-otchety.css)
   return (
-    <Modal title={t(v.title)} onClose={onClose}>
+    <Modal className="okno-itogi" title={t(v.title)} onClose={onClose}>
       {v.rows.map(([label, val]) => (
         <div className="total-row" key={label}>
           <span>{t(label)}</span>
@@ -518,7 +520,7 @@ export default function Reports() {
     }
     if (modal === 'expenses') {
       return (
-        <Modal title={`${t('Расходы')} · ${rangeLabel}`} onClose={close}>
+        <Modal className="okno-itogi" title={`${t('Расходы')} · ${rangeLabel}`} onClose={close}>
           {data.expensesByCategory.map((c) => (
             <div className="total-row" key={c.category}>
               <span>{t(c.category)} <span className="tag-cat">· {c.count}</span></span>
@@ -537,7 +539,7 @@ export default function Reports() {
     }
     if (modal === 'incomes') {
       return (
-        <Modal title={`${t('Прочие доходы')} · ${rangeLabel}`} onClose={close}>
+        <Modal className="okno-itogi" title={`${t('Прочие доходы')} · ${rangeLabel}`} onClose={close}>
           {data.incomesByCategory.map((c) => (
             <div className="total-row" key={c.category}>
               <span>{t(c.category)} <span className="tag-cat">· {c.count}</span></span>
@@ -556,7 +558,7 @@ export default function Reports() {
     }
     if (modal === 'profit' || modal === 'cost' || modal === 'net') {
       return (
-        <Modal title={`${t('Финансы')} · ${rangeLabel}`} onClose={close}>
+        <Modal className="okno-itogi" title={`${t('Финансы')} · ${rangeLabel}`} onClose={close}>
           <div className="total-row"><span>{t('Продано на')}</span><span>{money(data.revenueGross)}</span></div>
           <div className="total-row"><span>{t('Себестоимость проданного')}</span><span>−{money(data.cost)}</span></div>
           <div className="total-row"><span>{t('Прибыль с продаж')}</span><span>{money(data.profitGross)}</span></div>
@@ -632,7 +634,7 @@ export default function Reports() {
           ))}
         </div>
       </StickyBar>
-      <div className="row" data-tour="rep.period" style={{ maxWidth: 440, marginBottom: 16, gap: 10, alignItems: 'flex-end' }}>
+      <div className="row rep-dates" data-tour="rep.period" style={{ maxWidth: 440, marginBottom: 16, gap: 10, alignItems: 'flex-end' }}>
         <div className="field" style={{ flex: 1, marginBottom: 0 }}>
           <label>{t('С даты')}</label>
           <input type="date" value={fromDate} onChange={(e) => { setFromDate(e.target.value); setPeriod('custom') }} />
@@ -724,7 +726,8 @@ export default function Reports() {
           const pct = data.revenueGross ? Math.round((data.byPay[k] / data.revenueGross) * 100) : 0
           return (
             <div key={k} style={{ marginBottom: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 5 }}>
+              {/* bar-line: на узком экране сумма не слипается со способом оплаты (m-otchety.css) */}
+              <div className="bar-line" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 5 }}>
                 <PayBadge type={k} />
                 <span><b>{money(data.byPay[k])}</b> · {pct}%</span>
               </div>
@@ -757,7 +760,7 @@ export default function Reports() {
           const pct = stock.value ? Math.round((c.value / stock.value) * 100) : 0
           return (
             <div key={c.cat} style={{ marginBottom: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+              <div className="bar-line" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
                 <span>{c.cat} <span className="tag-cat">· {c.count} {t('поз.')}</span></span>
                 <span><b>{money(c.value)}</b> · {pct}%</span>
               </div>
@@ -770,22 +773,25 @@ export default function Reports() {
         {stock.categories.length === 0 && <div className="empty">{t('Товаров нет')}</div>}
       </div>
 
+      {/* Продажи периода: на телефоне — карточками (сверху что продали), с отступом от краёв панели */}
       <div className="panel mt" style={{ padding: 0 }}>
-        <table>
-          <thead><tr><th>{t('Дата')}</th><th>{t('Товары')}</th><th className="num">{t('Сумма')}</th><th className="num">{t('Прибыль')}</th><th>{t('Оплата')}</th></tr></thead>
-          <tbody>
-            {pg.slice.map((s) => (
-              <tr key={s.id}>
-                <td>{fmtShort(s.date)}</td>
-                <td>{s.items.map((i) => `${i.name} ×${i.qty || 0}${i.pieces ? '+' + i.pieces + 'шт' : ''}`).join(', ').slice(0, 55)}</td>
-                <td className="num"><b>{money(s.total)}</b></td>
-                <td className="num" style={{ color: 'var(--green)' }}>{money(s.profit || 0)}</td>
-                <td><PayBadge type={s.payment} via={s.payVia} /></td>
-              </tr>
-            ))}
-            {data.list.length === 0 && <tr><td colSpan="5" className="empty">{t('За период продаж нет')}</td></tr>}
-          </tbody>
-        </table>
+        <div className="table-cards-wrap">
+          <table className="table-cards">
+            <thead><tr><th>{t('Дата')}</th><th>{t('Товары')}</th><th className="num">{t('Сумма')}</th><th className="num">{t('Прибыль')}</th><th>{t('Оплата')}</th></tr></thead>
+            <tbody>
+              {pg.slice.map((s) => (
+                <tr key={s.id}>
+                  <td data-label={t('Дата')}>{fmtShort(s.date)}</td>
+                  <td className="cell-main">{s.items.map((i) => `${i.name} ×${i.qty || 0}${i.pieces ? '+' + i.pieces + 'шт' : ''}`).join(', ').slice(0, 55)}</td>
+                  <td className="num" data-label={t('Сумма')}><b>{money(s.total)}</b></td>
+                  <td className="num" data-label={t('Прибыль')} style={{ color: 'var(--green)' }}>{money(s.profit || 0)}</td>
+                  <td data-label={t('Оплата')}><PayBadge type={s.payment} via={s.payVia} /></td>
+                </tr>
+              ))}
+              {data.list.length === 0 && <tr><td colSpan="5" className="empty">{t('За период продаж нет')}</td></tr>}
+            </tbody>
+          </table>
+        </div>
         <Pagination {...pg} />
       </div>
 

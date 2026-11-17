@@ -99,10 +99,11 @@ export function PerenosForm({ rows, onDone, onCancel, compact = false }) {
     <div className="sklad-perenos" data-testid="sklad-perenos">
       <label className="prh-sheet-search" style={{ marginBottom: 10 }}>
         <LuSearch size={15} aria-hidden="true" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Название или штрихкод…')} aria-label={t('Поиск товара на складе')} data-testid="perenos-q" />
+        <input className="tovar-poisk" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Название или штрихкод…')} aria-label={t('Поиск товара на складе')} data-testid="perenos-q" />
         <KameraKnopka onCode={setQ} testid="kamera-perenos" />
       </label>
-      <div style={{ maxHeight: compact ? '46vh' : '60vh', overflow: 'auto' }}>
+      {/* На телефоне — без своей прокрутки: листается окно или страница (m-tovary.css) */}
+      <div className="okno-list" style={{ maxHeight: compact ? '46vh' : '60vh', overflow: 'auto' }}>
         <table className="table-cards">
           <thead>
             <tr><th>{t('Товар')}</th><th className="num">{t('На складе')}</th><th className="num">{t('В магазине')}</th><th>{t('Перенести')}</th></tr>
@@ -118,7 +119,7 @@ export function PerenosForm({ rows, onDone, onCancel, compact = false }) {
                     <div className="tag-cat">{r.product.barcode}{srokOn && r.expiry ? ` · ${t('срок')} ${fmtDate(r.expiry)}` : ''}</div>
                   </td>
                   <td className="num" data-label={t('На складе')}><b>{unitsText(r.units, r.product, t)}</b></td>
-                  <td className="num" data-label={t('В магазине')}>{stockText(r.product)}</td>
+                  <td className="num" data-label={t('В магазине')}>{stockText(r.product, t)}</td>
                   <td data-label={t('Перенести')}>
                     <QtyFields p={r.product} packs={v.packs} pieces={v.pieces} testid="perenos-qty" onChange={(x) => setVvod({ ...vvod, [r.productId]: x })} />
                     {units > r.units && <div className="tag-cat" style={{ color: 'var(--danger)' }}>{t('больше, чем на складе')}</div>}

@@ -11,7 +11,7 @@ import { SALES_CACHE_DAYS } from '../db/store'
 import { Pagination, usePagination } from '../components/Pagination'
 import { useCollection, money } from '../db/store'
 import { fmtDateTime } from '../lib/time'
-import { lineUnits, lineGross, lineDiscount, isDivisible, isVesovoy, kgText, edinica } from '../lib/units'
+import { lineUnits, lineGross, lineDiscount, isDivisible, isVesovoy, kgText, edinica, packLabel } from '../lib/units'
 import { useT } from '../lib/i18n'
 
 export default function Discounts() {
@@ -36,6 +36,8 @@ export default function Discounts() {
             name: i.name,
             qty: i.qty || 0,
             pieces: i.pieces || 0,
+            // Подпись целых: единица товара («шт», «уп», «рулон»), у весового в мешке — «уп»
+            pack: packLabel(i),
             units: lineUnits(i),
             divisible: isDivisible(i),
             // Весовой в мешке (1.5.12) — всего килограммов, а не граммов «штуками»
@@ -72,7 +74,7 @@ export default function Discounts() {
   )
 
   // ── Выгрузка и печать: все операции со скидкой, что видны здесь ──
-  const qtyText = (r) => [r.qty > 0 ? `${r.qty} ${t('уп')}` : '', r.pieces > 0 ? `${r.pieces} ${t('шт')}` : ''].filter(Boolean).join(' + ')
+  const qtyText = (r) => [r.qty > 0 ? `${r.qty} ${t(r.pack)}` : '', r.pieces > 0 ? `${r.pieces} ${t('шт')}` : ''].filter(Boolean).join(' + ')
   const kop = (x) => Math.round(x * 100) / 100
   const exCols = [
     { header: t('Дата и время'), key: 'date', width: 18 },
@@ -98,7 +100,9 @@ export default function Discounts() {
   return (
     <Layout title={t('История скидок')} subtitle={`${rows.length} ${t('операций со скидкой')}`} actions={<ExportPechat onExcel={exportExcel} />}>
       <PrintSheet zagolovok={t('История скидок')} podzag={exPodzag} cols={exCols} rows={exRows} itogi={exItogi} />
-      <div className="cards" data-tour="disc.cards" style={{ gridTemplateColumns: 'repeat(2,1fr)', marginBottom: 16 }}>
+      {/* disc-cards — на телефоне карточки одна под другой и со стрелкой: они открывают окна
+          (styles/m-smena.css) */}
+      <div className="cards disc-cards" data-tour="disc.cards" style={{ gridTemplateColumns: 'repeat(2,1fr)', marginBottom: 16 }}>
         <Metric label={t('Всего скидок выдано')} value={money(totalDiscount)} Icon={LuTag} sub={t('по товарам')} onClick={() => setOkno('tovary')} testid="card-disc-total" />
         <Metric label={t('Операций со скидкой')} value={rows.length} Icon={LuPercent} sub={`${chekiSoSkidkoy.length} ${t('чек(ов)')}`} onClick={() => setOkno('cheki')} testid="card-disc-count" />
       </div>
@@ -106,19 +110,23 @@ export default function Discounts() {
         <ChekiOkno title={t('Чеки со скидкой')} sales={chekiSoSkidkoy} returns={[]} onClose={() => setOkno(null)} empty={t('Скидок ещё не было')} />
       )}
       {okno === 'tovary' && (
-        <Modal wide title={t('Скидки по товарам')} onClose={() => setOkno(null)}>
-          <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
-            <table data-testid="disc-tovary">
+        // disc-okno — правила для телефона (styles/m-smena.css)
+        <Modal wide className="disc-okno" title={t('Скидки по товарам')} onClose={() => setOkno(null)}>
+          {/* okno-spisok: на телефоне у списка нет своей прокрутки — шторка листается целиком
+              (m-otchety.css) */}
+          <div className="okno-spisok" style={{ maxHeight: '56vh', overflow: 'auto' }}>
+            {/* На телефоне товары — карточками (index.css, .table-cards): вбок окно не листается */}
+            <table className="table-cards" data-testid="disc-tovary">
               <thead>
                 <tr><th>{t('Товар')}</th><th className="num">{t('Операций')}</th><th className="num">{t('Без скидки')}</th><th className="num">{t('Скидка')}</th></tr>
               </thead>
               <tbody>
                 {poTovaram.map((x) => (
                   <tr key={x.name}>
-                    <td><b>{x.name}</b></td>
-                    <td className="num">{x.count}</td>
-                    <td className="num">{money(x.gross)}</td>
-                    <td className="num" style={{ color: 'var(--danger)' }}>−{money(x.discount)}</td>
+                    <td className="cell-main"><b>{x.name}</b></td>
+                    <td className="num" data-label={t('Операций')}>{x.count}</td>
+                    <td className="num" data-label={t('Без скидки')}>{money(x.gross)}</td>
+                    <td className="num" data-label={t('Скидка')} style={{ color: 'var(--danger)' }}>−{money(x.discount)}</td>
                   </tr>
                 ))}
                 {poTovaram.length === 0 && <tr><td colSpan="4" className="empty">{t('Скидок ещё не было')}</td></tr>}
@@ -131,7 +139,9 @@ export default function Discounts() {
       )}
 
       <div className="panel" data-tour="disc.list" style={{ padding: 0 }}>
-        <table>
+        {/* На телефоне скидки — карточками (index.css, .table-cards): товар крупно, суммы подписями */}
+        <div className="table-cards-wrap">
+        <table className="table-cards disc-list">
           <thead>
             <tr>
               <th>{t('Дата и время')}</th><th>{t('Товар')}</th><th className="num">{t('Кол-во')}</th>
@@ -142,18 +152,19 @@ export default function Discounts() {
           <tbody>
             {pg.slice.map((r) => (
               <tr key={r.key}>
-                <td>{fmtDateTime(r.date)}</td>
-                <td><b>{r.name}</b></td>
-                <td className="num">
-                  {r.qty > 0 && `${r.qty} ${t('уп')}`}
+                <td data-label={t('Дата и время')}>{fmtDateTime(r.date)}</td>
+                <td className="cell-main"><b>{r.name}</b></td>
+                <td className="num" data-label={t('Кол-во')}>
+                  {r.qty > 0 && `${r.qty} ${t(r.pack)}`}
                   {r.qty > 0 && r.pieces > 0 && ' + '}
                   {r.pieces > 0 && `${r.pieces} ${t('шт')}`}
                   {r.divisible && <div className="tag-cat">{r.unitsText || `${r.units} ${t('шт')}`}</div>}
                 </td>
-                <td className="num tag-cat" style={{ textDecoration: 'line-through' }}>{money(r.gross)}</td>
-                <td className="num" style={{ color: 'var(--danger)' }}>−{money(r.discount)}</td>
-                <td className="num"><b>{money(r.net)}</b></td>
-                <td><PayBadge type={r.payment} /></td>
+                {/* Зачёркнута только сумма: зачёркивание всей ячейки задело бы и подпись карточки на телефоне */}
+                <td className="num tag-cat" data-label={t('Без скидки')}><span style={{ textDecoration: 'line-through' }}>{money(r.gross)}</span></td>
+                <td className="num" data-label={t('Скидка')} style={{ color: 'var(--danger)' }}>−{money(r.discount)}</td>
+                <td className="num" data-label={t('Итог')}><b>{money(r.net)}</b></td>
+                <td data-label={t('Оплата')}><PayBadge type={r.payment} /></td>
               </tr>
             ))}
             {rows.length === 0 && (
@@ -161,6 +172,7 @@ export default function Discounts() {
             )}
           </tbody>
         </table>
+        </div>
         <Pagination {...pg} />
       </div>
     </Layout>

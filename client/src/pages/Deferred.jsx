@@ -15,6 +15,7 @@ import NumberInput from '../components/NumberInput'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
 import { getUser } from '../db/auth'
+import { useTelefon } from '../components/StickyBar'
 
 export default function Deferred() {
   const deferred = useCollection('deferred')
@@ -27,6 +28,10 @@ export default function Deferred() {
   const can = useCan()
   const isFounder = can('products.create')
   const pg = usePagination(deferred, 10)
+  // Подсветка тура («Завести товар», «Удалить») на телефоне — только у первой карточки:
+  // общая рамка вокруг кнопок всех карточек шла полосой через весь список
+  const phone = useTelefon()
+  const tourFirst = (key, n) => (!phone || n === 0 ? key : undefined)
 
   // ── Выгрузка и печать: штрихкоды, которые ждут карточки ──
   const exCols = [
@@ -73,7 +78,7 @@ export default function Deferred() {
         price: Number(form.price) || 0,
         stock: Number(form.stock) || 0,
         minStock: Number(form.minStock) || 5,
-        unit: form.unit || 'уп',
+        unit: form.unit || 'шт',
         // Без этого товар заводился неделимым, и продать из него штуку
         // поштучно было нельзя, пока не откроешь карточку и не исправишь вручную
         unitsPerPack: Math.max(1, Number(form.unitsPerPack) || 1),
@@ -103,29 +108,32 @@ export default function Deferred() {
         </div>
       ) : (
         <div className="panel" data-tour="def.list" style={{ padding: 0 }}>
-          <table>
+          {/* На телефоне штрихкоды — карточками (index.css, .table-cards): кнопки — внизу карточки */}
+          <div className="table-cards-wrap">
+          <table className="table-cards def-list">
             <thead>
               <tr><th>{t('Штрихкод')}</th><th>{t('Добавлен')}</th><th></th></tr>
             </thead>
             <tbody>
-              {pg.slice.map((d) => (
+              {pg.slice.map((d, n) => (
                 <tr key={d.id}>
-                  <td><b style={{ letterSpacing: 0.5 }}>{d.barcode}</b></td>
-                  <td className="tag-cat">{d.createdAt ? fmtDateTime(d.createdAt) : '—'}</td>
-                  <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                  <td className="cell-main"><b style={{ letterSpacing: 0.5 }}>{d.barcode}</b></td>
+                  <td className="tag-cat" data-label={t('Добавлен')}>{d.createdAt ? fmtDateTime(d.createdAt) : '—'}</td>
+                  <td className="num cell-actions" style={{ whiteSpace: 'nowrap' }}>
                     {isFounder && (
                       <>
-                        <button className="btn sm" data-tour="def.create" onClick={() => setEdit({ id: d.id, barcode: d.barcode })}>
+                        <button className="btn sm" data-tour={tourFirst('def.create', n)} onClick={() => setEdit({ id: d.id, barcode: d.barcode })}>
                           <span className="ic"><LuPackagePlus size={15} /></span> {t('Завести товар')}
                         </button>{' '}
                       </>
                     )}
-                    {can('deferred.manage') && <button className="btn ghost sm icon" data-tour="def.delete" onClick={() => del(d)} title={t('Удалить')} aria-label={t('Удалить')}><LuTrash2 size={15} /></button>}
+                    {can('deferred.manage') && <button className="btn ghost sm icon" data-tour={tourFirst('def.delete', n)} onClick={() => del(d)} title={t('Удалить')} aria-label={t('Удалить')}><LuTrash2 size={15} /></button>}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
           <Pagination {...pg} />
         </div>
       )}
@@ -137,7 +145,10 @@ export default function Deferred() {
 
 function ProductForm({ barcode, onSave, onClose }) {
   const categories = categoryNames(useCategories())
-  const [f, setF] = useState({ name: '', barcode, category: '', cost: '', price: '', stock: '1', minStock: '5', unit: 'уп', unitsPerPack: '1' })
+  // На телефоне пустой пункт «Категории» — без тире по краям: по-таджикски
+  // «— категорияро интихоб кунед —» на 320 px обрезалось
+  const phone = useTelefon()
+  const [f, setF] = useState({ name: '', barcode, category: '', cost: '', price: '', stock: '1', minStock: '5', unit: 'шт', unitsPerPack: '1' })
   const [saving, setSaving] = useState(false)
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
   async function submit() {
@@ -153,14 +164,14 @@ function ProductForm({ barcode, onSave, onClose }) {
     <Modal title={<><span className="ic"><LuPackagePlus size={18} /></span>{tr('Завести товар по штрихкоду')}</>} onClose={onClose}>
       <div className="note info" style={{ marginBottom: 14 }}>{tr('Штрихкод')}: <b>{barcode}</b></div>
       <div className="field"><label>{tr('Название')}</label>
-        <input value={f.name} onChange={(e) => set('name', e.target.value)} placeholder="Напр. Индометацин 25мг №30" autoFocus />
+        <input value={f.name} onChange={(e) => set('name', e.target.value)} placeholder={tr('Напр. Индометацин 25мг №30')} autoFocus />
       </div>
       <div className="row">
         <div className="field" style={{ flex: 1 }}><label>{tr('Штрихкод')}</label><div className="kamera-pole"><input value={f.barcode} onChange={(e) => set('barcode', e.target.value)} /><KameraKnopka onCode={(c) => set('barcode', c)} testid="kamera-deferred" /></div></div>
         <div className="field" style={{ flex: 1 }}>
           <label>{tr('Категория')}</label>
           <select value={f.category} onChange={(e) => set('category', e.target.value)}>
-            <option value="">{tr('— выберите категорию —')}</option>
+            <option value="">{phone ? tr('Выберите категорию') : tr('— выберите категорию —')}</option>
             {categories.map((c) => <option key={c} value={c}>{tr(c)}</option>)}
           </select>
         </div>

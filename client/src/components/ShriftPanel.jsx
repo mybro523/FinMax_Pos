@@ -5,6 +5,12 @@ import { MENU, SISTEMA, setShrift, useShrift } from '../lib/shrift'
 // ── «Настройки → Шрифт» (1.7.7) ──
 // Размер всей системы и отдельно надписей главного меню — кнопками «−» и «+» шагом 10 %.
 // Помнится на этом компьютере (lib/shrift.js); видно сразу
+
+// Перед «%» — неразрывный пробел: на узком экране знак уходил на строку один («70–160 / %»),
+// а значение «150 %» должно сжиматься только до ширины своего текста (m-nastroyki.css).
+// Пределы «70–160 %» в пояснении — одним куском (nowrap): иначе строка рвалась после тире
+const pct = (s) => `${s}\u00a0%`
+
 function Stroka({ label, hint, value, lim, onChange, testid }) {
   const t = useT()
   return (
@@ -14,12 +20,16 @@ function Stroka({ label, hint, value, lim, onChange, testid }) {
         <button type="button" className="btn ghost sm icon" onClick={() => onChange(value - lim.step)} disabled={value <= lim.min} aria-label={t('Меньше')} title={t('Меньше')} data-testid={testid + '-less'}>
           <LuMinus size={15} />
         </button>
-        <span className="nk-step-val" data-testid={testid + '-val'}>{value} %</span>
+        <span className="nk-step-val" data-testid={testid + '-val'}>{pct(value)}</span>
         <button type="button" className="btn ghost sm icon" onClick={() => onChange(value + lim.step)} disabled={value >= lim.max} aria-label={t('Больше')} title={t('Больше')} data-testid={testid + '-more'}>
           <LuPlus size={15} />
         </button>
       </div>
-      {hint && <div className="tag-cat">{hint}</div>}
+      {hint && (
+        <div className="tag-cat">
+          {hint} · <span style={{ whiteSpace: 'nowrap' }}>{pct(`${lim.min}–${lim.max}`)}</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -34,7 +44,7 @@ export default function ShriftPanel() {
       </h2>
       <Stroka
         label={t('Размер шрифта системы')}
-        hint={`${t('Текст, кнопки и таблицы во всех разделах')} · ${SISTEMA.min}–${SISTEMA.max} %`}
+        hint={t('Текст, кнопки и таблицы во всех разделах')}
         value={sistema}
         lim={SISTEMA}
         onChange={(v) => setShrift({ sistema: v })}
@@ -42,7 +52,7 @@ export default function ShriftPanel() {
       />
       <Stroka
         label={t('Размер надписей меню')}
-        hint={`${t('Надписи на плитках главного меню')} · ${MENU.min}–${MENU.max} %`}
+        hint={t('Надписи на плитках главного меню')}
         value={menu}
         lim={MENU}
         onChange={(v) => setShrift({ menu: v })}

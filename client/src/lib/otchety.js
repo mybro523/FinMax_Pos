@@ -94,7 +94,7 @@ export function vseProdazhi({ sales, products, from, to, t = (s) => s }) {
     if (!vPeriode(s.date, from, to)) continue
     for (const i of s.items || []) {
       // Удалённый товар: единица — снимком строки чека (1.5.12), у прежних строк — догадкой
-      const p = byId.get(i.productId) || { unitsPerPack: uppOf(i), unit: String(i.unit || '').trim() || (uppOf(i) === KG ? 'кг' : 'уп') }
+      const p = byId.get(i.productId) || { unitsPerPack: uppOf(i), unit: uppOf(i) === KG && !String(i.unit || '').trim() ? 'кг' : edinica(i) }
       rows.push({
         saleId: s.id,
         productId: i.productId || null,
@@ -228,7 +228,7 @@ export function zakupkiIOplaty({ arrivals, supplierPayments, supplierReturns = [
         name: it.name,
         productId: it.productId || null,
         barcode: p?.barcode || '',
-        qty: qtyText(units, p || { unitsPerPack: num(it.pieces) > 0 ? KG : 1, unit: num(it.pieces) > 0 ? 'кг' : 'уп' }, t),
+        qty: qtyText(units, p || { unitsPerPack: num(it.pieces) > 0 ? KG : 1, unit: num(it.pieces) > 0 ? 'кг' : 'шт' }, t),
         price: num(it.cost),
         sum: sums[n],
         paid: kop(sums[n] - debt),
@@ -245,7 +245,7 @@ export function zakupkiIOplaty({ arrivals, supplierPayments, supplierReturns = [
     const vDolg = r.refund === 'debt'
     ;(r.items || []).forEach((it, n) => {
       const p = byId.get(it.productId)
-      const like = p || { unitsPerPack: num(it.pieces) > 0 ? KG : 1, unit: num(it.pieces) > 0 ? 'кг' : 'уп' }
+      const like = p || { unitsPerPack: num(it.pieces) > 0 ? KG : 1, unit: num(it.pieces) > 0 ? 'кг' : 'шт' }
       const units = num(it.qty) * lineUpp(it, p) + num(it.pieces)
       const sum = kop(num(it.price) * (units / lineUpp(it, p)))
       rows.push({

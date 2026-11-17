@@ -4,6 +4,7 @@ import {
   LuPlus, LuCheck, LuListChecks, LuReceipt, LuSearch, LuRotateCcw, LuStore, LuWarehouse,
 } from 'react-icons/lu'
 import { useToast, useDialog } from '../../components/ui'
+import { useTelefon } from '../../components/StickyBar'
 import NumberInput from '../../components/NumberInput'
 import { productPayload, emptyProduct } from '../../components/ProductForm'
 import { useCashSources, sourceName } from '../../components/SupplierMoney'
@@ -27,7 +28,7 @@ import {
 } from '../../lib/prihod'
 import { usePrihod, setPrihod, setForm, setPay, resetDraft, blankForm } from './store'
 import { SupplierPick } from './SupplierPick'
-import ProductPick from './ProductPick'
+import ProductPick, { kPolyuShtrihkoda } from './ProductPick'
 
 // ── Новое поступление ──
 // Как в привычных программах приёмки: по центру — накладная таблицей, справа — итоги
@@ -53,6 +54,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
   const srokOn = useModul('expiry')
   const toast = useToast()
   const dialog = useDialog()
+  const telefon = useTelefon()
   const st = usePrihod()
   const { lines, form, checked, sub } = st
   const sup = suppliers.find((s) => s.id === st.supplierId) || null
@@ -64,7 +66,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
   const [focusQty, setFocusQty] = useState(0)
   const [savingNew, setSavingNew] = useState(false)
   const catList = useCategories()
-  const focusScan = () => setTimeout(() => scanRef.current?.focus(), 0)
+  const focusScan = () => setTimeout(() => kPolyuShtrihkoda(scanRef.current, telefon), 0)
 
   useEffect(() => {
     if (!focusQty) return
@@ -88,7 +90,8 @@ export default function NewArrival({ products, suppliers, onSaved }) {
   // Новый товар — его ещё нет в базе: строку собираем из того, что вписано в форме.
   // Штук в упаковке — из поля «Кол-во в упаковке»: у штуки одна, у дробного (кг, л…) —
   // граммов: пусто — на вес (1000), мешок 50 кг — 50 000 (1.5.12)
-  const novUnit = form.novUnit || 'уп'
+  // Новый товар — по умолчанию в штуках (17.11.2026, просьба владельца)
+  const novUnit = form.novUnit || 'шт'
   const novUpp = novUnit === 'шт' ? 1 : packFromField(form.pack, isVesovoy({ unit: novUnit }))
   const nov = !!form.nov && !editing && !chosen
   const novLine = nov
@@ -358,7 +361,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
           </div>
         </div>
         <div className="prh-grid-wrap">
-          <table className="prh-grid">
+          <table className="prh-grid table-cards">
             <thead>
               <tr>
                 <th className="prh-c-chk">
@@ -383,28 +386,36 @@ export default function NewArrival({ products, suppliers, onSaved }) {
               {shown.map((l) => {
                 const n = lines.indexOf(l) + 1
                 const cls = [form.editKey === l.key ? 'sel' : '', st.flash === l.key ? 'flash' : '', checked.includes(l.key) ? 'chk' : ''].join(' ').trim()
+                // Карточка строки на телефоне — без пустого и повторённого (cell-hide; на компьютере
+                // в таблице всё как было): «Срок —», «Скидка —», «Цена со скидкой», равная цене,
+                // «В упаковке 1 шт». Штрихкод — мелкой строкой под названием, а не строкой карточки
+                const bezSkidki = num(l.disc) > 0 ? '' : ' cell-hide'
+                const prostayaUpak = !l.div && !packChanged(l) ? ' cell-hide' : ''
                 return (
                   <tr key={l.key} className={cls} onClick={() => editLine(l)} title={t('Открыть строку в форме')}>
-                    <td className="prh-c-chk" onClick={(e) => e.stopPropagation()}>
+                    <td className="prh-c-chk cell-check" onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={checked.includes(l.key)} onChange={() => toggle(l.key)} aria-label={`${t('Отметить')}: ${l.name}`} />
                     </td>
-                    <td className="num muted">{n}</td>
-                    <td className="prh-c-name" title={l.name}>{l.name}</td>
-                    <td className="muted prh-c-code">{l.barcode || '—'}</td>
-                    <td className={'muted' + (packChanged(l) ? ' prh-changed' : '')}>{packText(l, t)}</td>
-                    {srokOn && <td className="muted">{l.expiryDate ? l.expiryDate.split('-').reverse().join('.') : '—'}</td>}
-                    <td className="num"><b>{qtyText(l, t)}</b></td>
-                    <td className="num">{n2(num(l.base))}</td>
-                    <td className="num">{num(l.disc) > 0 ? pct(l.disc) : '—'}</td>
-                    <td className="num">{n2(lineCost(l))}</td>
-                    <td className={'num' + (num(l.price) !== l.price0 ? ' prh-changed' : '')} title={num(l.price) !== l.price0 ? `${t('Было')}: ${money(l.price0)}` : undefined}>
+                    <td className="num muted prh-c-n" data-label="№">{n}</td>
+                    <td className="prh-c-name cell-main" title={l.name}>
+                      {l.name}
+                      {telefon && l.barcode && <div className="tag-cat prh-c-sub">{l.barcode}</div>}
+                    </td>
+                    <td className="muted prh-c-code cell-hide" data-label={t('Штрихкод')}>{l.barcode || '—'}</td>
+                    <td className={'muted' + (packChanged(l) ? ' prh-changed' : '') + prostayaUpak} data-label={t('В упаковке')}>{packText(l, t)}</td>
+                    {srokOn && <td className={'muted' + (l.expiryDate ? '' : ' cell-hide')} data-label={t('Срок годности')}>{l.expiryDate ? l.expiryDate.split('-').reverse().join('.') : '—'}</td>}
+                    <td className="num" data-label={t('Кол-во')}><b>{qtyText(l, t)}</b></td>
+                    <td className="num" data-label={t('Цена')}>{n2(num(l.base))}</td>
+                    <td className={'num' + bezSkidki} data-label={t('Скидка')}>{num(l.disc) > 0 ? pct(l.disc) : '—'}</td>
+                    <td className={'num' + bezSkidki} data-label={t('Цена со скидкой')}>{n2(lineCost(l))}</td>
+                    <td className={'num' + (num(l.price) !== l.price0 ? ' prh-changed' : '')} data-label={t('Розн. цена')} title={num(l.price) !== l.price0 ? `${t('Было')}: ${money(l.price0)}` : undefined}>
                       {n2(num(l.price))}
                       {/* Своя цена за 1 шт (1.5.11) — второй строкой */}
                       {ownPiece(l) !== null && <div className={'tag-cat' + (pieceChanged(l) ? ' prh-changed' : '')}>{n2(ownPiece(l))}/{t(l.ves ? l.unit : 'шт')}</div>}
                     </td>
-                    <td className="num"><b>{n2(lineTotal(l))}</b></td>
-                    <td className="num">{n2(lineRetail(l))}</td>
-                    <td className="prh-c-act" onClick={(e) => e.stopPropagation()}>
+                    <td className="num" data-label={t('Итого')}><b>{n2(lineTotal(l))}</b></td>
+                    <td className="num" data-label={t('Сумма в рознице')}>{n2(lineRetail(l))}</td>
+                    <td className="prh-c-act cell-actions" onClick={(e) => e.stopPropagation()}>
                       <button type="button" className="btn ghost sm icon" onClick={() => removeLine(l.key)} title={t('Убрать из прихода')} aria-label={`${t('Убрать из прихода')}: ${l.name}`}>
                         <LuTrash2 size={15} />
                       </button>
@@ -421,16 +432,19 @@ export default function NewArrival({ products, suppliers, onSaved }) {
             </tbody>
             {lines.length > 0 && (
               <tfoot>
+                {/* На телефоне итог — карточкой с подписями. Под колонкой «Цена» здесь сумма
+                    накладной до скидки — в карточке она и подписана «Сумма», как в итогах справа */}
                 <tr>
                   <td colSpan={srokOn ? 6 : 5}>{t('Итого')}: {s.count} {t('поз.')}</td>
-                  <td className="num">{n2(s.packs)}</td>
-                  <td className="num">{n2(s.base)}</td>
-                  <td className="num">{s.discount > 0 ? pct(s.discountPct) : '—'}</td>
-                  <td></td>
-                  <td></td>
-                  <td className="num">{n2(s.total)}</td>
-                  <td className="num">{n2(s.retail)}</td>
-                  <td></td>
+                  <td className="num" data-label={t('Кол-во')}>{n2(s.packs)}</td>
+                  {/* Без скидки «Сумма» равна «Итого», а «Скидка» — прочерк: на телефоне их нет */}
+                  <td className={'num' + (s.discount > 0 ? '' : ' cell-hide')} data-label={t('Сумма')}>{n2(s.base)}</td>
+                  <td className={'num' + (s.discount > 0 ? '' : ' cell-hide')} data-label={t('Скидка')}>{s.discount > 0 ? pct(s.discountPct) : '—'}</td>
+                  <td className="cell-hide"></td>
+                  <td className="cell-hide"></td>
+                  <td className="num" data-label={t('Итого')}>{n2(s.total)}</td>
+                  <td className="num" data-label={t('Сумма в рознице')}>{n2(s.retail)}</td>
+                  <td className="cell-hide"></td>
                 </tr>
               </tfoot>
             )}
@@ -438,8 +452,10 @@ export default function NewArrival({ products, suppliers, onSaved }) {
         </div>
       </section>
 
-      {/* ── Итоги ── */}
-      <aside className="prh-sum" data-tour="af.total" aria-label={t('Итоги прихода')}>
+      {/* ── Итоги ──
+          На телефоне, пока накладная пуста, итогов нет: тёмный блок из одних нулей (370 px)
+          стоял между накладной и формой, и до «Штрихкода» приходилось листать лишний экран */}
+      {(!telefon || lines.length > 0) && <aside className="prh-sum" data-tour="af.total" aria-label={t('Итоги прихода')}>
         <div className="prh-sum-sup">
           <span>{t('Поставщик')}</span>
           <b className={sup ? '' : 'none'}>{sup ? sup.name : t('Без поставщика')}</b>
@@ -453,7 +469,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
           <div><dt>{t('Ожидаемая наценка')}</dt><dd>{pct(s.markupPct)} · {money(s.markup)}</dd></div>
           <div><dt>{t('Ожидаемая выручка')}</dt><dd>{money(s.retail)}</dd></div>
         </dl>
-      </aside>
+      </aside>}
 
       {/* ── Форма под таблицей ── */}
       <section className="panel prh-form">
@@ -480,6 +496,9 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                   codeTour="af.scan"
                   nameTour="af.name"
                   codeRef={scanRef}
+                  // На телефоне курсор сам в «Штрихкод» не ставим: открылась бы клавиатура, а
+                  // страница уехала бы мимо накладной и итогов к форме
+                  autoFocus={!telefon}
                   products={products}
                   code={form.code || ''}
                   name={form.q}
@@ -504,7 +523,9 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                   <div className="prh-ctl prh-qty">
                     <label className="prh-unit">
                       <NumberInput ref={qtyRef} integer={!(draft?.ves && !draft?.div)} value={form.qty} onChange={numField('qty')} onKeyDown={onEnter} disabled={!draft} aria-label={t('Количество')} />
-                      <span>{draft ? t(draft.ves && draft.div ? 'уп' : draft.unit) : t('уп')}</span>
+                      {/* Товар не выбран — «шт»: новые товары и товары по одной штуке теперь в штуках
+                          (17.11.2026, просьба владельца), «уп» тут вводило в заблуждение */}
+                      <span>{draft ? t(draft.ves && draft.div ? 'уп' : draft.unit) : t('шт')}</span>
                     </label>
                     {draft?.div && (
                       <label className="prh-unit">
@@ -712,14 +733,18 @@ export default function NewArrival({ products, suppliers, onSaved }) {
               </div>
             </div>
 
-            <div className="scan-hint prh-av-hint">
-              <span className="ic">{nov ? <LuPackagePlus size={15} /> : <LuScanLine size={15} />}</span>
-              {editing
-                ? t('Правите строку из таблицы. Enter — сохранить её.')
-                : nov
-                  ? t('Нового товара нет в базе — он заведётся в «Товарах», когда нажмёте «Завести и добавить». Без штрихкода программа даст свой код.')
-                  : t('USB-сканер работает как клавиатура. Незнакомый штрихкод — заведём товар прямо в этой форме')}
-            </div>
+            {/* Подсказки про USB-сканер и про «строку из таблицы, Enter» — для компьютера: на
+                телефоне нет ни таблицы, ни Enter. Там остаётся только та, что про новый товар */}
+            {(!telefon || nov) && (
+              <div className="scan-hint prh-av-hint">
+                <span className="ic">{nov ? <LuPackagePlus size={15} /> : <LuScanLine size={15} />}</span>
+                {editing
+                  ? t('Правите строку из таблицы. Enter — сохранить её.')
+                  : nov
+                    ? t('Нового товара нет в базе — он заведётся в «Товарах», когда нажмёте «Завести и добавить». Без штрихкода программа даст свой код.')
+                    : t('USB-сканер работает как клавиатура. Незнакомый штрихкод — заведём товар прямо в этой форме')}
+              </div>
+            )}
 
             <div className="prh-add-actions prh-av-actions">
               <button type="button" className="btn ghost" onClick={clearForm}>
@@ -1013,7 +1038,7 @@ function PayBlock({ tills, total, canDebt, tour }) {
         </div>
       )}
       {method === 'debt' && Number(paid) > 0 && (
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, marginTop: 8 }}>
+        <label className="prh-check-row" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, marginTop: 8 }}>
           <input type="checkbox" checked={fromCash} disabled={!tills.length} onChange={(e) => setPay({ fromCash: e.target.checked })} style={{ width: 16, height: 16 }} />
           {tr('оплаченное — из кассы')}
           {!tills.length && <span className="tag-cat">{tr('Нет открытой смены — из кассы взять нечего.')}</span>}

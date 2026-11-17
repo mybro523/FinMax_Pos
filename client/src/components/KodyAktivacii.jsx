@@ -29,12 +29,17 @@ async function copyText(text, toast, t) {
   }
 }
 
-export default function KodyAktivacii({ onClose }) {
+// phone — окно открыто на телефоне (панель, pages/Admin.jsx): там форма и список выпущенных —
+// на двух вкладках. Одной лентой форма с модулями занимала два экрана, и чтобы продиктовать
+// ранее выпущенный код, приходилось листать её всю
+export default function KodyAktivacii({ onClose, phone = false }) {
   const t = useT()
   const toast = useToast()
   const [f, setF] = useState({ computer: '', kind: 'activate', until: inYear(), forever: false, registers: 1, note: '', modulesOff: [] })
   const [list, setList] = useState([])
   const [find, setFind] = useState('')
+  // Вкладка на телефоне: 'new' — выпустить код, 'list' — выпущенные
+  const [tab, setTab] = useState('new')
   const [listErr, setListErr] = useState('')
   const [made, setMade] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -87,111 +92,159 @@ export default function KodyAktivacii({ onClose }) {
     }
   }
 
-  return (
-    <Modal wide title={t('Коды активации')} onClose={onClose}>
-      <div data-testid="licences">
-        <p className="tag-cat" style={{ marginBottom: 12, lineHeight: 1.6 }}>
-          {t('Для магазина без интернета. Магазин сообщает код компьютера — программа показывает его при активации. Выпустите код и продиктуйте или отправьте его магазину.')}
-        </p>
-        <form onSubmit={submit}>
+  const q = find.trim().toLowerCase()
+  const shown = list.filter((l) => !q || `${l.computer} ${l.note || ''}`.toLowerCase().includes(q))
+
+  // Выпуск кода: пояснение, форма и только что выпущенный код
+  const formPart = (
+    <>
+      <p className="tag-cat" style={{ marginBottom: 12, lineHeight: 1.6 }}>
+        {t('Для магазина без интернета. Магазин сообщает код компьютера — программа показывает его при активации. Выпустите код и продиктуйте или отправьте его магазину.')}
+      </p>
+      <form onSubmit={submit}>
+        <div className="row">
+          <div className="field" style={{ flex: 1 }}>
+            <label htmlFor="lic-pc">{t('Код компьютера')}</label>
+            <input id="lic-pc" className="solo-code" value={formatCode(pc)} onChange={(e) => set('computer', e.target.value)} onPaste={onPastePc} placeholder="XXXXX-XXXXX" autoComplete="off" spellCheck={false} />
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label>{t('Что выпустить')}</label>
+            <div className="chips">
+              <button type="button" className={'chip ' + (f.kind === 'activate' ? 'active' : '')} onClick={() => set('kind', 'activate')}>{t('Код активации')}</button>
+              <button type="button" className={'chip ' + (f.kind === 'reset' ? 'active' : '')} onClick={() => set('kind', 'reset')}>{t('Сброс пароля')}</button>
+            </div>
+          </div>
+        </div>
+        {f.kind === 'activate' && (
           <div className="row">
             <div className="field" style={{ flex: 1 }}>
-              <label htmlFor="lic-pc">{t('Код компьютера')}</label>
-              <input id="lic-pc" className="solo-code" value={formatCode(pc)} onChange={(e) => set('computer', e.target.value)} onPaste={onPastePc} placeholder="XXXXX-XXXXX" autoComplete="off" spellCheck={false} />
+              <label htmlFor="lic-until">{t('Действует до')}</label>
+              <input id="lic-until" type="date" value={f.until} min={dushanbeDay()} disabled={f.forever} required={!f.forever} onChange={(e) => set('until', e.target.value)} />
+              <label className="restore-check" style={{ fontWeight: 500 }}>
+                <input type="checkbox" checked={f.forever} onChange={(e) => set('forever', e.target.checked)} /> {t('Навсегда')}
+              </label>
             </div>
             <div className="field" style={{ flex: 1 }}>
-              <label>{t('Что выпустить')}</label>
-              <div className="chips">
-                <button type="button" className={'chip ' + (f.kind === 'activate' ? 'active' : '')} onClick={() => set('kind', 'activate')}>{t('Код активации')}</button>
-                <button type="button" className={'chip ' + (f.kind === 'reset' ? 'active' : '')} onClick={() => set('kind', 'reset')}>{t('Сброс пароля')}</button>
-              </div>
+              <label htmlFor="lic-reg">{t('Касс всего — вместе с главным компьютером')}</label>
+              <input id="lic-reg" type="number" min={1} max={50} step={1} required value={f.registers} onChange={(e) => set('registers', e.target.value)} />
+              <div className="tag-cat" style={{ marginTop: 4 }}>{t('1 — только главный компьютер; 2 — главный и одна касса.')}</div>
             </div>
           </div>
-          {f.kind === 'activate' && (
-            <div className="row">
-              <div className="field" style={{ flex: 1 }}>
-                <label htmlFor="lic-until">{t('Действует до')}</label>
-                <input id="lic-until" type="date" value={f.until} min={dushanbeDay()} disabled={f.forever} required={!f.forever} onChange={(e) => set('until', e.target.value)} />
-                <label className="restore-check" style={{ fontWeight: 500 }}>
-                  <input type="checkbox" checked={f.forever} onChange={(e) => set('forever', e.target.checked)} /> {t('Навсегда')}
-                </label>
+        )}
+        {f.kind === 'activate' && (
+          <>
+            {/* compact: на телефоне 14 галочек свёрнуты в строку «все включены · Изменить» */}
+            <ModuliVybor value={f.modulesOff} onChange={(v) => set('modulesOff', v)} t={t} testid="lic-moduli" compact={phone} />
+            {f.modulesOff.length > 0 && (
+              <div className="tag-cat" style={{ margin: '-6px 0 10px' }}>
+                {t('Код с выключенными модулями длиннее (55 знаков) и подходит программе 1.8.1 и новее.')}
               </div>
-              <div className="field" style={{ flex: 1 }}>
-                <label htmlFor="lic-reg">{t('Касс всего — вместе с главным компьютером')}</label>
-                <input id="lic-reg" type="number" min={1} max={50} step={1} required value={f.registers} onChange={(e) => set('registers', e.target.value)} />
-                <div className="tag-cat" style={{ marginTop: 4 }}>{t('1 — только главный компьютер; 2 — главный и одна касса.')}</div>
-              </div>
-            </div>
-          )}
-          {f.kind === 'activate' && (
-            <>
-              <ModuliVybor value={f.modulesOff} onChange={(v) => set('modulesOff', v)} t={t} testid="lic-moduli" />
-              {f.modulesOff.length > 0 && (
-                <div className="tag-cat" style={{ margin: '-6px 0 10px' }}>
-                  {t('Код с выключенными модулями длиннее (55 знаков) и подходит программе 1.8.1 и новее.')}
-                </div>
-              )}
-            </>
-          )}
-          {f.kind === 'reset' && <div className="note info" style={{ marginBottom: 10 }}>{t('Код сброса пароля владельца действует три дня и только один раз.')}</div>}
-          <div className="field">
-            <label htmlFor="lic-note">{t('Заметка')}</label>
-            <input id="lic-note" value={f.note} onChange={(e) => set('note', e.target.value)} placeholder={t('Магазин, владелец, телефон — для себя')} maxLength={200} />
+            )}
+          </>
+        )}
+        {f.kind === 'reset' && <div className="note info" style={{ marginBottom: 10 }}>{t('Код сброса пароля владельца действует три дня и только один раз.')}</div>}
+        <div className="field">
+          <label htmlFor="lic-note">{t('Заметка')}</label>
+          <input id="lic-note" value={f.note} onChange={(e) => set('note', e.target.value)} placeholder={t('Магазин, владелец, телефон — для себя')} maxLength={200} />
+        </div>
+        {err && <div className="note err" style={{ marginBottom: 10 }}>{err}</div>}
+        <button className="btn gold" disabled={busy || pc.length !== PC_LEN} data-testid="licence-issue">
+          <span className="ic"><LuKeyRound size={16} /></span> {busy ? t('Выпускаем…') : t('Выпустить код')}
+        </button>
+      </form>
+
+      {made && (
+        <div className="note ok" style={{ marginTop: 14 }} data-testid="licence-made">
+          <div className="tag-cat">
+            {made.kind === 'reset' ? t('Код сброса пароля') : t('Код активации')} · {made.computer}
+            {made.kind === 'activate' ? ` · ${made.until ? `${t('до')} ${human(made.until)}` : t('навсегда')} · ${t('касс')}: ${made.registers} · ${t('модули')}: ${moduliText(made.modulesOff, t)}` : ''}
           </div>
-          {err && <div className="note err" style={{ marginBottom: 10 }}>{err}</div>}
-          <button className="btn gold" disabled={busy || pc.length !== PC_LEN} data-testid="licence-issue">
-            <span className="ic"><LuKeyRound size={16} /></span> {busy ? t('Выпускаем…') : t('Выпустить код')}
+          <div className="licence-code" data-testid="licence-code">{made.code}</div>
+          <button type="button" className="btn ghost" onClick={() => copyText(made.code, toast, t)}>
+            <span className="ic"><LuCopy size={15} /></span> {t('Скопировать')}
           </button>
-        </form>
+        </div>
+      )}
+    </>
+  )
 
-        {made && (
-          <div className="note ok" style={{ marginTop: 14 }} data-testid="licence-made">
-            <div className="tag-cat">
-              {made.kind === 'reset' ? t('Код сброса пароля') : t('Код активации')} · {made.computer}
-              {made.kind === 'activate' ? ` · ${made.until ? `${t('до')} ${human(made.until)}` : t('навсегда')} · ${t('касс')}: ${made.registers} · ${t('модули')}: ${moduliText(made.modulesOff, t)}` : ''}
-            </div>
-            <div className="licence-code" data-testid="licence-code">{made.code}</div>
-            <button type="button" className="btn ghost" onClick={() => copyText(made.code, toast, t)}>
-              <span className="ic"><LuCopy size={15} /></span> {t('Скопировать')}
-            </button>
-          </div>
-        )}
-
-        <h4 style={{ margin: '18px 0 8px' }}>{t('Выпущенные коды')}</h4>
-        {list.length > 5 && (
-          <input style={{ marginBottom: 10 }} placeholder={t('Найти: код компьютера или заметка')} value={find} onChange={(e) => setFind(e.target.value)} data-testid="licences-find" />
-        )}
-        {listErr && <div className="note err">{t('Список кодов не загрузился')}: {listErr}</div>}
-        {!list.length && !listErr && <div className="tag-cat">{t('Пока ни одного.')}</div>}
-        {!!list.length && (
-          <table className="table-cards">
-            <thead>
-              <tr>
-                <th>{t('Когда')}</th>
-                <th>{t('Компьютер')}</th>
-                <th>{t('Что')}</th>
-                <th>{t('Заметка')}</th>
-                <th>{t('Код')}</th>
+  // Выпущенные коды: поиск и список. Заголовок на телефоне не нужен — его заменяет вкладка
+  const listPart = (
+    <>
+      {!phone && <h4 style={{ margin: '18px 0 8px' }}>{t('Выпущенные коды')}</h4>}
+      {list.length > 5 && (
+        <input style={{ marginBottom: 10 }} placeholder={t('Найти: код компьютера или заметка')} value={find} onChange={(e) => setFind(e.target.value)} data-testid="licences-find" />
+      )}
+      {listErr && <div className="note err">{t('Список кодов не загрузился')}: {listErr}</div>}
+      {!list.length && !listErr && <div className="tag-cat">{t('Пока ни одного.')}</div>}
+      {!!list.length && (
+        <table className="table-cards">
+          <thead>
+            <tr>
+              <th>{t('Когда')}</th>
+              <th>{t('Компьютер')}</th>
+              <th>{t('Что')}</th>
+              <th>{t('Заметка')}</th>
+              <th>{t('Код')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((l) => (
+              <tr key={l.id}>
+                {/* На телефоне строка — карточка: компьютер крупно сверху, длинные «Что» и заметка —
+                    под подписью во всю ширину, «Скопировать» — внизу карточки */}
+                <td data-label={t('Когда')}>{fmtShort(l.createdAt)}</td>
+                <td className="cell-main" data-label={t('Компьютер')}><b>{l.computer}</b></td>
+                <td className="cell-wide" data-label={t('Что')}>
+                  {l.kind === 'reset' ? t('Сброс пароля') : `${l.until ? `${t('до')} ${human(l.until)}` : t('навсегда')} · ${t('касс')}: ${l.registers}${l.modulesOff?.length ? ` · ${t('модули')}: ${moduliText(l.modulesOff, t)}` : ''}`}
+                </td>
+                <td data-label={t('Заметка')} className="tag-cat cell-wide">{l.note || '—'}</td>
+                {/* Сам код на телефоне — строкой карточки: его диктуют по телефону, а подсказка
+                    title, где он лежит на компьютере, на сенсорном экране не показывается */}
+                {phone && (
+                  <td className="cell-wide" data-label={t('Код')}>
+                    <span className="licence-code kody-code">{l.code}</span>
+                  </td>
+                )}
+                <td className="cell-actions" data-label={t('Код')}>
+                  <button type="button" className="btn ghost" onClick={() => copyText(l.code, toast, t)} title={l.code}>
+                    <span className="ic"><LuCopy size={14} /></span> {t('Скопировать')}
+                  </button>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {list.filter((l) => !find.trim() || `${l.computer} ${l.note || ''}`.toLowerCase().includes(find.trim().toLowerCase())).map((l) => (
-                <tr key={l.id}>
-                  <td data-label={t('Когда')}>{fmtShort(l.createdAt)}</td>
-                  <td data-label={t('Компьютер')}><b>{l.computer}</b></td>
-                  <td data-label={t('Что')}>
-                    {l.kind === 'reset' ? t('Сброс пароля') : `${l.until ? `${t('до')} ${human(l.until)}` : t('навсегда')} · ${t('касс')}: ${l.registers}${l.modulesOff?.length ? ` · ${t('модули')}: ${moduliText(l.modulesOff, t)}` : ''}`}
-                  </td>
-                  <td data-label={t('Заметка')} className="tag-cat">{l.note || '—'}</td>
-                  <td data-label={t('Код')}>
-                    <button type="button" className="btn ghost" onClick={() => copyText(l.code, toast, t)} title={l.code}>
-                      <span className="ic"><LuCopy size={14} /></span> {t('Скопировать')}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            ))}
+            {/* Поиск ничего не нашёл: на телефоне шапки таблицы нет, и без этой строки было
+                непонятно, сработал ли он вообще */}
+            {phone && !shown.length && (
+              <tr><td colSpan="5" className="empty">{t('Ничего не найдено')}</td></tr>
+            )}
+          </tbody>
+        </table>
+      )}
+    </>
+  )
+
+  return (
+    // admin-modal kody-modal: метка окна для правил телефона (styles/m-admin.css); на компьютере правил у неё нет
+    <Modal wide className="admin-modal kody-modal" title={t('Коды активации')} onClose={onClose}>
+      <div data-testid="licences">
+        {phone ? (
+          <>
+            <div className="kody-tabs" role="tablist">
+              <button type="button" role="tab" aria-selected={tab === 'new'} className={'kody-tab' + (tab === 'new' ? ' active' : '')} onClick={() => setTab('new')} data-testid="kody-tab-new">
+                {t('Выпустить код')}
+              </button>
+              <button type="button" role="tab" aria-selected={tab === 'list'} className={'kody-tab' + (tab === 'list' ? ' active' : '')} onClick={() => setTab('list')} data-testid="kody-tab-list">
+                {t('Выпущенные коды')}{list.length ? ` · ${list.length}` : ''}
+              </button>
+            </div>
+            {tab === 'new' ? formPart : listPart}
+          </>
+        ) : (
+          <>
+            {formPart}
+            {listPart}
+          </>
         )}
       </div>
     </Modal>

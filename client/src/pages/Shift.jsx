@@ -25,6 +25,10 @@ import { pechatTicket } from '../lib/pechat'
 import { getRekvizity } from '../lib/rekvizity'
 import { canCloseShift, shiftOpenerName } from '../lib/shiftOwner'
 import { ChekiOkno, RasshifrovkaOkno } from '../components/Cheki'
+import { useTelefon } from '../components/StickyBar'
+
+// Сумма без слова валюты — числом так же, как его пишет money() («1 234,5»)
+const SUMMA_NF = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })
 
 export default function Shift() {
   const shifts = useCollection('shifts')
@@ -43,6 +47,8 @@ export default function Shift() {
 
   const user = useAuth()
   const can = useCan()
+  // Телефон (окно до 600 px): у карточки истории смен — своя кнопка «Чеки» (ниже)
+  const phone = useTelefon()
   // Смены других кассиров и чужие внесения — по праву, а не по должности
   const isFounder = can('shift.others')
   const current = shifts.find((s) => !s.closedAt)
@@ -58,12 +64,15 @@ export default function Shift() {
     const map = {}
     sales.filter((s) => s && s.date && dayKey(s.date) === today).forEach((s) => {
       const id = s.userId || 'none'
-      map[id] = map[id] || { id, name: s.user?.name || '—', count: 0, total: 0, cash: 0, card: 0, debt: 0 }
+      map[id] = map[id] || { id, name: s.user?.name || '—', count: 0, total: 0, cash: 0, card: 0, transfer: 0, debt: 0 }
       const m = map[id]
       m.count += 1
       m.total += s.total || 0
       if (s.payment === 'cash') m.cash += s.total || 0
       else if (s.payment === 'card') m.card += s.total || 0
+      // Переводы — своей колонкой, как в карточках смены (live ниже). Раньше они падали в
+      // «В долг», и владелец видел долг больше настоящего
+      else if (s.payment === 'transfer') m.transfer += s.total || 0
       else m.debt += s.total || 0
     })
     return Object.values(map).sort((a, b) => b.total - a.total)
@@ -177,15 +186,20 @@ export default function Shift() {
     }
   }
 
+  // «Наличные в кассе по факту» изменить нельзя (17.11.2026, просьба владельца): факт всегда
+  // равен ожидаемому, его считают сами сайт, программа и сервер (server/src/shifts/totals.ts).
+  // Поле в окне только показывает сумму — так же, как строкой выше («632,5»), а не числом для
+  // ввода («632.5»); «сомони» — в подписи поля. Недостачу отмечают «Изъять» до закрытия
   async function doClose() {
+    const expected = Math.round(live.expectedCash * 100) / 100
     const r = await dialog.prompt({
       title: t('Закрытие смены'),
-      message: `${t('Ожидается в кассе')}: ${money(live.expectedCash)} (${t('касса на старте + наличные продажи + погашения долга + внесено + вернули поставщики − возвраты наличными − расходы и оплаты поставщикам из кассы − изъято')}). ${t('Пересчитайте наличные и введите фактическую сумму.')}`,
-      fields: [{ name: 'counted', label: t('Наличные в кассе по факту (сомони)'), type: 'number', defaultValue: String(Math.round(live.expectedCash * 100) / 100) }],
+      message: `${t('Ожидается в кассе')}: ${money(live.expectedCash)} (${t('касса на старте + наличные продажи + погашения долга + внесено + вернули поставщики − возвраты наличными − расходы и оплаты поставщикам из кассы − изъято')}). ${t('Сумма по факту считается сама и не меняется. Если в кассе денег меньше — до закрытия смены отметьте разницу кнопкой «Изъять».')}`,
+      fields: [{ name: 'counted', label: t('Наличные в кассе по факту (сомони)'), type: 'text', defaultValue: SUMMA_NF.format(expected), readOnly: true }],
       confirmText: t('Закрыть смену'),
     })
     if (!r) return
-    const counted = Number(r.counted) || 0
+    const counted = expected
     try {
       // Z-отчёт показываем сразу по данным кассы; сервер пришлёт сверенные цифры следом
       const { shift, synced } = closeShift(counted, {
@@ -336,7 +350,8 @@ export default function Shift() {
           <div className="tag-cat" style={{ marginBottom: 12 }}>
             {t('Открыта')}: {fmtDateTime(current.openedAt)} · {t('касса на старте')} {money(current.openingCash)}
           </div>
-          <div className="cards">
+          {/* shift-cards — на телефоне у карточек, которые открывают окно, стрелка (m-smena.css) */}
+          <div className="cards shift-cards">
             <Metric
               tour="shift.sales"
               testid="card-shift-sales"
@@ -363,7 +378,7 @@ export default function Shift() {
             <Metric tour="shift.expected" testid="card-shift-expected" onClick={() => setOkno({ kind: 'expected', shift: current })} label={t('Ожидается в кассе')} value={money(live.expectedCash)} Icon={LuWallet} tint="accent" />
           </div>
           {(live.debt > 0 || live.debtPaid > 0 || live.refundTotal > 0 || live.expenseCash > 0 || live.cashIn > 0 || live.cashOut > 0 || live.supplierCash > 0 || live.supplierRefund > 0) && (
-            <div className="panel mt" style={{ maxWidth: 460 }}>
+            <div className="panel mt shift-sums" style={{ maxWidth: 460 }}>
               {live.debt > 0 && <div className="total-row"><span>{t('В долг за смену')}</span><span>{money(live.debt)}</span></div>}
               {live.cashIn > 0 && (
                 <div className="total-row" data-tour="shift.cash-rows"><span>{t('Внесено в кассу')}</span><span style={{ color: 'var(--green)' }}>+{money(live.cashIn)}</span></div>
@@ -383,8 +398,9 @@ export default function Shift() {
                   <span>{t('Возвраты за смену')}</span>
                   <span style={{ color: 'var(--danger)' }}>
                     −{money(live.refundTotal)}
+                    {/* На телефоне пояснение — своей строкой под суммой, без «·» (m-smena.css) */}
                     {live.refundCash > 0 && live.refundCash !== live.refundTotal && (
-                      <span className="tag-cat"> · {t('наличными')} {money(live.refundCash)}</span>
+                      <span className="tag-cat"><span className="shift-sums-dot"> · </span>{t('наличными')} {money(live.refundCash)}</span>
                     )}
                   </span>
                 </div>
@@ -416,19 +432,21 @@ export default function Shift() {
       {current && moves.length > 0 && (
         <div className="panel mt" data-tour="shift.cash-list" style={{ padding: 0, maxWidth: 720 }}>
           <h2 style={{ padding: '16px 16px 0' }}><span className="h2-title"><span className="ic"><LuBanknote size={17} /></span>{t('Наличные за смену')}</span></h2>
-          <table>
+          {/* На телефоне строки — карточками (index.css, .table-cards): вбок ничего не листается */}
+          <div className="table-cards-wrap">
+          <table className="table-cards shift-moves">
             <thead><tr><th>{t('Время')}</th><th>{t('Что')}</th><th>{t('Кто')}</th><th className="num">{t('Сумма')}</th><th></th></tr></thead>
             <tbody>
               {moves.map((m) => (
                 <tr key={m.id}>
-                  <td style={{ whiteSpace: 'nowrap' }}>{fmtTime(m.date)}</td>
-                  <td>
+                  <td data-label={t('Время')} style={{ whiteSpace: 'nowrap' }}>{fmtTime(m.date)}</td>
+                  <td className="cell-main">
                     <b>{m.kind === 'in' ? t('Внесение') : t('Изъятие')}</b>
                     {m.note ? <div className="tag-cat">{m.note}</div> : null}
                   </td>
-                  <td>{m.user?.name || '—'}</td>
-                  <td className="num" style={{ color: m.kind === 'in' ? 'var(--green)' : 'var(--danger)', whiteSpace: 'nowrap' }}>{m.kind === 'in' ? '+' : '−'}{money(m.amount)}</td>
-                  <td className="num">
+                  <td data-label={t('Кто')}>{m.user?.name || '—'}</td>
+                  <td className="num" data-label={t('Сумма')} style={{ color: m.kind === 'in' ? 'var(--green)' : 'var(--danger)', whiteSpace: 'nowrap' }}>{m.kind === 'in' ? '+' : '−'}{money(m.amount)}</td>
+                  <td className="num cell-actions">
                     {isFounder && (
                       <button className="btn ghost sm icon" onClick={() => undoCash(m)} title={t('Отменить')} aria-label={`${t('Отменить')} ${money(m.amount)}`}><LuTrash2 size={15} /></button>
                     )}
@@ -437,6 +455,7 @@ export default function Shift() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -444,30 +463,34 @@ export default function Shift() {
       {isFounder && byCashier.length > 0 && (
         <div className="panel mt" data-tour="shift.cashiers" style={{ padding: 0 }}>
           <h2 style={{ padding: '16px 16px 0' }}><span className="h2-title"><span className="ic"><LuUsers size={17} /></span>{t('Сегодня по кассирам')}</span></h2>
-          <table>
+          <div className="table-cards-wrap">
+          <table className="table-cards">
             <thead>
-              <tr><th>{t('Кассир')}</th><th className="num">{t('Чеков')}</th><th className="num">{t('Наличными')}</th><th className="num">{t('Картой')}</th><th className="num">{t('В долг')}</th><th className="num">{t('Всего')}</th></tr>
+              <tr><th>{t('Кассир')}</th><th className="num">{t('Чеков')}</th><th className="num">{t('Наличными')}</th><th className="num">{t('Картой')}</th><th className="num">{t('Переводом')}</th><th className="num">{t('В долг')}</th><th className="num">{t('Всего')}</th></tr>
             </thead>
             <tbody>
               {byCashier.map((c) => (
                 <tr key={c.id}>
-                  <td><b>{c.name}</b></td>
-                  <td className="num">{c.count}</td>
-                  <td className="num">{money(c.cash)}</td>
-                  <td className="num">{money(c.card)}</td>
-                  <td className="num">{money(c.debt)}</td>
-                  <td className="num"><b>{money(c.total)}</b></td>
+                  <td className="cell-main"><b>{c.name}</b></td>
+                  <td className="num" data-label={t('Чеков')}>{c.count}</td>
+                  <td className="num" data-label={t('Наличными')}>{money(c.cash)}</td>
+                  <td className="num" data-label={t('Картой')}>{money(c.card)}</td>
+                  <td className="num" data-label={t('Переводом')}>{money(c.transfer)}</td>
+                  <td className="num" data-label={t('В долг')}>{money(c.debt)}</td>
+                  <td className="num" data-label={t('Всего')}><b>{money(c.total)}</b></td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {/* ── История смен (Z-отчёты) ── */}
       <div className="panel mt" data-tour="shift.history" style={{ padding: 0 }}>
         <h2 style={{ padding: '16px 16px 0' }}><span className="h2-title"><span className="ic"><LuCalculator size={17} /></span>{t('История смен')}</span></h2>
-        <table>
+        <div className="table-cards-wrap">
+        <table className="table-cards shift-history">
           <thead>
             <tr>
               <th>{t('Период')}</th><th>{t('Кассир')}</th><th className="num">{t('Чеков')}</th><th className="num">{t('Выручка')}</th>
@@ -485,33 +508,43 @@ export default function Shift() {
                 onClick={() => setOkno({ kind: 'all', shift: s })}
                 onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOkno({ kind: 'all', shift: s }) } }}
               >
-                <td>
+                <td className="cell-main">
                   {fmtShort(s.openedAt)}{' — '}{s.closedAt && fmtTime(s.closedAt)}
                 </td>
-                <td>
+                <td data-label={t('Кассир')}>
                   {s.user?.name || '—'}
                   {/* Смена кассы (программа для Windows): на какой именно */}
                   {s.deviceName ? <div className="tag-cat">{s.deviceName}</div> : null}
                 </td>
-                <td className="num">{s.count}</td>
-                <td className="num">
+                <td className="num" data-label={t('Чеков')}>{s.count}</td>
+                <td className="num" data-label={t('Выручка')}>
                   <b>{money(shiftTotals(s).netSales)}</b>
                   {(s.refundTotal || 0) > 0 && (
                     <div className="tag-cat" style={{ color: 'var(--danger)' }}>{t('возвраты')} −{money(s.refundTotal)}</div>
                   )}
                 </td>
-                <td className="num">{money(s.countedCash || 0)}</td>
-                <td className="num">
+                <td className="num" data-label={t('Наличные (факт)')}>{money(s.countedCash || 0)}</td>
+                <td className="num" data-label={t('Расхождение')}>
                   <span className={'badge ' + (Math.abs(s.difference) < 0.01 ? 'ok' : 'debt')}>
                     {s.difference > 0 ? '+' : ''}{money(s.difference)}
                   </span>
                 </td>
-                <td className="num"><button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); setView(s) }}>{t('Z-отчёт')}</button></td>
+                <td className="num cell-actions">
+                  {/* На телефоне карточка нажимается так же, как строка, но подсказки при наведении
+                      там нет — что за карточкой есть чеки смены, говорит кнопка */}
+                  {phone && (
+                    <button className="btn ghost sm" data-testid="shift-row-cheki" onClick={(e) => { e.stopPropagation(); setOkno({ kind: 'all', shift: s }) }}>
+                      <span className="ic"><LuReceipt size={15} /></span> {t('Чеки')}
+                    </button>
+                  )}
+                  <button className="btn ghost sm" onClick={(e) => { e.stopPropagation(); setView(s) }}>{t('Z-отчёт')}</button>
+                </td>
               </tr>
             ))}
             {history.length === 0 && <tr><td colSpan="7" className="empty">{t('Закрытых смен пока нет')}</td></tr>}
           </tbody>
         </table>
+        </div>
         <Pagination {...pg} />
       </div>
 
@@ -547,7 +580,8 @@ function ZReport({ shift, onClose }) {
     otmeny: otmenySmeny(returns.filter((r) => r.shiftId === shift.id)),
   })
   return (
-    <Modal title={<><span className="ic"><LuCalculator size={18} /></span>{tr('Z-отчёт смены')}</>} onClose={onClose}>
+    // z-okno — правила для телефона (styles/m-smena.css)
+    <Modal className="z-okno" title={<><span className="ic"><LuCalculator size={18} /></span>{tr('Z-отчёт смены')}</>} onClose={onClose}>
       {shift.pending && (
         <div className="note info no-print" style={{ marginBottom: 12 }}>
           {tr('Цифры предварительные — сверяются с сервером…')}
@@ -643,6 +677,8 @@ function OzhidaetsyaOkno({ shift, live, onClose }) {
         minus(t('Изъято'), live.cashOut),
       ]}
       itog={{ k: t('Ожидается в кассе'), v: money(live.expectedCash) }}
+      // Без этого окно не закрывалось ни кнопкой «Закрыть», ни Esc, ни нажатием мимо окна
+      onClose={onClose}
     />
   )
 }

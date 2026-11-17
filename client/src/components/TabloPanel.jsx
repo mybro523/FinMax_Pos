@@ -101,7 +101,9 @@ export default function TabloPanel() {
       {!desk && !tabloWebMozhno() && <div className="note err" style={{ marginBottom: 12 }}>{t('Этот браузер не работает с COM-портами. Откройте сайт в Chrome или Edge.')}</div>}
       <div className="field">
         <label>{t('Вид табло')}</label>
-        <div className="chips">
+        {/* set-choice: на телефоне — список выбора с кружком-отметкой, чтобы выбранный вид не
+            выглядел синей кнопкой действия рядом с «Сохранить» (styles/m-nastroyki.css) */}
+        <div className="chips set-chips set-choice">
           {VIDY.map(([k, label]) => (
             <button key={k} type="button" className={'chip' + (vid === k ? ' active' : '')} onClick={() => set({ vid: k })} data-vid={k}>
               {t(label)}

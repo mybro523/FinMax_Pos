@@ -52,7 +52,7 @@ export default function Reports({ rep, suppliers, loading, periodLabel }) {
           <span className="tag-cat">{periodLabel}</span>
         </div>
         <div className="table-cards-wrap">
-          <table className="table-cards">
+          <table className="table-cards prh-cards">
             <thead>
               <tr>
                 <th>{t('Поставщик')}</th><th className="num">{t('Долг на начало')}</th><th className="num">{t('Закуплено')}</th>
@@ -76,11 +76,11 @@ export default function Reports({ rep, suppliers, loading, periodLabel }) {
               <tfoot>
                 <tr className="zak-total">
                   <td>{t('Итого')}</td>
-                  <td className="num">{money(rep.sverka.itogo.nachalo)}</td>
-                  <td className="num">{money(rep.sverka.itogo.zakupleno)}</td>
-                  <td className="num">{money(rep.sverka.itogo.vozvrat)}</td>
-                  <td className="num">{money(rep.sverka.itogo.oplacheno)}</td>
-                  <td className="num">{money(rep.sverka.itogo.konec)}</td>
+                  <td className="num" data-label={t('Долг на начало')}>{money(rep.sverka.itogo.nachalo)}</td>
+                  <td className="num" data-label={t('Закуплено')}>{money(rep.sverka.itogo.zakupleno)}</td>
+                  <td className="num" data-label={t('Возвращено')}>{money(rep.sverka.itogo.vozvrat)}</td>
+                  <td className="num" data-label={t('Оплачено')}>{money(rep.sverka.itogo.oplacheno)}</td>
+                  <td className="num" data-label={t('Долг на конец')}>{money(rep.sverka.itogo.konec)}</td>
                 </tr>
               </tfoot>
             )}
@@ -94,7 +94,7 @@ export default function Reports({ rep, suppliers, loading, periodLabel }) {
           <h2><span className="h2-title"><span className="ic"><LuReceipt size={17} /></span>{t('Закупки и оплаты')}</span></h2>
           <span className="tag-cat">{periodLabel}</span>
         </div>
-        <StickyBar panel pad="8px 16px 14px">
+        <StickyBar panel pad="8px 16px 14px" className="prh-stick">
           <div className="toolbar">
             <div className="search kamera-pole">
               <input placeholder={t('Товар, штрихкод или поставщик…')} value={q} onChange={(e) => setQ(e.target.value)} />
@@ -103,7 +103,7 @@ export default function Reports({ rep, suppliers, loading, periodLabel }) {
           </div>
         </StickyBar>
         <div className="table-cards-wrap">
-          <table className="table-cards zak-table">
+          <table className="table-cards zak-table prh-cards">
             <thead>
               <tr>
                 <th>{t('Дата')}</th><th>{t('Поставщик')}</th><th>{t('Товар')}</th><th className="num">{t('Кол-во')}</th>
@@ -111,35 +111,40 @@ export default function Reports({ rep, suppliers, loading, periodLabel }) {
               </tr>
             </thead>
             <tbody>
-              {pg.slice.map((r) => (
-                <tr key={r.id} className={r.kind === 'pay' ? 'zak-pay' : r.kind === 'ret' ? 'zak-ret' : ''}>
-                  <td data-label={t('Дата')} style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.date)}</td>
-                  <td data-label={t('Поставщик')}>{supName(r)}</td>
-                  <td className="cell-main">
-                    {r.kind === 'pay' ? (
-                      <span className="zak-pay-name"><LuBanknote size={14} /> {r.name}{r.fromCash && <span className="badge cash" style={{ marginLeft: 6 }}>{t('из кассы')}</span>}</span>
-                    ) : <b>{r.name}</b>}
-                  </td>
-                  <td className="num" data-label={t('Кол-во')}>{r.qty || '—'}</td>
-                  <td className="num" data-label={t('Цена')}>{r.kind !== 'pay' ? money(r.price) : '—'}</td>
-                  <td className="num" data-label={t('Сумма')}>{r.kind === 'buy' ? <b>{money(r.sum)}</b> : r.kind === 'ret' ? <b>−{money(-r.sum)}</b> : '—'}</td>
-                  <td className="num" data-label={t('Оплачено')} style={{ color: r.paid > 0 ? 'var(--green)' : undefined }}>{r.paid < 0 ? '−' + money(-r.paid) : money(r.paid)}</td>
-                  <td className="num" data-label={t('Долг')} style={{ color: r.debt > 0 ? 'var(--danger)' : r.debt < 0 ? 'var(--green)' : undefined }}>
-                    {r.debt < 0 ? '−' + money(-r.debt) : money(r.debt)}
-                  </td>
-                  <td data-label={t('Принял')} className="tag-cat">{r.user || '—'}</td>
-                </tr>
-              ))}
+              {pg.slice.map((r) => {
+                // У оплаты долга нет ни количества, ни цены, ни суммы: на телефоне в её карточке
+                // этих пустых строк нет (cell-hide), на компьютере в таблице — прочерки, как были
+                const net = r.kind === 'pay' ? ' cell-hide' : ''
+                return (
+                  <tr key={r.id} className={r.kind === 'pay' ? 'zak-pay' : r.kind === 'ret' ? 'zak-ret' : ''}>
+                    <td data-label={t('Дата')} style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.date)}</td>
+                    <td data-label={t('Поставщик')}>{supName(r)}</td>
+                    <td className="cell-main">
+                      {r.kind === 'pay' ? (
+                        <span className="zak-pay-name"><LuBanknote size={14} /> {r.name}{r.fromCash && <span className="badge cash" style={{ marginLeft: 6 }}>{t('из кассы')}</span>}</span>
+                      ) : <b>{r.name}</b>}
+                    </td>
+                    <td className={'num' + net} data-label={t('Кол-во')}>{r.qty || '—'}</td>
+                    <td className={'num' + net} data-label={t('Цена')}>{r.kind !== 'pay' ? money(r.price) : '—'}</td>
+                    <td className={'num' + net} data-label={t('Сумма')}>{r.kind === 'buy' ? <b>{money(r.sum)}</b> : r.kind === 'ret' ? <b>−{money(-r.sum)}</b> : '—'}</td>
+                    <td className="num" data-label={t('Оплачено')} style={{ color: r.paid > 0 ? 'var(--green)' : undefined }}>{r.paid < 0 ? '−' + money(-r.paid) : money(r.paid)}</td>
+                    <td className="num" data-label={t('Долг')} style={{ color: r.debt > 0 ? 'var(--danger)' : r.debt < 0 ? 'var(--green)' : undefined }}>
+                      {r.debt < 0 ? '−' + money(-r.debt) : money(r.debt)}
+                    </td>
+                    <td data-label={t('Принял')} className="tag-cat">{r.user || '—'}</td>
+                  </tr>
+                )
+              })}
               {!zakRows.length && <tr><td colSpan="9" className="empty">{loading ? t('Загружаем…') : t('За этот период закупок и оплат нет')}</td></tr>}
             </tbody>
             {zakRows.length > 0 && (
               <tfoot>
                 <tr className="zak-total">
                   <td colSpan="5">{t('Итого за период')}</td>
-                  <td className="num">{money(itogo.sum)}</td>
-                  <td className="num">{money(itogo.paid)}</td>
-                  <td className="num">{itogo.debt < 0 ? '−' + money(-itogo.debt) : money(itogo.debt)}</td>
-                  <td></td>
+                  <td className="num" data-label={t('Сумма')}>{money(itogo.sum)}</td>
+                  <td className="num" data-label={t('Оплачено')}>{money(itogo.paid)}</td>
+                  <td className="num" data-label={t('Долг')}>{itogo.debt < 0 ? '−' + money(-itogo.debt) : money(itogo.debt)}</td>
+                  <td className="cell-hide"></td>
                 </tr>
               </tfoot>
             )}

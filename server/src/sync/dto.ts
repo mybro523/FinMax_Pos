@@ -46,8 +46,9 @@ export class RenameDeviceDto {
   @IsString() @MaxLength(40) name: string
 }
 
+// Сумму «по факту» сервер не берёт (17.11.2026, shifts/totals.ts): поле — для прежних версий
 export class CloseDeviceShiftDto {
-  @IsNumber() @Min(0) @Max(9_999_999_999.99) countedCash: number
+  @IsOptional() @IsNumber() @Min(0) @Max(9_999_999_999.99) countedCash?: number
 }
 
 export class PullQuery {

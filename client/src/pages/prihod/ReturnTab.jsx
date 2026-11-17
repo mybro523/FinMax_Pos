@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { LuUndo2, LuTrash2, LuPlus, LuCheck, LuEraser, LuScanLine, LuClock, LuCalculator, LuBanknote, LuCreditCard, LuList } from 'react-icons/lu'
 import { Modal, useToast, useDialog } from '../../components/ui'
+import { useTelefon } from '../../components/StickyBar'
 import NumberInput from '../../components/NumberInput'
 import { Pagination, usePagination } from '../../components/Pagination'
 import { useCashSources, sourceName } from '../../components/SupplierMoney'
@@ -15,7 +16,7 @@ import { qtyText as unitsText } from '../../lib/otchety'
 import { retLineFromProduct, retLineSum, retSummary, retProblem, toRetItem, qtyText, n2, num } from '../../lib/prihod'
 import { retyped } from '../../lib/pick'
 import { usePrihod, setRet, setRetForm, resetRet, blankRetForm } from './store'
-import ProductPick from './ProductPick'
+import ProductPick, { kPolyuShtrihkoda } from './ProductPick'
 
 // ── Возврат товара поставщику ──
 // Товар уходит со склада (просроченное — тоже: его чаще всего и возвращают), деньги
@@ -76,7 +77,7 @@ export default function ReturnTab({ products, suppliers, sup, arrivals, returns,
                   <td className="num" data-label={t('Сумма')}><b>{money(r.total)}</b></td>
                   <td data-label={t('Как вернули деньги')}>{t(REFUNDS[r.refund]?.[0] || '—')}</td>
                   <td data-label={t('Принял')} className="tag-cat">{r.user?.name || '—'}</td>
-                  <td className="num"><button type="button" className="btn ghost sm" data-tour="ret.details" onClick={() => setView(r)}>{t('Подробно')}</button></td>
+                  <td className="num cell-actions"><button type="button" className="btn ghost sm" data-tour="ret.details" onClick={() => setView(r)}>{t('Подробно')}</button></td>
                 </tr>
               ))}
               {!journal.length && (
@@ -97,13 +98,15 @@ export default function ReturnTab({ products, suppliers, sup, arrivals, returns,
 function NewReturn({ products, suppliers, sup, arrivals }) {
   const t = useT()
   const toast = useToast()
+  const telefon = useTelefon()
   const st = usePrihod()
   const { lines, form, refund, note, sourceId } = st.ret
   const s = useMemo(() => retSummary(lines), [lines])
   const scanRef = useRef(null)
   const qtyRef = useRef(null)
   const [focusQty, setFocusQty] = useState(0)
-  const focusScan = () => setTimeout(() => scanRef.current?.focus(), 0)
+  // На телефоне — без курсора в поле (иначе после «Добавить» открывалась клавиатура), см. ProductPick
+  const focusScan = () => setTimeout(() => kPolyuShtrihkoda(scanRef.current, telefon), 0)
   useEffect(() => {
     if (!focusQty) return
     qtyRef.current?.focus()
@@ -215,7 +218,12 @@ function NewReturn({ products, suppliers, sup, arrivals }) {
         <h2><span className="h2-title"><span className="ic"><LuUndo2 size={17} /></span>{t('Новый возврат поставщику')}</span></h2>
         <span className={'prh-ret-sup' + (sup ? '' : ' none')}>{sup ? sup.name : t('поставщик не выбран')}</span>
       </div>
-      {!sup && <div className="note info" style={{ marginBottom: 12 }}>{t('Выберите поставщика слева — товар возвращают конкретному поставщику.')}</div>}
+      {/* На телефоне список поставщиков не слева, а над вкладками — там подсказка без «слева» */}
+      {!sup && (
+        <div className="note info" style={{ marginBottom: 12 }}>
+          {telefon ? t('Выберите поставщика в списке выше — товар возвращают конкретному поставщику.') : t('Выберите поставщика слева — товар возвращают конкретному поставщику.')}
+        </div>
+      )}
 
       <div className="prh-ret-form">
         <ProductPick
@@ -251,7 +259,8 @@ function NewReturn({ products, suppliers, sup, arrivals }) {
           <div className="prh-qty">
             <label className="prh-unit">
               <NumberInput ref={qtyRef} integer={!(draft?.ves && !draft?.div)} value={form.qty} onChange={numField('qty')} onKeyDown={onEnter} disabled={!draft} aria-label={t('Количество')} />
-              <span>{draft ? t(draft.ves && draft.div ? 'уп' : draft.unit) : t('уп')}</span>
+              {/* Товар не выбран — «шт», как в новом поступлении (17.11.2026: товары по одной штуке — в «шт») */}
+              <span>{draft ? t(draft.ves && draft.div ? 'уп' : draft.unit) : t('шт')}</span>
             </label>
             {/* Делимая упаковка — штуки сверх упаковок, весовой в мешке — килограммы (1.5.12) */}
             {draft?.div && (
@@ -286,7 +295,7 @@ function NewReturn({ products, suppliers, sup, arrivals }) {
       </div>
 
       <div className="prh-grid-wrap prh-ret-grid">
-        <table className="prh-grid">
+        <table className="prh-grid table-cards">
           <thead>
             <tr>
               <th className="num">№</th>
@@ -302,14 +311,14 @@ function NewReturn({ products, suppliers, sup, arrivals }) {
           <tbody>
             {lines.map((l, n) => (
               <tr key={l.key} className={form.editKey === l.key ? 'sel' : ''} onClick={() => editLine(l)} title={t('Открыть строку в форме')}>
-                <td className="num muted">{n + 1}</td>
-                <td className="prh-c-name" title={l.name}>{l.name}</td>
-                <td className="muted prh-c-code">{l.barcode || '—'}</td>
-                <td className="num muted">{unitsText(stockUnits(products.find((p) => p.id === l.productId) || {}), products.find((p) => p.id === l.productId) || { unitsPerPack: uppOf(l), unit: l.unit }, t)}</td>
-                <td className="num"><b>{qtyText(l, t)}</b></td>
-                <td className="num">{n2(num(l.price))}</td>
-                <td className="num"><b>{n2(retLineSum(l))}</b></td>
-                <td className="prh-c-act" onClick={(e) => e.stopPropagation()}>
+                <td className="num muted prh-c-n" data-label="№">{n + 1}</td>
+                <td className="prh-c-name cell-main" title={l.name}>{l.name}</td>
+                <td className="muted prh-c-code" data-label={t('Штрихкод')}>{l.barcode || '—'}</td>
+                <td className="num muted" data-label={t('На складе')}>{unitsText(stockUnits(products.find((p) => p.id === l.productId) || {}), products.find((p) => p.id === l.productId) || { unitsPerPack: uppOf(l), unit: l.unit }, t)}</td>
+                <td className="num" data-label={t('Кол-во')}><b>{qtyText(l, t)}</b></td>
+                <td className="num" data-label={t('Цена возврата')}>{n2(num(l.price))}</td>
+                <td className="num" data-label={t('Сумма')}><b>{n2(retLineSum(l))}</b></td>
+                <td className="prh-c-act cell-actions" onClick={(e) => e.stopPropagation()}>
                   <button type="button" className="btn ghost sm icon" onClick={() => removeLine(l.key)} title={t('Убрать из возврата')} aria-label={`${t('Убрать из возврата')}: ${l.name}`}>
                     <LuTrash2 size={15} />
                   </button>
@@ -322,10 +331,10 @@ function NewReturn({ products, suppliers, sup, arrivals }) {
             <tfoot>
               <tr>
                 <td colSpan="4">{t('Итого')}: {s.count} {t('поз.')}</td>
-                <td className="num">{n2(s.packs)}</td>
-                <td></td>
-                <td className="num">{n2(s.total)}</td>
-                <td></td>
+                <td className="num" data-label={t('Кол-во')}>{n2(s.packs)}</td>
+                <td className="cell-hide"></td>
+                <td className="num" data-label={t('Сумма')}>{n2(s.total)}</td>
+                <td className="cell-hide"></td>
               </tr>
             </tfoot>
           )}
@@ -395,6 +404,7 @@ function ReturnDetails({ r, products, canDelete, onClose }) {
   const t = useT()
   const toast = useToast()
   const dialog = useDialog()
+  const telefon = useTelefon()
   const [busy, setBusy] = useState(false)
   async function remove() {
     const ok = await dialog.confirm({
@@ -416,27 +426,27 @@ function ReturnDetails({ r, products, canDelete, onClose }) {
     }
   }
   return (
-    <Modal title={t('Возврат поставщику · детали')} onClose={onClose}>
+    <Modal title={t('Возврат поставщику · детали')} onClose={onClose} className="prh-okno">
       <div className="tag-cat" style={{ marginBottom: 12 }}>
         {r.supplier} · {fmtDateTime(r.date)} · {t('Как вернули деньги')}: {t(REFUNDS[r.refund]?.[0] || '—')}
         {r.user?.name ? ` · ${t('Принял')}: ${r.user.name}` : ''}
       </div>
       {r.note && <div className="note info" style={{ marginBottom: 12 }}>{t('Причина')}: {r.note}</div>}
       <div className="table-scroll">
-        <table>
+        <table className="table-cards">
           <thead><tr><th>{t('Товар')}</th><th className="num">{t('Кол-во')}</th><th className="num">{t('Цена')}</th><th className="num">{t('Сумма')}</th></tr></thead>
           <tbody>
             {(r.items || []).map((i, n) => {
-              const p = products.find((x) => x.id === i.productId) || { unitsPerPack: num(i.unitsPerPack) || (num(i.pieces) > 0 ? 1000 : 1), unit: num(i.pieces) > 0 ? 'кг' : 'уп' }
+              const p = products.find((x) => x.id === i.productId) || { unitsPerPack: num(i.unitsPerPack) || (num(i.pieces) > 0 ? 1000 : 1), unit: num(i.pieces) > 0 ? 'кг' : num(i.unitsPerPack) > 1 ? 'уп' : 'шт' }
               // Упаковка строки — снимком (1.5.12): товару могли сменить её после возврата
               const upp = num(i.unitsPerPack) || uppOf(p)
               const units = num(i.qty) * upp + num(i.pieces)
               return (
                 <tr key={i.id || n}>
-                  <td>{i.name}</td>
-                  <td className="num">{unitsText(units, p, t)}</td>
-                  <td className="num">{money(i.price)}</td>
-                  <td className="num">{money(num(i.price) * (units / upp))}</td>
+                  <td className="cell-main">{i.name}</td>
+                  <td className="num" data-label={t('Кол-во')}>{unitsText(units, p, t)}</td>
+                  <td className="num" data-label={t('Цена')}>{money(i.price)}</td>
+                  <td className="num" data-label={t('Сумма')}>{money(num(i.price) * (units / upp))}</td>
                 </tr>
               )
             })}
@@ -444,11 +454,20 @@ function ReturnDetails({ r, products, canDelete, onClose }) {
         </table>
       </div>
       <div className="total-row big"><span>{t('Итого')}</span><span>{money(r.total)}</span></div>
-      {canDelete && (
+      {/* Телефон: «Закрыть» — последней, во всю ширину. Без неё окно закрывалось только касанием
+          узкой полосы затемнения, а у кого нет права удалять — кнопок в окне не было вовсе */}
+      {(canDelete || telefon) && (
         <div className="modal-actions" style={{ justifyContent: 'flex-start' }}>
-          <button className="btn ghost" style={{ color: 'var(--danger)' }} onClick={remove} disabled={busy}>
-            <span className="ic"><LuTrash2 size={16} /></span> {t('Удалить')}
-          </button>
+          {canDelete && (
+            <button className="btn ghost" style={{ color: 'var(--danger)' }} onClick={remove} disabled={busy}>
+              <span className="ic"><LuTrash2 size={16} /></span> {t('Удалить')}
+            </button>
+          )}
+          {telefon && (
+            <button type="button" className="btn prh-det-close" onClick={onClose} data-testid="ret-details-close">
+              {t('Закрыть')}
+            </button>
+          )}
         </div>
       )}
     </Modal>

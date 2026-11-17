@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import PrintDoc from './PrintDoc'
 import NumberInput from './NumberInput'
 import { barcodeInner } from '../lib/barcode'
@@ -115,11 +115,60 @@ export const Nakleyka = memo(function Nakleyka({ data, frame = false }) {
   return <div className="nk" style={{ width: `${r3(plan.boxW)}mm`, height: `${r3(plan.boxH)}mm` }} dangerouslySetInnerHTML={{ __html: svg }} />
 })
 
+// ── Образец на телефоне — по ширине экрана (17.11.2026) ──
+// На компьютере образец крупный: масштаб задан разметкой (zoom). На телефоне (окно уже 601 px)
+// крупная наклейка или ценник листались бы вбок внутри окна — там образец уменьшается под
+// ширину места. Место меряется у родителя, а не у самого образца: ширина образца зависит от
+// масштаба, и мерка по нему ужимала бы его снова и снова. На компьютере — 0: масштаб как был
+const UZKO = '(max-width: 600px)'
+export function useMestoObraztsa(ref) {
+  const [mesto, setMesto] = useState(0)
+  useLayoutEffect(() => {
+    const el = ref.current
+    const box = el?.parentElement
+    const mq = typeof window.matchMedia === 'function' ? window.matchMedia(UZKO) : null
+    if (!box || !mq) return undefined
+    const px = (cs, a, b) => (parseFloat(cs[a]) || 0) + (parseFloat(cs[b]) || 0)
+    const check = () => {
+      if (!mq.matches) return setMesto(0)
+      const p = getComputedStyle(box)
+      const s = getComputedStyle(el)
+      // Ширина родителя без его полей, минус поля и рамка самого образца
+      setMesto(Math.max(0, box.clientWidth - px(p, 'paddingLeft', 'paddingRight') - px(s, 'paddingLeft', 'paddingRight') - px(s, 'borderLeftWidth', 'borderRightWidth')))
+    }
+    check()
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(check) : null
+    ro?.observe(box)
+    mq.addEventListener?.('change', check)
+    return () => {
+      ro?.disconnect()
+      mq.removeEventListener?.('change', check)
+    }
+  }, [ref])
+  return mesto
+}
+
+// Масштаб образца шириной mm миллиметров: не крупнее заданного и, на телефоне, не шире места
+// (2 px — запас на округление)
+export const vmestit = (zoom, mm, mesto) => (mesto > 0 && mm > 0 ? Math.min(zoom, (mesto - 2) / (mm * PX_PER_MM)) : zoom)
+
+// Телефон ли сейчас (окно уже 601 px) — для окон, где образец на телефоне стоит в другом месте
+// (ценники: над списком товаров, а не под ним)
+const sledUzko = (cb) => {
+  const mq = typeof window.matchMedia === 'function' ? window.matchMedia(UZKO) : null
+  mq?.addEventListener?.('change', cb)
+  return () => mq?.removeEventListener?.('change', cb)
+}
+const uzkoSeychas = () => (typeof window.matchMedia === 'function' ? window.matchMedia(UZKO).matches : false)
+export const useUzko = () => useSyncExternalStore(sledUzko, uzkoSeychas, () => false)
+
 // Наклейка на экране — крупнее, с краем наклейки
 export function NakleykaPreview({ data, frame, zoom = 1.6 }) {
+  const ref = useRef(null)
+  const mesto = useMestoObraztsa(ref)
   return (
-    <div className="nk-preview" data-testid="nk-preview">
-      <div className="nk-zoom" style={{ zoom }}>
+    <div className="nk-preview" data-testid="nk-preview" ref={ref}>
+      <div className="nk-zoom" style={{ zoom: vmestit(zoom, data.plan.boxW, mesto) }}>
         <Nakleyka data={data} frame={frame} />
       </div>
     </div>

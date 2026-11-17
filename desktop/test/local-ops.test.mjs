@@ -639,6 +639,7 @@ test('смена: открытие, привязка чеков, итоги пр
   payDebt(c, 'ivan', { amount: 15 })
   createReturn(c, { saleId: s1.id, items: [{ productId: 'par', units: 5 }] })
 
+  // Касса прислала свою сумму (прежняя версия) — не важно: с 17.11.2026 факт = ожидаемому
   const closed = closeShift({ ...c, now: NOW + 3600_000 }, { countedCash: 600 })
   assert.equal(closed.id, shift.id)
   assert.equal(closed.closedAt, new Date(NOW + 3600_000).toISOString())
@@ -660,7 +661,7 @@ test('смена: открытие, привязка чеков, итоги пр
       difference: closed.difference,
     },
     {
-      countedCash: 600,
+      countedCash: 607,
       totalSales: 710,
       salesCash: 540,
       salesCard: 150,
@@ -675,7 +676,7 @@ test('смена: открытие, привязка чеков, итоги пр
       count: 3,
       // 100 на начало + 540 наличными + 15 погашение − 48 возврат
       expectedCash: 607,
-      difference: -7,
+      difference: 0,
     },
   )
   assert.deepEqual(Object.keys(closed), [

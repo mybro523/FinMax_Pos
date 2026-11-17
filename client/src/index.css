@@ -391,6 +391,9 @@ tbody tr:hover { background: var(--hover); }
 /* ───────── Формы ───────── */
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .field label { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+/* Поле только для показа (диалог «Закрытие смены»: сумма по факту не меняется, 17.11.2026) */
+.modal .field input[readonly] { background: var(--track); color: var(--text); cursor: not-allowed; font-weight: 700; }
+.modal .field input[readonly]:focus { box-shadow: none; border-color: var(--border); }
 input, select {
   border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
   padding: 10px 12px; font-size: 14px; background: var(--input-bg); width: 100%;
@@ -1066,84 +1069,8 @@ input::placeholder { color: var(--muted-2); }
   }
   .admin-app .mini-card.svodka-card .tag-cat { grid-area: note; }
 
-  /* ── Таблицы панели превращаются в карточки ──
-     Шесть колонок на узком экране нечитаемы, а листание вбок пальцем на
-     таблице с нажимаемыми строками промахивается по нажатию. Поэтому строка
-     становится карточкой: название сверху крупно, остальное — подпись и
-     значение в строку. Подписи берутся из data-label у ячеек: заголовок
-     таблицы на телефоне не виден, и без них значения были бы безымянными. */
-  .table-cards { display: block; }
-  .table-cards thead { display: none; }
-  .table-cards tbody { display: block; }
-  .table-cards tbody tr {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 12px 14px;
-    margin-bottom: 10px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    /* Фон карточки отличается от фона панели: в тёмной теме одинаковый фон
-       сливался, и рамка её почти не спасала */
-    background: var(--soft);
-  }
-  .table-cards tbody tr:last-child { margin-bottom: 0; }
-  .table-cards tbody tr:hover { box-shadow: none; }
-  .table-cards tbody td {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 3px 0;
-    border: none;
-    text-align: right;
-    min-width: 0;
-  }
-  .table-cards tbody td::before {
-    content: attr(data-label);
-    color: var(--muted);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-    text-align: left;
-    flex: 0 0 auto;
-  }
-  /* Ячейки без подписи (таблица без заголовков) не должны оставлять пустое место */
-  .table-cards tbody td:not([data-label])::before { content: none; }
-  /* Пояснение под значением (телефон владельца, «ни разу», отметка о звонке)
-     уходит на свою строку: иначе оно вставало вплотную к значению и читалось
-     как одно слово — «ВЛАДЕЛЕЦ Иванов 900100100» */
-  .table-cards tbody td > .tag-cat { flex: 1 0 100%; text-align: right; }
-  .table-cards tbody td { flex-wrap: wrap; }
-
-  /* Название и состояние — крупно и во всю ширину, они и есть суть карточки */
-  .table-cards tbody td.cell-main {
-    order: -2;
-    display: block;
-    text-align: left;
-    font-size: 15px;
-    font-weight: 600;
-    padding-bottom: 6px;
-  }
-  .table-cards tbody td.cell-main::before { content: none; }
-  .table-cards tbody td.cell-main .tag-cat { text-align: left; font-weight: 400; }
-  .table-cards tbody td.cell-state {
-    order: -1;
-    display: block;
-    text-align: left;
-    padding-bottom: 8px;
-    margin-bottom: 6px;
-    border-bottom: 1px solid var(--border);
-  }
-  .table-cards tbody td.cell-state::before { content: none; }
-  .table-cards tbody td.cell-state .tag-cat { text-align: left; }
-  /* Строка «записей нет» карточкой быть не должна */
-  .table-cards tbody td.empty { display: block; text-align: center; }
-  .table-cards tbody td.empty::before { content: none; }
-  /* Таблица стоит в панели без полей (журнал во всю ширину): карточкам нужен отступ
-     от её краёв, а самой панели незачем листаться вбок */
-  .table-cards-wrap { padding: 4px 12px 12px; }
-  .table-cards-wrap .table-cards tbody tr:has(td.empty) { background: none; border: none; }
+  /* Таблицы панели — карточками: общие правила .table-cards — в блоке «Телефон 320–450» в
+     конце файла (17.11.2026, они теперь для всех разделов) */
 
   /* Панель больше не листается вбок: листать нечего, а лишняя прокрутка
      съедала бы нажатия по карточкам */
@@ -1172,8 +1099,6 @@ input::placeholder { color: var(--muted-2); }
   .admin-app .topbar { padding: 10px 12px; }
   .admin-app .topbar h1 { font-size: 16px; }
   .mini-card.svodka-card .m-value { font-size: 18px; }
-  .table-cards tbody tr { padding: 11px 12px; }
-  .table-cards tbody td { font-size: 13px; }
 }
 
 /* ═════════ Анимации — «живой» интерфейс ═════════ */
@@ -2917,3 +2842,1905 @@ tr.inv-last > td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
 .kamera-btn { flex: 0 0 auto; width: 42px; min-width: 42px; padding: 0 !important; }
 .kamera-btn .ic { margin: 0; }
 .prh-sheet-search .kamera-btn, .prh-side-search .kamera-btn { width: 34px; min-width: 34px; height: 32px; border: 0; margin: 2px -6px 2px 0; background: transparent; }
+
+/* ═════════ Телефон 320–450 px: ничего не листается вбок, всё под палец (17.11.2026) ═════════
+   Просьба владельца: «мобильная версия максимально удобная, без скролла по бокам, от 320 до
+   450 пикселей». Общие правила для всех разделов — здесь (блок стоит последним и при равном
+   весе перебивает прежние); что нужно одному разделу — рядом с его стилями. На компьютере и в
+   программе для Windows ничего не меняется: всё ниже — только для экрана уже 601 px. Печать
+   не затрагивается (screen): ширина листа ленты 80 мм — около 300 px, и правила телефона
+   иначе меняли бы чеки и наклейки.
+   • Таблицы — карточками (.table-cards): строка — карточка, у значения подпись из data-label
+     ячейки (подпись слева, значение справа — и когда переносится на свою строку). Классы
+     ячеек: cell-main — название крупно сверху; cell-state — состояние под ним; cell-actions —
+     кнопки строки внизу карточки; cell-check — галочка выбора в углу; cell-wide — длинный
+     текст под подписью; cell-hide — на телефоне не нужна. Итог таблицы (tfoot) — своей карточкой.
+   • Ряды кнопок (.chips) и вкладки — в несколько рядов; длинные ряды (категории) — два ряда
+     и «Ещё» (components/ChipsMore.jsx), выбранная кнопка — первой.
+   • Поля ввода — 16 px (с меньшим шрифтом iPhone приближает страницу), кнопки — под палец.
+   • Окна — снизу во всю ширину, с крестиком (Modal в ui.jsx), их кнопки — в ряд на всю ширину. */
+.chips-more-btn { display: none; }
+.kassa-mbar { display: none; }
+.modal-x { display: none; }
+@media screen and (max-width: 600px) {
+  /* ── Таблицы карточками ── */
+  .table-cards, .table-cards tbody, .table-cards tfoot { display: block; width: 100%; }
+  .table-cards thead { display: none; }
+  .table-cards tbody tr, .table-cards tfoot tr {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 12px 14px; margin-bottom: 10px;
+    border: 1px solid var(--border); border-radius: 12px;
+    /* Фон карточки отличается от фона панели: в тёмной теме одинаковый фон сливался */
+    background: var(--soft);
+  }
+  .table-cards tbody tr:last-child { margin-bottom: 0; }
+  .table-cards tbody tr:hover { box-shadow: none; background: var(--soft); }
+  /* Подпись слева, значение справа. Не поместилось рядом — значение уходит строкой ниже и
+     остаётся справа, как у соседних строк (flex-end + подпись с margin-right: auto) */
+  .table-cards tbody td, .table-cards tfoot td {
+    display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: 2px 12px;
+    padding: 3px 0; border: none; background: none; text-align: right; min-width: 0; overflow-wrap: anywhere;
+  }
+  .table-cards tbody td::before, .table-cards tfoot td::before {
+    content: attr(data-label); margin-right: auto;
+    color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+    text-align: left; flex: 0 1 auto; max-width: 58%; overflow-wrap: normal;
+  }
+  /* Ячейки без подписи не оставляют пустого места */
+  .table-cards tbody td:not([data-label])::before, .table-cards tfoot td:not([data-label])::before { content: none; }
+  /* Пояснение под значением (div) — своей строкой, иначе читалось бы слитно со значением.
+     Если пояснение и есть всё значение («—», «не считали», span) — рядом с подписью */
+  .table-cards tbody td > .tag-cat { flex: 1 0 100%; text-align: right; }
+  .table-cards tbody td > span.tag-cat, .table-cards tbody td > .tag-cat:only-child { flex: 0 1 auto; }
+  /* Пустая ячейка (нет значения) — строку не показываем */
+  .table-cards tbody td:empty { display: none; }
+  /* Название — крупно и во всю ширину: оно и есть суть карточки */
+  .table-cards tbody td.cell-main {
+    order: -2; display: block; text-align: left; font-size: 15px; font-weight: 600; padding-bottom: 6px;
+  }
+  .table-cards tbody td.cell-main::before { content: none; }
+  .table-cards tbody td.cell-main .tag-cat { text-align: left; font-weight: 400; }
+  .table-cards tbody td.cell-state {
+    order: -1; display: block; text-align: left; padding-bottom: 8px; margin-bottom: 6px; border-bottom: 1px solid var(--border);
+  }
+  .table-cards tbody td.cell-state::before { content: none; }
+  .table-cards tbody td.cell-state .tag-cat { text-align: left; }
+  /* Галочка выбора — в верхнем углу карточки, крупная под палец (с полем вокруг) */
+  .table-cards tbody td.cell-check { order: -3; display: block; padding: 0 0 4px; text-align: left; }
+  .table-cards tbody td.cell-check::before { content: none; }
+  .table-cards tbody td.cell-check input[type='checkbox'] { width: 24px; height: 24px; margin: 4px 8px 4px 0; }
+  /* Длинный текст (примечание, список товаров) — под подписью во всю ширину */
+  .table-cards tbody td.cell-wide { display: block; text-align: left; }
+  .table-cards tbody td.cell-wide::before { display: block; max-width: none; margin-bottom: 2px; }
+  /* Кнопки строки — внизу карточки, справа, под палец, вровень друг с другом */
+  .table-cards tbody td.cell-actions {
+    order: 10; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 10px; margin-top: 6px; border-top: 1px dashed var(--border);
+  }
+  .table-cards tbody td.cell-actions::before { content: none; }
+  .table-cards tbody td.cell-actions .btn { min-height: 40px; }
+  .table-cards tbody td.cell-actions .btn.icon { min-width: 44px; min-height: 44px; }
+  .table-cards .cell-hide { display: none !important; }
+  /* Поле в карточке (количество, цена): подпись слева, поле справа своей ширины — и при длинной
+     таджикской подписи поле не уезжает строкой ниже к левому краю */
+  .table-cards tbody td:has(> input:not([type='checkbox']):not([type='radio'])) {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 10px;
+  }
+  .table-cards tbody td:has(> input:not([type='checkbox']):not([type='radio']))::before { max-width: none; }
+  .table-cards tbody td:has(> input:not([type='checkbox']):not([type='radio'])) > .tag-cat { grid-column: 1 / -1; }
+  .table-cards tbody td input:not([type='checkbox']):not([type='radio']), .table-cards tbody td select { max-width: 100%; }
+  /* Строка «записей нет» карточкой быть не должна */
+  .table-cards tbody td.empty { display: block; text-align: center; }
+  .table-cards tbody td.empty::before { content: none; }
+  .table-cards tbody tr:has(> td.empty) { background: none; border: none; padding: 0; }
+  /* Итог таблицы — своей карточкой, жирно; полосы итога с компьютера (zak-total) не ложатся
+     на каждую ячейку */
+  .table-cards tfoot tr { background: var(--accent-soft); border-color: var(--accent); font-weight: 700; }
+  .table-cards tfoot td, .table-cards tfoot .zak-total td { background: none; border-top: 0; }
+  /* Оплата и возврат в истории поставщика — цветом всей карточки, а не каждой ячейки */
+  .table-cards tbody tr.zak-pay { background: var(--green-soft); }
+  .table-cards tbody tr.zak-ret { background: var(--danger-soft); }
+  .table-cards tbody tr.zak-pay td, .table-cards tbody tr.zak-ret td { background: none; }
+  /* Таблица в панели без полей (журнал во всю ширину): карточкам — отступ от краёв */
+  .table-cards-wrap { padding: 4px 12px 12px; }
+  .panel > .table-cards-wrap:first-child { padding-top: 12px; }
+  .table-cards-wrap .table-cards tbody tr:has(td.empty) { background: none; border: none; }
+
+  /* ── Ряды кнопок и вкладки — в несколько рядов, вбок не листаются ── */
+  .chips { flex-wrap: wrap; overflow-x: visible; padding-bottom: 0; }
+  .chip { flex-shrink: 1; min-height: 38px; }
+  /* Значок в кнопке — в строку со словом (общее svg { display: block } ставило его над словом) */
+  .chip > svg { display: inline-block; vertical-align: -2px; }
+  /* Длинный ряд (категории) — два ряда и «Ещё»; выбранная кнопка в свёрнутом ряду — первой */
+  .chips.chips-more:not(.open), .stick-top .chips.chips-more:not(.open) { max-height: 86px; overflow: hidden; }
+  .chips.chips-more:not(.open) > .chip.active { order: -1; }
+  .stick-top .chips.chips-more.open { max-height: calc(var(--vh, 1vh) * 40); overflow-y: auto; }
+  .chips-more-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; padding: 8px 14px; min-height: 40px;
+    border: 1px dashed var(--border-strong); border-radius: 8px; background: none;
+    color: var(--accent-dark); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .chips-more-btn svg { display: inline-block; }
+  .prh-tabs, .prh-subtabs { flex-wrap: wrap; overflow: visible; gap: 6px; box-shadow: none; }
+  .prh-tabs button, .prh-subtabs button {
+    flex: 1 1 auto; justify-content: center; white-space: normal; text-align: center;
+    border: 1px solid var(--border-strong); border-radius: 9px; padding: 9px 12px; min-height: 42px;
+  }
+  .prh-tabs button.active, .prh-subtabs button.active { border-color: var(--accent); background: var(--accent-soft); }
+  .set-nav { flex-wrap: wrap; overflow: visible; gap: 6px; }
+  .set-nav-btn { flex: 1 1 calc(50% - 6px); min-width: 0; min-height: 42px; padding: 9px 10px; border: 1px solid var(--border); }
+  .set-nav-btn.active { border-color: var(--accent); }
+
+  /* ── Поля и кнопки под палец ── */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']), select, textarea { font-size: 16px; }
+  .btn { min-height: 40px; }
+  .btn.sm { min-height: 36px; }
+  /* Подписи плиток-сводок читают — не мельче 12 px */
+  .mini-card .m-label { font-size: 12.5px; }
+
+  /* ── Окна: шторкой снизу, с крестиком, кнопки — в ряд на всю ширину ── */
+  .modal { overscroll-behavior: contain; }
+  .modal-x {
+    display: inline-flex; align-items: center; justify-content: center;
+    position: sticky; top: -6px; float: right; z-index: 3; width: 44px; height: 44px; margin: -10px -8px 4px 8px;
+    border: 0; border-radius: 10px; background: var(--card); color: var(--muted); cursor: pointer;
+  }
+  .modal-x:active { background: var(--hover); }
+  .modal-x svg { display: block; }
+  /* Длинный заголовок окна переносится, а не вылезает */
+  .modal h3 { flex-wrap: wrap; overflow-wrap: anywhere; }
+  .modal-actions { flex-wrap: wrap; }
+  .modal-actions .btn { flex: 1 1 130px; white-space: normal; }
+  /* Поля окна столбиком: ширина «в ряду» (flex-basis) в столбике становилась бы высотой */
+  .modal .row > * { flex-basis: auto !important; }
+  /* Суммы в окнах не рвутся на «150 / сомони» */
+  .modal .total-row > :last-child { white-space: nowrap; margin-left: auto; }
+  /* Чек на экране (TicketView) в окнах: итог переносится, строки товара не рвут сумму */
+  .modal .tk-total { flex-wrap: wrap; row-gap: 2px; }
+  .modal .tk-total > span:last-child { margin-left: auto; }
+  .modal .tk-row > span:first-child { flex: 1 1 0; }
+
+  /* ── Сообщения: на всю ширину экрана, а не в половину (left: 50% ужимал их до 160 px) ── */
+  .toast { width: max-content; max-width: calc(var(--vw, 1vw) * 100 - 24px); }
+  /* Открыто окно-шторка снизу — сообщение сверху, иначе легло бы на кнопки окна */
+  html:has(.overlay) .toast { top: 12px; bottom: auto; animation-name: down; }
+
+  /* ── Касса: итог и «Провести продажу» всегда внизу (Pos.jsx, .kassa-mbar) ── */
+  .kassa-mbar {
+    display: flex; align-items: center; gap: 10px;
+    position: fixed; left: 0; right: 0; bottom: var(--app-foot-h); z-index: 35;
+    padding: 8px 12px; background: var(--card); border-top: 1px solid var(--border);
+    box-shadow: 0 -8px 18px -12px rgba(0, 0, 0, 0.4);
+  }
+  .kmb-sum { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
+  .kmb-sum span { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .kmb-sum b { font-size: 21px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .kmb-sum small { font-size: 12px; font-weight: 600; color: var(--danger); white-space: nowrap; }
+  .kassa-mbar .kmb-pay { flex: 1 1 auto; min-height: 48px; font-size: 15px; white-space: normal; }
+  /* Кнопка в панели оплаты на телефоне не нужна — она в полосе */
+  .kassa .kassa-deystviya { display: none; }
+  /* Место под полосой: последний блок чека не прячется под ней */
+  .kassa.has-mbar { padding-bottom: 76px; }
+  html.has-foot.kassa-open .toast { bottom: calc(var(--app-foot-h) + 80px); }
+}
+@media screen and (max-width: 380px) {
+  .table-cards tbody tr { padding: 11px 12px; }
+  .table-cards tbody td { font-size: 13px; }
+  .kmb-sum b { font-size: 19px; }
+  .kassa-mbar .kmb-pay { font-size: 14px; padding-left: 10px; padding-right: 10px; }
+}
+
+/* ── Телефон 320–450 px: Товары, склад, сроки годности (17.11.2026) ── */
+@media screen and (max-width: 600px) {
+  /* ── Товары: строки карточками (Products.jsx, .prod-table) ──
+     Шапки у карточек нет, но «Отметить все» для ценников нужно и на телефоне: от шапки
+     остаётся одна галочка, подпись к ней — из data-label (на компьютере её нет) */
+  .prod-table thead, .prod-table thead tr { display: block; }
+  .prod-table thead th { display: none; }
+  .prod-table thead th.cell-check { display: block; width: auto !important; padding: 0 0 8px 15px; border: 0; }
+  .prod-table .sel-all {
+    display: inline-flex; align-items: center; gap: 10px; min-height: 40px; padding-right: 10px; cursor: pointer;
+    font-size: 13.5px; font-weight: 600; color: var(--muted); text-transform: none; letter-spacing: normal;
+  }
+  .prod-table .sel-all::after { content: attr(data-label); }
+  /* Как галочки карточек (index.css: 24 px) и на одной линии с ними */
+  .prod-table .sel-all input { width: 24px; height: 24px; margin: 0; }
+  /* Ничего не найдено — и отмечать нечего */
+  .prod-table:has(td.empty) thead { display: none; }
+  /* Галочка — слева от названия, в одной строке с ним (как «Отметить все» над карточками):
+     отдельная строка под одну галочку только удлиняла бы каждую карточку. Место нажатия —
+     квадрат 44×44 вокруг неё (подпись .sel-box): в саму галочку пальцем не попасть. Галочка —
+     посередине квадрата, под «Отметить все» и вровень с первой строкой названия */
+  .prod-table tbody tr { position: relative; }
+  .prod-table tbody td.cell-check { position: absolute; left: 4px; top: 0; padding: 0; }
+  .prod-table .sel-box { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; cursor: pointer; }
+  .prod-table tbody td.cell-check .sel-box input[type='checkbox'] { margin: 0; }
+  .prod-table tbody td.cell-check + td.cell-main { padding-left: 34px; }
+  /* С фото название стоит ниже (кружок 34 px) — галочка на одной линии с ним */
+  .prod-table tbody tr:has(.foto-mini) td.cell-check { top: 7px; }
+  /* Кнопки карточки (этикетка, история, изменить, удалить) — значок и подпись под ним (на
+     телефоне всплывающих подсказок нет, а «ярлык» и «часы» сами по себе не говорят, что
+     делают): в ряд по ширине карточки, одной высоты, под палец. Ширина — по подписи: на 320 px
+     четыре подписи 12 px помещаются только так. Слово не рвётся посередине (в карточке перенос
+     «где угодно» — для длинных названий), а из двух слов («Тағйир додан») — в две строки */
+  .prod-table td.cell-actions { gap: 4px; align-items: stretch; flex-wrap: nowrap; }
+  .prod-table td.cell-actions .btn.icon {
+    flex: 1 1 auto; min-width: 44px; max-width: 96px; min-height: 48px;
+    flex-direction: column; gap: 3px; padding: 6px 0;
+  }
+  .prod-act-cap { font-size: 12px; font-weight: 500; line-height: 1.15; white-space: normal; overflow-wrap: normal; word-break: normal; text-align: center; }
+  /* «—» без срока — в строку с подписью (пояснения-блоки, как тип под категорией, — ниже) */
+  .prod-table tbody td > span.tag-cat { flex: 0 1 auto; }
+
+  /* ── Товары: полоса поиска и категорий (Products.jsx, .prod-stick) ── */
+  /* «Ещё» — блоком, а не строкой текста: высота под рядом — ровно высота кнопки (8 + 40 px, по
+     ней посчитан запас ниже) */
+  .prod-stick .chips-more-btn { display: flex; width: fit-content; }
+  /* Полоса прилипла (листают список): категории — один ряд, «Ещё» — справа в том же ряду:
+     полоса на 94 px ниже, списку больше места. Место полосы на странице при этом прежнее
+     (запас снизу — margin: 6 px свои + 94 − 1 px рамки прилипшей полосы): иначе список прыгал
+     бы на 94 px при каждом прилипании, а короткий — у самого низа дёргался бы туда-сюда.
+     Высоты — из index.css: ряд кнопок 38 px, два ряда — 86 px, «Ещё» — 8 + 40 px */
+  .prod-stick.is-stuck:has(> .chips-more-btn[aria-expanded='false']) {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; align-items: center;
+    margin-bottom: calc(6px + 93px);
+  }
+  .prod-stick.is-stuck:has(> .chips-more-btn[aria-expanded='false']) > .toolbar { grid-column: 1 / -1; }
+  .prod-stick.is-stuck:has(> .chips-more-btn[aria-expanded='false']) > .chips-more { max-height: 40px; }
+  .prod-stick.is-stuck:has(> .chips-more-btn[aria-expanded='false']) > .chips-more-btn { margin-top: 0; }
+  /* Выбранная категория в свёрнутом ряду — первой (index.css) и видна всегда: длинное название
+     в один ряд — с многоточием */
+  .prod-stick.is-stuck .prod-chips:not(.open) .chip.active { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Отмеченные товары — полоса внизу экрана, над «Меню» (Products.jsx, только на телефоне):
+     «Выбрано: N» и «Ценники» всегда под рукой, пока листают и отмечают. Кнопка «Ценники» в шапке
+     раздела тогда не нужна; под полосой — место, чтобы последняя карточка и сообщения не прятались */
+  .prod-selbar {
+    display: flex; align-items: center; gap: 10px;
+    position: fixed; left: 0; right: 0; bottom: var(--app-foot-h); z-index: 35;
+    padding: 8px 12px; background: var(--card); border-top: 1px solid var(--border);
+    box-shadow: 0 -8px 18px -12px rgba(0, 0, 0, 0.4);
+  }
+  .prod-selbar .btn { min-height: 44px; }
+  .prod-selbar .btn.icon { min-width: 44px; }
+  .prod-selbar-n { flex: 1 1 auto; min-width: 0; font-size: 14px; color: var(--muted); }
+  .prod-selbar-n b { color: var(--text); font-size: 16px; }
+  html:has(.prod-selbar) .prod-cenniki-top { display: none; }
+  html:has(.prod-selbar) .main { padding-bottom: calc(var(--app-foot-h) + 62px); }
+  html:has(.prod-selbar) .toast { bottom: calc(var(--app-foot-h) + 74px); }
+
+  /* Фото во весь экран (Lightbox): полоса «Меню» внизу оставалась поверх затемнения и ловила
+     нажатия — пока смотрят фото, её нет */
+  html:has(.lightbox) .app-foot { display: none; }
+
+  /* ── Карточки сверху (Склад, Срок годности) ──
+     На компьютере — три в ряд (задано в разметке). На телефоне три в ряд не помещаются, а
+     столбиком обычные карточки заняли бы пол-экрана над списком: здесь каждая — низкой
+     строкой, значок слева. Нажатие, как и прежде, открывает подробности */
+  .sklad-cards, .exp-cards { grid-template-columns: minmax(0, 1fr) !important; gap: 8px; }
+  .sklad-cards .metric, .exp-cards .metric {
+    display: grid; align-items: center; align-content: center; column-gap: 12px; row-gap: 2px; padding: 11px 14px; min-height: 56px;
+  }
+  .sklad-cards .metric-head, .exp-cards .metric-head { display: contents; }
+  .sklad-cards .ic-box, .exp-cards .ic-box { grid-area: ic; }
+  .sklad-cards .label, .exp-cards .label { grid-area: label; padding-top: 0; font-size: 13.5px; }
+  .sklad-cards .sub, .exp-cards .sub { grid-area: sub; font-size: 12px; }
+  .sklad-cards .value, .exp-cards .value { grid-area: value; }
+  /* Склад: суммы бывают длинными («1 234 567 сомони») — число под подписью, во всю строку */
+  .sklad-cards .metric { grid-template-columns: 34px minmax(0, 1fr); grid-template-areas: "ic label" "ic value"; }
+  .sklad-cards .value { font-size: 20px; overflow-wrap: anywhere; }
+  /* Третьей строки («нажмите для деталей», «наименований») нет: карточка — около 56 px, как в
+     «Сроках», и список товаров склада ближе к верху экрана. Что карточка нажимается, видно
+     и без подписи — как в «Сроках» */
+  .sklad-cards .sub { display: none; }
+  /* Сроки: числа короткие (сколько товаров) — подпись слева, число справа, в одну строку */
+  .exp-cards .metric { grid-template-columns: 34px minmax(0, 1fr) auto; grid-template-areas: "ic label value"; }
+  .exp-cards .value { font-size: 20px; text-align: right; }
+
+  /* ── Склад ── */
+  /* Кнопки раздела (Sklad.jsx, .sklad-acts): были три неровных ряда справа. Теперь «Экспорт» и
+     «Печать» — значками в строке названия, «Приход на склад» и «Поправить остаток» — рядом,
+     «В магазин» — во всю ширину (третья кнопка без пары). Обёртки на телефоне — сетка
+     (!important — против display: contents в разметке: на компьютере обёртки как бы нет) */
+  .page-acts:has(.sklad-acts) .pa-btns { display: contents; }
+  .page-acts:has(.sklad-acts) .pa-btns > .btn { order: 1; }
+  .page-acts .sklad-acts {
+    display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px;
+    flex: 1 1 100%; order: 2;
+  }
+  .page-acts .sklad-acts:empty { display: none !important; }
+  .page-acts .sklad-acts .btn { min-height: 44px; padding-left: 8px; padding-right: 8px; white-space: normal; text-align: center; line-height: 1.2; }
+  .page-acts .sklad-acts .btn:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  /* Значок вкладки — в строку с подписью (svg по всему сайту — блоком: значок вставал над словом) */
+  .sklad-tabs .chip svg { display: inline-block; }
+  /* Итог — карточкой с подписями: полосы фона и черта строки итога здесь лишние */
+  .sklad-table tfoot .zak-total td { background: none; border-top: 0; }
+  /* «Поправить остаток» в карточке — квадрат под палец, как кнопки карточки товара */
+  .sklad-table tbody td.cell-actions .btn { min-width: 44px; min-height: 44px; }
+  /* «Закупочная» и «Срок» в «Поправить остаток» — столбиком: ширина от строки (160 px)
+     в столбике стала бы высотой и раздвинула бы окно */
+  .sklad-edit-row > .field { flex: 0 0 auto !important; }
+  /* «Поправить остаток»: название словом без пробелов переносится, а не выталкивает «Другой
+     товар» за край окна */
+  .total-row:has(> .sklad-edit-name) { gap: 10px; }
+  /* white-space — против общего «сумма в окне не рвётся» (index.css, .modal .total-row > :last-child):
+     окно, открытое с карточки, — без «Другой товар», и название там последнее в строке */
+  .modal .total-row > .sklad-edit-name { min-width: 0; overflow-wrap: anywhere; white-space: normal; margin-left: 0; }
+  .sklad-edit-name + .btn { flex-shrink: 0; }
+  /* Перенос со склада (SkladPerenos.jsx; в окне «В магазин» и в приходе — «Свой склад»): поля
+     «сколько» — своей ширины, под палец (общее правило ужимало их до 60 % подписи — 58 px), ряд
+     прижат вправо, как остальные значения карточки. «уп + шт» не влезли рядом с подписью —
+     следующей строкой, тоже справа */
+  .table-cards tbody td .sklad-qty { margin-left: auto; justify-content: flex-end; gap: 10px; }
+  .table-cards tbody td .sklad-qty input:not([type='checkbox']):not([type='radio']) { width: 64px; max-width: none; min-height: 40px; }
+  /* В окне «В магазин» итог и «Перенести в магазин» прижаты к низу окна: при большом складе
+     кнопка иначе уезжала под все карточки. «Отмена» и «Перенести» — в один ряд: длинная
+     подпись переносится внутри кнопки */
+  .modal .sklad-perenos .modal-actions {
+    position: sticky; bottom: -18px; z-index: 2;
+    margin: 8px -18px -18px; padding: 10px 18px 18px;
+    background: var(--card); border-top: 1px solid var(--border);
+  }
+  .modal .sklad-perenos .modal-actions > .tag-cat { flex: 1 1 100%; }
+  .modal .sklad-perenos .modal-actions .btn { white-space: normal; line-height: 1.2; }
+  .modal .sklad-perenos .modal-actions .btn.ghost { flex: 0 0 auto; }
+  .modal .sklad-perenos .modal-actions .btn.green { flex: 1 1 0; min-width: 0; }
+
+  /* ── Списки в окнах — без своей прокрутки: листается всё окно ──
+     Окно на телефоне и так листается; прокрутка внутри прокрутки ловила палец и прятала
+     кнопки окна (движение товара, перенос в магазин, подробности склада и сроков, этикетки).
+     Перенос со склада на странице прихода — так же: листается страница */
+  .okno-list { max-height: none !important; overflow: visible !important; }
+  .cn-rows { max-height: none; overflow: visible; border: 0; border-radius: 0; }
+  /* Лист A4 этикеток — так же (index.css: 46vh и прокрутка внутри; на 320×568 палец крутил
+     лист, а не окно, и до «Печать» было не долистать). Образец там короткий — две этикетки в
+     ряд, первые четыре (LabelPrint.jsx, A4Obrazec) */
+  .label-print .label-sheet { max-height: none; overflow: visible; }
+  .lp-a4-more { margin-top: 6px; }
+  /* Пропущенные строки файла Excel (TovaryIzExcel.jsx; inline-стиль — 160 px с прокруткой) */
+  .excel-skipped-list { max-height: none !important; overflow: visible !important; }
+
+  /* ── Окна этикеток, ценников и движения товара: кнопки прижаты к низу окна ──
+     Списки в них бывают длинными (сотни отмеченных товаров, сотни движений за год) — «Печать»
+     и «Готово» под рукой на любом месте. Отступы окна на телефоне — 18 px: полоса кнопок
+     закрывает их своим фоном, как полоса «Восстановление из копии» в настройках */
+  .label-print .modal-actions, .ph-okno .modal-actions {
+    position: sticky; bottom: -18px; z-index: 2;
+    margin: 8px -18px -18px; padding: 10px 18px 18px;
+    background: var(--card); border-top: 1px solid var(--border);
+  }
+  /* «Шрифт ценника» − / + — под палец */
+  .label-print .nk-step .btn.icon { min-width: 44px; min-height: 44px; }
+  /* Название словом без пробелов не раздвигает этикетку (и лист не листается вбок) */
+  .label-print .label-item .label-name { overflow-wrap: anywhere; max-width: 100%; }
+
+  /* ── Ценники (Cenniki.jsx, .cn-okno) ──
+     Образец на телефоне — над списком (Cenniki.jsx): выбрали размер и шрифт — видно, как
+     выйдет, не листая весь список. Товар — одной строкой: название и цена слева, «сколько»
+     справа (около 60 px вместо 141). Над строками — подписи столбцов «Товар» и «Сколько» */
+  .cn-okno .cn-preview { margin-bottom: 12px; }
+  .cn-okno .cn-rows .table-cards thead { display: block; }
+  .cn-okno .cn-rows .table-cards thead tr,
+  .cn-okno .cn-rows .table-cards tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) 64px; column-gap: 12px; align-items: center; }
+  .cn-okno .cn-rows .table-cards thead tr { padding: 0 13px 4px; }
+  .cn-okno .cn-rows .table-cards thead th { padding: 0; border: 0; background: none; font-size: 12px; }
+  .cn-okno .cn-rows .table-cards thead th:nth-child(2) { display: none; }
+  .cn-okno .cn-rows .table-cards thead th:last-child { width: auto !important; text-align: right; }
+  .cn-okno .cn-rows .table-cards tbody tr { padding: 8px 12px; margin-bottom: 8px; }
+  .cn-okno .cn-rows .table-cards tbody td.cell-main { grid-column: 1; grid-row: 1; padding: 0; font-size: 14px; }
+  /* Штрихкод здесь не нужен: проверяют название, цену и сколько печатать */
+  .cn-okno .cn-rows .table-cards tbody td.cell-main .tag-cat { display: none; }
+  .cn-okno .cn-rows .table-cards tbody td.cn-price { grid-column: 1; grid-row: 2; justify-content: flex-start; padding: 0; font-size: 12.5px; color: var(--muted); }
+  /* display: block — против общей сетки «подпись | поле» (index.css, td:has(> input)) */
+  .cn-okno .cn-rows .table-cards tbody td.cn-qty { grid-column: 2; grid-row: 1 / span 2; display: block; padding: 0; }
+  .cn-okno .cn-rows .table-cards tbody td.cn-price::before, .cn-okno .cn-rows .table-cards tbody td.cn-qty::before { content: none; }
+  .cn-okno .cn-rows .table-cards tbody td.cn-qty input { width: 64px !important; max-width: none; min-height: 40px; text-align: center; }
+
+  /* ── Движение товара (ProductHistory.jsx, .ph-okno) ── */
+  /* Название словом без пробелов переносится (окно листалось вбок) */
+  .ph-head { overflow-wrap: anywhere; }
+  /* Период — прижат к верху окна: сменить его можно, не листая назад. Справа — место под
+     крестиком окна (он тоже прижат к верху, поверх) */
+  .ph-okno .ph-period {
+    position: sticky; top: -18px; z-index: 2;
+    margin-left: -18px; margin-right: -18px; padding: 8px 56px 8px 18px; background: var(--card);
+  }
+  /* Строка движения — короче: «Продажа … −2», ниже «Остаток после», ниже мелко дата и кто */
+  .ph-okno .table-cards tbody tr:not(:has(> td.empty)) {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 2px; align-items: baseline;
+  }
+  .ph-okno .table-cards tbody td.cell-main { grid-column: 1; grid-row: 1; padding-bottom: 4px; }
+  .ph-okno .table-cards tbody td.ph-qty { grid-column: 2; grid-row: 1; justify-content: flex-end; font-size: 16px; }
+  .ph-okno .table-cards tbody td.ph-after { grid-column: 1 / -1; grid-row: 2; }
+  .ph-okno .table-cards tbody td.ph-date { grid-column: 1; grid-row: 3; justify-content: flex-start; }
+  .ph-okno .table-cards tbody td.ph-who { grid-column: 2; grid-row: 3; justify-content: flex-end; }
+  .ph-okno .table-cards tbody td.ph-date, .ph-okno .table-cards tbody td.ph-who { font-size: 12.5px; color: var(--muted); }
+  .ph-okno .table-cards tbody td.ph-qty::before, .ph-okno .table-cards tbody td.ph-date::before,
+  .ph-okno .table-cards tbody td.ph-who::before { content: none; }
+
+  /* Подтверждение удаления товара (Products.jsx): название словом без пробелов переносится */
+  .okno-slovo { display: block; overflow-wrap: anywhere; }
+
+  /* ── Образец наклейки и ценника — во всю ширину, по центру ──
+     Масштаб под ширину экрана считает разметка (Nakleyka.jsx, useMestoObraztsa) */
+  .nk-preview { flex: 1 1 100%; display: flex; justify-content: center; }
+  /* «Свой размер» наклейки и ценника: ширина и высота — рядом, как на компьютере. Ряды полей в
+     окне на телефоне идут столбиком, а здесь два коротких числа: столбиком ширина поля из ряда
+     стала бы высотой (пустые места), а прижатие к низу — прижатием вправо */
+  .modal .nk-custom, .modal .cn-mm { flex-direction: row; gap: 10px; }
+  .modal .cn-mm { align-items: flex-end; }
+  .modal .cn-mm > .field { flex: 1 1 0; min-width: 0; }
+
+  /* ── Карточка товара (ProductForm) ── */
+  /* «+» у категории и типа товара (CategorySelect.jsx, TypeSelect.jsx) — квадрат под палец */
+  .pf-add { min-width: 44px; }
+  /* Наценка: ширина 112 px из ряда цен в столбике стала бы высотой — пустое место под полем */
+  .pf-prices .pf-markup { flex: 0 0 auto; }
+  /* «за 1 шт», «от закупочной» — читаемо */
+  .pf-hint { font-size: 12px; }
+  /* Крестик «убрать аналог» — 13 px, пальцем не попасть: место нажатия — вся высота кнопки-
+     аналога и её правый край (отрицательные поля сохраняют прежний размер кнопки) */
+  .pf-analog-x { min-width: 34px; min-height: 36px; margin: -9px -13px -9px -6px; justify-content: center; align-items: center; }
+
+  /* Новый товар с кассы (NewProductModal): «Добавить позже» — своим рядом, под ним «Отмена» и
+     «Добавить и в корзину» во всю ширину (длинная подпись иначе упиралась бы в край окна) */
+  .np-acts { flex: 1 1 100%; flex-wrap: wrap; }
+  .np-acts .btn { flex: 1 1 auto; }
+  /* Без права «отложить» вместо «Добавить позже» — пустое место: на телефоне оно дало бы пустой ряд */
+  .modal-actions:has(> .np-acts) > span:empty { display: none; }
+
+  /* Товары из Excel (панель владельца сервиса): кнопка «Убрать» — под сводкой файла */
+  .excel-sum-head { flex-wrap: wrap; }
+
+  /* ── Поиск товара: подсказка в поле видна целиком ──
+     Набранный текст остаётся 16 px (иначе iPhone приближает страницу), мельче — только подсказка */
+  .tovar-poisk::placeholder { font-size: 14px; }
+}
+@media screen and (max-width: 380px) {
+  /* Поля карточки здесь уже (index.css: 11px 12px) — галочка следом */
+  .prod-table tbody td.cell-check { left: 2px; top: -1px; }
+  .prod-table tbody tr:has(.foto-mini) td.cell-check { top: 6px; }
+  .prod-table thead th.cell-check { padding-left: 13px; }
+  .tovar-poisk::placeholder { font-size: 13px; }
+}
+
+/* ── Телефон 320–450 px: Приход и поставщики (17.11.2026) ── */
+/* ═════════ Приход товара, поставщики, отчёт поставщиков — на телефоне ═════════
+   Просьба владельца: вбок не листается ничего, всё под палец. Таблицы — карточками (общие
+   правила .table-cards), здесь — то, что нужно именно этим разделам: колонка поставщиков и
+   период — плотнее (до самих поступлений меньше листать), вкладки — по две в ряд, накладная
+   и строки возврата — карточками, списки в окнах — без своей прокрутки внутри окна */
+@media screen and (max-width: 600px) {
+  /* ── Колонка поставщиков ──
+     Кнопки «Свой склад», «Все поступления», «Новый поставщик» — по две в ряд, третья во всю
+     ширину: столбиком они занимали пол-экрана, и до поступлений приходилось долго листать.
+     Три в ряд не годятся: таджикское «Таъминкунандаи нав» в такую плитку не помещается */
+  .prh-side { flex-direction: row; flex-wrap: wrap; gap: 8px; padding: 10px; }
+  .prh-side-btn { flex: 1 1 calc(50% - 4px); min-width: 0; gap: 6px; min-height: 44px; padding: 8px 10px; line-height: 1.25; }
+  .prh-side-btn svg { flex-shrink: 0; }
+  .prh-side-search, .prh-side-list, .prh-side-foot { flex: 1 1 100%; }
+  .prh-side-list button { min-height: 40px; font-size: 14px; }
+  /* Список — без своей прокрутки: на узком экране у него было 220 px и прокрутка внутри
+     страницы. Видно первых пятерых, остальные — по «Ещё» (SupplierColumn.jsx) */
+  .prh-side-list { max-height: none; overflow: visible; }
+  .prh-side-list .prh-side-more { justify-content: center; align-items: center; gap: 6px; color: var(--accent-dark); font-weight: 600; }
+  /* Название — целиком, хоть в две строки, а не обрубком с многоточием: всплывающей подсказки
+     на телефоне нет, и «ООО «Фарм-Импорт Ду…» от похожих было не отличить. Долг — справа,
+     вровень с первой строкой названия */
+  .prh-side-list button:not(.prh-side-more) { align-items: baseline; }
+  .prh-side-name { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+
+  /* ── Период: «с» и «по» рядом, кнопки — пополам, быстрый выбор — ровной сеткой ──
+     Раньше поля и кнопки переносились как придётся: «по» уезжало на новую строку, «Всё
+     время» — одно на целой строке */
+  .prh-period { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; padding: 12px; }
+  .prh-period-label, .prh-period-chips, .prh-period > .tag-cat { grid-column: 1 / -1; }
+  .prh-period-f { display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-width: 0; }
+  .prh-period-f > span { font-size: 12px; font-weight: 600; }
+  .prh-period-f input { width: 100%; min-width: 0; padding: 9px 8px; }
+  .prh-period > .btn { width: 100%; }
+  .prh-period-chips { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-left: 0; }
+  .prh-period-chips .chip { padding: 8px 4px; text-align: center; }
+
+  /* ── Вкладки прихода и формы — по две в ряд одинаковой ширины; последняя без пары —
+     во всю ширину. Длинная подпись («Новое поступление») переносится внутри вкладки ── */
+  .prh-tabs button, .prh-subtabs button { flex: 1 1 40%; min-width: 0; gap: 6px; padding: 9px 8px; }
+  .prh-subtabs { padding: 8px; }
+  /* Значок и число на вкладке не сжимаются вместе с подписью: на 320 px значок «Новое
+     поступление» был 12 px, по-таджикски «Баргардонидан» — 10 px, а рядом с числом пропадал */
+  .prh-tabs button svg, .prh-subtabs button svg, .prh-tabs .prh-badge, .prh-subtabs .prh-badge { flex-shrink: 0; }
+  /* На вкладке «Новое поступление» период ни на что не влияет — его там нет, до формы ближе */
+  .prh-main-new > .prh-period { display: none; }
+
+  /* Края шапок панелей и поиска — вровень с карточками ниже (у карточек — 12 px) */
+  .prh .prh-panel-head, .prh-sheet-head { padding-left: 12px; padding-right: 12px; }
+  /* Поиск над поступлениями и строками накладной — во всю ширину, как поиск в других разделах */
+  .prh-panel-head .prh-sheet-search, .prh-sheet-head .prh-sheet-search { flex: 1 1 100%; min-width: 0; }
+  .prh-head { padding: 14px 12px 0 !important; }
+  .prh-stick > .stick-pad { padding: 10px 12px 12px !important; }
+  /* Поиск — во всю ширину, выбор поставщика — под ним: рядом с выбором (260 px) поле поиска
+     на 375–450 px сжималось до 50–120 px, в него не помещалось и слово */
+  .prh-stick .toolbar .search { flex: 1 1 100%; }
+  .prh-stick .toolbar select { flex: 1 1 100%; max-width: none !important; }
+
+  /* ── Карточки таблиц этих разделов ── */
+  /* Значение, которому не хватило места рядом с подписью («Поставщик: ООО «Фарм-Импорт
+     Душанбе»»), уходит под подпись и стоит справа, как остальные значения, а не прыгает влево */
+  .prh .table-cards td[data-label], .prh-okno .table-cards td[data-label], .table-cards.prh-cards td[data-label] { justify-content: flex-end; }
+  .prh .table-cards td[data-label]::before, .prh-okno .table-cards td[data-label]::before, .table-cards.prh-cards td[data-label]::before { margin-right: auto; }
+  /* Кнопки-значки строки (корзина, карандаш) — под палец, а не узкой полоской */
+  .prh .table-cards td.cell-actions .btn.icon, .prh-okno .table-cards td.cell-actions .btn.icon, .table-cards.prh-cards td.cell-actions .btn.icon { min-width: 44px; }
+  /* Значок в подписи («на склад» в карточке поступления) — в одной строке с текстом */
+  .prh .table-cards .tag-cat svg { display: inline-block; }
+  /* Длинное примечание к оплате переносится, а не уезжает за край карточки */
+  .prh .table-cards tbody td.cell-main, .prh-okno .table-cards tbody td.cell-main { white-space: normal !important; }
+
+  /* ── Накладная и строки возврата — карточками ──
+     Таблица шириной 900 px листалась вбок. Карточка — строка накладной: галочка и № сверху,
+     название крупно, ниже подписи; нажатие по карточке открывает строку в форме, как и
+     щелчок по строке на компьютере. Своей прокрутки у списка нет — листается страница */
+  .prh-grid-wrap { max-height: none; min-height: 0; overflow: visible; }
+  .prh-sheet .prh-grid-wrap { border-top: 0; padding: 0 12px 12px; }
+  .prh-grid.table-cards, .prh-ret-grid .prh-grid.table-cards { min-width: 0; font-size: 14px; }
+  .prh-grid.table-cards tbody tr { position: relative; cursor: pointer; }
+  .prh-grid.table-cards tbody td { white-space: normal; }
+  .prh-grid.table-cards td.prh-c-name { max-width: none; overflow: visible; text-overflow: clip; }
+  .prh-grid.table-cards td.prh-c-code { font-size: 13px; }
+  /* № строки — в правом верхнем углу карточки, напротив галочки */
+  .prh-grid.table-cards tbody td.prh-c-n { position: absolute; top: 12px; right: 14px; padding: 0; gap: 4px; }
+  /* В возврате галочки нет — № встаёт над названием, а не поверх него */
+  .prh-ret-grid .prh-grid.table-cards tbody td.prh-c-name { padding-right: 44px; }
+  /* Отмеченная, открытая в форме и только что добавленная строка — цветом всей карточки,
+     а не полосками отдельных ячеек */
+  .prh-grid.table-cards tbody tr.chk td, .prh-grid.table-cards tbody tr.flash td, .prh-grid.table-cards tbody tr.sel td { background: none; }
+  .prh-grid.table-cards tbody tr.sel td:first-child { box-shadow: none; }
+  .prh-grid.table-cards tbody tr.chk { background: var(--blue-soft); }
+  .prh-grid.table-cards tbody tr.flash { background: var(--gold-soft); }
+  .prh-grid.table-cards tbody tr.sel { background: var(--accent-soft); border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+  .prh-grid.table-cards td.prh-c-act { width: auto; padding: 10px 0 0 !important; }
+  .prh-grid.table-cards td.prh-c-act .btn.icon { width: 44px; min-height: 40px; }
+  /* Итог — карточкой: без липкого низа таблицы и фона ячеек */
+  .prh-grid.table-cards tfoot td { position: static; background: none; border-top: 0; white-space: normal; padding: 3px 0; }
+  /* «Строк пока нет» — строкой по центру, без карточки */
+  .prh-grid.table-cards tbody tr.prh-empty { background: none; border: 0; padding: 0; margin: 0; cursor: default; box-shadow: none; }
+  .prh-grid.table-cards tbody tr.prh-empty td { display: block; text-align: center; padding: 20px 8px; }
+  .prh-ret-grid { border: 0; border-radius: 0; min-height: 0; }
+
+  /* ── Форма нового поступления ── */
+  /* «Сумма строки», «Цена за 1 шт»: подпись слева, значение справа, как задумано для узкой
+     формы. Строка поля здесь — столбиком, и выравнивание по центру из сетки формы ставило
+     подпись и значение одно под другим посередине */
+  .prh-av .prh-f-info { flex-direction: row; flex-wrap: wrap; align-items: center; }
+  /* Количество упаковками и штуками (килограммами) — оба поля в один ряд, пополам, а не
+     одно под другим: так и читается «2 уп 5 шт» */
+  .prh .prh-qty:has(> .prh-unit + .prh-unit) { flex-wrap: nowrap; }
+  .prh .prh-qty:has(> .prh-unit + .prh-unit) > .prh-unit { flex: 1 1 0; min-width: 0; }
+  .prh .prh-qty:has(> .prh-unit + .prh-unit) > .prh-unit input { width: 100%; min-width: 0; }
+  /* Длинные подписи кнопок («Убрать отмеченные из прихода», таджикское «Оформить возврат»)
+     переносятся, а не вылезают за край */
+  .prh-form .btn, .prh-ret-new .btn { white-space: normal; }
+  /* «Добавить» — первой и во всю ширину; «Очистить форму» и «Убрать строку» — под ней */
+  .prh-av-actions .btn { flex: 1 1 0; min-width: 0; }
+  .prh-av-actions .btn.green { order: -1; flex: 1 1 100%; min-height: 46px; font-size: 15px; }
+  /* Отмеченные строки: «Отметить все строки» и «Снять отметки» — пополам под счётчиком */
+  .prh-sel-head { align-items: stretch; }
+  .prh-sel-head > b { flex: 1 1 100%; }
+  .prh-sel-head .btn { flex: 1 1 0; min-width: 0; }
+  .prh-sel .prh-add-actions .btn { flex: 1 1 100%; }
+  /* Галочки с подписью («На все товары», «В долг», «Оплачено из кассы») — нажимается вся
+     строка, высотой под палец */
+  .prh-check, .prh-check-row { min-height: 40px; }
+  /* Возврат: «Добавить» — во всю ширину рядом со значком «Очистить форму» */
+  .prh-ret-actions .btn.green { flex: 1 1 auto; min-height: 46px; font-size: 15px; }
+  .prh-ret-form .prh-f-price input { width: 100%; }
+  /* Новый товар: «Кол-во в упаковке» и единица — в один ряд и на 320 px. Выбор единицы, упавший
+     под пустое серое поле упаковки, читался как его часть */
+  .prh-av .prh-ctl:has(> #prh-nov-unit) { flex-wrap: nowrap; }
+  .prh-av .prh-ctl > #prh-nov-upp { flex: 0 0 72px; width: 72px; }
+  .prh-av .prh-ctl > #prh-nov-unit { flex: 1 1 auto; min-width: 0; }
+  /* Штрихкод строки накладной — мелкой строкой под названием, а не строкой карточки */
+  .prh-grid.table-cards td.prh-c-name .prh-c-sub { margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+  /* ── Окна прихода ── */
+  /* «Подробно»: «Этикетки», «Ценники» и «Изменить» — во всю ширину окна, а не узким столбиком */
+  .prh-okno .prh-det-acts { flex: 1 1 100%; }
+  /* «Закрыть» в «Приход · детали» и «Возврат поставщику · детали» — последней, во всю ширину */
+  .prh-okno .modal-actions .prh-det-close { flex: 1 1 100%; }
+  /* «Показать все» под списками карточки поставщика (там видно последние 10) */
+  .prh-okno .prh-okno-more { width: 100%; margin-top: 8px; }
+  /* «Долги поставщикам» (окно): строка поставщика — под палец и отделена чертой, сумма — одной
+     строкой справа. Было 17 px вплотную — пальцем легко открыть карточку не того */
+  .prh-okno .total-row.clickable { min-height: 44px; margin: 0; padding: 10px 0; gap: 12px; border-bottom: 1px solid var(--border); }
+  .prh-okno .total-row.clickable > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+  .prh-okno .total-row.clickable > span:last-child { flex-shrink: 0; white-space: nowrap; }
+  /* Телефон поставщика — целиком на следующей строке, а не «+992 44 / 600 70 80» */
+  .prh-okno .total-row.clickable .tag-cat { white-space: nowrap; }
+  /* Списки в окнах не листаются отдельно от окна: две прокрутки одна в другой пальцем не
+     разобрать — листается всё окно */
+  .prh-okno .prh-okno-list { max-height: none !important; overflow: visible !important; }
+  /* Правка прихода: строка — карточкой, поля — под палец. Ширины колонок с компьютера здесь
+     не к месту: ячейка карточки — во всю её ширину */
+  .prh-edit-table tbody td { width: auto !important; }
+  .prh-edit-table tbody td.cell-main { white-space: normal !important; }
+  .prh-edit-qty { flex-wrap: wrap; justify-content: flex-end; }
+  .prh-edit-table .disc-input { width: 84px; min-height: 40px; padding: 8px; }
+  /* Срок рядом с подписью не помещается — под ней во всю ширину, а не обрубком слева */
+  .prh-okno .table-cards.prh-edit-table tbody td input[type='date'] { flex: 1 1 100%; max-width: none; }
+
+  /* Подписи, которые читают (плитки долга и баланса, «Поставщик» в итогах прихода), — не
+     мельче 12 px */
+  .prh-bal-cards .m-label, .supd-cards .m-label, .sup-card-cards .m-label, .prh-sum-sup span { font-size: 12px; }
+
+  /* ── Платежи и баланс ── */
+  /* Списки оплат и приходов — карточками в странице, без своей прокрутки */
+  .prh-scroll { max-height: none; overflow: visible; }
+  /* Плитки — по две в ряд (на 450 px вставали по три, и «Телефон» оставался в ряду один);
+     «Долг сейчас» и «Телефон» — во всю ширину: долг одной строкой, номер не рвётся на
+     «+992 44 600 / 70 80», как в карточке поставщика */
+  .prh-bal-cards { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+  .prh-bal-cards > .mini-card:first-child, .prh-bal-cards > .mini-card:last-child { grid-column: 1 / -1; }
+  .prh-bal-cards > .mini-card:first-child .m-value, .prh-bal-cards > .mini-card:last-child .m-value { white-space: nowrap; }
+  /* Сумма и примечание оплаты — друг под другом: в ряд поле суммы сжималось до пары цифр */
+  .sup-pay-row { flex-direction: column; gap: 0; }
+  /* Долги поставщикам: «Всего должны» — во всю ширину, две другие плитки — под ней в ряд */
+  .supd-cards { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .supd-cards > .mini-card:first-child { grid-column: 1 / -1; }
+
+  /* ── Поставщики ── */
+  /* Даты периода в панели «Закупки и оплаты» — целиком: поле узкое, отступы внутри меньше */
+  .period[data-tour="sup.period"] .period-f input { padding-left: 8px; padding-right: 8px; }
+  /* Вкладки «Поставщики · Долги поставщикам»: значок — в строке с подписью, а не над ней */
+  .sup-tabs .chip { display: inline-flex; align-items: center; flex-wrap: wrap; }
+  .sup-tabs .chip svg { display: inline-block; flex-shrink: 0; }
+  /* Карточка поставщика: телефон — во всю ширину, номер не рвётся на две строки */
+  .sup-card-cards { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+  .sup-card-cards > .mini-card:last-child { grid-column: 1 / -1; }
+  /* «Список поставщиков» на телефоне стоит первым, перед лентой закупок (Suppliers.jsx) */
+  .panel[data-tour="sup.list"] { margin-bottom: 16px; }
+  /* Выбор поставщика ленты — в шапке панели во всю ширину: закреплён при прокрутке только поиск */
+  .sup-zak-filter { margin-top: 10px; }
+  .sup-zak-filter select { width: 100%; max-width: none !important; }
+  /* Отчёт поставщиков: ссылка «Поставщики» в пояснении — целью под палец (была 80×16 px) */
+  .spr-note .linklike { min-height: 40px; padding: 0 6px; vertical-align: middle; }
+
+  /* Итог закупок и сверки — карточкой: без фона и рамки ячеек строки «Итого» */
+  .prh-cards tfoot tr.zak-total td { background: none; border-top: 0; }
+  /* Оплата долга и возврат в закупках — цветом всей карточки, а не полосками строк */
+  .table-cards.prh-cards tbody tr.zak-pay { background: var(--green-soft); }
+  .table-cards.prh-cards tbody tr.zak-ret { background: var(--danger-soft); }
+  .table-cards.prh-cards tbody tr.zak-pay td, .table-cards.prh-cards tbody tr.zak-ret td { background: none; }
+  /* «Оплата долга · примечание»: значок — слева от подписи, длинная подпись переносится рядом
+     с ним, а не уезжает под значок */
+  .table-cards.prh-cards .zak-pay-name { flex-wrap: nowrap; align-items: flex-start; }
+  .table-cards.prh-cards .zak-pay-name svg { flex-shrink: 0; margin-top: 3px; }
+}
+
+@media screen and (max-width: 380px) {
+  /* Быстрый выбор периода — два на два: четыре в ряд не помещаются («Сегодня» рвалось
+     посреди слова). В «Поставщиках» период стоит в панели — там места ещё меньше */
+  .prh-period-chips, .period[data-tour="sup.period"] .chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ── Телефон 320–450 px: Касса (17.11.2026) ── */
+/* ── Касса на телефоне: всё под палец, ничего не листается вбок ──
+   Просьба владельца: «мобильная версия максимально удобная». На кассе в телефон тычут
+   пальцем на ходу, у прилавка, поэтому кнопки здесь не меньше 40 px, а цифры — крупные.
+   Клавиш на телефоне нет — подсказки по ним только занимали бы место.
+   Чек ниже — своими карточками (index.css, «Строки чека карточками»): общая разметка
+   таблиц-карточек (.table-cards) ему не подходит — в строке чека не подписи со значениями,
+   а кнопки и поля, и стоять им удобнее в один ряд. */
+@media screen and (max-width: 600px) {
+  /* ── Поле сканера ── */
+  /* Кнопка камеры — квадратная, вровень с полем: подпись «Камера» на телефоне спрятана */
+  .kassa .scan-line { gap: 8px; }
+  .kassa .scan-line .btn { width: 50px; padding: 0; justify-content: center; }
+
+  /* Подсказки по клавишам (↑ ↓ + − Del F2…F9): клавиатуры у телефона нет */
+  .kassa .kassa-keys, .kassa .kbd { display: none; }
+
+  /* ── «Чек | Каталог» и вкладки чеков ── */
+  .kassa .kassa-switch button { min-height: 44px; font-size: 15px; }
+  /* Тёмная тема: выбранная вкладка была темнее дорожки (фон карточки на более светлом
+     --track) и читалась «наоборот» — выбор угадывался только по яркости текста. Выбранная —
+     светлее дорожки и с золотой чертой снизу, как шапка каталога */
+  :root[data-theme='dark'] .kassa .kassa-switch button.active {
+    background: var(--border-strong); color: #fff; box-shadow: inset 0 -3px 0 var(--gold);
+  }
+  .kassa .chek-tab-main { min-height: 42px; font-size: 14.5px; }
+  /* Крестик «закрыть чек» был шириной в 29 px — промахнуться легко, а промах стирает чек */
+  .kassa .chek-tab .chek-x { min-width: 40px; }
+  .kassa .chek-new { min-height: 42px; font-size: 14px; }
+  .kassa .chek-count { min-width: 21px; height: 21px; font-size: 12px; }
+  /* «Чек изменился»: крестик под палец */
+  .kassa .kassa-izm .chek-x { width: 36px; height: 36px; margin: -7px -7px -7px 0; }
+
+  /* ── Строка чека — карточка ──
+     Сверху название и сумма, ниже в ряд: упаковки «− 1 +», штуки, скидка и корзинка.
+     Не поместились (делимый товар на узком телефоне) — скидка с корзинкой уходят вторым рядом */
+  .kassa-table td[data-label]::before { font-size: 11px; margin-bottom: 5px; }
+  .kassa-table .kt-name b { font-size: 15px; line-height: 1.3; }
+  .kassa-table .kt-name .tag-cat { font-size: 12.5px; margin-top: 2px; }
+  .kassa-table .kt-sum b { font-size: 15.5px; }
+  .kassa-table .kt-sum .tag-cat { font-size: 12.5px; }
+  .kassa-table .qty-ctrl { gap: 4px; }
+  .kassa-table .qty-ctrl button { width: 40px; height: 40px; border-radius: 9px; }
+  .kassa-table .qty-ctrl b { min-width: 24px; text-align: center; font-size: 16px; }
+  .kassa-table .disc-input { width: 72px; height: 40px; padding: 6px 8px; }
+  .kassa-table .ves-cell .disc-input { width: 84px; }
+  .kassa-table .ves-unit { font-size: 14px; }
+  /* Прочерк вместо поля («товар не делится», «скидка не разрешена») на карточке не нужен */
+  .kassa-table .kt-pcs.kt-empty, .kassa-table .kt-disc.kt-empty { display: none; }
+  /* Корзинка — справа, даже если ушла вторым рядом */
+  .kassa-table .kt-del { margin-left: auto; }
+  .kassa-table .kt-del .btn { width: 40px; height: 40px; min-height: 40px; padding: 0; }
+
+  /* ── Итог и скидка на чек ── */
+  .kassa .kassa-itogo { padding: 12px 14px; }
+  /* «Товаров: 3 уп + 1 кг + 1 шт» не помещается в строку — значение переносится справа,
+     а не слипается с подписью */
+  .kassa .kassa-itogo .total-row:not(.big) { gap: 12px; }
+  .kassa .kassa-itogo .total-row:not(.big) span:last-child { text-align: right; }
+  .kassa .chek-skidka .cs-input { flex: 1 1 80px; min-width: 60px; width: auto; min-height: 42px; }
+  .kassa .chek-skidka .cs-mode button { min-height: 36px; padding: 0 13px; font-size: 14px; }
+  .kassa .chek-skidka .cs-x { width: 42px; height: 42px; }
+
+  /* ── Оплата ── */
+  .kassa .kassa-oplata .pay-methods button { min-height: 46px; font-size: 14px; }
+  /* Выбрали способ оплаты — экран подъезжает к тому, что под ним появилось (Pos.jsx,
+     vybratOplatu). Запас снизу — полоса «Итого» и полоса внизу окна: без него блок вставал
+     ровно у нижнего края, под ними */
+  .kassa [data-tour='pos.pay-via'], .kassa [data-tour='pos.customer'], .kassa [data-tour='pos.received'],
+  .kassa .kassa-klient-kto {
+    scroll-margin-bottom: calc(var(--app-foot-h, 60px) + 80px);
+  }
+  .kassa .kp-input { min-height: 46px; min-width: 84px; font-size: 18px; }
+  /* «Сдача 1 224,5 сомони» рядом с полем на узком телефоне не помещается — тогда она
+     уходит строкой ниже, к правому краю, а не за край экрана */
+  .kassa .kp-line { flex-wrap: wrap; row-gap: 4px; }
+  .kassa .kp-sdacha { margin-left: auto; }
+  /* Купюры — ровной сеткой, как клавиши: одинаковые крупные кнопки, ряд заполнен целиком.
+     «Без сдачи» (всегда первая) — шириной в две клетки */
+  .kassa .kp-bills { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 6px; }
+  .kassa .kp-bills button { min-height: 42px; padding: 8px 4px; font-size: 14.5px; }
+  .kassa .kp-bills button:first-child { grid-column: span 2; }
+  /* В долг: длинное имя клиента не раздвигает строку шире экрана */
+  .kassa .kassa-klient select { flex: 1 1 auto; min-width: 0; min-height: 44px; }
+  .kassa .kassa-klient .btn { width: 46px; min-height: 44px; flex-shrink: 0; }
+  /* …а под списком выбранный клиент — целиком, с текущим долгом и телефоном (Pos.jsx): в самом
+     списке имя обрезано на полуслове, и не проверить, тому ли пишется долг */
+  .kassa .kassa-klient-kto {
+    display: flex; flex-direction: column; gap: 2px; margin-top: 8px; padding: 9px 12px;
+    border: 1px solid var(--border); border-radius: 9px; background: var(--soft);
+    font-size: 14px; line-height: 1.35; overflow-wrap: anywhere;
+  }
+  .kassa .kassa-klient-kto span { font-size: 13px; color: var(--muted); }
+  /* Перевод: сервисы — крупными плашками */
+  .kassa [data-tour='pos.pay-via'] .chip { min-height: 40px; padding: 8px 14px; font-size: 14px; }
+
+  /* «Смена не открыта — … Открыть смену»: ссылка в строке была целью в 26 px — на телефоне
+     это обычная кнопка своей строкой */
+  .kassa .kassa-stop .linklike {
+    min-height: 40px; padding: 0 14px; margin-top: 8px;
+    border: 1px solid var(--accent); border-radius: 9px; background: var(--card); color: var(--accent-dark); font-size: 14px;
+  }
+
+  /* ── Полоса «Итого + Провести продажу» (index.css, .kassa-mbar) ── */
+  .kmb-sum span, .kmb-sum small { font-size: 12px; }
+  /* «сомони» после суммы — мельче числа, как в табло «Итого» */
+  .kmb-sum .kmb-cur { font-style: normal; font-size: 0.68em; font-weight: 700; }
+  /* «Не хватает 24 626 сомони» одной строкой на 320 px залезала на «Провести продажу» (на
+     таджикском — на 14 px). Теперь «Не хватает» и сумма переносятся двумя строками (сумма —
+     неразрывно, .kmb-nw), а колонка не бывает уже своего текста: сужается кнопка, её
+     подпись переносится */
+  .kassa-mbar .kmb-sum { min-width: auto; }
+  .kassa-mbar .kmb-sum small { white-space: normal; }
+  .kassa-mbar .kmb-sum .kmb-nw { font-size: inherit; font-weight: inherit; letter-spacing: normal; text-transform: none; color: inherit; white-space: nowrap; }
+  /* «Продажи закрыты» — не бледное золото «выключено», а явная красная остановка */
+  .kassa-mbar .kmb-pay.kmb-stop:disabled {
+    opacity: 1; background: var(--danger-soft); border-color: var(--danger); color: var(--danger); cursor: default;
+  }
+
+  /* ── Сообщения (тосты) на кассе ──
+     Над полосой «Итого» сообщение стояло прямо на рабочем месте: закрывало только что
+     выбранного клиента, купюры, последнюю строку чека. На телефоне оно встаёт сверху, как
+     на широкой кассе. Ширина — по тексту, до краёв экрана с отступом: общее правило давало
+     ему не больше половины экрана, и «Смена не открыта: Нет связи…» шла столбиком в девять
+     строк. Светлая обводка — чтобы тёмное сообщение не терялось на тёмном табло «Итого» */
+  html.kassa-open .toast, html.has-foot.kassa-open .toast {
+    top: max(10px, env(safe-area-inset-top)); bottom: auto; animation-name: down;
+    left: 50%; right: auto; margin: 0; transform: translateX(-50%);
+    width: max-content; max-width: calc(var(--vw, 1vw) * 100 - 24px);
+    line-height: 1.4; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.35);
+  }
+  html.kassa-open .toast .ic { flex-shrink: 0; }
+
+  /* ── Каталог ── */
+  .kassa .kc-cats-head { min-height: 46px; font-size: 14px; }
+  .kassa .kc-cats-hint { font-size: 13px; }
+  /* Выбранная категория в шапке видна целиком (переносом), а не «Антибиот…»: в свёрнутой
+     шапке это единственное место, где её видно */
+  .kassa .kc-cats-title { white-space: normal; overflow-wrap: anywhere; }
+  .kassa .kc-cats .chip { font-size: 13.5px; }
+  /* Два ряда плашек (2 × 36 + промежуток 6 + отступ снизу 8), остальные — по «Ещё»
+     (components/ChipsMore.jsx). Общая высота для «Ещё» (82) срезала бы низ второго ряда */
+  .kassa-catalog .kc-cats.chips-more:not(.open) { max-height: 86px; }
+  /* В двух свёрнутых рядах длинное название — одной строкой с многоточием: плашка в две
+     строки выходила выше ряда (46 px), и её низ срезался вместе с рамкой. Целиком название
+     видно в раскрытом списке («Ещё») и в шапке «Категории: …» после выбора */
+  .kassa-catalog .kc-cats.chips-more:not(.open) .chip {
+    max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
+  /* «Ещё» — на тёмно-синей шапке каталога: золотом, как стрелка «Категории» */
+  .kassa-catalog .chips-more-btn { margin: -2px 10px 6px; min-height: 36px; color: var(--gold); }
+  /* Раскрыт весь список: под ним своя «Свернуть» (до двух рядов). Подсказка «свернуть» в
+     шапке (прячет все плашки) рядом с ней путала — два «свернуть», и делают разное. Пока
+     список раскрыт, подсказки нет; сама шапка нажимается, как прежде */
+  .kassa-catalog .kc-cats-box:has(.chips-more.open) .kc-cats-hint { display: none; }
+  .kassa .kc-row { padding: 11px 12px; }
+  .kassa .kc-name b, .kassa .kc-price { font-size: 15px; }
+  .kassa .kc-name .tag-cat { font-size: 12.5px; }
+  .kassa .kc-note { font-size: 13px; }
+
+  /* ── Полоса внизу окна (AppFoot.jsx, на всех страницах) ──
+     Длинное имя сотрудника обрезалось на полубукве: многоточие ставится на самом имени,
+     у полосы-флекса его не бывает */
+  .app-foot .kf-user b { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ── Окно «Сканирование камерой» (CameraScanner.jsx) ── */
+  /* «Сфотографировать и распознать» на 320 px едва помещалась в одну строку */
+  .cam-snap { white-space: normal; text-align: center; }
+  /* Ползунок приближения и «Подсветка» — под палец */
+  .cam-tools .btn { min-height: 42px; }
+  .cam-zoom input[type='range'] { min-height: 32px; }
+}
+
+/* 320–380: ряд «− 1 + · скидка · корзинка» должен остаться одним рядом */
+@media screen and (max-width: 380px) {
+  /* Значок в поле сканера стоял поверх подсказки «Наведите сканер…»: место под него
+     (общий узкий отступ поля в index.css про значок не знал) */
+  .kassa .scan-wrap .scan-input { padding-left: 38px; }
+  .kassa .scan-wrap .scan-ic { left: 11px; }
+  .kassa .scan-line .btn { width: 46px; }
+  .kassa-table .qty-ctrl button { width: 38px; height: 38px; }
+  .kassa-table .disc-input { width: 64px; }
+  .kassa-table .ves-cell .disc-input { width: 76px; }
+  .kassa .kassa-oplata .pay-methods button { font-size: 13.5px; }
+  /* В полосе внизу «Провести продажу» — одной строкой: значок галочки уступает место */
+  .kassa-mbar .kmb-pay .ic { display: none; }
+
+  /* Скидка на чек: пока она задана, рядом с полем встаёт крестик «снять». Поле с основой
+     80 px не оставляло ему места, и крестик уходил отдельной строкой — табло вырастало на
+     50 px прямо под пальцами. Поле уже, «сомони | %» плотнее — всё в один ряд */
+  .kassa .chek-skidka .cs-input { flex: 1 1 56px; min-width: 52px; }
+  .kassa .chek-skidka .cs-mode button { padding: 0 10px; }
+
+  /* «Чек 1» и «Отложить чек» — одним рядом. Таджикское «Чекро ба таъхир гузоштан» не
+     помещалось рядом и уходило вторым рядом; теперь подпись переносится внутри кнопки, а
+     короткая (русская) кнопка остаётся своей ширины справа, как была */
+  .kassa .chek-new { flex: 1 1 120px; max-width: max-content; white-space: normal; text-align: center; line-height: 1.25; }
+  /* Шапка корзины: «Корзина» и «5 шт · Очистить корзину» — одной строкой. «Тоза кардани
+     сабад» уводила всю группу второй строкой; теперь подпись кнопки переносится внутри
+     неё (не больше двух строк: уже 110 px кнопка не сжимается — при длинной сводке
+     «Товаров» она уходит строкой ниже внутри группы) */
+  .kassa .kassa-cart h2 .kassa-cart-tools { flex: 1 1 140px; }
+  .kassa .kassa-cart-tools .btn { flex: 1 1 110px; max-width: max-content; white-space: normal; text-align: center; line-height: 1.25; }
+}
+
+/* ── Телефон 320–450 px: Смена, возвраты, долги, отложенные, история скидок (17.11.2026) ── */
+/* ═════════ Смена, возвраты, долги, отложенные, скидки — на телефоне ═════════
+   Таблицы этих разделов на телефоне — карточками (общие правила .table-cards — в index.css,
+   блок «Телефон 320–450 px»). Здесь — то, что нужно только этим разделам и их окнам. */
+@media screen and (max-width: 600px) {
+  /* ── Список без заголовка над ним (должники, штрихкоды, скидки, чеки для возврата) ──
+     Отступ сверху — как по бокам: 4 px общего правила рассчитаны на заголовок над списком,
+     без него первая карточка прижималась к краю панели */
+  .table-cards-wrap:first-child:has(> .table-cards.debt-list, > .table-cards.def-list, > .table-cards.disc-list, > .table-cards.ret-found) { padding-top: 12px; }
+
+  /* ── Карточки-сводки, которые открывают окно (смена: продажи, способы оплаты, «Ожидается в
+     кассе»; скидки: «по товарам», «чеки со скидкой») ──
+     Стрелка после подписи: подсказки при наведении на телефоне нет, и что карточка нажимается,
+     было не видно. Стрелка — рамкой, цветом подписи */
+  .cards.shift-cards .metric.clickable .label::after,
+  .cards.disc-cards .metric.clickable .label::after {
+    content: ''; display: inline-block; width: 7px; height: 7px; margin-left: 7px; vertical-align: 1px;
+    border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg);
+  }
+
+  /* ── Строки «подпись — сумма»: суммы смены под карточками, окно «Ожидается в кассе»
+     (components/Cheki.jsx), «Вернуть покупателю», «Всего скидок выдано» ──
+     Сумма — одной строкой, переносится подпись: по-таджикски подписи длиннее, и сумма
+     рвалась на «−106,5 / сомони». Зазор — чтобы перенесённая подпись не слипалась с суммой */
+  .shift-sums .total-row, .rassh-okno .total-row, .ret-sale .total-row, .disc-okno .total-row { gap: 12px; }
+  .shift-sums .total-row > span:first-child, .rassh-okno .total-row > span:first-child,
+  .ret-sale .total-row > span:first-child, .disc-okno .total-row > span:first-child { min-width: 0; }
+  .shift-sums .total-row > span:last-child, .rassh-okno .total-row > span:last-child,
+  .ret-sale .total-row > span:last-child, .disc-okno .total-row > span:last-child { white-space: nowrap; text-align: right; }
+  /* «Возвраты за смену»: пояснение «наличными …» — своей строкой во всю ширину под строкой,
+     серым, обычным шрифтом и с переносом. Под суммой в одну строку оно раздвигало правую
+     колонку: при шестизначных суммах подпись сжималась до «Возвраты / за / смену», а жирным
+     и чёрным оно было от общего правила последнего span строки. Сумма (span с display:
+     contents) остаётся справа в первой строке, «·» в начале строки не нужна */
+  .shift-sums .total-row:has(> span:last-child > .tag-cat) { flex-wrap: wrap; row-gap: 0; }
+  .shift-sums .total-row > span:last-child:has(> .tag-cat) { display: contents; }
+  .shift-sums .total-row > span:last-child > .tag-cat {
+    flex: 1 0 100%; text-align: right; white-space: normal; font-weight: 400; color: var(--muted-2);
+  }
+  .shift-sums-dot { display: none; }
+  /* Итог крупным шрифтом: не помещается в строку с подписью — сумма уходит строкой ниже,
+     к правому краю. Иначе длинное слово подписи («баргардонидан») наезжало на сумму */
+  .rassh-okno .total-row.big, .ret-sale .total-row.big, .disc-okno .total-row.big { flex-wrap: wrap; row-gap: 2px; }
+  .rassh-okno .total-row.big > span:last-child, .ret-sale .total-row.big > span:last-child,
+  .disc-okno .total-row.big > span:last-child { margin-left: auto; }
+
+  /* ── Чек на экране: чек продажи (components/Cheki.jsx), чек возврата, Z-отчёт ──
+     Итог на тёмной плашке (components/TicketView.jsx): по-таджикски подпись длиннее («Ба
+     харидор баргардонида шуд»), и сумма уезжала за край плашки — теперь она уходит строкой
+     ниже, к правому краю. Бумажный чек рисуется отдельно (печатный слой вне окна) и не меняется */
+  .chek-okno .tk-total, .ret-chek-okno .tk-total, .z-okno .tk-total { flex-wrap: wrap; row-gap: 2px; }
+  .chek-okno .tk-total > span:last-child, .ret-chek-okno .tk-total > span:last-child,
+  .z-okno .tk-total > span:last-child { margin-left: auto; }
+  /* Строки чека «подпись — значение»: место сперва значению, переносится подпись. Иначе
+     «150 сомони» рвалось на «150 / сомони» рядом с длинной таджикской подписью */
+  .chek-okno .tk-row > span:first-child, .ret-chek-okno .tk-row > span:first-child,
+  .z-okno .tk-row > span:first-child { flex: 1 1 0; }
+
+  /* ── Возврат товара ── */
+  /* Пять последних чеков, под ними — «Показать все (40)» во всю ширину (Returns.jsx) */
+  .table-cards-wrap > .ret-more { display: flex; justify-content: center; width: 100%; margin-top: 10px; }
+  /* После «Выбрать» форма поднимается к верху экрана (Returns.jsx) — с небольшим отступом */
+  .ret-sale { scroll-margin-top: 10px; }
+  /* «Что с товаром» — два крупных переключателя вместо списка (Returns.jsx): надпись
+     переносится, а не обрезается краем поля. «Списать» выбрано — цветом предупреждения */
+  .ret-restock { display: grid; gap: 8px; margin-top: 4px; }
+  .ret-restock-opt {
+    display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 9px 12px;
+    border: 1px solid var(--border-strong); border-radius: 10px; background: var(--card);
+    color: var(--text); font-size: 14.5px; font-weight: 500; line-height: 1.3; cursor: pointer;
+  }
+  /* Кружок — своего размера и без рамки поля: общее правило input растягивает поле на всю
+     ширину и рисует вокруг кружка серый квадрат фокуса. Фокус с клавиатуры — рамкой варианта */
+  .ret-restock-opt input {
+    flex: none; width: 20px; height: 20px; min-width: 20px; padding: 0; margin: 0; box-shadow: none; accent-color: var(--accent);
+  }
+  .ret-restock-opt input:focus { box-shadow: none; }
+  .ret-restock-opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .ret-restock-opt.on { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+  .ret-restock-opt.spisat input { accent-color: var(--warn); }
+  .ret-restock-opt.spisat.on { border-color: var(--warn); background: var(--warn-soft); }
+  /* Пока «Вернуть, шт» пусто, выбирать нечего — как прежде у списка */
+  .ret-restock-opt:has(input:disabled) { opacity: 0.55; cursor: default; }
+  /* «Что возвращают»: дата и сумма чека — строкой под заголовком, а не столбиком сбоку */
+  .ret-sale > h2 { flex-wrap: wrap; row-gap: 4px; }
+  .ret-sale > h2 > .tag-cat { flex-basis: 100%; }
+  /* «Можно вернуть, шт» — подписи места побольше: значение рядом короткое («1», «0,5 кг»),
+     а в общих 58% подпись рвалась на «Можно вернуть, / шт» */
+  .table-cards.ret-lines tbody td.num::before { max-width: 78%; }
+  /* Поле «Вернуть, шт» — крупнее, под палец; если длинная подпись (по-таджикски) столкнула
+     его строкой ниже — оно остаётся справа, как все значения карточки */
+  .table-cards.ret-lines tbody td .disc-input { width: 112px; min-height: 42px; margin-left: auto; text-align: center; }
+  /* «Что с товаром» и срок на упаковке — во всю ширину карточки: в 60% ширины выбор
+     обрезался на «Вернуть в пр…» */
+  .table-cards.ret-lines tbody td.cell-wide select,
+  .table-cards.ret-lines tbody td.cell-wide .ret-expiry input { max-width: none; }
+  .table-cards.ret-lines tbody td.cell-wide .ret-expiry { margin-top: 10px; }
+  .table-cards.ret-lines tbody td.cell-wide .ret-expiry input { min-height: 42px; padding: 8px 12px; }
+  .table-cards.ret-lines tbody td.cell-wide .ret-expiry label { font-size: 12.5px; }
+  /* «Чем возвращаем деньги» и «Через какой сервис» — во всю ширину, как всё в панели
+     (ширина 340 px задана в разметке, поэтому — !important) */
+  .ret-sale > .field { max-width: none !important; }
+  /* «Оформить возврат» по-таджикски («Ба расмият даровардани баргардонидан») шире экрана:
+     надпись переносится, а не обрезается по краям кнопки */
+  .ret-sale .modal-actions .btn { white-space: normal; }
+  /* Поиск и даты журнала возвратов (components/JournalFilter.jsx) — общими правилами
+     журналов (styles/m-dengi.css): даты рядом, пока помещаются, иначе одна под другой */
+
+  /* ── Долги клиентов ── */
+  /* Стрелка «открыть историю» — справа от имени: значок по умолчанию блочный и падал
+     отдельной строкой под имя */
+  .table-cards.debt-list tbody td.cell-main { display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 10px; }
+  .table-cards.debt-list tbody td.cell-main svg { width: 20px; height: 20px; flex-shrink: 0; }
+  /* Телефон клиента в карточке — обычным текстом: его читают и набирают */
+  .table-cards.debt-list tbody td.tag-cat { font-size: 14px; color: var(--text); }
+  /* У клиента без долга кассиру нажимать нечего — пустую полосу кнопок не показываем */
+  .table-cards.debt-list tbody td.cell-actions:not(:has(.btn)) { display: none; }
+  /* Окно истории клиента: плитки («Текущий долг», «Куплено в долг», «Погашено») — строками
+     списка: подпись слева, сумма справа одной строкой. Плиткой в ряд сумма рвалась на
+     «1 250,5 / сомони», а подпись была мельче 12 px. Нажатие по строке отбирает операции,
+     как и раньше */
+  .debt-okno .mini-cards { grid-template-columns: 1fr; gap: 6px; }
+  .debt-okno .mini-card { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 11px 14px; }
+  .debt-okno .mini-card .m-label { font-size: 13.5px; min-width: 0; }
+  .debt-okno .mini-card .m-value { margin-top: 0; white-space: nowrap; }
+  /* Значок у «Погашение» — в строку с надписью, а не отдельной строкой под ней */
+  .debt-okno tbody td .ic { display: inline-flex; }
+  /* Шторка истории — во всю свою высоту и не меняет её: при отборе плиткой («Куплено в
+     долг», «Погашено») список короче, шторка садилась ниже, и плитки уезжали из-под пальца.
+     Высота — та же, что предел окна на телефоне (index.css, .modal) */
+  .debt-okno .modal { min-height: calc(var(--vh, 1vh) * 92); }
+  @supports (min-height: 92dvh) { .debt-okno .modal { min-height: calc(var(--vh, 1dvh) * 92); } }
+
+  /* ── История скидок ── */
+  /* Две карточки сверху — одна под другой: рядом подпись рвалась на три строки, а сумма
+     скидок побольше («12 345,5 сомони») уже не помещалась. На компьютере их ряд задан в
+     разметке (style), поэтому здесь — !important */
+  .cards.disc-cards { grid-template-columns: 1fr !important; }
+}
+
+/* ── Телефон 320–450 px: Панель управления и отчёты (17.11.2026) ── */
+/* ── Панель управления, отчёт продаж, отчёт о прибылях и убытках, период ──
+   Просьба владельца: на телефоне ничего не листается вбок, всё под палец. Таблицы этих
+   разделов — карточками (table-cards, общие правила в index.css); здесь — то, что нужно
+   только им: списки в окнах подробностей, период, лист «Показатель — Сумма», заголовки. */
+@media screen and (max-width: 600px) {
+  /* ── Списки в окнах подробностей (панель управления, «Выручка по товарам») ──
+     На компьютере список прокручивается в своём ящике под шапкой окна. На телефоне окно
+     и так листается целиком (снизу во всю высоту): второй ящик внутри оставлял карточкам
+     пару строк и путал палец — какая из двух прокруток сейчас едет */
+  .okno-spisok { max-height: none !important; overflow: visible !important; }
+
+  /* ── Мини-карточки панели управления и отчёта (MC — Dashboard.jsx, Reports.jsx) ──
+     Подпись читают — 12.5 px, как в других разделах. Всегда по две в ряд: у общего правила
+     минимум 130 px, и на 320 px карточки «Аналитики склада» выстраивались столбиком по одной */
+  .mc-otchet .m-label { font-size: 12.5px; }
+  .mini-cards:has(> .mc-otchet) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  /* ── Окна с итогами «подпись — сумма» (прибыль, финансы, карточки ОПУ, расходы, доходы) ──
+     Раньше обе половины сжимались поровну, и «−13 250 / сомони» рвалось посередине.
+     Сетка «1fr auto» решает по порядку: сначала подпись переносится по словам, потом,
+     если и этого мало, «сомони» уходит строкой ниже; число не рвётся никогда */
+  .okno-itogi .total-row { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; }
+  .okno-itogi .total-row > span:last-child { text-align: right; }
+
+  /* ── Поля дат (период отчёта продаж, ОПУ, «Подробно») ──
+     В половине ширины 320 px дата с обычными отступами не помещалась рядом со значком
+     календаря и обрезалась («mm/dd/yyy») */
+  .period-f input, .rep-dates input, [data-tour="opu.period"] input { padding-left: 8px; padding-right: 6px; }
+
+  /* ── Строка над полоской (категории, структура оплат) ──
+     Название и сумма стоят по краям; на 320 px длинное название («Антигистамины · 2 поз.»)
+     сливалось с суммой без пробела. Теперь между ними зазор, а не влезло — сумма уходит
+     строкой ниже, к правому краю */
+  .bar-line { flex-wrap: wrap; gap: 0 10px; }
+  .bar-line > :last-child { margin-left: auto; }
+
+  /* ── Период (components/Period.jsx: отчёт продаж, поставщики, отчёт поставщиков) ──
+     Четыре быстрые кнопки — ровно в один ряд одинаковой ширины (длинная подпись
+     переносится внутри кнопки), а не «три и одна». Даты — две рядом, «Показать» — под
+     ними во всю ширину: у дат свой минимум 150 px, на 320 px вторая уезжала за край */
+  .period { display: block; }
+  .period .chips { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .period .chip { min-height: 40px; padding: 7px 4px; text-align: center; white-space: normal; line-height: 1.2; overflow-wrap: break-word; }
+  .period-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+  .period-dates .btn { grid-column: 1 / -1; }
+  .period-f { min-width: 0; }
+  /* Подпись над датой читают — не мельче 12 px */
+  .period-f > span { font-size: 12px; }
+  .period-f input { min-width: 0; }
+
+  /* ── Отчёт продаж: поиск и отборы ──
+     Выборы — по два в ряд; отступы полей и полосы меньше, чтобы «Все категории» и «Все
+     кассиры» читались целиком (от 360 px; на 320 длинное значение срезается, полный список —
+     по нажатию). Края полосы — вровень с карточками ниже (12 px, как у table-cards-wrap);
+     отступ полосы задан в разметке (StickyBar pad), поэтому перебивается с !important */
+  [data-tour="sr.table"] > .stick-top > .stick-pad { padding: 12px 12px 10px !important; }
+  [data-tour="sr.table"] .tools-wrap { gap: 8px; }
+  /* По два в ряд и на 320 px: полоса закреплена сверху, и выборы столбиком съедали бы
+     треть невысокого экрана (на 320 × 568 — почти половину под списком) */
+  [data-tour="sr.table"] .tools-wrap select { flex-basis: 120px; padding-left: 10px; padding-right: 4px; }
+  /* Итог списка — одна карточка ровного цвета: серая заливка ячеек итога с компьютера
+     (tfoot .zak-total td) ложилась на карточку полосами */
+  [data-tour="sr.table"] .table-cards tfoot td { background: none; }
+  /* Вкладки «По товарам · Все продажи · Чеки» — одним рядом поровну, как переключатель;
+     «Чеки» не остаётся одна на второй строке */
+  .chips[data-tour="sr.tabs"] { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .chips[data-tour="sr.tabs"] .chip { min-height: 40px; padding: 7px 4px; text-align: center; white-space: normal; line-height: 1.2; }
+
+  /* ── Отчёт о прибылях и убытках ── */
+  /* Две вкладки — одним рядом во всю ширину, как переключатель; на 320 px длинное
+     название переносится внутри своей кнопки, а не сталкивает «Подробно» строкой ниже */
+  .chips[data-tour="rep.tabs"] { flex-wrap: nowrap; }
+  .chips[data-tour="rep.tabs"] .chip { flex: 1 1 auto; min-height: 40px; white-space: normal; line-height: 1.2; text-align: center; }
+  /* «Показать» — во всю ширину под датами: под палец и не висит сбоку одна */
+  [data-tour="opu.period"] > .btn { flex: 1 1 100%; }
+  /* Лист «Показатель — Сумма» и есть карточка: подпись слева, сумма справа. Он только не
+     должен быть шире экрана. В столбцах таблицы браузер делил нехватку поровну и рвал обе
+     ячейки, поэтому каждая строка — своя сетка «1fr auto»: сначала подпись переносится по
+     словам («Оплата / поставщику»), и только огромная сумма уносит «сомони» строкой ниже */
+  .opu-table, .opu-table thead, .opu-table tbody { display: block; }
+  .opu-table tr { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 12px; padding: 0 14px; border-bottom: 1px solid var(--border); }
+  .opu-table tbody tr:last-child { border-bottom: none; }
+  .opu-table th, .opu-table td { padding: 11px 0; border: none; }
+  .opu-table td { font-size: 15px; }
+  .opu-table tr > .num { white-space: normal; }
+  .opu-big td { font-size: 17px; }
+  /* «Подробно»: быстрые кнопки периода — одним рядом, как в периоде отчёта продаж */
+  .chips[data-tour="rep.period"] { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .chips[data-tour="rep.period"] .chip { min-height: 40px; padding: 7px 4px; text-align: center; white-space: normal; line-height: 1.2; overflow-wrap: break-word; }
+  /* Даты — по половине ширины: свой минимум у поля даты выталкивал вторую за край экрана */
+  .rep-dates { max-width: none !important; }
+  .rep-dates .field { min-width: 0; }
+  .rep-dates input { min-width: 0; }
+
+  /* ── Панель управления ── */
+  /* Заголовок панели и подсказка «клик — детали»: если вместе не влезают, подсказка
+     уходит строкой ниже, а не сжимает заголовок в узкий столбик */
+  [data-tour="dash.chart"] > h2, [data-tour="dash.top"] > h2,
+  [data-tour="dash.analytics"] > h2, [data-tour="dash.recent"] > h2 { flex-wrap: wrap; row-gap: 2px; }
+  /* «Стоимость по категориям — клик по категории» — одной фразой, а не двумя столбиками */
+  [data-tour="dash.categories"] { display: block; }
+  /* Ссылки-надписи («смотреть все», «Открыть раздел») — под палец: место для нажатия выше
+     самой надписи, а строка вокруг не раздвигается (отступ погашен полем) */
+  [data-tour="dash.recent"] .linklike, .okno-itogi .linklike { padding: 10px 0; margin: -10px 0; }
+  /* Названия товаров в «Топе товаров» читают — 12 px, а не 11 */
+  [data-tour="dash.top"] .recharts-cartesian-axis-tick-value { font-size: 12px; }
+  /* Подсказка графика (невидимая, пока не нажали на столбик) стоит в стороне и на 320 px
+     выходила за правый край панели — панель начинала ездить вбок под пальцем. Всё, что
+     рисует график, остаётся в его рамке (видимую подсказку график и сам держит внутри) */
+  [data-tour="dash.chart"] .recharts-wrapper, [data-tour="dash.top"] .recharts-wrapper { contain: paint; }
+}
+
+/* ── Телефон 320–450 px: Доходы, расходы, списание, инвентаризация, авто-заявка (17.11.2026) ── */
+/* Телефон 320–450 px (17.11.2026): правила группы «dengi» — временный файл на время работы,
+   потом переносится в index.css. Только внутри @media screen and (max-width: 600px)
+   Разделы: доходы, расходы, списание, инвентаризация, авто-заявка; журнал с поиском и периодом
+   (components/JournalFilter.jsx — он же в «Возвратах») */
+@media (max-width: 600px) {
+  /* ── Журналы: поиск, отбор и период (JournalFilter) ──
+     На телефоне закреплена одна строка поиска (JournalFilter.jsx): с отбором и периодом полоса
+     была выше 200 px и на невысоком экране закрывала треть журнала. Отбор (статья, причина),
+     период и даты — сразу под ней, над журналом, и уезжают вместе с ним */
+  .journal-filter-bar .toolbar > .search { flex: 1 1 100%; max-width: none; }
+  /* Отбор — своей строкой во всю ширину: в одну строку с поиском поле сжималось до пустого
+     квадратика */
+  .journal-filter > .toolbar { gap: 8px; margin-bottom: 10px; }
+  .journal-filter > .toolbar > select { flex: 1 1 100%; max-width: none; }
+  /* Период — две на две кнопки одной ширины: четыре в ряд не помещаются, а «Всё время»
+     одна во втором ряду выглядела оторванной */
+  .journal-filter > .chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 12px; }
+  /* Даты «с» и «по» — рядом, пока помещаются, иначе друг под другом: поле даты само
+     не сжимается и уводило вторую дату за край экрана */
+  .journal-filter .row { flex-wrap: wrap; }
+  .journal-filter .field { min-width: 140px; }
+  /* Заголовок журнала и сумма за период: не помещаются в строку — сумма под заголовком, а не
+     оба столбиком по слову */
+  .panel:has(> .journal-filter-bar) > h2 { flex-wrap: wrap; row-gap: 4px; }
+
+  /* ── Кнопки в карточках: изменить, удалить, продолжить, убрать — под палец (44 px) ──
+     Селекторы тяжелее общего .table-cards tbody td.cell-actions .btn (40 px) из index.css —
+     иначе высоту брал он */
+  .table-cards.inc-table tbody td.cell-actions .btn, .table-cards.exp-table tbody td.cell-actions .btn,
+  .table-cards.wo-rows tbody td.cell-actions .btn, .table-cards.inv-list tbody td.cell-actions .btn,
+  .inv-otbor .table-cards tbody td.cell-actions .btn { min-height: 44px; }
+  .table-cards.inc-table tbody td.cell-actions .btn.icon, .table-cards.exp-table tbody td.cell-actions .btn.icon,
+  .table-cards.wo-rows tbody td.cell-actions .btn.icon, .table-cards.inv-list tbody td.cell-actions .btn.icon,
+  .inv-otbor .table-cards tbody td.cell-actions .btn.icon { min-width: 44px; }
+
+  /* «Без поставщика», «не считали» — само значение, а не пояснение под ним: в одну строку с
+     подписью (общее правило уносит .tag-cat ячейки отдельной строкой) */
+  .ord-table tbody td > .tag-cat:only-child, .inv-sheet tbody td > .tag-cat:only-child { flex: 0 1 auto; text-align: right; }
+
+  /* ── Поиск товара с подсказками: списание; пересчёт — «Новый пересчёт» и открытый лист ──
+     Подсказки под полем видны целиком, поверх следующей панели. Общее правило телефона даёт
+     панели прокрутку вбок (overflow-x: auto, а с ней и по высоте) — список срезался нижним
+     краем панели (на 360 px целиком видна была одна подсказка из восьми). А из-за анимации
+     появления каждая панель — отдельный слой, и следующая («История списаний», лист)
+     рисовалась поверх списка. Таблиц в этих панелях нет (строки — карточками), листать вбок
+     нечего. Слой — выше полосы кнопок листа (.inv-mbar): список, открытый над ней, не
+     уходит под неё */
+  .panel:has(.wo-search-box), .panel:has(.inv-scan) { overflow: visible; position: relative; z-index: 4; }
+  /* Поле поиска при нажатии поднимается к верху экрана (WriteOffs.jsx, Inventory.jsx) — с
+     отступом: подпись над полем не прижата к краю */
+  .wo-search, .inv-scan .prh-f-name { scroll-margin-top: 10px; }
+
+  /* ── Карточки с полем количества: списание (wo-rows), отбор сканером (inv-otbor),
+     открытый лист пересчёта (inv-sheet) ── */
+  /* Поле — шире и выше, под палец. Ширину из разметки (style) и общий предел поля в
+     карточке (60 %) перебивает только !important */
+  .wo-rows .disc-input, .inv-otbor .disc-input, .inv-sheet .disc-input {
+    width: 120px !important; max-width: none !important; min-height: 44px; padding: 8px 12px;
+  }
+  /* Подпись — слева (длинная, как по-таджикски, переносится), поле — справа, пояснение
+     («2 уп + 5 шт») — под полем. В строке с переносом поле уезжало под подпись к левому краю */
+  .wo-rows tbody td:has(> input), .inv-otbor tbody td:has(> input), .inv-sheet tbody td:has(> input) {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 10px;
+  }
+  .wo-rows tbody td:has(> input)::before, .inv-otbor tbody td:has(> input)::before, .inv-sheet tbody td:has(> input)::before { max-width: none; }
+  .wo-rows tbody td:has(> input) > .tag-cat, .inv-otbor tbody td:has(> input) > .tag-cat, .inv-sheet tbody td:has(> input) > .tag-cat {
+    grid-column: 1 / -1; margin-top: 2px;
+  }
+  /* Списание и отбор: единственная кнопка строки — «убрать» — крестиком в правом верхнем углу
+     карточки, как в корзине: отдельным рядом внизу она удлиняла карточку вдвое */
+  .wo-rows tbody tr, .inv-otbor .table-cards tbody tr { position: relative; }
+  .wo-rows tbody td.cell-actions, .inv-otbor .table-cards tbody td.cell-actions {
+    position: absolute; top: 6px; right: 6px; margin: 0; padding: 0; border: 0;
+  }
+  /* Название не заходит под крестик; короткое (в одну строку) — не выше крестика, иначе
+     следующая строка карточки («Остаток») упиралась бы в него */
+  .wo-rows tbody td.cell-main, .inv-otbor .table-cards tbody td.cell-main { padding-right: 50px; min-height: 44px; }
+  /* Последняя отсканированная строка — подсвечена вся карточка, а не полосы ячеек в ней */
+  .inv-otbor .table-cards tbody tr.inv-last, .inv-sheet tbody tr.inv-last { background: var(--gold-soft); border-color: var(--gold); }
+  .inv-otbor .table-cards tbody tr.inv-last > td, .inv-sheet tbody tr.inv-last > td { background: none; box-shadow: none; }
+
+  /* ── Доходы и расходы: новая запись ── */
+  /* Поля — в одну колонку на всех ширинах телефона. Сетка из разметки (style) от 431 px
+     ставила «Дату» и «Статью» по две в ряд, и выбранная статья срезалась («— выберите
+     стать…»), а «Сумма» стояла одна на пол-ширины. Перебивает её только !important */
+  .fin-form { grid-template-columns: minmax(0, 1fr) !important; }
+  /* «Добавьте её в «Настройках»», «Откройте смену» — ссылки под палец: были высотой 15 px.
+     Буквы — крупнее; размер в разметке (style) перебивает только !important */
+  .fin-link > a.linklike { min-height: 40px; align-items: center; font-size: 13.5px !important; }
+  /* «Оплачен из кассы» — отметка под палец (строка выше, галочка крупнее) */
+  .exp-cash > label { min-height: 40px; }
+  .exp-cash > label input[type='checkbox'] { width: 22px !important; height: 22px !important; flex: none; }
+
+  /* ── Списание ──
+     Поиск товара, причина и пояснение — друг под другом во всю ширину: в ряд они не
+     помещались, и выбор причины уезжал за край. Ширины полей заданы в разметке — их
+     перебивает только !important */
+  .wo-head { flex-direction: column; align-items: stretch !important; gap: 0; }
+  .wo-head > .field { flex: none !important; min-width: 0 !important; }
+  /* Камера — квадратной кнопкой рядом с полем: с подписью она забирала у поля полстроки */
+  .wo-search .cam-text { display: none; }
+  .wo-search .btn.ghost { flex: none; width: 48px; padding: 0; }
+  /* Подсказка про USB-сканер на телефоне лишняя: сканер к телефону не подключают */
+  .wo-search .scan-hint { display: none; }
+  /* Причина «Другое»: пояснение пишут в «Какая причина?» прямо под причиной. Нижнее
+     «Примечание» пишет в то же самое — на телефоне поля стоят почти за экран друг от друга, и
+     одно и то же казалось двумя разными полями: набираешь в одном — текст появляется в другом */
+  .panel:has(.wo-drugoe) [data-tour='wo.note'] { display: none; }
+
+  /* ── Инвентаризация ── */
+  /* Список отбора — карточками прямо в панели: рамка вокруг карточек была бы лишней */
+  .inv-otbor { border: 0; border-radius: 0; overflow: visible; }
+  /* «Создать лист» и «Очистить список» — в ряд на всю ширину, переносятся, если не влезают */
+  .inv-create .btn { flex: 1 1 140px; min-height: 44px; }
+  /* Открытый лист: полоса кнопок (Inventory.jsx, .inv-mbar) стоит в конце листа и держится
+     над нижней панелью, пока до конца не долистали: «Сохранить черновик» и «Применить» под
+     рукой на любом месте длинного листа, а последняя карточка под полосой не прячется.
+     Полоса — во всю ширину экрана (поля страницы — 14 px), как полоса итога в кассе */
+  .inv-mbar {
+    position: sticky; bottom: var(--app-foot-h); z-index: 3;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
+    margin: 16px -14px 0; padding: 6px 14px 8px;
+    background: var(--card); border-top: 1px solid var(--border);
+    box-shadow: 0 -8px 18px -12px rgba(0, 0, 0, 0.4);
+  }
+  /* Сколько пересчитано — строкой над кнопками: видно, что введённое засчитано. Рядом с
+     кнопками в одну строку подпись не помещалась (по-таджикски — в три строки) */
+  .inv-mbar-sum { flex: 1 1 100%; display: flex; align-items: baseline; gap: 8px; min-width: 0; line-height: 1.3; }
+  .inv-mbar-sum span { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  .inv-mbar-sum b { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* Кнопки — поровну, под палец; длинная надпись («Сохранить черновик», по-таджикски ещё
+     длиннее) переносится внутри кнопки, а не раздвигает полосу */
+  .inv-mbar .btn { flex: 1 1 0; min-width: 0; min-height: 44px; padding: 6px 10px; white-space: normal; line-height: 1.15; text-align: center; }
+  /* Уведомление («Пересчёт сохранён») — над полосой, как в кассе: иначе оно на несколько секунд
+     закрывало «Применить» сразу после «Сохранить черновик» */
+  html.has-foot:has(.inv-mbar) .toast { bottom: calc(var(--app-foot-h) + 98px); }
+
+  /* ── Авто-заявка ── */
+  /* Карточки сверху: «Позиций» и «Единиц» — в ряд, сумма — во всю ширину. По одной в
+     столбик они занимали весь первый экран */
+  .cards.ord-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cards.ord-cards > :last-child { grid-column: 1 / -1; }
+  /* Числа соседних карточек — на одной высоте: «Позиций к заказу» переносится в две строки
+     (по-таджикски — в три), «Единиц товара» — нет, и числа стояли вразнобой */
+  .cards.ord-cards .metric .value { margin-top: auto; }
+  /* Отбор под закреплённым поиском (Orders.jsx, .ord-otbor): поставщик и категория — каждый
+     во всю строку. По два в ряд имя поставщика срезалось («ООО «Фарм-…»), а оно же стоит в
+     заголовке заявки. «Сбросить» — справа под ними */
+  .toolbar.ord-otbor { margin: 0 16px 12px; gap: 8px; }
+  .toolbar.ord-otbor > select { flex: 1 1 100%; }
+  .toolbar.ord-otbor > .btn { margin-left: auto; }
+
+  /* ── Итог в окнах заявки и пересчёта: сумма не рвётся посередине, переносится подпись ── */
+  .modal:has(.ord-table, .inv-okno) .total-row.big { gap: 10px; }
+  .modal:has(.ord-table, .inv-okno) .total-row.big > span:last-child { white-space: nowrap; }
+}
+@media screen and (max-width: 380px) {
+  /* На самом узком экране итог окна чуть мельче — подпись и сумма встают в одну строку */
+  .modal:has(.ord-table, .inv-okno) .total-row.big { font-size: 17px; }
+}
+
+/* ── Телефон 320–450 px: Вход, главное меню, сотрудники, роли, обучение (17.11.2026) ── */
+@media screen and (max-width: 600px) {
+  /* ── Экран входа ──
+     «Логин и пароль выдаёт владелец» и RU/TJ на 320 px в строку не помещались: переключатель
+     сжимался, и TJ обрезалась. Переключатель — всегда целиком, подпись переносится */
+  .auth-foot { flex-wrap: wrap; }
+  .auth-foot .lang-switch { flex-shrink: 0; margin-left: auto; }
+  /* RU / TJ — под палец (было 25 px высотой) */
+  .lang-switch button { min-height: 36px; min-width: 46px; font-size: 13px; }
+  /* Глазок «Показать пароль» — 40 × 40 (было 32): поле пароля 44 px, места хватает; текст
+     поля под глазок не заходит */
+  .auth-card .pw-eye { width: 40px; height: 40px; right: 3px; }
+  .auth-card .pw-wrap input { padding-right: 48px; }
+
+  /* ── Главное меню: шапка ──
+     В одну строку: значок FinMax, «Главное меню» с названием магазина и три кнопки. С надписью
+     «FinMax POS» шапка на 320–390 px расползалась на две строки (заголовок рвался «Главное /
+     меню»), а она закреплена вверху и отнимала у плиток пятую часть экрана. Значок остаётся —
+     по нему программу и узнают. Только шапка меню (.app-hub): у панели владельца сервиса своя */
+  .app-hub .topbar { flex-wrap: nowrap; gap: 10px; padding: 10px 12px; }
+  .app-hub .topbar-left { flex: 1 1 auto; gap: 10px; }
+  .app-hub .topbar .brand-mini .brand-word { display: none; }
+  .app-hub .topbar-title { flex: 1 1 auto; }
+  .app-hub .topbar h1 { font-size: 15.5px; line-height: 1.25; }
+  /* Название магазина — читаемым размером (было 11,5 px); длинное — переносится, но не больше
+     двух строк: шапка закреплена, и «Аптека … — филиал на проспекте …» в четыре строки
+     отнимало у плиток пятую часть экрана 320 × 568 */
+  .app-hub .topbar .sub {
+    font-size: 12.5px; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .app-hub .topbar-actions { flex-wrap: nowrap; flex-shrink: 0; margin-left: 0; }
+  .app-hub .hub-acts { gap: 6px; }
+
+  /* ── Главное меню: плитки ──
+     Плитки идут строго по порядку меню, как на компьютере: плитка перед кассой, которой не
+     досталось пары, — во всю ширину (Home.jsx), пустой клетки нет и ничего не переставляется */
+  /* Поля экрана, зазоры и поля плиток меньше: надпись упирается в самое длинное слово
+     («Инвентаризация», по-таджикски «Таъминкунандагон»), и каждый пиксель ширины плитки — это
+     крупнее надпись (lib/hubFont.js считает от настоящей ширины): на 320 px — 14,5 вместо 13,5,
+     по-таджикски на 320 — 12,5 вместо 12, на 360 — 14,5 вместо 13,5 */
+  .app-hub .content { padding: 8px; }
+  .hub-grid { gap: 8px; }
+  .hub-tile { --hub-px: 8px; }
+  /* Плитка во всю ширину перед кассой (Home.jsx) — с картинкой обычной плитки, а не крупной,
+     как у кассы: главное действие одно */
+  .hub-tile.wide:not(.gold) .hub-pic { height: var(--hub-pic, min(50%, 108px)); right: 5%; bottom: 5%; }
+
+  /* ── Сотрудники ── */
+  /* «—» (не задано) — рядом с подписью, а не отдельной строкой под ней: отдельной строкой
+     в карточке идёт только пояснение-div (дни бонуса под суммой продаж) */
+  .emp-table tbody td > span.tag-cat { flex: 0 1 auto; }
+  /* Кнопки строки — по центру ряда: по базовой линии «Блокировать» (без значка) вставала ниже
+     «Изменить» и «Пароль» (со значком) */
+  .emp-table tbody td.cell-actions { align-items: center; }
+  /* Итог зарплаты за месяц — своей карточкой, как итог таблицы (строка стоит в tbody) */
+  .table-cards tbody tr.emp-zp-total { background: var(--accent-soft); border-color: var(--accent); }
+  .table-cards tbody tr.emp-zp-total td { background: none; }
+  /* «Осталось»: подпись слева, сумма и кнопка «Выдать» — вместе справа. Перенос разрешён:
+     «выдано больше на …» в узкой карточке в строку не помещается */
+  .table-cards tbody td.emp-zp-ost { justify-content: flex-end; align-items: center; white-space: normal !important; }
+  .table-cards tbody td.emp-zp-ost::before { margin-right: auto; }
+  .table-cards .emp-zp-pay { min-height: 36px; padding: 6px 12px; font-size: 13px; }
+  /* Роль в карточке — подпись «Роль» сверху, выбор под ней во всю ширину карточки: рядом с
+     подписью выбор был уже (на 320 px — 144 px, «Наблюдатель» резалось до «Наблюдате»), а
+     свои роли бывают с длинным названием. Шрифт как у полей (16 px — иначе iPhone приближает
+     страницу). max-width: none — сильнее общего ограничения полей в карточке */
+  .table-cards.emp-table tbody td > select.role-select {
+    flex: 1 1 100%; width: 100%; max-width: none; min-width: 0; min-height: 40px; font-size: 16px;
+  }
+  /* «Роли и права» под списком — под палец (было 20 px высотой) */
+  .emp-roles-link { min-height: 40px; padding: 0 6px; }
+  /* Глазок «Показать пароль» в окнах раздела — под палец: 40 × 40 (было 32), текст поля под
+     него не заходит */
+  html:has(.emp-table) .modal .pw-eye { width: 40px; height: 40px; right: 3px; }
+  html:has(.emp-table) .modal .pw-wrap input { padding-right: 48px; }
+  /* Месяц зарплаты — во всю ширину, пояснение под ним */
+  .emp-zp-bar { padding: 12px; }
+  .emp-zp-bar select { width: 100%; min-width: 0; }
+  .emp-zp-bar .tag-cat { flex-basis: 100%; font-size: 12.5px; line-height: 1.5; }
+
+  /* ── Зарплата в «Расходах» (SalaryPicker.jsx) ── дни бонуса «с» и «по» — каждый своей
+     строкой во всю ширину и одинаковые: в ряд два поля даты на телефон не помещаются, а
+     перенесённые были разной ширины */
+  .salary-pick { padding: 12px 12px 4px; }
+  .salary-period { gap: 8px; }
+  .salary-period-label { flex-basis: 100%; }
+  .salary-period-field { flex: 1 1 100%; }
+  .salary-period-field > span { flex: 0 0 26px; }
+  .salary-period-field input { flex: 1 1 auto; min-width: 0; width: auto; }
+  /* «как в карточке» — кнопкой под палец в цветах программы (без них — серая кнопка браузера) */
+  .salary-period-reset { min-height: 36px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--card); }
+
+  /* ── Роли и права ── */
+  /* Роли — по две в ряд: список вдвое короче, и права выбранной роли видны сразу под ним */
+  .roles-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .roles-list h2, .roles-list .empty { grid-column: 1 / -1; }
+  .role-item { width: auto; min-height: 58px; padding: 9px 10px; border-color: var(--border); }
+  .role-item-main b { overflow-wrap: anywhere; }
+  /* «2 чел. · 10 из 59» переносится по точке, а не посреди числа («10 из» / «59») */
+  .role-item-n { white-space: nowrap; }
+  .roles-editor { padding: 16px 14px; }
+  .roles-editor-actions { width: 100%; }
+  .roles-editor-actions .btn { flex: 1 1 auto; justify-content: center; }
+  /* У «Владельца» права не меняются — большая серая «Сохранить права» во всю ширину ему ни к
+     чему. Во время тура кнопка остаётся: шаг «Сохранить права» показывает именно её */
+  html:not(.tur-uzko) .roles-editor.owner .roles-save { display: none; }
+  /* Галочка права — вся строка под палец */
+  .perm { min-height: 44px; padding: 9px 8px; }
+  .perm input { width: 20px; height: 20px; }
+  /* Заголовок группы и «выбрать все 0/8»: не помещаются в строку — кнопка встаёт под заголовком,
+     справа. На 320–349 px по-таджикски («ҳамаро интихоб кардан 0/8») она была шире панели на
+     30 px: «0/8» срезалось, а панель прав листалась вбок */
+  .perm-group-head { flex-wrap: wrap; row-gap: 6px; }
+  .perm-group-head h3 { min-width: 0; }
+  /* Кнопкой под палец в цветах программы (без них браузер рисовал серую объёмную кнопку, в
+     тёмной теме — светлое пятно) */
+  .perm-group-head .linklike {
+    min-height: 36px; padding: 0 12px; margin-left: auto; max-width: 100%;
+    white-space: normal; text-align: center;
+    border: 1px solid var(--border-strong); border-radius: 8px; background: var(--card);
+  }
+  /* Есть несохранённые галочки — «Сохранить права» внизу экрана над полосой: прав почти шесть
+     десятков, и листать к кнопке наверх после каждой правки неудобно */
+  .roles-editor.dirty .roles-save {
+    position: fixed; left: 12px; right: 12px; bottom: calc(var(--app-foot-h) + 10px); z-index: 36;
+    min-height: 48px; font-size: 15px; box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.5);
+  }
+  .roles-editor.dirty { padding-bottom: 76px; }
+  /* Сообщение («Роль создана…») — над этой кнопкой, а не поверх неё (как в кассе над полосой).
+     Открыто окно — сообщение сверху (index.css), низ ему не задаём: с верхом и низом сразу оно
+     растянулось бы на весь экран */
+  html.has-foot:has(.roles-editor.dirty):not(:has(.overlay)) .toast { bottom: calc(var(--app-foot-h) + 70px); }
+  /* Появление панели (fadeUp) с заполнением both оставляло на ней transform — от него
+     position: fixed считался от панели, а не от экрана, и кнопка уезжала вниз вместе с ней.
+     backwards: анимация та же, а после неё у панели transform нет */
+  .roles-editor { animation-fill-mode: backwards; }
+
+  /* ── Обучение ── */
+  /* Список уроков — два ряда кнопок и «Ещё» (Obuchenie.jsx, ChipsMore): ряд — 36 px, как у
+     ряда фильтров, иначе второй ряд срезался бы */
+  .uch-list nav.uch-nav-uzko { display: block; }
+  .uch-chips .uch-item {
+    width: auto; min-height: 36px; max-height: 36px; padding: 0 10px; gap: 7px; max-width: 100%;
+    border: 1px solid var(--border); font-size: 14px;
+  }
+  .uch-chips .uch-item-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Выбранный урок в свёрнутом списке — первым (как выбранная кнопка в рядах .chips): выбрали
+     в раскрытом списке «Сотрудники», свернули — и он виден, а не спрятан за «Ещё» */
+  .uch-chips.chips-more:not(.open) > .uch-item.active { order: -1; }
+  .uch-search input { min-height: 42px; }
+  .uch-progress { font-size: 13px; }
+  /* scroll-margin: экран доезжает до урока (Obuchenie.jsx) — край панели остаётся виден */
+  .uch-body { padding: 16px 14px; scroll-margin-top: 12px; }
+
+  /* ── О компании ── на телефоне раздел — полтора десятка экранов: карточки компактнее */
+  /* Цифры (+50 %, 500+, 7+) — строками «число — подпись», а не тремя высокими плитками */
+  .about-stats { gap: 8px; }
+  .about-stat { display: flex; align-items: baseline; gap: 12px; padding: 10px 14px; }
+  .about-stat b { flex: 0 0 84px; font-size: 24px; }
+  /* Услуга: значок слева от названия, описание и пункты — под ними во всю ширину */
+  .about-card { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 6px 12px; align-items: center; padding: 14px; }
+  .about-card-ic { width: 40px; height: 40px; margin: 0; }
+  .about-card p, .about-card .about-points { grid-column: 1 / -1; }
+  .about-card .about-points { margin: 0; padding-top: 4px; }
+  /* Основатель: фото и имя с должностью — строкой, цитата — под ними во всю ширину (рядом с
+     фото она шла столбиком в полтора десятка строк по два-три слова) */
+  .about-founder { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 2px 14px; align-items: center; }
+  .about-founder > div { display: contents; }
+  .about-founder .about-avatar { grid-row: 1 / span 2; width: 76px; height: 76px; }
+  .about-founder-name { grid-column: 2; align-self: end; }
+  .about-founder-role { grid-column: 2; align-self: start; margin: 0; }
+  .about-founder-quote { grid-column: 1 / -1; margin-top: 12px; }
+  /* Подпись «Иконки: Icons8» — не мельче 12 px, ссылка — под палец (было 38 × 15) */
+  .about-credits { font-size: 12px; }
+  .about-credits a { display: inline-flex; align-items: center; min-height: 40px; padding: 0 8px; }
+
+  /* ── Тур ── крестик «Закрыть» — под палец (было 28 px) и не сжимается рядом с длинным
+     «Тур по разделу · …»: ужимается подпись, у неё многоточие */
+  .tur-x { width: 40px; height: 40px; margin: -6px -4px -6px 0; flex-shrink: 0; }
+  .tur-count { flex-shrink: 0; }
+  /* Шаг без элемента на экране (TurRunner.jsx, tur-sheet-free): показывать за карточкой нечего —
+     текст выше, длинные «Как это делается» и «Частые ошибки» почти не листаются внутри */
+  .tur-sheet.tur-sheet-free .tur-body { max-height: calc(var(--vh, 1vh) * 62); }
+
+  /* ── Полосы вверху раздела (нет связи, чужой магазин) ── кнопки — под палец */
+  .conn-banner.rejected .ok-btn, .conn-banner.support .back { min-height: 34px; padding: 6px 14px; font-size: 13px; }
+  /* «Вы смотрите чужой магазин…», «Нет связи…», «Отправляем чеки…» — строками текста со
+     значком в начале (и кнопкой в конце): флексом значок, текст и кнопка вставали отдельными
+     рядами, значок — один над текстом, и полоса занимала шестую часть экрана */
+  .conn-banner.support, .conn-banner.offline, .conn-banner.sending, .conn-banner.rejected .rej-row {
+    display: block; text-align: center; line-height: 1.45;
+  }
+  /* Строка непринятого чека: OfflineBar.css подключается позже и при равном весе возвращал ей
+     flex (значок и «Понятно» — отдельными рядами, полоса в четверть экрана) — здесь вес выше */
+  .main .conn-banner.rejected .rej-row { display: block; }
+  .conn-banner.support, .conn-banner.offline, .conn-banner.sending { padding: 8px 12px; }
+  .conn-banner.support .ic, .conn-banner.offline .ic, .conn-banner.sending .ic, .conn-banner.rejected .ic { vertical-align: -2px; margin-right: 6px; }
+  .conn-banner.support .back, .conn-banner.rejected .ok-btn { display: inline-flex; align-items: center; vertical-align: middle; margin: 4px 0 0 8px; }
+  /* «…ждут отправки: 2.» и «Касса продаёт…» — через пробел, а не слитно */
+  .conn-banner.offline b { margin-right: 0.3em; }
+  /* Свои чеки и чеки другого кассира — разными строками */
+  .conn-banner.sending > span:not(.ic) + span { display: block; }
+  .conn-banner.rejected .rej-why { margin-left: 0.3em; }
+}
+
+@media screen and (max-width: 380px) {
+  /* 320–380 px: зазоры в шапке меню чуть меньше — «Главное меню» остаётся одной строкой,
+     кнопки — прежние 40 × 40 */
+  .app-hub .topbar { gap: 8px; }
+  .app-hub .topbar-left { gap: 8px; }
+}
+
+/* ── Телефон 320–450 px: Настройки (17.11.2026) ── */
+@media screen and (max-width: 600px) {
+  /* ── Настройки: содержимое раздела — во всю ширину экрана ──
+     Разделы стоят над содержимым (.set-wrap столбиком), и содержимое брало ширину по самому
+     широкому, что в нём есть: таблица категорий раздувала его до 414 px, и на экране 320 px
+     правый край панелей обрезался вместе с кнопками «Переименовать» и «Удалить» */
+  .set-wrap { align-items: stretch; }
+
+  /* ── Формы: поля друг под другом ──
+     Поле рядом с «Добавить» на 320 px сжималось до десятка букв, два пароля в ряд — тоже.
+     Столбиком поле во всю ширину, а кнопка под ним — во всю ширину, под большой палец */
+  .set-body .row { flex-direction: column; gap: 0; }
+  /* У ряда «поле + Добавить» своё выравнивание по низу (style): столбиком оно прижимало бы
+     поле и кнопку вправо по их ширине — растягиваем каждое во всю строку */
+  .set-body .row > * { align-self: stretch; }
+  /* Кнопки внизу панели («Сохранить», «Изменить пароль», «Скачать копию») — во всю ширину */
+  .set-body .panel > .btn { width: 100%; }
+  .set-btns > .btn, .solo-copy-actions > .btn { flex: 1 1 auto; }
+  /* Короткие ряды выбора (язык, тема, вид табло) делят строку поровну: цели крупнее,
+     и ряд не обрывается на середине */
+  .set-chips .chip { flex: 1 1 auto; }
+  /* Два варианта (язык, тема) — ровно пополам */
+  .set-chips .chip:first-child:nth-last-child(2), .set-chips .chip:first-child:nth-last-child(2) + .chip { flex-basis: 0; }
+  /* Значок у «Светлая», «Тёмная», у подписи «Язык» и в пояснении про пароль — в строку
+     с текстом, а не над ним (общее svg { display: block } ставило его отдельной строкой) */
+  .set-chips .chip svg, .set-body .field > label > svg, .set-body .note > svg { display: inline-block; }
+  /* Галочки: целью для пальца служит вся строка с подписью, сама галочка крупнее */
+  .set-body label:has(> input[type='checkbox']) { min-height: 40px; }
+  .set-body label > input[type='checkbox'] { width: 20px !important; height: 20px !important; flex: none; }
+  /* «−» и «+» размера шрифта — квадраты под палец */
+  .set-body .nk-step .btn.icon { min-width: 44px; min-height: 44px; }
+  /* Крупный шрифт системы (масштаб страницы: при 150 % экран 320 px «шириной» 213) — без наездов.
+     Длинная подпись кнопки («Открыть экран покупателя») переносится, а не уезжает за край
+     панели. Раздел, чьё самое длинное слово («Категории», «устройства») в половину строки не
+     влезает, встаёт строкой целиком — слово не рвётся и не налезает на соседнюю кнопку.
+     При 100 % на 320–450 px всё помещается как есть: и кнопки, и разделы по два в ряд */
+  .set-body .panel .btn { white-space: normal; text-align: center; }
+  .set-nav .set-nav-btn { min-width: min-content; }
+
+  /* ── Поле «Логотип» (LogoField: окна панели владельца сервиса, «Чек и печать» в программе) ──
+     Предпросмотр — во всю ширину (240 px оставляли справа пустую полосу), кнопки «Заменить»
+     и «Убрать» делят строку пополам */
+  .logo-field .logo-preview, .logo-field .logo-actions { flex: 1 1 100%; }
+  .logo-field .logo-actions .btn { flex: 1 1 0; }
+
+  /* ── Списки настроек карточками (.set-list поверх общего .table-cards) ──
+     Название и кнопки строки — в одной строке сверху: здесь кнопки — один-два значка, и
+     отдельная строка под ними удлиняла бы каждую карточку почти вдвое (категорий — десятки).
+     Остальное («Товаров», «Срок годности», «Была на связи») — подписями ниже */
+  /* Рядом — пока названию остаётся не меньше 7em. Уже (крупный шрифт системы: при 130–150 % на
+     320 px колонка названия рядом с двумя значками сужалась до слога — «Бы / тов / ая») кнопки
+     уходят строкой ниже, вправо, а название берёт всю строку */
+  .set-list.table-cards tbody tr {
+    flex-direction: row; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 2px;
+  }
+  /* Зазор подпись — значение чуть меньше общего: на 320 px «лозим нест» помещается рядом
+     с «Мӯҳлати нигоҳдорӣ», а не уходит строкой ниже */
+  .set-list.table-cards tbody td { flex: 1 0 100%; column-gap: 8px; }
+  .set-list.table-cards tbody td.cell-main { flex: 1 1 7em; min-width: 0; padding: 0; }
+  .set-list.table-cards tbody td.cell-actions {
+    order: -1; flex: 0 0 auto; gap: 6px; padding: 0; margin: 0 0 0 auto; border-top: 0;
+  }
+  /* Под строкой с названием — отступ, если ниже есть подписи (в списке из одних названий его нет) */
+  .set-list.table-cards tbody tr:has(> td:nth-child(3)) td.cell-main { padding-bottom: 8px; }
+  .set-list.table-cards tbody tr:has(> td:nth-child(3)) { row-gap: 4px; }
+  /* Значки «Переименовать» и «Убрать» — квадрат 44×44, как в списке товаров */
+  .set-list.table-cards td.cell-actions .btn.icon, .set-list.table-cards td.cell-actions .btn.sm { min-width: 44px; min-height: 44px; }
+  /* Значение карточки — всегда у правого края, и когда не уместилось рядом с подписью и ушло
+     на свою строку: длинная подпись по-таджикски («Мӯҳлати нигоҳдорӣ»), подпись в две строки при
+     крупном шрифте системы. Одно в строке, оно прижималось к левому краю («Была на связи»), а
+     остальные значения карточки стояли справа */
+  .set-list.table-cards td[data-label] { justify-content: flex-end; }
+  .set-list.table-cards td[data-label]::before { margin-right: auto; }
+  /* Смена кассы: время и «Закрыть смену» — одним блоком, кнопка под временем */
+  .set-list .dev-smena .btn { margin-top: 6px; }
+  /* Переключатели в карточках («обязателен» / «не нужен», «есть» / «нет») и «Закрыть смену» —
+     44 px, как значки рядом: срок у категорий переключают часто, а 36 px рядом с 44 мельче пальца */
+  .set-list.table-cards td[data-label] > .btn, .set-list .dev-smena .btn { min-height: 44px; }
+
+  /* ── «Новая категория», «Новый тип товара»: отметка — между полем и «Добавить» ──
+     Столбиком форма читалась сверху вниз «поле → Добавить → отметка», и «Добавить» нажимали
+     раньше, чем видели отметку: категория заводилась со сроком «обязателен», тип — без аналогов.
+     Ряд «поле + кнопка» раскрывается (display: contents), и отметка встаёт между ними.
+     На компьютере кнопка справа от поля, отметка и так прямо под полем */
+  .set-add { display: flex; flex-direction: column; }
+  .set-add > .row { display: contents; }
+  .set-add > label { order: 1; }
+  .set-add > .row > .btn { order: 2; }
+  /* Отметка относится к полю — ближе к нему, «Добавить» — под ней */
+  .set-add > .row > .field { margin-bottom: 4px; }
+  .set-add > label { margin-bottom: 10px !important; }
+
+  /* ── Ряды выбора (язык, тема, вид табло): цели 44 px, выбранный — отметкой ──
+     Залитый синим выбранный вариант во всю ширину выглядел как кнопка «Сохранить» под ним.
+     Теперь как выбранный раздел настроек: светлый фон, синяя рамка */
+  .set-chips .chip { min-height: 44px; }
+  .set-chips .chip.active { background: var(--accent-soft); color: var(--accent-dark); border-color: var(--accent); font-weight: 600; }
+  /* «Вид табло» — список выбора: по варианту в строке, слева кружок, как у радиокнопки.
+     Без него три варианта ложились неровно (по-таджикски два в ряд и один под ними) */
+  .set-choice { flex-direction: column; }
+  .set-choice .chip { display: flex; align-items: center; gap: 10px; text-align: left; }
+  .set-choice .chip::before {
+    content: ''; flex: none; box-sizing: border-box; width: 18px; height: 18px; border-radius: 50%;
+    border: 2px solid var(--border-strong); background: var(--card);
+  }
+  .set-choice .chip.active::before { border: 6px solid var(--accent); }
+
+  /* ── «Шрифт»: «−  150 %  +» не шире поля ──
+     При шрифте системы 150 % (экран 320 px «шириной» 213) значение шириной не меньше 68 px
+     выталкивало «+» за край поля. Теперь значение уступает место, но не уже своего текста
+     (перед «%» неразрывный пробел — ShriftPanel.jsx). При 100 % всё как было */
+  .set-body .nk-step { max-width: 100%; }
+  .set-body .nk-step-val { min-width: auto; flex: 0 1 68px; }
+
+  /* ── Глазок «Показать пароль» («Смена пароля») — 44×44 под палец, а не 32×32 ── */
+  .set-body .pw-wrap input { padding-right: 48px; }
+  .set-body .pw-eye { right: 1px; width: 44px; height: 44px; max-height: 100%; }
+
+  /* ── Экран покупателя (второй экран моноблока) ──
+     Подсказка про «Параметры → Дисплей» Windows на телефоне не к месту: выглядела ошибкой.
+     «открыт / не открыт» — в строке заголовка справа, а не одна строкой под кнопкой */
+  .pk-panel .pk-one-screen { display: none; }
+  .pk-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; align-items: start; }
+  .pk-panel > * { grid-column: 1 / -1; }
+  .pk-panel > h2 { grid-column: 1; grid-row: 1; }
+  /* !important — против display: flex в style ряда кнопки */
+  .pk-panel > .set-btns { display: contents !important; }
+  .pk-panel > .set-btns > .btn { grid-column: 1 / -1; }
+  .pk-panel .pk-state { grid-column: 2; grid-row: 1; margin-top: 1px; }
+
+  /* ── Окно «Восстановление из копии» ──
+     С выбранным файлом окно выше низкого экрана (320×568, 375×667), и «Отмена» / «Восстановить»
+     уходили за край — кнопки закреплены внизу окна, содержимое листается над ними */
+  .set-restore .modal-actions {
+    position: sticky; bottom: -18px; z-index: 1;
+    margin: 8px -18px -18px; padding: 10px 18px 18px;
+    background: var(--card); border-top: 1px solid var(--border);
+  }
+  /* Четыре плитки «Товаров / Продаж / Клиентов / Приходов» — строками «подпись … число», два
+     столбца: окно ниже, и на 450 px они не делятся на три и одну */
+  .set-restore .mini-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .set-restore .mini-card { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 11px; }
+  .set-restore .mini-card .m-value { margin-top: 0; }
+
+  /* ── «↑ Разделы настроек» внизу длинного раздела (Settings.jsx) ──
+     Разделы после прокрутки — не вплотную к краю экрана */
+  .set-nav { scroll-margin-top: 10px; }
+}
+
+/* ── Телефон 320–450 px: Панель владельца сервиса (17.11.2026) ── */
+/* ═════════ Панель владельца сервиса на телефоне ═════════
+   Окна панели рендерятся порталом в <body>: класс страницы .admin-app до них не достаёт,
+   поэтому у окон своя метка — .admin-modal (у окна кодов активации ещё и .kody-modal).
+   Встроенные стили разметки (style={…}) перебиваются здесь только через !important —
+   на компьютере эти стили и остаются как были. Часть разметки на телефоне своя (поиск,
+   подписи под значками, вкладки кодов) — её рисует pages/Admin.jsx по ширине окна. */
+@media screen and (max-width: 600px) {
+  /* ── Шапка ──
+     На телефоне она в три ряда (название, значки, «Завести магазин») и занимала бы пятую часть
+     экрана при каждой прокрутке списка магазинов — поэтому уезжает вместе со страницей.
+     relative — от неё отсчитывается место «Выйти» в углу */
+  .admin-app .topbar { position: relative; }
+  .admin-app .topbar-left, .admin-app .topbar-actions { flex: 1 1 100%; }
+  /* Значки — ровным рядом во всю ширину, поровну и одной высоты: крупнее под палец и без
+     пустого хвоста. «Завести магазин» — главное действие — всегда своим рядом во всю ширину */
+  .admin-app .topbar-actions { align-items: stretch; }
+  .admin-app .topbar-actions .btn.ghost { flex: 1 1 0; min-width: 0; min-height: 42px; }
+  .admin-app .topbar-actions .btn:not(.ghost) { flex: 1 1 100%; min-height: 44px; }
+  /* Под значком — короткая подпись (admin-cap): подсказка title на сенсорном экране не видна,
+     и «Коды активации» искали наугад. Два таджикских слова («Нав кардан») — в две строки */
+  .admin-app .topbar-actions .btn.admin-capbtn {
+    flex-direction: column; gap: 3px; min-height: 54px; padding: 6px 2px; line-height: 1.15;
+  }
+  .admin-app .topbar-actions .btn.admin-capbtn .ic { margin: 0; }
+  .admin-app .topbar-actions .admin-cap { font-size: 12px; font-weight: 500; text-align: center; white-space: normal; }
+  /* «Выйти» — отдельно, в правом верхнем углу шапки, вровень с названием: в ряду одинаковых
+     значков (и вплотную к «Завести магазин») промах пальцем выкидывал из панели */
+  .admin-app .topbar-actions .btn.admin-logout {
+    position: absolute; top: 12px; right: 14px; flex: none; width: 60px; min-height: 40px; padding: 3px 2px; gap: 1px;
+  }
+  .admin-app .topbar:has(.admin-logout) .topbar-left { padding-right: 70px; }
+  /* «3 в обслуживании · admin» читают — не мельче 12 px */
+  .admin-app .topbar .sub { font-size: 12.5px; }
+
+  /* ── Поиск магазина — сразу под шапкой ── */
+  .admin-app .admin-find { margin-bottom: 12px; }
+  .admin-app .admin-find input { min-height: 46px; padding: 10px 14px; border-radius: 12px; }
+  /* Подсказка мельче набираемого текста — иначе на 320 px обрезалась на полуслове */
+  .admin-app .admin-find input::placeholder { font-size: 14px; }
+
+  /* ── Сводка ──
+     Клиенты — по две плитки в ряд (подпись, число, пояснение столбиком), деньги — во всю
+     ширину: «подпись … сумма» строкой, а длинная сумма — под подписью, а не сжимает её в
+     столбик по слову. «Сомони» — мельче числа */
+  .admin-app .mini-cards.admin-svodka { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .admin-app .admin-svodka .mini-card.svodka-card {
+    position: relative; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start;
+    gap: 2px; padding: 10px 30px 11px 12px;
+  }
+  .admin-app .admin-svodka .mini-card.svodka-card .m-value {
+    margin-top: 2px; font-size: 22px; line-height: 1.15; text-align: left; min-width: 0; max-width: 100%; overflow-wrap: anywhere;
+  }
+  .admin-app .admin-svodka .mini-card.svodka-money {
+    grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 12px;
+  }
+  .admin-app .admin-svodka .svodka-money .m-label { flex: 1 1 52%; min-width: 0; }
+  .admin-app .admin-svodka .mini-card.svodka-money .m-value { flex: 0 1 auto; margin-top: 0; font-size: 20px; }
+  .admin-app .admin-svodka .svodka-money .tag-cat { flex: 1 0 100%; }
+  .admin-app .admin-svodka .m-value .cur { font-size: 14px; font-weight: 600; letter-spacing: 0; color: var(--muted); }
+  /* Плитка раскрывается списком — стрелка подсказывает, что она нажимается (как у карточек
+     магазинов): на телефоне нет ни указателя, ни подсветки при наведении */
+  .admin-app .admin-svodka .mini-card.svodka-card::after {
+    content: ''; position: absolute; top: 50%; right: 13px; width: 7px; height: 7px; margin-top: -4px;
+    border-top: 2px solid var(--muted); border-right: 2px solid var(--muted); transform: rotate(45deg);
+  }
+  /* Подписи плиток — не мельче 12 px */
+  .admin-app .mini-card .m-label, .admin-modal .mini-card .m-label { font-size: 12.5px; }
+  .admin-app .mini-card.svodka-card .tag-cat { font-size: 12.5px; }
+  /* Подписи шкал графика дохода: 10 px на телефоне не прочесть */
+  .admin-app .recharts-cartesian-axis-tick-value { font-size: 12px; }
+
+  /* ── Карточки магазинов ──
+     Код и точка «сейчас работают» — вместе у правого края: иначе карточка раздвигала их
+     по краям, и код висел посреди строки */
+  .admin-app .table-cards tbody td:has(> .live-dot) > b { margin-left: auto; }
+  .admin-app .table-cards tbody td > .live-dot { margin-left: -4px; align-self: center; }
+  /* Карточка магазина открывается касанием — стрелка в углу подсказывает, что она нажимается
+     (на компьютере это видно по указателю и подсветке строки, на телефоне их нет) */
+  .table-cards tbody tr.admin-row { position: relative; }
+  .table-cards tbody tr.admin-row::after {
+    content: ''; position: absolute; top: 19px; right: 16px; width: 8px; height: 8px;
+    border-top: 2px solid var(--muted); border-right: 2px solid var(--muted); transform: rotate(45deg);
+  }
+  .table-cards tbody tr.admin-row > td.cell-main { padding-right: 24px; }
+  /* Все магазины, а под ними график — с зазором */
+  .admin-app .admin-all { margin-bottom: 16px; }
+  /* Заметка о звонке — целиком, но не длиннее двух строк (дальше многоточие): на компьютере
+     полный текст в подсказке, на телефоне подсказки нет */
+  .admin-app .table-cards tbody td > .admin-zvonok {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+  }
+  /* Номер клиента — кнопкой-ссылкой для звонка (Tel в Admin.jsx): видно, что он нажимается,
+     и палец попадает. Тот же вид в карточке, в окнах сводки и в «Отметить звонок» */
+  .admin-tel {
+    display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+    min-height: 40px; margin: 3px 0; padding: 6px 12px;
+    border: 1px solid var(--border-strong); border-radius: 999px; background: var(--card);
+    color: var(--accent-dark); font-size: 14px; font-weight: 600; line-height: 1.25; text-decoration: none;
+    text-align: left; overflow-wrap: anywhere;
+  }
+  .admin-tel svg { display: inline-block; flex: none; }
+  .admin-tel:active { background: var(--accent-soft); }
+  .admin-tel-line { display: block; margin-top: 10px; }
+
+  /* ── Окна панели ── */
+  /* «Оплат пока не было», «Здесь пока пусто»: без пустых полей в полэкрана */
+  .admin-modal .modal div.empty { padding: 18px 10px; }
+  /* Ряды кнопок-выборов (тема, язык, способ оплаты, что выпустить) — во всю ширину и под палец.
+     Значок темы — в строку со словом: общее svg { display: block } ставило его над словом */
+  .admin-modal .chips .chip {
+    flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    min-height: 44px; font-size: 14px;
+  }
+  .admin-modal .chips .chip svg { display: inline-block; flex: none; }
+  /* Значок ключа у «Пароль» в «Магазин заведён» — тоже в строку со словом */
+  .admin-modal .mini-card .m-label svg { display: inline-block; }
+  /* Плитки окон: длинное значение (логин без дефиса, название одним словом) переносится,
+     а не уводит шторку вбок */
+  .admin-modal .mini-cards > * { min-width: 0; }
+  .admin-modal .mini-card .m-value { min-width: 0; overflow-wrap: anywhere; }
+
+  /* «Контакты» в карточке магазина: подпись над значением. Рядом с подписью длинная ссылка или
+     почта в примечании не переносилась и уводила всю шторку вбок, а «Модули: выключены: …»
+     стояли колонкой в восемь строк */
+  .admin-modal .kv { flex-direction: column; gap: 1px !important; padding: 6px 0 !important; }
+  .admin-modal .kv > span:first-child { min-width: 0 !important; font-size: 12.5px; }
+  .admin-modal .kv > span:last-child { min-width: 0; overflow-wrap: anywhere; font-size: 15px; }
+
+  /* «Магазин заведён»: плитки столбиком во всю ширину, логин и пароль — крупно и моноширинно
+     (l и 1, O и 0 не путаются, когда их переписывают или диктуют) */
+  .admin-modal.admin-created .mini-cards { grid-template-columns: minmax(0, 1fr); }
+  .admin-modal.admin-created .mini-card { display: block; padding: 10px 14px; }
+  .admin-modal.admin-created .mini-card .m-value { margin-top: 3px; text-align: left; }
+  .admin-modal.admin-created .mini-card .m-value.admin-secret {
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 21px; font-weight: 700;
+    letter-spacing: 0.04em !important; user-select: all;
+  }
+
+  /* ── Карточка магазина: кнопки ровной сеткой ──
+     Ряд из семи кнопок разной ширины рассыпался лесенкой по одной в строку. «Продлить» —
+     главное действие — во всю ширину, остальные по две; длинные подписи (по-таджикски)
+     переносятся внутри кнопки, а не раздвигают её */
+  .admin-card-acts { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-card-acts > .btn {
+    min-width: 0; min-height: 46px; padding: 8px 10px; gap: 6px;
+    white-space: normal; text-align: center; line-height: 1.25;
+  }
+  .admin-card-acts > .btn:first-child { grid-column: 1 / -1; }
+  /* «Удалить» на компьютере отодвинут вправо отступом — в сетке он не нужен */
+  .admin-card-acts > .btn:last-child { margin-left: 0 !important; }
+
+  /* «Оплачено до» в «Изменить магазин»: дата сжимается, час — своей ширины; иначе поле часа
+     вылезало за край окна и его «PM» обрезалось */
+  .admin-srok { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; }
+  .admin-srok > input[type='date'] { min-width: 0; width: 100%; }
+  .admin-srok > input[type='time'] { width: auto !important; min-width: 0; }
+
+  /* «Новый магазин»: ошибка проверки — под самим полем, пока его не исправят */
+  .admin-modal .admin-field-err { margin-top: 2px; font-size: 13.5px; }
+  /* «Заполнить демонстрационными товарами…» — вся строка под палец, галочка крупнее */
+  .admin-modal label.admin-demo { min-height: 44px; font-size: 15px !important; line-height: 1.35; }
+  .admin-modal label.admin-demo input[type='checkbox'] { width: 22px !important; height: 22px !important; }
+
+  /* Журнал действий: своя прокрутка внутри окна-шторки лишняя — листается само окно */
+  .admin-zhurnal { max-height: none !important; overflow: visible !important; }
+  /* Журнал и «Что делали с этим магазином» — компактной записью: серой строкой «время · кто ·
+     магазин», под ней — что сделал. Карточкой с подписью у каждого значения запись была
+     150 px высотой, и двести записей журнала тянулись на тридцать тысяч пикселей */
+  .admin-modal .table-cards.admin-log tbody tr {
+    flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 0; padding: 10px 12px; margin-bottom: 8px;
+  }
+  .admin-modal .table-cards.admin-log tbody td {
+    display: block; flex: 0 1 auto; padding: 0; font-size: 12.5px; color: var(--muted); text-align: left;
+  }
+  .admin-modal .table-cards.admin-log tbody td::before { content: none; }
+  .admin-modal .table-cards.admin-log tbody td:not(.cell-main) + td:not(.cell-main)::before {
+    content: '·'; display: inline; margin: 0 6px; max-width: none; color: var(--muted);
+    font-size: inherit; font-weight: 400; letter-spacing: 0; text-transform: none;
+  }
+  .admin-modal .table-cards.admin-log tbody td.cell-main {
+    order: 5; flex: 1 0 100%; margin-top: 4px; font-size: 14.5px; font-weight: 500; color: var(--text);
+  }
+  .admin-modal .table-cards.admin-log tbody td.empty { flex: 1 0 100%; text-align: center; }
+  /* «Показать ещё» — журнал на телефоне показывается по 50 записей */
+  .admin-modal .admin-more { margin-top: 10px; min-height: 44px; }
+
+  /* Модули магазина: строки галочек — под палец (вся строка нажимается) */
+  .modal .moduli-vybor label.moduli-item { padding: 9px 0; gap: 10px; font-size: 15px; }
+  .modal .moduli-vybor label.moduli-item input[type='checkbox'] { width: 20px; height: 20px; min-width: 20px; }
+  /* Свёрнутые модули (ModuliVybor compact): строка «все включены · Изменить» */
+  .moduli-vybor .moduli-svod {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
+    min-height: 48px; padding: 10px 14px; border: 1px solid var(--border-strong); border-radius: 10px;
+    background: var(--card); color: var(--text); font: inherit; font-size: 15px; line-height: 1.35;
+    text-align: left; cursor: pointer;
+  }
+  .moduli-vybor .moduli-svod-text { min-width: 0; overflow-wrap: anywhere; }
+  .moduli-vybor .moduli-svod-act { flex: none; color: var(--accent-dark); font-weight: 600; }
+
+  /* ── Коды активации ── */
+  /* Вкладки «Выпустить код» и «Выпущенные коды» */
+  .kody-modal .kody-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+  .kody-modal .kody-tab {
+    flex: 1 1 0; min-width: 0; min-height: 44px; padding: 8px 10px;
+    border: 1px solid var(--border-strong); border-radius: 10px; background: var(--card); color: var(--text);
+    font: inherit; font-size: 14px; font-weight: 600; line-height: 1.25; text-align: center; cursor: pointer;
+  }
+  .kody-modal .kody-tab.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); }
+  /* «Выпустить код» — главное действие окна: во всю ширину, под большой палец */
+  .kody-modal [data-testid='licence-issue'] { width: 100%; min-height: 46px; }
+  .kody-modal [data-testid='licence-made'] .btn { width: 100%; }
+  /* Выпущенный код диктуют по телефону группами по пять знаков: на узком экране строка
+     переносится после дефиса, а не посреди группы */
+  .kody-modal .licence-code { word-break: normal; overflow-wrap: anywhere; }
+  /* Сам код в карточке выпущенного — строкой под подписью «Код» */
+  .kody-modal .table-cards td .kody-code { display: block; margin: 2px 0 0; font-size: 16px; }
+  /* «Навсегда» — нажимается вся строка, галочка крупнее */
+  .kody-modal .restore-check { min-height: 40px; margin-top: 4px; }
+  .kody-modal .restore-check input { width: 20px; height: 20px; }
+  /* Длинные подсказки в полях на телефоне обрезались на полуслове — шрифт подсказки мельче
+     (сам набираемый текст остаётся 16 px, иначе iPhone приближает страницу) */
+  .kody-modal #lic-note::placeholder, .kody-modal [data-testid='licences-find']::placeholder { font-size: 14px; }
+}
+
+@media screen and (max-width: 380px) {
+  /* Шапка: отступы здесь 10 и 12 px — «Выйти» встаёт вровень с ними */
+  .admin-app .topbar-actions .btn.admin-logout { top: 10px; right: 12px; }
+  /* Сводка: числа чуть мельче — плитки по две в ряд узкие */
+  .admin-app .admin-svodka .mini-card.svodka-card .m-value { font-size: 20px; }
+  .admin-app .admin-svodka .mini-card.svodka-money .m-value { font-size: 18px; }
+  /* Плитки карточки магазина («Состояние», «Оплачено до»…) в один столбец стояли по
+     65 px каждая и уводили кнопки за экран: подпись слева, значение справа — строкой */
+  .admin-modal .mini-card { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; }
+  .admin-modal .mini-card .m-value { margin-top: 0; min-width: 0; text-align: right; overflow-wrap: anywhere; }
+  /* (у «Магазин заведён» плитки остаются столбиком — правило .admin-created выше сильнее) */
+  /* «Оплачено до»: при 12-часовом времени («10:41 PM») поле часа занимало полстроки, и год
+     в дате уходил под значок календаря — дата и час друг под другом */
+  .admin-srok { grid-template-columns: minmax(0, 1fr); }
+  .admin-srok > input[type='time'] { width: 100% !important; }
+  /* Подсказка «Магазин, владелец, телефон — для себя» на 320 px целиком влезает только так */
+  .kody-modal #lic-note::placeholder { font-size: 12.5px; }
+}

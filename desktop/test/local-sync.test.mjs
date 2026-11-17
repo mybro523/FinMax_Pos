@@ -389,15 +389,16 @@ test('числа больше тех, что примет сервер, касс
     () => createArrival(ctx(db), { supplier: 'Склад', items: [{ productId: 'nur', qty: 100_000, cost: 5_000_000, expiryDate: '2028-01-01' }] }),
     /Сумма документа слишком велика/,
   )
-  // Смена: наличные с лишними нулями сервер не примет — закрытие было бы отвергнуто
+  // Смена: сумму «по факту» касса не берёт (17.11.2026) — даже с лишними нулями она не
+  // попадает в закрытие, факт равен ожидаемому
   openShift(ctx(db), { openingCash: 100 })
-  assert.throws(() => closeShift(ctx(db), { countedCash: 100_000_000_000 }), /не больше 9999999999\.99/)
   assert.throws(() => payDebt(ctx(db), 'ivan', { amount: 1e12 }), /не больше/)
   assert.equal(pendingCount(db), 1, 'в очереди — только открытие смены: остальное не оформлено')
   assert.equal(stock(db, 'nur'), 5, 'и на полке ничего не изменилось')
   // Обычные числа проходят как раньше
   createArrival(ctx(db), { supplier: 'Склад', items: [{ productId: 'nur', qty: 1000, cost: 9_999_999.99, expiryDate: '2028-01-01' }] })
-  assert.equal(closeShift(ctx(db), { countedCash: 9_999_999_999.99 }).countedCash, 9_999_999_999.99)
+  const closed = closeShift(ctx(db), { countedCash: 100_000_000_000 })
+  assert.deepEqual([closed.countedCash, closed.expectedCash, closed.difference], [100, 100, 0])
 })
 
 test('штук в строке и в упаковке — не больше, чем примет сервер; срок годности — с годом, который хранит база', () => {

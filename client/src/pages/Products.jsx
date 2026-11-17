@@ -1,8 +1,9 @@
-import { useState, useMemo, lazy, Suspense } from 'react'
-import { LuPlus, LuPencil, LuTrash2, LuTag, LuHistory, LuReceiptText } from 'react-icons/lu'
+import { useState, useMemo, useEffect, useSyncExternalStore, lazy, Suspense } from 'react'
+import { LuPlus, LuPencil, LuTrash2, LuTag, LuHistory, LuReceiptText, LuX } from 'react-icons/lu'
 import ProductHistory from '../components/ProductHistory'
 import Layout from '../components/Layout'
 import StickyBar from '../components/StickyBar'
+import ChipsMore from '../components/ChipsMore'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import { useCollection, money, db, stockText } from '../db/store'
@@ -21,7 +22,7 @@ import Lightbox from '../components/Lightbox'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
 import { editPatch, stockAtOpen } from '../lib/productEdit'
-import { isVesovoy, stockUnits, stockValue } from '../lib/units'
+import { edinica, isVesovoy, stockUnits, stockValue } from '../lib/units'
 
 // Печать этикеток нужна редко — грузим по требованию, чтобы не утяжелять страницу
 const LabelPrint = lazy(() => import('../components/LabelPrint'))
@@ -33,6 +34,17 @@ const CennikiModal = lazy(() => import('../components/Cenniki'))
 const empty = emptyProduct
 
 const EXP_COLOR = { expired: 'var(--danger)', soon: 'var(--warn)', ok: 'var(--muted)' }
+
+// Телефон — окно уже 601 px (как в стилях): там у отмеченных товаров своя полоса внизу экрана
+const UZKO = '(max-width: 600px)'
+const mqUzko = () => (typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(UZKO) : null)
+const sledUzko = (cb) => {
+  const mq = mqUzko()
+  mq?.addEventListener?.('change', cb)
+  return () => mq?.removeEventListener?.('change', cb)
+}
+const uzko = () => !!mqUzko()?.matches
+const useTelefon = () => useSyncExternalStore(sledUzko, uzko, () => false)
 
 export default function Products() {
   const products = useCollection('products')
@@ -62,14 +74,49 @@ export default function Products() {
     })
   const [historyFor, setHistoryFor] = useState(null) // товар, чью историю движения смотрим
   const [foto, setFoto] = useState(null) // товар, чьё фото смотрим на весь экран
+  const telefon = useTelefon()
+  // Ряд категорий с «Ещё» (ChipsMore) помнит «раскрыт» сам: новый key — новый ряд, свёрнутый
+  const [chipsKey, setChipsKey] = useState(0)
+  const svernutKategorii = () => setChipsKey((k) => k + 1)
 
   // Курсор в штрихкод под сканер ставит сама форма — там же, где поле
-
-
 
   // Чипы-фильтры — тот же список, что и в форме товара (без дублей из старых данных)
   const catList = useCategories()
   const categories = useMemo(() => ['Все', ...categoryNames(catList)], [catList])
+  // Телефон: выбрали категорию — ряд новый, свёрнутый и с начала. ChipsMore сворачивает ряд и
+  // сам, но прокрутка раскрытого ряда при этом оставалась: выбранная кнопка, которая в
+  // свёрнутом ряду первая, уезжала вверх за край
+  function pickCat(c) {
+    setCat(c)
+    if (telefon) svernutKategorii()
+  }
+  // Телефон: начали листать список при раскрытом «Ещё» — ряд сворачивается (как выпадающий
+  // список при касании мимо), иначе раскрытая полоса закрывала бы полсписка. Листание внутри
+  // полосы (самого ряда категорий) не в счёт. Только жесты пальца и колесо: прокрутку, которую
+  // делает сам браузер, когда полоса растёт, жестом не считаем — иначе ряд сворачивался бы,
+  // едва раскрывшись
+  useEffect(() => {
+    if (!telefon) return undefined
+    const raskryt = () => !!document.querySelector('.prod-stick .chips-more.open')
+    const mimo = (e) => !e.target?.closest?.('.prod-stick, .overlay')
+    let y0 = null
+    const start = (e) => { y0 = mimo(e) ? e.touches[0]?.clientY ?? null : null }
+    const move = (e) => {
+      if (y0 === null || Math.abs((e.touches[0]?.clientY ?? y0) - y0) < 12) return
+      y0 = null
+      if (raskryt()) svernutKategorii()
+    }
+    const wheel = (e) => { if (mimo(e) && raskryt()) svernutKategorii() }
+    window.addEventListener('touchstart', start, { passive: true })
+    window.addEventListener('touchmove', move, { passive: true })
+    window.addEventListener('wheel', wheel, { passive: true })
+    return () => {
+      window.removeEventListener('touchstart', start)
+      window.removeEventListener('touchmove', move)
+      window.removeEventListener('wheel', wheel)
+    }
+  }, [telefon])
 
   // Поиск — по названию или штрихкоду, в том числе сканером (и маркировкой DataMatrix)
   const z = useMemo(() => poiskZapros(q), [q])
@@ -115,7 +162,8 @@ export default function Products() {
   async function del(p) {
     const ok = await dialog.confirm({
       title: t('Удалить товар?'),
-      message: `«${p.name}» будет удалён из базы.`,
+      // Название — словом без пробелов бывает длиннее окна: на телефоне переносится (m-tovary.css)
+      message: <span className="okno-slovo">«{p.name}» {t('будет удалён из базы.')}</span>,
       danger: true,
       confirmText: t('Удалить'),
     })
@@ -169,7 +217,7 @@ export default function Products() {
           barcode: p.barcode || '',
           category: p.category || '—',
           type: p.type || '—',
-          unit: p.unit || 'уп',
+          unit: edinica(p),
           price: Number(p.price) || 0,
           ostatok: stockText(p),
           exp: p.expiryDate ? String(p.expiryDate).slice(0, 10) : '—',
@@ -187,7 +235,7 @@ export default function Products() {
       actions={<>
         <ExportPechat onExcel={exportExcel} />
         {can('products.labels') && sel.size > 0 && (
-          <button className="btn ghost" onClick={() => setCenniki(true)} data-testid="prod-cenniki">
+          <button className="btn ghost prod-cenniki-top" onClick={() => setCenniki(true)} data-testid="prod-cenniki">
             <span className="ic"><LuReceiptText size={16} /></span> {t('Ценники')} ({sel.size})
           </button>
         )}
@@ -196,92 +244,122 @@ export default function Products() {
     >
       <PrintSheet zagolovok={t('Товары')} podzag={exPodzag} cols={exCols} rows={exRows} />
       {/* Поиск и категории закреплены вверху: при прокрутке списка не уезжают (1.5.11) */}
-      <StickyBar>
+      <StickyBar className="prod-stick">
         <div className="toolbar">
           <div className="search kamera-pole">
-            <input data-tour="prod.search" placeholder={t('Поиск по названию или штрихкоду…')} value={q} onChange={(e) => setQ(e.target.value)} />
+            {/* На телефоне подсказка короче: длинная в узкое поле не помещалась */}
+            <input className="tovar-poisk" data-tour="prod.search" placeholder={telefon ? t('Название или штрихкод…') : t('Поиск по названию или штрихкоду…')} value={q} onChange={(e) => setQ(e.target.value)} />
             <KameraKnopka onCode={setQ} testid="kamera-tovary" />
           </div>
         </div>
-        <div className="chips" data-tour="prod.chips">
+        {/* Категорий бывает много: на телефоне — два ряда и «Ещё» (ChipsMore), в прилипшей
+            полосе — один ряд и «Ещё» справа (m-tovary.css) */}
+        <ChipsMore key={chipsKey} className="prod-chips" data-tour="prod.chips">
           {categories.map((c) => (
-            <button key={c} className={'chip ' + (cat === c ? 'active' : '')} onClick={() => setCat(c)}>{c}</button>
+            <button key={c} className={'chip ' + (cat === c ? 'active' : '')} onClick={() => pickCat(c)}>{c}</button>
           ))}
-        </div>
+        </ChipsMore>
       </StickyBar>
 
+      {/* На телефоне строки — карточками (table-cards, m-tovary.css): вбок не листается */}
       <div className="panel" style={{ padding: 0 }}>
-        <table>
-          <thead>
-            <tr>
-              {can('products.labels') && (
-                <th style={{ width: 36 }}>
-                  <input
-                    type="checkbox"
-                    aria-label={t('Отметить все')}
-                    title={t('Отметить все')}
-                    data-testid="prod-sel-all"
-                    checked={filtered.length > 0 && filtered.every((p) => sel.has(p.id))}
-                    onChange={(e) => setSel(e.target.checked ? new Set(filtered.map((p) => p.id)) : new Set())}
-                  />
-                </th>
-              )}
-              <th>{t('Наименование')}</th><th>{t('Штрихкод')}</th><th>{t('Категория')}</th>
-              <th className="num">{t('Продажа')}</th><th className="num">{t('Остаток')}</th>{srokOn && <th>{t('Годен до')}</th>}<th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {pg.slice.map((p) => {
-              const e = expiryStatus(p)
-              return (
-                <tr key={p.id}>
-                  {can('products.labels') && (
-                    <td>
-                      <input type="checkbox" checked={sel.has(p.id)} onChange={() => toggle(p.id)} aria-label={t('Отметить') + ': ' + p.name} data-testid="prod-sel" />
-                    </td>
-                  )}
-                  <td>
-                    <span className="prod-name-cell">
-                      {p.image && <img className="foto-mini" src={p.image} alt="" onClick={() => setFoto(p)} />}
-                      <span><b>{p.name}</b>{p.dosage ? <div className="tag-cat">{p.dosage}</div> : null}</span>
-                    </span>
-                  </td>
-                  <td className="tag-cat">{p.barcode}</td>
-                  <td>{p.category}{p.type ? <div className="tag-cat">{t(p.type)}</div> : null}</td>
-                  <td className="num"><b>{money(p.price)}</b></td>
-                  <td className="num">
-                    <span className={'badge ' + (p.stock <= p.minStock ? 'low' : 'ok')}>{stockText(p)}</span>
-                  </td>
-                  {srokOn && <td>
-                    {e.has ? (
-                      <span style={{ color: EXP_COLOR[e.level], fontWeight: e.level === 'ok' ? 400 : 600, fontSize: 13 }}>
-                        {fmtDate(p.expiryDate)}
-                        {e.level !== 'ok' && <div className="tag-cat" style={{ color: EXP_COLOR[e.level] }}>{expiryLabel(e.days)}</div>}
-                      </span>
-                    ) : <span className="tag-cat">—</span>}
-                  </td>}
-                  <td className="num" style={{ whiteSpace: 'nowrap' }}>
+        <div className="table-cards-wrap">
+          <table className="table-cards prod-table">
+            <thead>
+              <tr>
+                {can('products.labels') && (
+                  <th className="cell-check" style={{ width: 36 }}>
+                    {/* Подпись из data-label видна только на телефоне: шапки таблицы там нет,
+                        а «отметить все» для ценников нужно и там */}
+                    <label className="sel-all" data-label={t('Отметить все')}>
+                      <input
+                        type="checkbox"
+                        aria-label={t('Отметить все')}
+                        title={t('Отметить все')}
+                        data-testid="prod-sel-all"
+                        checked={filtered.length > 0 && filtered.every((p) => sel.has(p.id))}
+                        onChange={(e) => setSel(e.target.checked ? new Set(filtered.map((p) => p.id)) : new Set())}
+                      />
+                    </label>
+                  </th>
+                )}
+                <th>{t('Наименование')}</th><th>{t('Штрихкод')}</th><th>{t('Категория')}</th>
+                <th className="num">{t('Продажа')}</th><th className="num">{t('Остаток')}</th>{srokOn && <th>{t('Годен до')}</th>}<th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pg.slice.map((p) => {
+                const e = expiryStatus(p)
+                return (
+                  <tr key={p.id}>
                     {can('products.labels') && (
-                      <><button className="btn ghost sm icon" data-tour="prod.label" onClick={() => setLabelFor(p)} title={t('Печать этикетки')}><LuTag size={15} /></button>{' '}</>
+                      <td className="cell-check">
+                        {/* Подпись вокруг галочки — место нажатия: на телефоне 44×44 (m-tovary.css),
+                            на компьютере — ровно галочка */}
+                        <label className="sel-box">
+                          <input type="checkbox" checked={sel.has(p.id)} onChange={() => toggle(p.id)} aria-label={t('Отметить') + ': ' + p.name} data-testid="prod-sel" />
+                        </label>
+                      </td>
                     )}
-                    {can('products.history') && (
-                      <><button className="btn ghost sm icon" data-tour="prod.history" onClick={() => setHistoryFor(p)} title={t('Движение товара')} aria-label={`${t('Движение товара')}: ${p.name}`}><LuHistory size={15} /></button>{' '}</>
-                    )}
-                    {can('products.edit') && (
-                      <><button className="btn ghost sm icon" data-tour="prod.row-actions" onClick={() => openEdit(p)} title={t('Изменить')} aria-label={`${t('Изменить')}: ${p.name}`}><LuPencil size={15} /></button>{' '}</>
-                    )}
-                    {can('products.delete') && (
-                      <button className="btn ghost sm icon" data-tour="prod.row-actions" onClick={() => del(p)} title={t('Удалить')} aria-label={`${t('Удалить')}: ${p.name}`}><LuTrash2 size={15} /></button>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-            {filtered.length === 0 && <tr><td colSpan="8" className="empty">{t('Ничего не найдено')}</td></tr>}
-          </tbody>
-        </table>
+                    <td className="cell-main">
+                      <span className="prod-name-cell">
+                        {p.image && <img className="foto-mini" src={p.image} alt="" onClick={() => setFoto(p)} />}
+                        <span><b>{p.name}</b>{p.dosage ? <div className="tag-cat">{p.dosage}</div> : null}</span>
+                      </span>
+                    </td>
+                    <td className="tag-cat" data-label={t('Штрихкод')}>{p.barcode}</td>
+                    <td data-label={t('Категория')}>{p.category}{p.type ? <div className="tag-cat">{t(p.type)}</div> : null}</td>
+                    <td className="num" data-label={t('Продажа')}><b>{money(p.price)}</b></td>
+                    <td className="num" data-label={t('Остаток')}>
+                      <span className={'badge ' + (p.stock <= p.minStock ? 'low' : 'ok')}>{stockText(p, t)}</span>
+                    </td>
+                    {/* Без срока — на телефоне строки «Годен до —» нет: карточка короче */}
+                    {srokOn && <td data-label={t('Годен до')} className={e.has ? undefined : 'cell-hide'}>
+                      {e.has ? (
+                        <span style={{ color: EXP_COLOR[e.level], fontWeight: e.level === 'ok' ? 400 : 600, fontSize: 13 }}>
+                          {fmtDate(p.expiryDate)}
+                          {e.level !== 'ok' && <div className="tag-cat" style={{ color: EXP_COLOR[e.level] }}>{expiryLabel(e.days, t)}</div>}
+                        </span>
+                      ) : <span className="tag-cat">—</span>}
+                    </td>}
+                    {/* На телефоне всплывающих подсказок нет — под значками подписи (prod-act-cap) */}
+                    <td className="num cell-actions" style={{ whiteSpace: 'nowrap' }}>
+                      {can('products.labels') && (
+                        <><button className="btn ghost sm icon" data-tour="prod.label" onClick={() => setLabelFor(p)} title={t('Печать этикетки')} aria-label={`${t('Печать этикетки')}: ${p.name}`}><LuTag size={15} />{telefon && <span className="prod-act-cap" aria-hidden="true">{t('Этикетки')}</span>}</button>{' '}</>
+                      )}
+                      {can('products.history') && (
+                        <><button className="btn ghost sm icon" data-tour="prod.history" onClick={() => setHistoryFor(p)} title={t('Движение товара')} aria-label={`${t('Движение товара')}: ${p.name}`}><LuHistory size={15} />{telefon && <span className="prod-act-cap" aria-hidden="true">{t('История')}</span>}</button>{' '}</>
+                      )}
+                      {can('products.edit') && (
+                        <><button className="btn ghost sm icon" data-tour="prod.row-actions" onClick={() => openEdit(p)} title={t('Изменить')} aria-label={`${t('Изменить')}: ${p.name}`}><LuPencil size={15} />{telefon && <span className="prod-act-cap" aria-hidden="true">{t('Изменить')}</span>}</button>{' '}</>
+                      )}
+                      {can('products.delete') && (
+                        <button className="btn ghost sm icon" data-tour="prod.row-actions" onClick={() => del(p)} title={t('Удалить')} aria-label={`${t('Удалить')}: ${p.name}`}><LuTrash2 size={15} />{telefon && <span className="prod-act-cap" aria-hidden="true">{t('Удалить')}</span>}</button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+              {filtered.length === 0 && <tr><td colSpan="8" className="empty">{t('Ничего не найдено')}</td></tr>}
+            </tbody>
+          </table>
+        </div>
         <Pagination {...pg} />
       </div>
+
+      {/* Телефон: отмеченные — полоса внизу экрана с «Ценники». Отмечают, листая список, а кнопка
+          вверху страницы при этом уезжает. На компьютере полосы нет: кнопка — в шапке раздела */}
+      {telefon && can('products.labels') && sel.size > 0 && (
+        <div className="prod-selbar" data-testid="prod-selbar">
+          <button type="button" className="btn ghost icon" onClick={() => setSel(new Set())} title={t('Снять отметки')} aria-label={t('Снять отметки')}>
+            <LuX size={18} />
+          </button>
+          <span className="prod-selbar-n">{t('Выбрано')}: <b>{sel.size}</b></span>
+          <button type="button" className="btn" onClick={() => setCenniki(true)} data-testid="prod-selbar-cenniki">
+            <span className="ic"><LuReceiptText size={16} /></span> {t('Ценники')}
+          </button>
+        </div>
+      )}
 
       {historyFor && <ProductHistory product={products.find((p) => p.id === historyFor.id) || historyFor} onClose={() => setHistoryFor(null)} />}
 

@@ -275,7 +275,8 @@ export default function SalesReport() {
                     </td>
                     <td data-label={t('Дата')} style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.date)}</td>
                     <td data-label={t('Кассир')}>{r.cashier || '—'}</td>
-                    <td data-label={t('Оплата')}>{payLabel(r.payment, t)}{r.payVia ? <span className="tag-cat"> · {r.payVia}</span> : null}</td>
+                    {/* Способ и сервис перевода — одним значением: на телефоне сервис не уходит отдельной строкой */}
+                    <td data-label={t('Оплата')}><span>{payLabel(r.payment, t)}{r.payVia ? <span className="tag-cat"> · {r.payVia}</span> : null}</span></td>
                     <td data-label={t('Клиент')}>{r.customer || '—'}</td>
                     <td className="num" data-label={t('Позиций')}>{r.positions}</td>
                     <td className="num" data-label={t('Сумма')}>
@@ -290,7 +291,7 @@ export default function SalesReport() {
                   <tr className="zak-total">
                     <td colSpan="5">{t('Итого')} · {chekItogText}</td>
                     <td></td>
-                    <td className="num">{money(tolkoOtmena ? otmenaItogo.sum : chekItogo.sum)}</td>
+                    <td className="num" data-label={t('Сумма')}>{money(tolkoOtmena ? otmenaItogo.sum : chekItogo.sum)}</td>
                   </tr>
                 </tfoot>
               )}
@@ -320,9 +321,9 @@ export default function SalesReport() {
                 <tfoot>
                   <tr className="zak-total">
                     <td colSpan="2">{t('Итого')}</td>
-                    <td className="num">{money(tovItogo.revenue)}</td>
-                    <td className="num">{money(tovItogo.cost)}</td>
-                    <td className="num">{money(tovItogo.profit)}</td>
+                    <td className="num" data-label={t('Выручка')}>{money(tovItogo.revenue)}</td>
+                    <td className="num" data-label={t('Себестоимость')}>{money(tovItogo.cost)}</td>
+                    <td className="num" data-label={t('Прибыль')}>{money(tovItogo.profit)}</td>
                     <td></td>
                   </tr>
                 </tfoot>
@@ -347,7 +348,7 @@ export default function SalesReport() {
                     <td className="num" data-label={t('Цена')}>{money(r.price)}</td>
                     <td className="num" data-label={t('Скидка')}>{r.discount > 0 ? '−' + money(r.discount) : '—'}</td>
                     <td className="num" data-label={t('Сумма')}><b>{money(r.sum)}</b></td>
-                    <td data-label={t('Оплата')}>{payLabel(r.payment, t)}{r.payVia ? <span className="tag-cat"> · {r.payVia}</span> : null}</td>
+                    <td data-label={t('Оплата')}><span>{payLabel(r.payment, t)}{r.payVia ? <span className="tag-cat"> · {r.payVia}</span> : null}</span></td>
                   </tr>
                 ))}
                 {vseRows.length === 0 && <tr><td colSpan="9" className="empty">{loading ? t('Загружаем…') : t('За этот период продаж нет')}</td></tr>}
@@ -356,8 +357,8 @@ export default function SalesReport() {
                 <tfoot>
                   <tr className="zak-total">
                     <td colSpan="6">{t('Итого')}</td>
-                    <td className="num">{vseItogo.discount > 0 ? '−' + money(vseItogo.discount) : '—'}</td>
-                    <td className="num">{money(vseItogo.sum)}</td>
+                    <td className="num" data-label={t('Скидка')}>{vseItogo.discount > 0 ? '−' + money(vseItogo.discount) : '—'}</td>
+                    <td className="num" data-label={t('Сумма')}>{money(vseItogo.sum)}</td>
                     <td></td>
                   </tr>
                 </tfoot>
@@ -402,10 +403,12 @@ function TovaryOkno({ vid, poTov, onClose }) {
   const t = useT()
   const k = KARTOCHKI[vid] || KARTOCHKI.revenue
   const list = [...poTov.rows].sort((a, b) => b[k.key] - a[k.key])
+  // okno-itogi — строка итога «подпись — сумма» на телефоне (m-otchety.css)
   return (
-    <Modal wide title={t(k.title)} onClose={onClose}>
-      <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
-        <table data-testid="sr-okno">
+    <Modal className="okno-itogi" wide title={t(k.title)} onClose={onClose}>
+      {/* На телефоне — карточками, и список листается вместе с окном (m-otchety.css) */}
+      <div className="okno-spisok" style={{ maxHeight: '56vh', overflow: 'auto' }}>
+        <table className="table-cards" data-testid="sr-okno">
           <thead>
             <tr>
               <th>{t('Товар')}</th><th className="num">{t('Продано')}</th><th className="num">{t('Выручка')}</th>
@@ -415,11 +418,11 @@ function TovaryOkno({ vid, poTov, onClose }) {
           <tbody>
             {list.map((r) => (
               <tr key={r.key || r.name}>
-                <td><b>{r.name}</b>{r.category ? <div className="tag-cat">{t(r.category)}</div> : null}</td>
-                <td className="num">{r.qty}</td>
-                <td className="num" style={k.key === 'revenue' ? { fontWeight: 700 } : undefined}>{money(r.revenue)}</td>
-                <td className="num" style={k.key === 'cost' ? { fontWeight: 700 } : undefined}>{money(r.cost)}</td>
-                <td className="num" style={{ color: r.profit < 0 ? 'var(--danger)' : 'var(--green)', fontWeight: k.key === 'profit' ? 700 : undefined }}>{money(r.profit)}</td>
+                <td className="cell-main"><b>{r.name}</b>{r.category ? <div className="tag-cat">{t(r.category)}</div> : null}</td>
+                <td className="num" data-label={t('Продано')}>{r.qty}</td>
+                <td className="num" data-label={t('Выручка')} style={k.key === 'revenue' ? { fontWeight: 700 } : undefined}>{money(r.revenue)}</td>
+                <td className="num" data-label={t('Себестоимость')} style={k.key === 'cost' ? { fontWeight: 700 } : undefined}>{money(r.cost)}</td>
+                <td className="num" data-label={t('Прибыль')} style={{ color: r.profit < 0 ? 'var(--danger)' : 'var(--green)', fontWeight: k.key === 'profit' ? 700 : undefined }}>{money(r.profit)}</td>
               </tr>
             ))}
             {list.length === 0 && <tr><td colSpan="5" className="empty">{t('За этот период продаж нет')}</td></tr>}

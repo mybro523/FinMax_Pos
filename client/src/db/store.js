@@ -8,7 +8,8 @@ import { useEffect, useSyncExternalStore } from 'react'
 import { api } from './api.js'
 import { dayKey } from '../lib/time.js'
 import { blockUpdate } from '../lib/version.js'
-import { isDivisible, isVesovoy, stockUnits, unitsText } from '../lib/units.js'
+import { edinica, isDivisible, isVesovoy, stockUnits, unitsText } from '../lib/units.js'
+import { translate } from '../lib/i18n.js'
 import { OFFLINE_KEYS, activeItems, applyOverlay, connectStore, kickOffline, startOffline, stripOverlay } from '../lib/offlineSales.js'
 
 const EMPTY = []
@@ -593,12 +594,13 @@ export { uppOf as unitsPerPack, isDivisible, stockUnits as totalUnits, unitPrice
 export function stockText(p) {
   // Дробный товар без мешка: одно число в своей единице — «12,35 кг», «4,5 л». В мешках
   // (1.5.12) — как штучный: «2 уп + 10 кг»
-  if (isVesovoy(p)) return unitsText(stockUnits(p), p)
-  const unit = p?.unit || 'уп'
+  // Подписи — на языке интерфейса (17.11.2026: по-таджикски в карточках оставалось русское «шт»)
+  if (isVesovoy(p)) return unitsText(stockUnits(p), p, translate)
+  const unit = translate(edinica(p))
   const packs = Number(p?.stock) || 0
   if (!isDivisible(p)) return `${packs} ${unit}`
   const loose = Number(p?.looseUnits) || 0
-  return loose > 0 ? `${packs} ${unit} + ${loose} шт` : `${packs} ${unit}`
+  return loose > 0 ? `${packs} ${unit} + ${loose} ${translate('шт')}` : `${packs} ${unit}`
 }
 
 // Календарный день по Таджикистану (UTC+5). Оставлено для совместимости.

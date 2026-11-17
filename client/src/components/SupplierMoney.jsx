@@ -84,7 +84,8 @@ export function SupplierPayPanel({ supplierId, debt, onPaid, tour = 'sup.pay', c
   return (
     <div className={className} data-tour={tour} style={style}>
       <h2><span className="h2-title"><span className="ic"><LuHandCoins size={17} /></span>{t('Оплатить поставщику')}</span></h2>
-      <div className="row">
+      {/* На телефоне сумма и примечание — друг под другом (sup-pay-row): в ряд поле суммы сжималось до пары цифр */}
+      <div className="row sup-pay-row">
         <div className="field" style={{ flex: 1 }}>
           <label htmlFor="supPayAmount">{t('Сумма (сомони)')}</label>
           <NumberInput id="supPayAmount" value={amount} placeholder="0" onChange={(e) => setAmount(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && pay()} />
@@ -94,7 +95,7 @@ export function SupplierPayPanel({ supplierId, debt, onPaid, tour = 'sup.pay', c
           <input id="supPayNote" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && pay()} placeholder={t('напр. за накладную № 12')} />
         </div>
       </div>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: noTill ? 'var(--muted)' : undefined }}>
+      <label className="prh-check-row" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: noTill ? 'var(--muted)' : undefined }}>
         <input type="checkbox" checked={fromCash} disabled={!tills.length} onChange={(e) => setFromCash(e.target.checked)} style={{ width: 17, height: 17 }} />
         {t('Оплачено из кассы')}
       </label>
@@ -160,21 +161,23 @@ export function SupplierPaymentsTable({ payments, onRemoved, empty, withSupplier
     }
   }
 
+  // На телефоне — карточками (таблица в окне карточки поставщика листалась вбок): дата с
+  // пометкой «из кассы» и примечанием — сверху, кнопка отмены — внизу под палец
   return (
-    <table>
+    <table className="table-cards">
       <thead><tr><th>{t('Дата')}</th>{withSupplier && <th>{t('Поставщик')}</th>}<th>{t('Кто')}</th><th className="num">{t('Сумма')}</th><th></th></tr></thead>
       <tbody>
         {payments.map((p) => (
           <tr key={p.id}>
-            <td style={{ whiteSpace: 'nowrap' }}>
+            <td className="cell-main" style={{ whiteSpace: 'nowrap' }}>
               {fmtDateTime(p.date)}
               {p.fromCash && <span className="badge cash" style={{ marginLeft: 8 }}><LuBanknote size={13} /> {t('из кассы')}</span>}
               {p.note ? <div className="tag-cat">{p.note}</div> : null}
             </td>
-            {withSupplier && <td>{p.supplier?.name || '—'}</td>}
-            <td>{p.user?.name || '—'}</td>
-            <td className="num" style={{ color: 'var(--green)' }}>{money(p.amount)}</td>
-            <td className="num">
+            {withSupplier && <td data-label={t('Поставщик')}>{p.supplier?.name || '—'}</td>}
+            <td data-label={t('Кто')}>{p.user?.name || '—'}</td>
+            <td className="num" data-label={t('Сумма')} style={{ color: 'var(--green)' }}>{money(p.amount)}</td>
+            <td className="num cell-actions">
               {locked(p) ? (
                 <span className="tag-cat" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><LuLock size={14} /> {t('в отчёте смены')}</span>
               ) : (

@@ -82,12 +82,15 @@ export default function ProductHistory({ product, onClose }) {
   const upp = data?.unitsPerPack || 1
   const packs = (units) => (upp > 1 ? ` (${Math.floor(units / upp)} ${t('уп')}${units % upp ? ' + ' + (units % upp) + ' ' + t('шт') : ''})` : '')
 
+  // На телефоне (m-tovary.css, .ph-okno): период — прижат к верху окна, «Готово» — к низу,
+  // строка движения — короче. За год у ходового товара сотни строк: листать ради кнопок
+  // в начало или в конец окна не приходится
   return (
-    <Modal wide title={<><span className="ic"><LuHistory size={18} /></span>{t('Движение товара')}</>} onClose={onClose}>
-      <div className="tag-cat" style={{ marginBottom: 10, fontSize: 13 }}>
-        <b style={{ color: 'var(--text)' }}>{product.name}</b> · {t('сейчас на складе')}: <b style={{ color: 'var(--text)' }}>{stockText(product)}</b>
+    <Modal className="ph-okno" wide title={<><span className="ic"><LuHistory size={18} /></span>{t('Движение товара')}</>} onClose={onClose}>
+      <div className="tag-cat ph-head" style={{ marginBottom: 10, fontSize: 13 }}>
+        <b style={{ color: 'var(--text)' }}>{product.name}</b> · {t('сейчас на складе')}: <b style={{ color: 'var(--text)' }}>{stockText(product, t)}</b>
       </div>
-      <div className="chips" data-tour="ph.period" style={{ marginBottom: 12 }}>
+      <div className="chips ph-period" data-tour="ph.period" style={{ marginBottom: 12 }}>
         {PERIODS.map((p) => (
           <button key={p.key} className={'chip ' + (period === p.key ? 'active' : '')} onClick={() => setPeriod(p.key)}>{t(p.label)}</button>
         ))}
@@ -100,7 +103,8 @@ export default function ProductHistory({ product, onClose }) {
         </div>
       )}
       {loading && !data && <div className="note info" style={{ marginBottom: 10 }}>{t('Загружаем историю…')}</div>}
-      <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+      {/* На телефоне — без своей прокрутки: листается всё окно (m-tovary.css) */}
+      <div className="okno-list" style={{ maxHeight: '56vh', overflow: 'auto' }}>
         <table className="table-cards" data-tour="ph.rows">
           <thead>
             <tr><th>{t('Дата')}</th><th>{t('Что')}</th><th className="num">{t('Штук')}</th><th className="num">{t('Остаток после')}</th><th>{t('Кто')}</th></tr>
@@ -108,16 +112,16 @@ export default function ProductHistory({ product, onClose }) {
           <tbody>
             {rows.map((r, n) => (
               <tr key={r.kind + r.docId + n} style={r.moves ? undefined : { color: 'var(--muted)' }}>
-                <td data-label={t('Дата')} style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.date)}</td>
+                <td className="ph-date" data-label={t('Дата')} style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.date)}</td>
                 <td className="cell-main">
                   <b>{t(KIND[r.kind] || r.kind)}</b>
                   {details(r, t) ? <div className="tag-cat">{details(r, t)}</div> : null}
                 </td>
-                <td className="num" data-label={t('Штук')} style={{ whiteSpace: 'nowrap', color: !r.moves ? 'var(--muted-2)' : r.delta > 0 ? 'var(--green)' : r.delta < 0 ? 'var(--danger)' : undefined, fontWeight: 600 }}>
+                <td className="num ph-qty" data-label={t('Штук')} style={{ whiteSpace: 'nowrap', color: !r.moves ? 'var(--muted-2)' : r.delta > 0 ? 'var(--green)' : r.delta < 0 ? 'var(--danger)' : undefined, fontWeight: 600 }}>
                   {!r.moves ? '—' : (r.delta > 0 ? '+' : '') + r.delta}
                 </td>
-                <td className="num" data-label={t('Остаток после')} style={{ whiteSpace: 'nowrap' }}>{r.after}{packs(r.after)}</td>
-                <td data-label={t('Кто')}>{r.who || '—'}</td>
+                <td className="num ph-after" data-label={t('Остаток после')} style={{ whiteSpace: 'nowrap' }}>{r.after}{packs(r.after)}</td>
+                <td className="ph-who" data-label={t('Кто')}>{r.who || '—'}</td>
               </tr>
             ))}
             {data && rows.length === 0 && <tr><td colSpan="5" className="empty">{t('За этот период движений не было')}</td></tr>}

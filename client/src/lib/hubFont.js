@@ -49,6 +49,11 @@ export const GOLD = 1.5 // «КАССА» крупнее остальных на
 export const MIN_FS = 9
 export const SCALE = 0.65 // доля самого крупного размера (1.5.10: 0,85; 1.6.4: 0,65 — ещё на четверть мельче)
 export const READABLE = 11 // уменьшение не делает надпись мельче этого
+// Телефон (17.11.2026, просьба владельца: «надписи крупнее»): плитки в две колонки, слово
+// «Инвентаризация» и так почти во всю ширину — надпись почти самая крупная (PHONE_SCALE от неё),
+// но не больше PHONE_CAP: на 320 px — около 14, на 360 — 15, от 390 — 17
+export const PHONE_SCALE = 0.95
+export const PHONE_CAP = 17
 const SAFE = 0.99 // запас ширины на расхождение мерки и страницы (canvas и страница сходятся до 0,1 %)
 const STEP = 0.5
 
@@ -148,7 +153,10 @@ function bestPic(tiles, space, fs, w, pic, badges = true) {
 // pic — картинка плитки на сайте (fitHub, только когда real ниже box): { cw, ch, pt, px, w,
 // max, min } — плитка без рамки, поля, ширина под надпись, картинка как в программе и
 // прежняя. Ответ тогда — ещё и pic, px: самая крупная картинка, что не задевает надписи
-export function hubSizes({ box, real = box, tiles, space, gold, menu = 1, pic = null }) {
+// scale, cap — доля самого крупного и верхняя граница (телефон: PHONE_SCALE, PHONE_CAP);
+// readable — нижняя граница, если столько помещается (телефон: 12 — по-таджикски на 320 px
+// доля от самого крупного давала 11,5)
+export function hubSizes({ box, real = box, tiles, space, gold, menu = 1, pic = null, scale = SCALE, cap = Infinity, readable = READABLE }) {
   const w = box.w * SAFE
   const wr = real.w * SAFE
   const longest = Math.max(1e-6, ...tiles.flatMap((t) => t.words))
@@ -166,8 +174,8 @@ export function hubSizes({ box, real = box, tiles, space, gold, menu = 1, pic = 
   // Доля SCALE от самого крупного, но не мельче READABLE (если столько помещается). Меньший
   // размер проверяется заново: значок в углу не уменьшается вместе с надписью (не мельче 24 px)
   // и при мелкой надписи обтекается ещё и вторая строка
-  const want = Math.floor((max * Math.min(1, SCALE * (Number(menu) > 0 ? Number(menu) : 1))) / STEP) * STEP
-  let fs = menu < 1 ? Math.max(want, MIN_FS) : Math.max(want, Math.min(max, READABLE))
+  const want = Math.min(cap * (Number(menu) > 0 ? Number(menu) : 1), Math.floor((max * Math.min(1, scale * (Number(menu) > 0 ? Number(menu) : 1))) / STEP) * STEP)
+  let fs = menu < 1 ? Math.max(want, MIN_FS) : Math.max(want, Math.min(max, readable))
   // Настоящая плитка другая: надпись должна встать и в неё
   const fitsReal = real.h !== box.h || real.w !== box.w ? fitsIn(wr, real.h) : fits
   while (fs > MIN_FS && !fitsReal(fs)) fs -= STEP
@@ -371,7 +379,12 @@ export function fitHub(grid) {
         min: Math.min(PIC * ch, PIC_MAX),
       }
     : null
-  const r = hubSizes({ box: full, real: box, tiles, space: emWidth(' ', font, ls), gold, menu: shrift().menu / 100, pic: picBox })
+  // Телефон: две колонки, сетка листается — надписи почти самые крупные (PHONE_SCALE)
+  const phone = !!window.matchMedia?.('(max-width: 600px)').matches
+  const r = hubSizes({
+    box: full, real: box, tiles, space: emWidth(' ', font, ls), gold, menu: shrift().menu / 100, pic: picBox,
+    ...(phone ? { scale: PHONE_SCALE, cap: PHONE_CAP, readable: 12 } : {}),
+  })
   setVar(grid, '--hub-pic', r.pic == null ? null : r.pic + 'px')
   const vars = {
     '--hub-fs': r.fs + 'px',

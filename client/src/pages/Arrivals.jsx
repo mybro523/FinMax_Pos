@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { LuTrash2, LuPencil, LuList, LuPackagePlus, LuWallet, LuChartColumn, LuSearch, LuRotateCcw, LuUndo2, LuTag, LuReceiptText, LuWarehouse } from 'react-icons/lu'
 import { useLocation, useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout'
-import StickyBar from '../components/StickyBar'
+import StickyBar, { useTelefon } from '../components/StickyBar'
 import { isVesovoy, uppOf, gramsOfKg, kgText, edinica, isDivisible } from '../lib/units'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
@@ -65,7 +65,7 @@ function productOf(i, products) {
   if (p) return p
   const upp = num(i.unitsPerPack) || (num(i.pieces) > 0 ? 1000 : 1)
   // Граммы кратны тысяче — весовой (мешок 50 кг — 50 000, 1.5.12)
-  return { unitsPerPack: upp, unit: upp >= 1000 && upp % 1000 === 0 ? 'кг' : 'уп' }
+  return { unitsPerPack: upp, unit: upp >= 1000 && upp % 1000 === 0 ? 'кг' : upp > 1 ? 'уп' : 'шт' }
 }
 // Упаковка строки — снимком (1.5.12): с какой товар пришёл. Упаковку товара могли сменить
 // позже (килограмм → мешок 50 кг), а «100 кг» прежнего прихода — всё те же 100 кг
@@ -80,6 +80,7 @@ export default function Arrivals() {
   const can = useCan()
   const toast = useToast()
   const dialog = useDialog()
+  const telefon = useTelefon()
   const st = usePrihod()
   const products = useCollection('products')
   const suppliers = useCollection('suppliers')
@@ -337,7 +338,9 @@ export default function Arrivals() {
           toast={toast}
         />
 
-        <div className="prh-main">
+        {/* prh-main-new: на вкладке «Новое поступление» период ни на что не влияет — на телефоне
+            он спрятан (m-prihod.css), до формы меньше листать; набранные даты при этом не теряются */}
+        <div className={'prh-main' + (tab === 'new' ? ' prh-main-new' : '')}>
           {svoySklad ? (
             <div className="panel" data-testid="svoy-sklad-panel">
               <h2><span className="h2-title"><span className="ic"><LuWarehouse size={17} /></span>{t('Приход со своего склада')}</span></h2>
@@ -383,7 +386,10 @@ export default function Arrivals() {
                       <tr key={a.id}>
                         <td data-label={t('Дата')} style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(a.date)}</td>
                         <td className="cell-main">
-                          <b>{a.supplier}</b>
+                          {/* На телефоне название поставщика — заголовок карточки: у прихода без
+                              поставщика там стояло одно «—». На компьютере под заголовком столбца
+                              «Поставщик» прочерк понятен — там как было */}
+                          <b>{telefon && (!a.supplier || a.supplier === '—') ? t('Без поставщика') : a.supplier}</b>
                           {a.place === 'sklad' && <div className="tag-cat" data-testid="arr-na-sklad" style={{ color: 'var(--blue)' }}><LuWarehouse size={12} style={{ verticalAlign: '-2px' }} /> {t('на склад')}</div>}
                           {num(a.debt) > 0 && <div className="tag-cat" style={{ color: 'var(--danger)' }}>{t('в долг')} {money(a.debt)}</div>}
                           {a.payMethod === 'cash' && <div className="tag-cat">{t('оплачен из кассы')}</div>}
@@ -393,7 +399,7 @@ export default function Arrivals() {
                         <td className="num" data-label={t('Позиций')}>{(a.items || []).length}</td>
                         <td className="num" data-label={t('Сумма')}><b>{money(a.total)}</b></td>
                         <td data-label={t('Принял')} className="tag-cat">{a.user?.name || '—'}</td>
-                        <td className="num"><button type="button" className="btn ghost sm" data-tour="arr.details" onClick={() => setView(a)}>{t('Подробно')}</button></td>
+                        <td className="num cell-actions"><button type="button" className="btn ghost sm" data-tour="arr.details" onClick={() => setView(a)}>{t('Подробно')}</button></td>
                       </tr>
                     ))}
                     {!journal.length && !loading && (
@@ -406,7 +412,18 @@ export default function Arrivals() {
             </div>
           )}
 
-          {tab === 'new' && <NewArrival products={products} suppliers={suppliers} onSaved={() => setPrihod({ tab: 'journal' })} />}
+          {tab === 'new' && (
+            <NewArrival
+              products={products}
+              suppliers={suppliers}
+              onSaved={() => {
+                setPrihod({ tab: 'journal' })
+                // Телефон: журнал короче формы, и прокрутка, оставшаяся от формы, показывала середину
+                // списка, а новый приход (он первый) уходил под закреплённый поиск. Журнал — с начала
+                if (telefon) setTimeout(() => document.querySelector('.prh-tabs')?.scrollIntoView({ block: 'start' }), 0)
+              }}
+            />
+          )}
 
           {tab === 'return' && (
             <ReturnTab products={products} suppliers={suppliers} sup={sup} arrivals={arrivals} returns={supReturns} range={range} loading={loading} periodLabel={periodLabel} />
@@ -524,10 +541,11 @@ function PeriodBar({ value, onChange, loading }) {
 // ── Приход · подробно ──
 function ArrivalDetails({ a, products, sposob, busy, canEdit, canLabels, onClose, onEdit, onDelete, onLabels, onCenniki }) {
   const t = useT()
+  const telefon = useTelefon()
   const items = a.items || []
   const withDisc = items.some((i) => num(i.discount) > 0)
   return (
-    <Modal title={t('Приход · детали')} onClose={onClose} wide={withDisc}>
+    <Modal title={t('Приход · детали')} onClose={onClose} wide={withDisc} className="prh-okno">
       <div className="tag-cat" style={{ marginBottom: 12 }}>
         {a.supplier} · {fmtDateTime(a.date)} · {t('Оплата')}: {sposob(a)}
         {a.user?.name ? ` · ${t('Принял')}: ${a.user.name}` : ''}
@@ -538,7 +556,7 @@ function ArrivalDetails({ a, products, sposob, busy, canEdit, canLabels, onClose
         </div>
       )}
       <div className="table-scroll">
-        <table>
+        <table className="table-cards">
           <thead>
             <tr>
               <th>{t('Товар')}</th>
@@ -552,14 +570,17 @@ function ArrivalDetails({ a, products, sposob, busy, canEdit, canLabels, onClose
           <tbody>
             {items.map((i, n) => {
               const p = productOf(i, products)
+              // Строка без скидки в приходе со скидками: «Скидка —» и «Цена со скидкой», равная
+              // цене, в её карточке на телефоне лишние (cell-hide); на компьютере — как были
+              const bezSkidki = withDisc && !(num(i.discount) > 0) ? ' cell-hide' : ''
               return (
                 <tr key={i.id || n}>
-                  <td>{i.name}</td>
-                  <td className="num">{unitsText(itemUnits(i, p), p, t)}</td>
-                  {withDisc && <td className="num">{money(itemBase(i))}</td>}
-                  {withDisc && <td className="num">{num(i.discount) > 0 ? pct(i.discount) : '—'}</td>}
-                  <td className="num">{money(i.cost)}</td>
-                  <td className="num">{money(itemSum(i, p))}</td>
+                  <td className="cell-main">{i.name}</td>
+                  <td className="num" data-label={t('Кол-во')}>{unitsText(itemUnits(i, p), p, t)}</td>
+                  {withDisc && <td className="num" data-label={t('Цена')}>{money(itemBase(i))}</td>}
+                  {withDisc && <td className={'num' + bezSkidki} data-label={t('Скидка')}>{num(i.discount) > 0 ? pct(i.discount) : '—'}</td>}
+                  <td className={'num' + bezSkidki} data-label={withDisc ? t('Цена со скидкой') : t('Закуп.')}>{money(i.cost)}</td>
+                  <td className="num" data-label={t('Сумма')}>{money(itemSum(i, p))}</td>
                 </tr>
               )
             })}
@@ -575,33 +596,44 @@ function ArrivalDetails({ a, products, sposob, busy, canEdit, canLabels, onClose
       )}
 
       {/* «Удалить» и «Изменить» кассиру не видно, и запрос от него сервер тоже отклонит.
-          «Этикетки» — наклейки со штрихкодом на все товары прихода */}
-      {(canEdit || canLabels) && (
+          «Этикетки» — наклейки со штрихкодом на все товары прихода.
+          Телефон: последней — «Закрыть» во всю ширину. Иначе окно закрывалось только касанием
+          узкой полосы затемнения над ним, а «Назад» на Android уводит со страницы. На компьютере
+          есть Esc и щелчок мимо окна — там ряд как был */}
+      {(canEdit || canLabels || telefon) && (
         <div className="modal-actions" style={{ justifyContent: 'space-between' }}>
           {canEdit ? (
             <button className="btn ghost" style={{ color: 'var(--danger)' }} onClick={onDelete} disabled={busy}>
               <span className="ic"><LuTrash2 size={16} /></span> {t('Удалить')}
             </button>
           ) : (
-            <span />
+            !telefon && <span />
           )}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {canLabels && (
-              <button className="btn ghost" onClick={onLabels} disabled={busy || !(a.items || []).length} data-testid="arr-labels">
-                <span className="ic"><LuTag size={16} /></span> {t('Этикетки')}
-              </button>
-            )}
-            {canLabels && (
-              <button className="btn ghost" onClick={onCenniki} disabled={busy || !(a.items || []).length} data-testid="arr-cenniki">
-                <span className="ic"><LuReceiptText size={16} /></span> {t('Ценники')}
-              </button>
-            )}
-            {canEdit && a.place !== 'sklad' && (
-              <button className="btn" onClick={onEdit} disabled={busy}>
-                <span className="ic"><LuPencil size={16} /></span> {t('Изменить')}
-              </button>
-            )}
-          </div>
+          {/* На телефоне ряд — во всю ширину окна: иначе «Этикетки» и «Ценники» стояли узким столбиком сбоку */}
+          {(!telefon || canLabels || (canEdit && a.place !== 'sklad')) && (
+            <div className="prh-det-acts" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {canLabels && (
+                <button className="btn ghost" onClick={onLabels} disabled={busy || !(a.items || []).length} data-testid="arr-labels">
+                  <span className="ic"><LuTag size={16} /></span> {t('Этикетки')}
+                </button>
+              )}
+              {canLabels && (
+                <button className="btn ghost" onClick={onCenniki} disabled={busy || !(a.items || []).length} data-testid="arr-cenniki">
+                  <span className="ic"><LuReceiptText size={16} /></span> {t('Ценники')}
+                </button>
+              )}
+              {canEdit && a.place !== 'sklad' && (
+                <button className="btn" onClick={onEdit} disabled={busy}>
+                  <span className="ic"><LuPencil size={16} /></span> {t('Изменить')}
+                </button>
+              )}
+            </div>
+          )}
+          {telefon && (
+            <button type="button" className="btn ghost prh-det-close" onClick={onClose} data-testid="arr-details-close">
+              {t('Закрыть')}
+            </button>
+          )}
         </div>
       )}
     </Modal>
@@ -635,7 +667,7 @@ function EditArrival({ arrival, suppliers, products, canAddSupplier, onClose, on
       // Упаковка — снимком строки (подробный приход присылает её всегда), иначе — карточки
       const upp = num(i.unitsPerPack) >= 1 ? Math.trunc(num(i.unitsPerPack)) : p ? uppOf(p) : 1
       const ves = p ? isVesovoy(p) : upp === 1000
-      const unit = p ? edinica(p) : ves ? 'кг' : 'уп'
+      const unit = p ? edinica(p) : ves ? 'кг' : upp > 1 ? 'уп' : 'шт'
       const div = isDivisible({ unit, unitsPerPack: upp })
       return {
         id: i.id,
@@ -704,7 +736,7 @@ function EditArrival({ arrival, suppliers, products, canAddSupplier, onClose, on
   }
 
   return (
-    <Modal title={t('Изменить приход')} onClose={onClose} wide>
+    <Modal title={t('Изменить приход')} onClose={onClose} wide className="prh-okno">
       <div className="note info" style={{ marginBottom: 14 }}>
         {t('Склад и закупочная цена пересчитаются сразу. Прибыль по уже пробитым чекам не изменится: каждый чек хранит себестоимость на момент продажи, иначе вчерашние отчёты менялись бы задним числом.')}
       </div>
@@ -712,7 +744,7 @@ function EditArrival({ arrival, suppliers, products, canAddSupplier, onClose, on
       <SupplierPick suppliers={suppliers} value={supplierId} onChange={setSupplierId} dialog={dialog} toast={toast} canAdd={canAddSupplier} />
 
       <div className="table-scroll">
-        <table>
+        <table className="table-cards prh-edit-table">
           <thead>
             <tr>
               <th>{t('Товар')}</th>
@@ -724,14 +756,14 @@ function EditArrival({ arrival, suppliers, products, canAddSupplier, onClose, on
           <tbody>
             {lines.map((l, n) => (
               <tr key={l.id}>
-                <td>
+                <td className="cell-main">
                   <b>{l.name}</b>
                   {l.discount > 0 && <div className="tag-cat">{t('скидка поставщика')} {pct(l.discount)}</div>}
                   {l.soldUnits > 0 && <div className="tag-cat">{t('уже продано')}: {soldText(l)}{l.minQty > 0 ? ` · ${t('меньше нельзя')}` : ''}</div>}
                   {!l.exists && <div className="tag-cat" style={{ color: 'var(--danger)' }}>{t('товар удалён из базы')}</div>}
                   {unitsOf(l) === 0 && <div className="tag-cat" style={{ color: 'var(--warn)' }}>{t('строка будет убрана')}</div>}
                 </td>
-                <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                <td className="num" data-label={t('Кол-во')} style={{ whiteSpace: 'nowrap' }}>
                   <span className="prh-edit-qty">
                     <NumberInput integer={!(l.ves && !l.div)} className="disc-input" value={l.qty} onChange={(e) => set(n, 'qty', e.target.value)} aria-label={t('Количество')} />
                     <span className="tag-cat">{t(l.ves && l.div ? 'уп' : l.unit)}</span>
@@ -750,11 +782,11 @@ function EditArrival({ arrival, suppliers, products, canAddSupplier, onClose, on
                     )}
                   </span>
                 </td>
-                <td className="num" style={{ width: 104 }}>
-                  <NumberInput className="disc-input" value={l.cost} onChange={(e) => set(n, 'cost', e.target.value)} />
+                <td className="num" data-label={t('Закуп.')} style={{ width: 104 }}>
+                  <NumberInput className="disc-input" value={l.cost} onChange={(e) => set(n, 'cost', e.target.value)} aria-label={t('Закуп.')} />
                 </td>
                 {srokOn && (
-                  <td style={{ width: 168 }}>
+                  <td data-label={t('Срок годности')} style={{ width: 168 }}>
                     <input type="date" style={{ width: '100%' }} value={l.expiryDate} onChange={(e) => set(n, 'expiryDate', e.target.value)} title={t('Пусто — срок останется прежним')} />
                   </td>
                 )}
@@ -794,7 +826,7 @@ function CreditBlock({ credit, setCredit, paid, setPaid, total }) {
   const debt = Math.max(0, total - Math.max(0, num(paid)))
   return (
     <div style={{ margin: '10px 0 4px' }}>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+      <label className="prh-check-row" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
         <input type="checkbox" checked={credit} onChange={(e) => setCredit(e.target.checked)} style={{ width: 17, height: 17 }} />
         {t('В долг (оплачено не полностью)')}
       </label>

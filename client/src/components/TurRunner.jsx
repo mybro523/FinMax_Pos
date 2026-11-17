@@ -71,6 +71,16 @@ function unionRect(els) {
   return { top, left, width: right - left, height: bottom - top, right, bottom }
 }
 
+// Телефон: таблицы там карточками (17.11.2026), и одинаковые кнопки строк («Изменить» у
+// каждого сотрудника) стоят не столбиком, а по одной в каждой карточке. Общая рамка вокруг
+// всех растягивалась на весь список и уходила под карточку тура — тогда подсвечиваем только
+// первую: человек видит, о какой кнопке речь. Рядом стоящие (два поля цены) остаются вместе
+function forPhone(els) {
+  if (els.length < 2) return els
+  const r = unionRect(els)
+  return r && r.height > window.innerHeight * 0.5 ? [els[0]] : els
+}
+
 const sameRect = (a, b) =>
   a === b ||
   (!!a && !!b &&
@@ -245,12 +255,18 @@ export default function TurRunner({ id, index }) {
       }
       if (cancelled) return
 
+      // Группа плиток меню («grp:…») подсвечивается вся — она и есть смысл шага
+      if (narrow && !String(step.t || '').startsWith('grp:')) els = forPhone(els)
       targetsRef.current = els
       setMissing(!!step.t && !els.length)
       if (els.length) {
-        // На телефоне карточка стоит снизу — элемент поднимаем повыше, чтобы не прятался под ней
-        els[0].scrollIntoView({ block: narrow ? 'start' : 'center', inline: 'nearest' })
-        if (narrow) window.scrollBy(0, -80)
+        // На телефоне карточка стоит снизу — элемент поднимаем повыше, чтобы не прятался под
+        // ней, но с отступом сверху. Отступ — через scroll-margin, а не прокруткой окна: главное
+        // меню листается своим блоком (.main), и там плитка вставала под закреплённую шапку
+        const el = els[0]
+        if (narrow) el.style.scrollMarginTop = '80px'
+        el.scrollIntoView({ block: narrow ? 'start' : 'center', inline: 'nearest' })
+        if (narrow) el.style.scrollMarginTop = ''
         setRect(unionRect(els))
       } else {
         setRect(null)
@@ -353,9 +369,12 @@ export default function TurRunner({ id, index }) {
         <div className="tur-dim" />
       )}
 
+      {/* tur-sheet-free — телефон, шаг без элемента (вступление, «Как это делается»): экран за
+          карточкой всё равно затемнён, и ей можно быть выше — длинный список читается, почти
+          не листая (m-lyudi.css) */}
       <div
         ref={cardRef}
-        className={'tur-card' + (pos?.sheet ? ' tur-sheet' + (pos.up ? ' tur-sheet-up' : '') : '')}
+        className={'tur-card' + (pos?.sheet ? ' tur-sheet' + (pos.up ? ' tur-sheet-up' : '') + (ready && !rect ? ' tur-sheet-free' : '') : '')}
         style={cardStyle}
         role="dialog"
         aria-modal="true"

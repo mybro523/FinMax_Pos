@@ -29,30 +29,33 @@ import { useModul, useRouteOn } from '../lib/useModul'
 const unitsOf = stockUnits
 const valueOf = stockValue
 
-// Мини-карточка (кликабельная, если задан onClick)
+// Мини-карточка (кликабельная, если задан onClick). mc-otchet — вид на телефоне (m-otchety.css)
 function MC({ label, v, color, onClick }) {
   return (
-    <div className={'mini-card' + (onClick ? ' clickable' : '')} onClick={onClick}>
+    <div className={'mini-card mc-otchet' + (onClick ? ' clickable' : '')} onClick={onClick}>
       <div className="m-label">{label}</div>
       <div className="m-value sm" style={color ? { color } : undefined}>{v}</div>
     </div>
   )
 }
 
-// Таблица товаров для модалок аналитики
+// Таблица товаров для модалок аналитики.
+// На телефоне (17.11.2026) строки — карточками (table-cards), а список не прокручивается
+// отдельно внутри окна (okno-spisok, m-otchety.css): окно и так листается целиком
 function ProductTable({ list, showValue }) {
   if (!list.length) return <div className="empty">{tr('Нет товаров')}</div>
+  const valLabel = showValue ? tr('Стоимость') : tr('Цена')
   return (
-    <div style={{ maxHeight: '52vh', overflow: 'auto' }}>
-      <table>
-        <thead><tr><th>{tr('Товар')}</th><th>{tr('Категория')}</th><th className="num">{tr('Остаток')}</th><th className="num">{showValue ? tr('Стоимость') : tr('Цена')}</th></tr></thead>
+    <div className="okno-spisok" style={{ maxHeight: '52vh', overflow: 'auto' }}>
+      <table className="table-cards">
+        <thead><tr><th>{tr('Товар')}</th><th>{tr('Категория')}</th><th className="num">{tr('Остаток')}</th><th className="num">{valLabel}</th></tr></thead>
         <tbody>
           {list.map((p) => (
             <tr key={p.id}>
-              <td><b>{p.name}</b>{p.dosage ? <span className="tag-cat"> · {p.dosage}</span> : null}</td>
-              <td>{p.category}</td>
-              <td className="num">{stockText(p)}</td>
-              <td className="num">{money(showValue ? valueOf(p) : p.price)}</td>
+              <td className="cell-main"><b>{p.name}</b>{p.dosage ? <span className="tag-cat"> · {p.dosage}</span> : null}</td>
+              <td data-label={tr('Категория')}>{p.category}</td>
+              <td className="num" data-label={tr('Остаток')}>{stockText(p)}</td>
+              <td className="num" data-label={valLabel}>{money(showValue ? valueOf(p) : p.price)}</td>
             </tr>
           ))}
         </tbody>
@@ -185,8 +188,9 @@ export default function Dashboard() {
     }
     if (modal.type === 'profit') {
       const f = stats.fin
+      // okno-itogi — строки «подпись — сумма» на телефоне (m-otchety.css)
       return (
-        <Modal title={t('Прибыль за сегодня')} onClose={close}>
+        <Modal className="okno-itogi" title={t('Прибыль за сегодня')} onClose={close}>
           <div className="total-row"><span>{t('Продано на')}</span><span>{money(f.revenueGross)}</span></div>
           <div className="total-row"><span>{t('Себестоимость проданного')}</span><span>−{money(f.cost)}</span></div>
           <div className="total-row"><span>{t('Прибыль с продаж')}</span><span>{money(f.profitGross)}</span></div>
@@ -233,15 +237,15 @@ export default function Dashboard() {
             <MC label={t('Нет в наличии')} v={stats.outList.length} color={stats.outList.length ? 'var(--danger)' : undefined} />
           </div>
           <h2 style={{ fontSize: 14, margin: '14px 0 6px' }}>{t('Заканчивается')}</h2>
-          <div style={{ maxHeight: '44vh', overflow: 'auto' }}>
-            <table>
+          <div className="okno-spisok" style={{ maxHeight: '44vh', overflow: 'auto' }}>
+            <table className="table-cards">
               <thead><tr><th>{t('Товар')}</th><th>{t('Категория')}</th><th className="num">{t('Остаток')}</th></tr></thead>
               <tbody>
                 {stats.lowList.map((p) => (
                   <tr key={p.id}>
-                    <td><b>{p.name}</b></td>
-                    <td>{p.category}</td>
-                    <td className="num"><span className={'badge ' + (unitsOf(p) <= 0 ? 'debt' : 'low')}>{stockText(p)}</span></td>
+                    <td className="cell-main"><b>{p.name}</b></td>
+                    <td data-label={t('Категория')}>{p.category}</td>
+                    <td className="num" data-label={t('Остаток')}><span className={'badge ' + (unitsOf(p) <= 0 ? 'debt' : 'low')}>{stockText(p)}</span></td>
                   </tr>
                 ))}
                 {stats.lowList.length === 0 && <tr><td colSpan="3" className="empty">{t('Все остатки в норме')}</td></tr>}
@@ -257,12 +261,16 @@ export default function Dashboard() {
     if (modal.type === 'suppliers') {
       return (
         <Modal wide title={t('Долги поставщикам')} onClose={close}>
-          <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
-            <table>
+          <div className="okno-spisok" style={{ maxHeight: '56vh', overflow: 'auto' }}>
+            <table className="table-cards">
               <thead><tr><th>{t('Поставщик')}</th><th>{t('Телефон')}</th><th className="num">{t('Долг')}</th></tr></thead>
               <tbody>
                 {stats.creditors.map((s) => (
-                  <tr key={s.id}><td><b>{s.name}</b></td><td className="tag-cat">{s.phone || '—'}</td><td className="num"><span className="badge debt">{money(s.debt)}</span></td></tr>
+                  <tr key={s.id}>
+                    <td className="cell-main"><b>{s.name}</b></td>
+                    <td className="tag-cat" data-label={t('Телефон')}>{s.phone || '—'}</td>
+                    <td className="num" data-label={t('Долг')}><span className="badge debt">{money(s.debt)}</span></td>
+                  </tr>
                 ))}
                 {stats.creditors.length === 0 && <tr><td colSpan="3" className="empty">{t('Долгов нет')}</td></tr>}
               </tbody>
@@ -275,12 +283,16 @@ export default function Dashboard() {
     if (modal.type === 'debts') {
       return (
         <Modal wide title={t('Долги клиентов')} onClose={close}>
-          <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
-            <table>
+          <div className="okno-spisok" style={{ maxHeight: '56vh', overflow: 'auto' }}>
+            <table className="table-cards">
               <thead><tr><th>{t('Клиент')}</th><th>{t('Телефон')}</th><th className="num">{t('Долг')}</th></tr></thead>
               <tbody>
                 {stats.debtors.map((c) => (
-                  <tr key={c.id}><td><b>{c.name}</b></td><td className="tag-cat">{c.phone || '—'}</td><td className="num"><span className="badge debt">{money(c.debt)}</span></td></tr>
+                  <tr key={c.id}>
+                    <td className="cell-main"><b>{c.name}</b></td>
+                    <td className="tag-cat" data-label={t('Телефон')}>{c.phone || '—'}</td>
+                    <td className="num" data-label={t('Долг')}><span className="badge debt">{money(c.debt)}</span></td>
+                  </tr>
                 ))}
                 {stats.debtors.length === 0 && <tr><td colSpan="3" className="empty">{t('Долгов нет')}</td></tr>}
               </tbody>
@@ -355,8 +367,8 @@ export default function Dashboard() {
             <MC label={t('Выручу за всё')} v={money(stats.stockValue + sklad.value)} />
             <MC label={t('Будущая прибыль')} v={money(stats.stockValue + sklad.value - stats.stockCost - sklad.cost)} color="var(--green)" />
           </div>
-          <div style={{ maxHeight: '48vh', overflow: 'auto' }}>
-            <table>
+          <div className="okno-spisok" style={{ maxHeight: '48vh', overflow: 'auto' }}>
+            <table className="table-cards">
               <thead>
                 <tr>
                   <th>{t('Товар')}</th>
@@ -369,11 +381,11 @@ export default function Dashboard() {
               <tbody>
                 {list.map((p) => (
                   <tr key={p.id}>
-                    <td><b>{p.name}</b>{p.dosage ? <span className="tag-cat"> · {p.dosage}</span> : null}</td>
-                    <td className="num">{stockText(p)}</td>
-                    {skladOn && <td className="num">{naSklade.get(p.id) ? unitsText(naSklade.get(p.id).units, p, t) : '—'}</td>}
-                    <td className="num">{money(p.cost || 0)}</td>
-                    <td className="num"><b>{money(vlozheno(p))}</b></td>
+                    <td className="cell-main"><b>{p.name}</b>{p.dosage ? <span className="tag-cat"> · {p.dosage}</span> : null}</td>
+                    <td className="num" data-label={skladOn ? t('В магазине') : t('Остаток')}>{stockText(p)}</td>
+                    {skladOn && <td className="num" data-label={t('На складе')}>{naSklade.get(p.id) ? unitsText(naSklade.get(p.id).units, p, t) : '—'}</td>}
+                    <td className="num" data-label={t('Закуп.')}>{money(p.cost || 0)}</td>
+                    <td className="num" data-label={t('Вложено')}><b>{money(vlozheno(p))}</b></td>
                   </tr>
                 ))}
                 {list.length === 0 && <tr><td colSpan={skladOn ? 5 : 4} className="empty">{t('Нет товаров')}</td></tr>}
@@ -395,16 +407,16 @@ export default function Dashboard() {
             <MC label={t('По закупке')} v={money(sklad.cost)} />
             <MC label={t('Наименований')} v={sklad.tovarov} />
           </div>
-          <div style={{ maxHeight: '48vh', overflow: 'auto' }}>
-            <table data-testid="dash-sklad-okno">
+          <div className="okno-spisok" style={{ maxHeight: '48vh', overflow: 'auto' }}>
+            <table className="table-cards" data-testid="dash-sklad-okno">
               <thead><tr><th>{t('Товар')}</th><th className="num">{t('На складе')}</th><th className="num">{t('По закупке')}</th><th className="num">{t('По цене продажи')}</th></tr></thead>
               <tbody>
                 {[...skladRows].sort((a, b) => b.value - a.value).map((r) => (
                   <tr key={r.productId}>
-                    <td><b>{r.product.name}</b>{r.product.dosage ? <span className="tag-cat"> · {r.product.dosage}</span> : null}</td>
-                    <td className="num">{unitsText(r.units, r.product, t)}</td>
-                    <td className="num">{money(r.cost)}</td>
-                    <td className="num"><b>{money(r.value)}</b></td>
+                    <td className="cell-main"><b>{r.product.name}</b>{r.product.dosage ? <span className="tag-cat"> · {r.product.dosage}</span> : null}</td>
+                    <td className="num" data-label={t('На складе')}>{unitsText(r.units, r.product, t)}</td>
+                    <td className="num" data-label={t('По закупке')}>{money(r.cost)}</td>
+                    <td className="num" data-label={t('По цене продажи')}><b>{money(r.value)}</b></td>
                   </tr>
                 ))}
                 {!skladRows.length && <tr><td colSpan="4" className="empty">{t('На складе пока пусто')}</td></tr>}
@@ -454,13 +466,17 @@ export default function Dashboard() {
       return (
         <Modal wide title={t('Маржа склада')} onClose={close}>
           <div className="mini-cards"><MC label={t('Ср. маржа')} v={stats.margin + '%'} /><MC label={t('Стоимость')} v={money(stats.stockValue)} /></div>
-          <div style={{ maxHeight: '48vh', overflow: 'auto' }}>
-            <table>
+          <div className="okno-spisok" style={{ maxHeight: '48vh', overflow: 'auto' }}>
+            <table className="table-cards">
               <thead><tr><th>{t('Товар')}</th><th className="num">{t('Закуп.')}</th><th className="num">{t('Продажа')}</th><th className="num">{t('Маржа')}</th></tr></thead>
               <tbody>
                 {list.map((p) => (
-                  <tr key={p.id}><td><b>{p.name}</b></td><td className="num">{money(p.cost)}</td><td className="num">{money(p.price)}</td>
-                    <td className="num" style={{ color: p._m < 20 ? 'var(--danger)' : 'var(--green)' }}>{p._m}%</td></tr>
+                  <tr key={p.id}>
+                    <td className="cell-main"><b>{p.name}</b></td>
+                    <td className="num" data-label={t('Закуп.')}>{money(p.cost)}</td>
+                    <td className="num" data-label={t('Продажа')}>{money(p.price)}</td>
+                    <td className="num" data-label={t('Маржа')} style={{ color: p._m < 20 ? 'var(--danger)' : 'var(--green)' }}>{p._m}%</td>
+                  </tr>
                 ))}
               </tbody>
             </table>
@@ -611,8 +627,8 @@ export default function Dashboard() {
           sub={skladOn ? `${t('по закупке')} · ${t('магазин')} ${money(stats.stockCost)} · ${t('склад')} ${money(sklad.cost)}` : t('по закупочной цене')} onClick={() => setModal({ type: 'invested' })} />
         <Metric tour="dash.stock" testid="card-dash-stock" label={t('Остаток в магазине')} value={money(stats.stockValue)} Icon={LuBoxes} tint="blue"
           sub={stats.lowList.length
-            ? `${stats.stockUnits} ${t('уп')} · ${stats.lowList.length} ${t('заканчивается')}`
-            : `${stats.stockUnits} ${t('уп')} · ${t('по цене продажи')}`}
+            ? `${stats.stockUnits} ${t('ед.')} · ${stats.lowList.length} ${t('заканчивается')}`
+            : `${stats.stockUnits} ${t('ед.')} · ${t('по цене продажи')}`}
           warn={stats.lowList.length > 0} onClick={() => setModal({ type: 'stock' })} />
         {/* Склад (1.8.0): отдельный запас и всё вместе — только тому, кому склад разрешён */}
         {skladOn && (
@@ -658,7 +674,8 @@ export default function Dashboard() {
           const pct = stats.stockValue ? Math.round((c.value / stats.stockValue) * 100) : 0
           return (
             <div key={c.cat} className="cat-row" style={{ marginBottom: 11, cursor: 'pointer' }} onClick={() => setModal({ type: 'category', cat: c.cat })}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+              {/* bar-line: на узком экране сумма не слипается с названием (m-otchety.css) */}
+              <div className="bar-line" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
                 <span>{c.cat} <span className="tag-cat">· {c.count} {t('поз.')}</span></span>
                 <span><b>{money(c.value)}</b> · {pct}%</span>
               </div>
@@ -676,17 +693,18 @@ export default function Dashboard() {
           <span className="h2-title"><span className="ic"><LuReceipt size={17} /></span>{t('Последние продажи')}</span>
           {est('/reports') && <Link to="/reports" className="linklike">{t('смотреть все')} <LuChevronRight size={14} /></Link>}
         </h2>
-        <table>
+        {/* На телефоне — карточками: сверху что продали, ниже время, сумма и оплата */}
+        <table className="table-cards">
           <thead><tr><th>{t('Время')}</th><th>{t('Товары')}</th><th className="num">{t('Сумма')}</th><th>{t('Оплата')}</th></tr></thead>
           <tbody>
             {stats.recent.map((s) => {
               const names = s.items.map((i) => i.name).join(', ')
               return (
                 <tr key={s.id}>
-                  <td>{fmtShort(s.date)}</td>
-                  <td>{names.slice(0, 50)}{names.length > 50 ? '…' : ''} <span className="tag-cat">({s.items.reduce((a, i) => a + lineUnits(i), 0)} {t('шт')})</span></td>
-                  <td className="num"><b>{money(s.total)}</b></td>
-                  <td><PayBadge type={s.payment} /></td>
+                  <td data-label={t('Время')}>{fmtShort(s.date)}</td>
+                  <td className="cell-main">{names.slice(0, 50)}{names.length > 50 ? '…' : ''} <span className="tag-cat">({s.items.reduce((a, i) => a + lineUnits(i), 0)} {t('шт')})</span></td>
+                  <td className="num" data-label={t('Сумма')}><b>{money(s.total)}</b></td>
+                  <td data-label={t('Оплата')}><PayBadge type={s.payment} /></td>
                 </tr>
               )
             })}

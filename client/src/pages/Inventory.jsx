@@ -26,6 +26,7 @@ import {
   readDraft, writeDraft, dropDraft, closeDraft, pruneDrafts,
 } from '../lib/pereschet'
 import { useCan } from '../db/auth'
+import { useTelefon } from '../components/StickyBar'
 
 // ── Инвентаризация (пересчёт остатков) ──
 // 1) Создаём лист — система записывает, сколько товара должно быть.
@@ -48,6 +49,9 @@ const LOOK_AGAIN_MS = 3000
 const PICKED = '__picked'
 const PICKED_SCOPE = 'Выбранные товары'
 const pause = (ms) => new Promise((r) => setTimeout(r, ms))
+// Остаток словами с переведёнными единицами: stockText (db/store.js) пишет их по-русски, и
+// по-таджикски в карточке стояло «12 шт» рядом с переведённым «2 дона». По-русски — как было
+const ostatokText = (p, t) => stockText(p).replace(/[^\d\s.,+-]+/g, (w) => t(w))
 
 // Один лист с сервера. wait — «ответь, когда закончится идущее применение».
 // null — сервер такого запроса не знает: он прежней версии. Сайт обновляется на минуты
@@ -97,6 +101,7 @@ export default function Inventory() {
   const products = useCollection('products')
   const categories = categoryNames(useCategories())
   const t = useT()
+  const telefon = useTelefon()
   const toast = useToast()
   const dialog = useDialog()
   const [list, setList] = useState([])
@@ -406,9 +411,18 @@ export default function Inventory() {
     refocusScan()
   }
 
+  // Телефон: «Наименование» при нажатии поднимается к верху экрана — подсказкам под ним
+  // остаётся место над клавиатурой. В открытом листе поле стоит под карточками-счётчиками, и
+  // выехавшая клавиатура закрывала бы список целиком
+  const naverhPoisk = (e) => {
+    if (!telefon || e.target.id !== 'inv-name') return
+    const pole = e.target.closest('.prh-f') || e.target
+    requestAnimationFrame(() => pole.scrollIntoView({ block: 'start' }))
+  }
+
   // Поля «Штрихкод» и «Наименование» — одни на оба места
   const skanPolya = (onPick, readOnly = false) => (
-    <div className="inv-scan">
+    <div className="inv-scan" onFocus={naverhPoisk}>
       <ProductPick
         readOnly={readOnly}
         ids={{ code: 'inv-code', name: 'inv-name' }}
@@ -688,7 +702,8 @@ export default function Inventory() {
                   </div>
                 )}
                 <div className="inv-otbor" data-testid="inv-otbor">
-                  <table>
+                  {/* На телефоне — карточками: поле «Насчитано» под палец, вбок ничего не листается */}
+                  <table className="table-cards">
                     <thead>
                       <tr><th>{t('Товар')}</th><th className="num">{t('По системе')}</th><th style={{ width: 170 }}>{t('Насчитано')}</th><th></th></tr>
                     </thead>
@@ -698,9 +713,9 @@ export default function Inventory() {
                         const ves = isVesovoy(p)
                         return (
                           <tr key={r.productId} className={n === 0 ? 'inv-last' : undefined}>
-                            <td><b>{p.name}</b><div className="tag-cat">{p.barcode}</div></td>
-                            <td className="num">{stockText(p)}</td>
-                            <td>
+                            <td className="cell-main"><b>{p.name}</b><div className="tag-cat">{p.barcode}</div></td>
+                            <td className="num" data-label={t('По системе')}>{ostatokText(p, t)}</td>
+                            <td data-label={t('Насчитано')}>
                               {ves ? (
                                 <VesInput
                                   className="disc-input" style={{ width: 110 }} grams={r.units ?? 0} placeholder="—"
@@ -720,7 +735,7 @@ export default function Inventory() {
                               {/* Сколько это упаковок: «2 уп + 5 шт»; у весового без мешка вес и так в поле */}
                               {r.units !== null && !(ves && !opensPack(p)) && <div className="tag-cat">{unitsText(r.units, p, t)}</div>}
                             </td>
-                            <td className="num">
+                            <td className="num cell-actions">
                               <button className="btn ghost sm icon" onClick={() => setOtbor((l) => izOtbora(l, r.productId))} title={t('Убрать из списка')} aria-label={`${t('Убрать из списка')}: ${p.name}`}><LuX size={15} /></button>
                             </td>
                           </tr>
@@ -760,22 +775,24 @@ export default function Inventory() {
             <h2 style={{ padding: '16px 16px 0' }}>
               <span className="h2-title"><span className="ic"><LuClipboardCheck size={17} /></span>{t('Пересчёты')}</span>
             </h2>
-            <table>
+            {/* На телефоне листы — карточками: что пересчитывали, состояние, кнопки внизу */}
+            <div className="table-cards-wrap">
+            <table className="table-cards inv-list">
               <thead>
                 <tr><th>{t('Дата')}</th><th>{t('Охват')}</th><th>{t('Кто')}</th><th>{t('Статус')}</th><th></th></tr>
               </thead>
               <tbody>
                 {pg.slice.map((inv) => (
                   <tr key={inv.id}>
-                    <td>{fmtDateTime(inv.date)}</td>
-                    <td>{inv.scope === 'all' ? t('Весь склад') : t(inv.scope)}</td>
-                    <td>{inv.user?.name || '—'}</td>
-                    <td>
+                    <td data-label={t('Дата')}>{fmtDateTime(inv.date)}</td>
+                    <td className="cell-main">{inv.scope === 'all' ? t('Весь склад') : t(inv.scope)}</td>
+                    <td data-label={t('Кто')}>{inv.user?.name || '—'}</td>
+                    <td className="cell-state">
                       {inv.status === 'applied'
                         ? <span className="badge ok">{t('применён')}</span>
                         : <span className="badge low">{t('не закончен')}</span>}
                     </td>
-                    <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                    <td className="num cell-actions" style={{ whiteSpace: 'nowrap' }}>
                       <button className="btn ghost sm" onClick={() => openSheet(inv)}>
                         {inv.status === 'applied' ? t('Посмотреть') : t('Продолжить')}
                       </button>{' '}
@@ -788,6 +805,7 @@ export default function Inventory() {
                 {list.length === 0 && <tr><td colSpan="5" className="empty">{t('Пересчётов ещё не было')}</td></tr>}
               </tbody>
             </table>
+            </div>
             <Pagination {...pg} />
           </div>
         </>
@@ -812,15 +830,15 @@ export default function Inventory() {
             return (
               <Modal wide title={title} onClose={() => setOkno(null)}>
                 <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
-                  <table data-testid="inv-okno">
+                  <table data-testid="inv-okno" className="table-cards inv-okno">
                     <thead><tr><th>{t('Товар')}</th><th className="num">{t('По системе, шт')}</th><th className="num">{t('По факту, шт')}</th><th className="num">{t('Расхождение')}</th></tr></thead>
                     <tbody>
                       {list.map((r, n) => (
                         <tr key={(r.id || r.productId || r.name) + '_' + n}>
-                          <td><b>{r.name}</b></td>
-                          <td className="num">{chisloEx(r, r.expected)}</td>
-                          <td className="num">{r.actual === null ? '—' : chisloEx(r, r.actual)}</td>
-                          <td className="num" style={{ color: r.diff < 0 ? 'var(--danger)' : r.diff > 0 ? 'var(--warn)' : undefined, fontWeight: r.diff ? 700 : undefined }}>
+                          <td className="cell-main"><b>{r.name}</b></td>
+                          <td className="num" data-label={t('По системе, шт')}>{chisloEx(r, r.expected)}</td>
+                          <td className="num" data-label={t('По факту, шт')}>{r.actual === null ? '—' : chisloEx(r, r.actual)}</td>
+                          <td className="num" data-label={t('Расхождение')} style={{ color: r.diff < 0 ? 'var(--danger)' : r.diff > 0 ? 'var(--warn)' : undefined, fontWeight: r.diff ? 700 : undefined }}>
                             {r.diff === null ? '—' : (r.diff > 0 ? '+' : '') + chisloEx(r, r.diff)}
                           </td>
                         </tr>
@@ -846,7 +864,9 @@ export default function Inventory() {
           )}
 
           <div className="panel" style={{ padding: 0 }}>
-            <table>
+            {/* На телефоне каждый товар — карточкой: название крупно, поле «По факту» под палец */}
+            <div className="table-cards-wrap">
+            <table className="table-cards inv-sheet">
               <thead>
                 <tr>
                   <th>{t('Товар')}</th>
@@ -866,9 +886,9 @@ export default function Inventory() {
                   const chislo = (n) => (ves ? `${kgText(n)} ${t(edinica(prod))}` : n)
                   return (
                     <tr key={i.id} className={top[0] === i.id ? 'inv-last' : undefined}>
-                      <td><b>{i.name}</b>{prod?.barcode && <div className="tag-cat">{prod.barcode}</div>}</td>
-                      <td className="num">{chislo(i.expectedUnits)}</td>
-                      <td data-tour="inv.fact">
+                      <td className="cell-main"><b>{i.name}</b>{prod?.barcode && <div className="tag-cat">{prod.barcode}</div>}</td>
+                      <td className="num" data-label={t('По системе, шт')}>{chislo(i.expectedUnits)}</td>
+                      <td data-tour="inv.fact" data-label={t('По факту, шт')}>
                         {ves ? (
                           <VesInput
                             className="disc-input"
@@ -892,7 +912,7 @@ export default function Inventory() {
                         )}
                         {!ves && opensPack(prod) && actual !== null && <div className="tag-cat">{unitsText(actual, prod, t)}</div>}
                       </td>
-                      <td className="num">
+                      <td className="num" data-label={t('Расхождение')}>
                         {diff === null ? <span className="tag-cat">{t('не считали')}</span>
                           : diff === 0 ? <span className="badge ok">{t('сходится')}</span>
                             : <span className={'badge ' + (diff < 0 ? 'debt' : 'low')}>{diff > 0 ? '+' : ''}{chislo(diff)}</span>}
@@ -902,21 +922,45 @@ export default function Inventory() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
 
-          <div className="modal-actions" style={{ marginTop: 16 }}>
-            <button className="btn ghost" onClick={close} disabled={busy}>{t('Назад к списку')}</button>
-            {open.status !== 'applied' && (
-              <>
+          {telefon && open.status !== 'applied' && (can('inventory.count') || can('inventory.apply')) ? (
+            // Телефон (17.11.2026): «Сохранить черновик» и «Применить пересчёт» — в полосе внизу
+            // экрана, над нижней панелью, рядом — сколько уже пересчитано. Лист «Весь склад» на
+            // телефоне — много экранов карточек, а кнопки стояли только в самом конце. Полоса
+            // стоит в конце листа и держится внизу экрана, пока до него не долистали (sticky —
+            // m-dengi.css): последняя карточка под ней не прячется. «Назад к списку» — под листом
+            <>
+              <div className="inv-mbar" data-testid="inv-mbar">
+                <div className="inv-mbar-sum">
+                  <span>{t('Пересчитано')}</span>
+                  <b>{sum.counted} {t('из')} {open.items.length}</b>
+                </div>
                 {can('inventory.count') && <button className="btn ghost" data-tour="inv.draft" onClick={saveDraft}>{t('Сохранить черновик')}</button>}
                 {can('inventory.apply') && (
-                  <button className="btn danger" data-tour="inv.apply" onClick={apply} disabled={busy || sum.counted === 0}>
-                    <span className="ic"><LuCircleCheck size={16} /></span> {t('Применить пересчёт')}
-                  </button>
+                  <button className="btn danger" data-tour="inv.apply" onClick={apply} disabled={busy || sum.counted === 0}>{t('Применить пересчёт')}</button>
                 )}
-              </>
-            )}
-          </div>
+              </div>
+              <div className="modal-actions" style={{ marginTop: 16 }}>
+                <button className="btn ghost" onClick={close} disabled={busy}>{t('Назад к списку')}</button>
+              </div>
+            </>
+          ) : (
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button className="btn ghost" onClick={close} disabled={busy}>{t('Назад к списку')}</button>
+              {open.status !== 'applied' && (
+                <>
+                  {can('inventory.count') && <button className="btn ghost" data-tour="inv.draft" onClick={saveDraft}>{t('Сохранить черновик')}</button>}
+                  {can('inventory.apply') && (
+                    <button className="btn danger" data-tour="inv.apply" onClick={apply} disabled={busy || sum.counted === 0}>
+                      <span className="ic"><LuCircleCheck size={16} /></span> {t('Применить пересчёт')}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </>
       )}
 
