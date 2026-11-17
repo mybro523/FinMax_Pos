@@ -10,7 +10,7 @@
 // Запуск: npm test (в папке client)
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { hubSizes, lineCount, badgeGeom, badgeWidth, LINE, FILL, GOLD, MIN_FS, SCALE, READABLE } from '../src/lib/hubFont.js'
+import { hubSizes, lineCount, badgeGeom, badgeWidth, picClear, LINE, FILL, GOLD, MIN_FS, SCALE, READABLE } from '../src/lib/hubFont.js'
 
 const SAFE = 0.99 // как в hubFont.js
 const SPACE = 0.217
@@ -167,4 +167,77 @@ test('крошечное окно: не мельче нижней границы
   assert.equal(r.max, MIN_FS)
   assert.equal(r.fs, MIN_FS)
   assert.equal(r.gold, MIN_FS)
+})
+
+// ── 17.11.2026: сайт в окне браузера — надписи как в программе на весь экран ──
+// Владелец: «сайт — точь-в-точь как программа, без прокрутки, шрифт такой же большой». Экран
+// 1536×864: в программе (на весь экран) плитка 290×131 — место под надпись 264×103; на сайте
+// вкладки, адрес и панель задач забирают ~165 px — плитка 290×98, место 264×70.
+const APP = { w: 264, h: 103 }
+const SITE = { w: 264, h: 70 }
+// Картинка обычной плитки на сайте: плитка без рамки 288×96, поля 14 (верх) и 12 (слева);
+// как в программе — половина плитки на весь экран (129 px), прежняя — половина настоящей
+const PIC_SITE = { cw: 288, ch: 96, pt: 14, px: 12, w: 264, max: Math.min(0.5 * 129, 108), min: Math.min(0.5 * 96, 108) }
+
+test('сайт: надпись того же размера, что в программе на весь экран, а не мельче', () => {
+  const app = hubSizes({ box: APP, tiles: RU, space: SPACE, gold: KASSA(450, 75) })
+  const old = hubSizes({ box: SITE, tiles: RU, space: SPACE, gold: KASSA(450, 42) })
+  const site = hubSizes({ box: APP, real: SITE, tiles: RU, space: SPACE, gold: KASSA(450, 42) })
+  assert.equal(site.fs, app.fs, `на сайте ${site.fs} px, в программе ${app.fs}`)
+  assert.equal(site.gold, app.gold, '«КАССА» на сайте не как в программе')
+  assert.ok(old.fs < app.fs - 3, `прежний расчёт по низкой плитке давал ${old.fs} px — мельче программы`)
+  // и встаёт в настоящую плитку
+  for (const t of RU) {
+    const n = lineCount(t.words, SPACE, site.fs, SITE.w * SAFE, fltFor(t, site.fs))
+    assert.ok(n * site.fs * LINE <= SITE.h * FILL + 1e-9, 'надпись выше допустимого в низкой плитке')
+  }
+})
+
+test('программа на весь экран: без «сайта» всё как было (картинка не считается)', () => {
+  const a = hubSizes({ box: APP, tiles: RU, space: SPACE, gold: KASSA(450, 75) })
+  const b = hubSizes({ box: APP, real: APP, tiles: RU, space: SPACE, gold: KASSA(450, 75), pic: PIC_SITE })
+  assert.deepEqual(b, a)
+  assert.equal(a.pic, null)
+})
+
+test('сайт: картинка — самая крупная, что не задевает надписи и цифру, не меньше прежней', () => {
+  const r = hubSizes({ box: APP, real: SITE, tiles: RU, space: SPACE, gold: null, pic: PIC_SITE })
+  assert.ok(r.pic >= PIC_SITE.min && r.pic <= PIC_SITE.max, `картинка ${r.pic} px вне ${PIC_SITE.min}–${PIC_SITE.max}`)
+  assert.ok(picClear(RU, SPACE, r.fs, APP.w * SAFE, PIC_SITE, r.pic), 'картинка задевает надпись')
+  if (r.pic + 1 <= PIC_SITE.max) assert.ok(!picClear(RU, SPACE, r.fs, APP.w * SAFE, PIC_SITE, r.pic + 1), 'картинка могла быть крупнее')
+})
+
+test('сайт: короткие надписи — картинка как в программе', () => {
+  const short = [tile([3.25, 3.05]), tile([2.4]), tile([INV])]
+  const r = hubSizes({ box: APP, real: SITE, tiles: short, space: SPACE, gold: null, pic: PIC_SITE })
+  assert.equal(r.pic, Math.floor(PIC_SITE.max))
+})
+
+test('сайт: цифра в углу над картинкой — картинка ниже цифры', () => {
+  // одно короткое слово и цифра: строка надписи левее картинки, мешает только цифра
+  const r = hubSizes({ box: APP, real: SITE, tiles: [tile([2.4], 0.43), tile([INV])], space: SPACE, gold: null, pic: PIC_SITE })
+  const g = badgeGeom(r.fs)
+  const picTop = PIC_SITE.ch * 0.95 - r.pic
+  assert.ok(picTop >= PIC_SITE.pt + g.mt + g.bh + 4 - 1e-9, `картинка (верх ${picTop}) заходит на цифру`)
+})
+
+test('сайт: не встаёт и прежняя картинка — надпись мельче, но не мельче прежнего расчёта', () => {
+  // длинная надпись во всю ширину и в две строки — рядом с картинкой ей места нет
+  const wide = [tile([7.9, 7.9]), tile([INV])]
+  const floor = hubSizes({ box: SITE, tiles: wide, space: SPACE, gold: null }).fs
+  const r = hubSizes({ box: APP, real: SITE, tiles: wide, space: SPACE, gold: null, pic: PIC_SITE })
+  assert.ok(r.fs >= floor, `надпись ${r.fs} px мельче прежней ${floor}`)
+  assert.ok(r.pic >= PIC_SITE.min, 'картинка меньше прежней')
+})
+
+test('сайт 1366×768: цифра в углу мешает и прежней картинке — надпись из-за неё не мельчает', () => {
+  // программа: плитка 256×112 — место 230×84; сайт: плитка 256×83 — место 230×55
+  const app = hubSizes({ box: { w: 230, h: 84 }, tiles: RU, space: SPACE, gold: null })
+  const pic = { cw: 254, ch: 81, pt: 14, px: 12, w: 230, max: Math.min(0.5 * 110, 108), min: Math.min(0.5 * 81, 108) }
+  const r = hubSizes({ box: { w: 230, h: 84 }, real: { w: 230, h: 55 }, tiles: RU, space: SPACE, gold: null, pic })
+  assert.equal(r.fs, app.fs, `на сайте ${r.fs} px, в программе ${app.fs}`)
+  // картинка — прежняя: цифра (24 px) задевает и её, как было до 17.11
+  assert.equal(r.pic, pic.min)
+  // строки надписи картинку не задевают
+  assert.ok(picClear(RU, SPACE, r.fs, 230 * SAFE, pic, r.pic, false))
 })

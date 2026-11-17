@@ -161,7 +161,7 @@ svg { display: block; }
    Бокового меню нет: разделы открываются с главного экрана (плитки) и занимают
    весь экран. Шапка есть только у главного экрана; в разделах «Меню» (назад к
    плиткам) и «?» стоят в полосе внизу, кнопки раздела — строкой вверху страницы. */
-.app { min-height: 100vh; }
+.app { min-height: calc(var(--vh, 1vh) * 100); }
 
 /* Скрыто с экрана, но читается экранным диктором: название раздела */
 .sr-only {
@@ -197,7 +197,7 @@ svg { display: block; }
 .brand-mini .brand-word { font-size: 17px; }
 .topbar-title { min-width: 0; }
 
-.main { display: flex; flex-direction: column; min-height: 100vh; min-width: 0; }
+.main { display: flex; flex-direction: column; min-height: calc(var(--vh, 1vh) * 100); min-width: 0; }
 /* Шапка главного экрана — фирменным тёмно-синим, как табло «Итого» в кассе:
    белый заголовок, светлый подзаголовок, кнопки действий — золотая главная и светлые остальные */
 .topbar {
@@ -653,7 +653,7 @@ input::placeholder { color: var(--muted-2); }
   .kc-cats { max-height: 84px; overflow-y: auto; }
   /* Если экран совсем низкий и касса листается страницей, каталог всё равно
      не должен уходить вниз на сотню строк */
-  .kc-list { max-height: 70vh; overflow-y: auto; overscroll-behavior: contain; }
+  .kc-list { max-height: calc(var(--vh, 1vh) * 70); overflow-y: auto; overscroll-behavior: contain; }
 }
 
 /* ── Касса занимает ровно экран ──
@@ -666,8 +666,8 @@ input::placeholder { color: var(--muted-2); }
    касса на весь остаток.
    На низком экране (меньше 600) всё это выключено и касса листается страницей. */
 @media (min-width: 1280px) and (min-height: 600px) {
-  .main-fill { height: 100vh; min-height: 0; }
-  @supports (height: 100dvh) { .main-fill { height: 100dvh; } }
+  .main-fill { height: calc(var(--vh, 1vh) * 100); min-height: 0; }
+  @supports (height: 100dvh) { .main-fill { height: calc(var(--vh, 1dvh) * 100); } }
   .main-fill .content { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-top: 14px; padding-bottom: 14px; }
   .kassa { height: 100%; min-height: 440px; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
   .kassa-receipt, .kassa-side { min-height: 0; }
@@ -826,7 +826,7 @@ input::placeholder { color: var(--muted-2); }
 .stick-top select { max-width: 260px; }
 /* Категорий бывает много (в тестовом магазине их сотня — 13 рядов кнопок): в полосе — не
    больше двух-трёх рядов, остальные листаются внутри. Иначе полоса закрыла бы весь список */
-.stick-top .chips { max-height: max(84px, 16vh); overflow-y: auto; overscroll-behavior: contain; }
+.stick-top .chips { max-height: max(84px, calc(var(--vh, 1vh) * 16)); overflow-y: auto; overscroll-behavior: contain; }
 /* Прилипла — тень снизу: видно, что список едет под ней */
 .stick-top.is-stuck { box-shadow: 0 10px 14px -12px rgba(0, 0, 0, 0.35); border-bottom: 1px solid var(--border); }
 @media (max-width: 600px) {
@@ -849,13 +849,13 @@ input::placeholder { color: var(--muted-2); }
 
 /* ───────── Модалка ───────── */
 .overlay { position: fixed; inset: 0; background: rgba(8, 16, 40, 0.55); display: grid; place-items: center; z-index: 100; padding: 20px; animation: overlayIn 0.18s ease; }
-.modal { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px; width: 100%; max-width: 480px; box-shadow: var(--shadow-lg); max-height: 90vh; overflow: auto; animation: popIn 0.24s cubic-bezier(0.16, 1, 0.3, 1); }
+.modal { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px; width: 100%; max-width: 480px; box-shadow: var(--shadow-lg); max-height: calc(var(--vh, 1vh) * 90); overflow: auto; animation: popIn 0.24s cubic-bezier(0.16, 1, 0.3, 1); }
 .modal h3 { margin-bottom: 18px; font-size: 16.5px; font-weight: 600; display: flex; align-items: center; gap: 9px; }
 .modal h3 .ic { color: var(--accent); display: inline-flex; }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
 /* На мобильных vh не учитывает адресную строку — dvh не даёт обрезать модалку */
 @supports (max-height: 90dvh) {
-  .modal { max-height: 90dvh; }
+  .modal { max-height: calc(var(--vh, 1dvh) * 90); }
 }
 /* В тёмной теме светлая тень не видна — отделяем модалку от затемнённого фона
    более заметной границей и глубокой тенью */
@@ -867,7 +867,7 @@ input::placeholder { color: var(--muted-2); }
 .note.err { background: var(--danger-soft); color: var(--danger); }
 
 /* Тост */
-.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--sidebar); color: #fff; padding: 12px 20px; border-radius: 10px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.28); z-index: 200; font-size: 14px; animation: up 0.2s; max-width: 90vw; display: flex; align-items: center; gap: 9px; }
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--sidebar); color: #fff; padding: 12px 20px; border-radius: 10px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.28); z-index: 200; font-size: 14px; animation: up 0.2s; max-width: calc(var(--vw, 1vw) * 90); display: flex; align-items: center; gap: 9px; }
 .toast .ic { display: inline-flex; font-size: 17px; color: var(--gold); }
 .toast.err .ic { color: #fff; }
 .toast.err { background: #8d241d; }
@@ -944,8 +944,8 @@ input::placeholder { color: var(--muted-2); }
   .qty-ctrl { gap: 5px; }
   .qty-ctrl button { width: 24px; height: 24px; }
   .overlay { padding: 0; align-items: flex-end; }
-  .modal { max-width: 100%; border-radius: 16px 16px 0 0; max-height: 92vh; padding: 18px; animation: sheetUp 0.28s cubic-bezier(0.16, 1, 0.3, 1); }
-  @supports (max-height: 92dvh) { .modal { max-height: 92dvh; } }
+  .modal { max-width: 100%; border-radius: 16px 16px 0 0; max-height: calc(var(--vh, 1vh) * 92); padding: 18px; animation: sheetUp 0.28s cubic-bezier(0.16, 1, 0.3, 1); }
+  @supports (max-height: 92dvh) { .modal { max-height: calc(var(--vh, 1dvh) * 92); } }
   .modal .row { flex-direction: column; gap: 0; }
   .toolbar .search { max-width: 100%; }
   .chips { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; }
@@ -1247,8 +1247,8 @@ input, select { transition: border 0.14s, box-shadow 0.14s, background 0.14s; }
 /* ───────── Экран входа ─────────
    Слева — панель бренда на глубоком синем, справа — форма на светлом. На телефоне
    панель сжимается до полосы с именем, форма идёт под ней. */
-.auth { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); background: var(--bg); }
-@supports (min-height: 100dvh) { .auth { min-height: 100dvh; } }
+.auth { min-height: calc(var(--vh, 1vh) * 100); display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); background: var(--bg); }
+@supports (min-height: 100dvh) { .auth { min-height: calc(var(--vh, 1dvh) * 100); } }
 .auth-brand {
   position: relative; overflow: hidden;
   display: flex; flex-direction: column; justify-content: space-between; gap: 32px;
@@ -1263,9 +1263,9 @@ input, select { transition: border 0.14s, box-shadow 0.14s, background 0.14s; }
    тёмного прямоугольника вокруг */
 .auth-hero { width: min(100%, 440px); margin: 0 auto 26px; display: flex; flex-direction: column; align-items: center; gap: 16px; }
 .auth-hero img { display: block; height: auto; user-select: none; }
-.auth-hero-emblem { width: clamp(120px, 11vw, 176px); }
+.auth-hero-emblem { width: clamp(120px, calc(var(--vw, 1vw) * 11), 176px); }
 .auth-hero-word { width: 100%; }
-.auth-brand-body h2 { font-size: clamp(25px, 2.5vw, 32px); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 12px; text-wrap: balance; }
+.auth-brand-body h2 { font-size: clamp(25px, calc(var(--vw, 1vw) * 2.5), 32px); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 12px; text-wrap: balance; }
 .auth-brand-body p { font-size: 15px; line-height: 1.6; color: #b9c4e4; max-width: 420px; margin: 0 auto; }
 .auth-points { list-style: none; margin: 24px 0 0; padding: 0; display: grid; gap: 10px; }
 .auth-points li { display: flex; align-items: center; justify-content: center; gap: 11px; font-size: 14px; color: #d6dcf0; }
@@ -1341,7 +1341,7 @@ button.link { border: 0; background: none; padding: 0; font: inherit; color: var
 }
 
 /* Экран остановки работы: та же центрированная карточка, что была у входа */
-.login-screen { min-height: 100vh; display: grid; place-items: center; padding: 20px; background: var(--bg); }
+.login-screen { min-height: calc(var(--vh, 1vh) * 100); display: grid; place-items: center; padding: 20px; background: var(--bg); }
 .login-card {
   width: 100%; max-width: 380px; background: var(--card); border: 1px solid var(--border);
   border-radius: 14px; box-shadow: var(--shadow); padding: 32px 28px; text-align: center;
@@ -1407,7 +1407,7 @@ tbody tr.clickable { cursor: pointer; }
   padding: 0.3mm 3mm; border-radius: 1.2mm; font-variant-numeric: tabular-nums;
 }
 /* Превью на тёмной теме — сама этикетка всегда белая, как на бумаге */
-.label-print .label-sheet { max-height: 46vh; overflow: auto; }
+.label-print .label-sheet { max-height: calc(var(--vh, 1vh) * 46); overflow: auto; }
 
 /* ── Наклейка для принтера этикеток (components/Nakleyka.jsx) ──
    Ровно своего размера и чёрно-белая — так печатает термопринтер. Шрифт — Arial: он
@@ -1505,7 +1505,7 @@ input.pn-count { width: 84px; text-align: right; }
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 14px; padding: 24px; cursor: zoom-out;
 }
-.lightbox img { max-width: min(92vw, 900px); max-height: 82vh; border-radius: 12px; background: #fff; }
+.lightbox img { max-width: min(calc(var(--vw, 1vw) * 92), 900px); max-height: calc(var(--vh, 1vh) * 82); border-radius: 12px; background: #fff; }
 .lightbox-name { color: #fff; font-size: 16px; font-weight: 600; text-align: center; }
 
 
@@ -1726,11 +1726,11 @@ input.pn-count { width: 84px; text-align: right; }
 /* ═════════ Экран печати программы для Windows (components/PrintPreview.jsx) ═════════
    Слева страницы — картинками того PDF, который уйдёт на принтер, на сером «столе»;
    справа — на чём и как печатать. Чек на ленту — строками, как у чекового принтера */
-.pp .modal { max-width: min(1180px, 96vw); width: 96vw; }
+.pp .modal { max-width: min(1180px, calc(var(--vw, 1vw) * 96)); width: calc(var(--vw, 1vw) * 96); }
 .pp-body { display: flex; gap: 20px; align-items: stretch; }
 .pp-view { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .pp-stage {
-  height: min(70vh, 780px); min-height: 320px; overflow: auto; border-radius: 10px; padding: 16px;
+  height: min(calc(var(--vh, 1vh) * 70), 780px); min-height: 320px; overflow: auto; border-radius: 10px; padding: 16px;
   background: #5b6479; display: flex; align-items: flex-start; justify-content: center;
 }
 .pp-page { display: block; max-width: 100%; max-height: 100%; height: auto; background: #fff; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); }
@@ -1771,7 +1771,7 @@ input.pn-count { width: 84px; text-align: right; }
 @media (max-width: 860px) {
   .pp-body { flex-direction: column; }
   .pp-side { width: 100%; }
-  .pp-stage { height: 56vh; }
+  .pp-stage { height: calc(var(--vh, 1vh) * 56); }
 }
 
 /* ═════════ Печатный слой: всё, что идёт на бумагу (components/PrintDoc.jsx) ═════════
@@ -1881,7 +1881,7 @@ input.pn-count { width: 84px; text-align: right; }
 }
 .tur-card {
   position: fixed; pointer-events: auto;
-  width: min(390px, calc(100vw - 24px));
+  width: min(390px, calc(calc(var(--vw, 1vw) * 100) - 24px));
   background: var(--card); color: var(--text);
   border: 1px solid var(--border); border-radius: 16px;
   box-shadow: 0 22px 60px rgba(0, 0, 0, 0.35);
@@ -1893,7 +1893,7 @@ input.pn-count { width: 84px; text-align: right; }
 .tur-count { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .tur-x { display: inline-grid; place-items: center; width: 28px; height: 28px; border: none; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
 .tur-x:hover { background: var(--hover); color: var(--text); }
-.tur-body { padding: 14px 16px 6px; max-height: min(52vh, 420px); overflow: auto; }
+.tur-body { padding: 14px 16px 6px; max-height: min(calc(var(--vh, 1vh) * 52), 420px); overflow: auto; }
 .tur-body h3 { font-size: 17px; font-weight: 700; margin: 0 0 8px; }
 .tur-body p { font-size: 14.5px; line-height: 1.6; margin: 0 0 10px; }
 .tur-list { margin: 0 0 10px; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.55; }
@@ -1908,7 +1908,7 @@ input.pn-count { width: 84px; text-align: right; }
 .tur-card.tur-sheet { left: 10px; right: 10px; bottom: 10px; top: auto; width: auto; }
 /* Элемент прикреплён к низу экрана (полоса внизу) — карточка сверху */
 .tur-card.tur-sheet.tur-sheet-up { top: 10px; bottom: auto; }
-.tur-sheet .tur-body { max-height: 38vh; }
+.tur-sheet .tur-body { max-height: calc(var(--vh, 1vh) * 38); }
 /* Три кнопки с подписями на 320–360 пикселях в ряд не влезали, и «Дальше»
    вылезал за край карточки. На телефоне «Назад» — одна стрелка, отступы меньше */
 .tur-sheet .tur-back-text { display: none; }
@@ -1918,7 +1918,7 @@ input.pn-count { width: 84px; text-align: right; }
 
 /* Запас внизу страницы на время тура — чтобы последние элементы раздела
    поднимались выше карточки, а не оставались под ней */
-.tur-uzko .content { padding-bottom: calc(100vh - 140px); }
+.tur-uzko .content { padding-bottom: calc(calc(var(--vh, 1vh) * 100) - 140px); }
 
 
 @media (prefers-reduced-motion: reduce) {
@@ -1943,8 +1943,8 @@ input.pn-count { width: 84px; text-align: right; }
    (--hub-fs, --hub-fs-gold, значок --hub-b*, замочек --hub-lock). Числа в запасных значениях
    var() — на миг до расчёта и на случай, если скрипт не справился */
 .hub { width: 100%; display: flex; flex-direction: column; }
-.app-hub .main { height: 100vh; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-@supports (height: 100dvh) { .app-hub .main { height: 100dvh; } }
+.app-hub .main { height: calc(var(--vh, 1vh) * 100); min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+@supports (height: 100dvh) { .app-hub .main { height: calc(var(--vh, 1dvh) * 100); } }
 .app-hub .topbar { flex: 0 0 auto; }
 /* 1.8.0: 24 раздела + касса на две клетки = 5 × 5. 1.8.1: у магазина без части модулей
    рядов меньше (--hub-rows ставит Home.jsx) — плитки крупнее, пустых рядов нет */
@@ -1971,9 +1971,11 @@ input.pn-count { width: 84px; text-align: right; }
 }
 /* Картинка 100 px (размер бесплатной лицензии Icons8): по высоте плитки, не больше
    натуральной величины, чтобы не замыливаться от растяжения. Половина высоты и в самом углу —
-   чтобы вторая строка крупной надписи кончалась выше картинки */
+   чтобы вторая строка крупной надписи кончалась выше картинки. На сайте в окне браузера
+   (плитки ниже, чем в программе на весь экран) размер ставит lib/hubFont.js — --hub-pic:
+   как в программе, если встаёт рядом с надписью. Числа 50 % и 108 px — те же там */
 .hub-tile .hub-pic {
-  position: absolute; right: 5%; bottom: 5%; height: min(50%, 108px); width: auto; aspect-ratio: 1 / 1; object-fit: contain;
+  position: absolute; right: 5%; bottom: 5%; height: var(--hub-pic, min(50%, 108px)); width: auto; aspect-ratio: 1 / 1; object-fit: contain;
   pointer-events: none; user-select: none; filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.35));
   transition: transform 0.18s ease;
 }
@@ -1983,7 +1985,7 @@ input.pn-count { width: 84px; text-align: right; }
 /* Последний неполный ряд (модули выключены) — на всю ширину, без пустых клеток (Home.jsx) */
 @media (min-width: 601px) { .hub-tile.stretch { grid-column: span var(--span, 1); } }
 @media (max-width: 600px) { .hub-tile.fill2 { grid-column: span 2; } }
-.hub-tile.wide .hub-pic { height: min(76%, 132px); right: 4%; bottom: 6%; }
+.hub-tile.wide .hub-pic { height: var(--hub-pic-gold, min(76%, 132px)); right: 4%; bottom: 6%; }
 .hub-tile.gold { background: linear-gradient(160deg, #ffd65a 0%, var(--gold) 55%, var(--gold-dark) 100%); border-color: var(--gold-dark); color: var(--on-gold); }
 .hub-tile.gold .hub-name { font-size: var(--hub-fs-gold, clamp(16px, min(7cqw, 20cqh), 32px)); text-transform: uppercase; letter-spacing: 0.02em; text-shadow: none; }
 .hub-tile.gold:hover { border-color: var(--on-gold); }
@@ -2012,6 +2014,8 @@ input.pn-count { width: 84px; text-align: right; }
 .hub-lock svg { width: var(--hub-lock, 14px); height: var(--hub-lock, 14px); }
 /* Кнопки шапки главного меню: «О компании», тема, выход, «Закрыть программу» */
 .hub-acts { display: flex; align-items: center; gap: 8px; }
+/* «Во весь экран» (сайт, 17.11.2026) — на телефоне не нужна: там меню листается */
+@media (max-width: 600px) { .hub-acts .hub-fs { display: none; } }
 @media (max-width: 1100px) {
   .hub-acts .btn-text { display: none; }
   .hub-acts .btn { padding: 9px 11px; }
@@ -2230,7 +2234,7 @@ html.has-foot .vkb { bottom: calc(var(--app-foot-h) + 10px); }
    чтобы последние поля можно было поднять над клавишами (видимое при этом не двигается) */
 .vkb {
   position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 120;
-  width: min(1180px, calc(100vw - 32px)); box-sizing: border-box;
+  width: min(1180px, calc(calc(var(--vw, 1vw) * 100) - 32px)); box-sizing: border-box;
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 10px; border-radius: 14px;
   background: var(--sidebar); border: 1px solid var(--tile-line); box-shadow: var(--shadow-lg); user-select: none;
 }
@@ -2460,10 +2464,10 @@ tfoot .zak-total td { font-weight: 700; border-top: 2px solid var(--border-stron
 .prh-side {
   background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm);
   padding: 12px; display: flex; flex-direction: column; gap: 8px;
-  position: sticky; top: 12px; max-height: calc(100vh - 56px);
+  position: sticky; top: 12px; max-height: calc(calc(var(--vh, 1vh) * 100) - 56px);
 }
 /* 56 — отступы страницы сверху и снизу; шапки над ней больше нет */
-html.has-foot .prh-side { max-height: calc(100vh - 56px - var(--app-foot-h)); }
+html.has-foot .prh-side { max-height: calc(calc(var(--vh, 1vh) * 100) - 56px - var(--app-foot-h)); }
 .prh-side-btn {
   display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 11px; border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong); background: var(--card); color: var(--text);
@@ -2532,7 +2536,7 @@ html.has-foot .prh-side { max-height: calc(100vh - 56px - var(--app-foot-h)); }
 .prh-val-off { color: var(--muted); text-decoration: line-through; font-weight: 500; }
 .prh-panel-head h2 { margin: 0; }
 .prh-panel-head .prh-sheet-search { flex: 0 1 340px; min-width: 200px; }
-.prh-scroll { max-height: 46vh; overflow: auto; }
+.prh-scroll { max-height: calc(var(--vh, 1vh) * 46); overflow: auto; }
 .table-scroll { overflow-x: auto; }
 
 /* ── Новое поступление ── */
@@ -2549,7 +2553,7 @@ html.has-foot .prh-side { max-height: calc(100vh - 56px - var(--app-foot-h)); }
 .prh-sheet-head .prh-sheet-search { flex: 0 1 300px; min-width: 180px; }
 
 /* Таблица накладной: плотная, с закреплённой шапкой и итоговой строкой */
-.prh-grid-wrap { overflow: auto; max-height: 46vh; min-height: 170px; border-top: 1px solid var(--border); }
+.prh-grid-wrap { overflow: auto; max-height: calc(var(--vh, 1vh) * 46); min-height: 170px; border-top: 1px solid var(--border); }
 /* Шапки колонок переносятся в две строки («Цена со / скидкой»): иначе длинные подписи
    раздвигали таблицу шире экрана, и «Итого» уезжало за край */
 .prh-grid { font-size: 13px; min-width: 900px; }
@@ -2866,7 +2870,7 @@ input.pair-input { font-size: 22px; letter-spacing: 0.14em; text-align: center; 
 .inv-scan .prh-pick { max-width: 760px; }
 .inv-scan-panel { margin-bottom: 14px; }
 .inv-scan-panel .inv-scan { margin: 0; }
-.inv-otbor { border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: auto; max-height: 52vh; margin-bottom: 14px; }
+.inv-otbor { border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: auto; max-height: calc(var(--vh, 1vh) * 52); margin-bottom: 14px; }
 .inv-otbor table td, .inv-otbor table th { padding: 9px 12px; }
 .inv-otbor tbody tr:last-child td { border-bottom: 0; }
 .inv-create { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -2903,7 +2907,7 @@ tr.inv-last > td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
 
 .cn-preview { background: var(--soft); border-radius: var(--radius); padding: 12px; overflow: auto; display: flex; justify-content: center; }
 .cn-preview .cn-page { width: max-content; zoom: 1.35; }
-.cn-rows { max-height: 34vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.cn-rows { max-height: calc(var(--vh, 1vh) * 34); overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .cn-rows td, .cn-rows th { padding: 8px 12px; }
 
 /* ── Кнопка «Камера» у полей штрихкода (мобильная версия, 1.8.1) ──

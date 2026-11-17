@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { LuLogOut, LuMoon, LuSun, LuPower, LuLock, LuInfo } from 'react-icons/lu'
+import { LuLogOut, LuMoon, LuSun, LuPower, LuLock, LuInfo, LuMaximize, LuMinimize } from 'react-icons/lu'
 import Layout, { NAV, allowedNav, navShown } from '../components/Layout'
 import { useCollection, useCollectionIf } from '../db/store'
 import { useAuth, logout } from '../db/auth'
@@ -12,6 +12,7 @@ import { useTheme, toggleTheme } from '../lib/theme'
 import { isDesktop } from '../lib/desktop'
 import { fitHub, resetHubMeasure } from '../lib/hubFont'
 import { useShrift } from '../lib/shrift'
+import { canFullscreen, toggleFullscreen, useFullscreen } from '../lib/fullscreen'
 import { useCloseApp } from '../components/WindowButtons'
 
 // ── Главный экран ──
@@ -27,7 +28,9 @@ import { useCloseApp } from '../components/WindowButtons'
 // Кто вошёл, видно в полосе внизу окна (она одна на весь проект). Тема, выход и — в
 // программе для Windows — «Закрыть программу» стоят в правом верхнем углу шапки,
 // рядом с «О компании»: у кассы часто нет мыши с крестиком под рукой. На телефоне
-// у этих кнопок остаются значки, подпись — во всплывающей подсказке.
+// у этих кнопок остаются значки, подпись — во всплывающей подсказке. На сайте первой стоит
+// «Во весь экран» (17.11.2026): без вкладок и адресной строки браузера меню — точь-в-точь
+// как в программе (lib/fullscreen.js).
 //
 // Надписи на плитках (31.10): как можно крупнее, слово целиком, у всех плиток один размер,
 // растут вместе с экраном; «КАССА» — в полтора раза крупнее. Размер считает lib/hubFont.js
@@ -106,6 +109,11 @@ export default function Home() {
   const phoneFill = cells % 2 === 1 ? shown[shown.length - 1]?.to : null
 
   const temaText = theme === 'dark' ? t('Светлая тема') : t('Тёмная тема')
+  // «Во весь экран» — только на сайте (программа и так на весь экран), не на телефоне (index.css)
+  // и не в браузере, который уже на весь экран сам (F11): из него страница выйти не может
+  const full = useFullscreen()
+  const fsShown = !isDesktop && full !== 'browser' && canFullscreen()
+  const fsText = full === 'page' ? t('Обычный экран') : t('Во весь экран')
 
   const gridRef = useRef(null)
   // Размер надписей меню из «Настройки → Шрифт» (1.7.7) — пересчёт и при его смене
@@ -159,6 +167,11 @@ export default function Home() {
       subtitle={user?.pharmacy?.name || ''}
       actions={
         <div className="hub-acts">
+          {fsShown && (
+            <button type="button" className="btn ghost hub-fs" onClick={toggleFullscreen} data-testid="hub-fullscreen" title={fsText} aria-label={fsText}>
+              <span className="ic">{full === 'page' ? <LuMinimize size={16} /> : <LuMaximize size={16} />}</span> <span className="btn-text">{fsText}</span>
+            </button>
+          )}
           <Link to="/about" className="btn ghost" data-tour="hub.about" title={t('О компании')} aria-label={t('О компании')}>
             <span className="ic"><LuInfo size={16} /></span> <span className="btn-text">{t('О компании')}</span>
           </Link>

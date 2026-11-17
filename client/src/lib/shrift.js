@@ -33,7 +33,27 @@ const subs = new Set()
 export function primenit() {
   if (typeof document === 'undefined') return
   document.documentElement.style.zoom = state.sistema === 100 ? '' : String(state.sistema / 100)
+  okno()
 }
+
+// ── Высота и ширина окна под масштабом (17.11.2026) ──
+// zoom увеличивает и единицы окна (vh, vw): при 120 % «100vh» — это 120 % окна, и главное меню и
+// касса вылезали за экран (появлялась прокрутка, нижний ряд плиток уходил вниз), а при 80 %
+// не доставали до низа. Поэтому при масштабе не 100 % в index.css единица окна — --vh / --vw:
+// сотая доля окна в px страницы (px под zoom увеличиваются ровно до размера окна). При 100 %
+// переменных нет — работают обычные vh и vw, всё как было
+const VARS = ['--vh', '--vw']
+function okno() {
+  const root = document.documentElement
+  const z = state.sistema / 100
+  if (z === 1 || typeof window === 'undefined') {
+    VARS.forEach((k) => root.style.removeProperty(k))
+    return
+  }
+  root.style.setProperty('--vh', window.innerHeight / z / 100 + 'px')
+  root.style.setProperty('--vw', window.innerWidth / z / 100 + 'px')
+}
+if (typeof window !== 'undefined') window.addEventListener('resize', okno)
 
 export const shrift = () => state
 export function setShrift(patch) {
