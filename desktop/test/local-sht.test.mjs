@@ -23,8 +23,10 @@ const insert = (db, id, unit, upp) =>
 
 test('обновление программы: «уп» по одной штуке — «шт», настоящие упаковки и весовые — как были', () => {
   const file = join(fs.mkdtempSync(join(os.tmpdir(), 'apteka-sht-')), 'p.db')
-  // База прежней версии: все шаги схемы, кроме нового
-  let db = openDb(file, PHARMACY_SCHEMA.slice(0, -1))
+  // База прежней версии: все шаги схемы ДО шага «шт по умолчанию» (ищем его по содержимому,
+  // чтобы тест не ломался от шагов, добавленных после него)
+  const shtIdx = PHARMACY_SCHEMA.findIndex((s) => s.includes("SET unit = 'шт'"))
+  let db = openDb(file, PHARMACY_SCHEMA.slice(0, shtIdx))
   insert(db, 'a', 'уп', 1) // «1 уп» из одной штуки — станет «шт»
   insert(db, 'b', '', 1) // единица не заполнена (показывалась «уп») — тоже «шт»
   insert(db, 'c', 'уп', 20) // пачка по 20 — остаётся упаковкой

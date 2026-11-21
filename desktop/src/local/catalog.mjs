@@ -16,11 +16,24 @@ function analogs(text) {
   }
 }
 
+// Состав (1.8.5): из каких ингредиентов собирается товар. Для всего списка сразу — одной
+// выборкой, сгруппированной по товару
+export function recipeMap(db) {
+  const map = new Map()
+  for (const r of q(db, 'SELECT productId, ingredientId, units FROM recipe ORDER BY productId, ord').all()) {
+    if (!map.has(r.productId)) map.set(r.productId, [])
+    map.get(r.productId).push({ ingredientId: r.ingredientId, units: r.units })
+  }
+  return map
+}
+export const recipeOf = (db, productId) =>
+  q(db, 'SELECT ingredientId, units FROM recipe WHERE productId = ? ORDER BY ord').all(productId).map((r) => ({ ingredientId: r.ingredientId, units: r.units }))
+
 // Карточка товара. Упаковки, штуки во вскрытой и просрочка не хранятся — они
 // выводятся из партий в момент ответа. Поэтому просрочка здесь всегда сегодняшняя:
 // партия, у которой срок вышел ночью, утром уже считается негодной, даже если
 // компьютер неделю не видел сервера.
-function productView(row, u) {
+function productView(row, u, recipe) {
   const units = u?.units || 0
   const { stock, looseUnits } = splitUnits(units, uppOf(row))
   return {
@@ -44,17 +57,21 @@ function productView(row, u) {
     expiryDate: row.expiryDate,
     expiredUnits: Math.min(units, u?.expired || 0),
     analogIds: analogs(row.analogIds),
+    // Сырьё/состав (1.8.5): forSale по умолчанию true (колонки может не быть у старой записи)
+    forSale: row.forSale === undefined || row.forSale === null ? true : row.forSale !== 0,
+    recipe: recipe || [],
     createdAt: row.createdAt,
   }
 }
 
 export function productsList(db, now) {
   const units = allUnits(db, now)
-  return q(db, 'SELECT * FROM products ORDER BY ord, name').all().map((r) => productView(r, units.get(r.id)))
+  const recipes = recipeMap(db)
+  return q(db, 'SELECT * FROM products ORDER BY ord, name').all().map((r) => productView(r, units.get(r.id), recipes.get(r.id)))
 }
 
 export function productView1(db, row, now) {
-  return productView(row, unitsOf(db, row.id, now))
+  return productView(row, unitsOf(db, row.id, now), recipeOf(db, row.id))
 }
 
 export const productByBarcode = (db, barcode) => q(db, 'SELECT * FROM products WHERE barcode = ?').get(barcode) || null

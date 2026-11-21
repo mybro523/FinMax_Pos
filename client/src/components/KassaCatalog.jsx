@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import { money } from '../db/store'
 import { isVesovoy, kgText, isDivisible, pricePerPiece, sellableUnits, stockUnits, expiredUnits, hasExpired, edinica, pieceLabel, unitsText } from '../lib/units'
+import { isComposite, compositeBuildable } from '../lib/recipe'
 import { useT } from '../lib/i18n'
 
 // ── Каталог кассы ──
@@ -23,7 +24,7 @@ export const LIMIT = 100
 // 10 кг» (1.5.12). С переводом подписей: каталог открыт и на таджикском
 const ostatok = (p, t) => unitsText(stockUnits(p), p, t)
 
-function KassaCatalog({ rows, total, hi, showHi, outside, loading, noProducts, onPick, onFoto }) {
+function KassaCatalog({ rows, byId, total, hi, showHi, outside, loading, noProducts, onPick, onFoto }) {
   const t = useT()
 
   if (loading) return <div className="empty">{t('Список товаров загружается…')}</div>
@@ -37,7 +38,9 @@ function KassaCatalog({ rows, total, hi, showHi, outside, loading, noProducts, o
       )}
       <div className="kc-list" role="listbox" aria-label={t('Каталог')}>
         {rows.map((p, n) => {
-          const sell = sellableUnits(p)
+          // Составной товар (1.8.5): доступно = сколько можно собрать из ингредиентов
+          const composite = isComposite(p)
+          const sell = composite ? compositeBuildable(p, byId) : sellableUnits(p)
           const net = sell <= 0
           return (
             <button
@@ -79,8 +82,8 @@ function KassaCatalog({ rows, total, hi, showHi, outside, loading, noProducts, o
                 {isVesovoy(p) && !isDivisible(p)
                   ? <span className="tag-cat">{t('за 1')} {t(edinica(p))}</span>
                   : isDivisible(p) && <span className="tag-cat">{money(pricePerPiece(p))}/{t(pieceLabel(p))}</span>}
-                <span className={'badge ' + (net ? 'debt' : p.stock <= p.minStock ? 'low' : 'ok')}>
-                  {net && stockUnits(p) <= 0 ? t('нет') : ostatok(p, t)}
+                <span className={'badge ' + (net ? 'debt' : composite ? 'ok' : p.stock <= p.minStock ? 'low' : 'ok')}>
+                  {composite ? (net ? t('нет') : `${t('собрать')} ${sell}`) : net && stockUnits(p) <= 0 ? t('нет') : ostatok(p, t)}
                 </span>
                 {hasExpired(p) && (
                   <span className="tag-cat kc-exp">

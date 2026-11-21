@@ -11,13 +11,18 @@ import { PeriodQuery } from '../common/period'
 import { changedFields, forgetStamps, stamp } from '../common/stamps'
 import { productHistory } from './history'
 import { isDrob, KG, OLD_WINDOW_SACK, opensPack, packFor, piecePriceIn } from '../common/piece'
+import { normalizeRecipe, saveRecipe } from '../common/recipe'
 
 type Tx = Prisma.TransactionClient
+
+// Состав товара в ответе — списком { ingredientId, units }: по нему касса и сайт считают,
+// на сколько хватает ингредиентов, и показывают его в карточке
+export const PRODUCT_INCLUDE = { recipe: { orderBy: { ord: 'asc' as const }, select: { ingredientId: true, units: true, ord: true } } }
 
 // Поля карточки, у которых сервер помнит время последней правки (common/stamps.ts):
 // по ним решается, чья правка новее, когда карточку поправили и на кассе без связи, и
 // на сайте. Остаток и срок годности сюда не входят — они живут партиями
-export const PRODUCT_CARD_FIELDS = ['name', 'barcode', 'category', 'type', 'cost', 'price', 'piecePrice', 'minStock', 'unit', 'unitsPerPack', 'dosage', 'analogIds', 'image'] as const
+export const PRODUCT_CARD_FIELDS = ['name', 'barcode', 'category', 'type', 'cost', 'price', 'piecePrice', 'minStock', 'unit', 'unitsPerPack', 'dosage', 'analogIds', 'image', 'forSale'] as const
 
 export const BARCODE_TAKEN = 'Товар с таким штрихкодом уже существует'
 
@@ -25,7 +30,8 @@ export const BARCODE_TAKEN = 'Товар с таким штрихкодом уж
 // was — карточка до правки (при заведении её нет)
 type Was = { unit: string; unitsPerPack: number; piecePrice: Prisma.Decimal | null } | null | undefined
 export function productData(dto: Record<string, any>, was?: Was) {
-  const { drobPack, repack: _repack, ...rest } = dto
+  // recipe — связь (состав), не колонка карточки: сохраняется отдельно (saveRecipe)
+  const { drobPack, repack: _repack, recipe: _recipe, ...rest } = dto
   const data: any = { ...rest }
   if ('expiryDate' in data) {
     const d = data.expiryDate ? expiryFrom(data.expiryDate) : null
@@ -128,11 +134,11 @@ export class ProductsService {
   constructor(private prisma: PrismaService) {}
 
   findAll() {
-    return this.prisma.product.findMany({ orderBy: { name: 'asc' } })
+    return this.prisma.product.findMany({ orderBy: { name: 'asc' }, include: PRODUCT_INCLUDE })
   }
 
   findByBarcode(barcode: string) {
-    return this.prisma.product.findUnique({ where: { barcode } })
+    return this.prisma.product.findUnique({ where: { barcode }, include: PRODUCT_INCLUDE })
   }
 
   // ── Поставщик каждого товара (1.7.2) ──
@@ -155,8 +161,13 @@ export class ProductsService {
 
   async create(dto: CreateProductDto) {
     const data = productData(dto)
+    const recipe = normalizeRecipe((dto as any).recipe)
     try {
-      return await this.prisma.$transaction((tx) => createProductIn(tx, data), TX)
+      return await this.prisma.$transaction(async (tx) => {
+        const product = await createProductIn(tx, data)
+        await saveRecipe(tx, product!.id, recipe)
+        return tx.product.findUnique({ where: { id: product!.id }, include: PRODUCT_INCLUDE })
+      }, TX)
     } catch (e) {
       throw this.mapError(e)
     }
@@ -243,7 +254,10 @@ export class ProductsService {
           await syncProduct(tx, id)
         }
 
-        return tx.product.findUnique({ where: { id } })
+        // Состав товара (1.8.5): прислали — заменяем целиком; не прислали (undefined) — не трогаем
+        if ((dto as any).recipe !== undefined) await saveRecipe(tx, id, normalizeRecipe((dto as any).recipe))
+
+        return tx.product.findUnique({ where: { id }, include: PRODUCT_INCLUDE })
       }, TX)
     } catch (e) {
       throw this.mapError(e)

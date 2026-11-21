@@ -17,7 +17,7 @@ import { useDesktopStatus } from '../db/desktopStatus'
 import { soloMessage } from '../lib/aktivaciya'
 import { isVesovoy, kgText, KG, gramsOfKg, edinica, isKg,
   uppOf, isDivisible as isDiv, lineUnits, lineGross, lineNet, pricePerPiece,
-  sellableUnits, expiredUnits, hasExpired, stockUnits,
+  expiredUnits, hasExpired, stockUnits,
   fitLine, pieceUnits, packPieces, packLabel,
 } from '../lib/units'
 
@@ -54,12 +54,14 @@ import { pechatTicket } from '../lib/pechat'
 import { getRekvizity } from '../lib/rekvizity'
 import { useCategories, categoryNames } from '../lib/categories'
 import NumberInput from '../components/NumberInput'
+import { isComposite, availUnitsOf, compositeCost } from '../lib/recipe'
 
 // ── Хелперы штучной продажи ──
 // Сама арифметика упаковок и штук живёт в lib/units — одна на всю программу.
 // Доступно к продаже только ГОДНОЕ: просроченные партии лежат на складе,
 // но покупателю не уходят, поэтому касса считает остаток без них.
-const availUnits = (p) => sellableUnits(p)
+// У составного товара (1.8.5) доступно = сколько можно собрать из ингредиентов —
+// считается в компоненте, где есть весь список товаров (availUnits ниже).
 // ── Строка чека: числа обязаны сходиться ──
 // Покупатель умножает то, что видит. Раньше в строке стояло количество упаковок,
 // а рядом цена ОДНОЙ ШТУКИ: «1 уп × 7,5 сомони», итог 150. Для товара, который
@@ -106,6 +108,10 @@ const poAlfavitu = new Intl.Collator('ru').compare
 
 export default function Pos() {
   const products = useCollection('products')
+  // Состав (1.8.5): у составного товара доступно = сколько можно собрать из ингредиентов.
+  // Для этого нужен весь список товаров — считаем здесь, где он есть
+  const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products])
+  const availUnits = useCallback((p) => availUnitsOf(p, byId), [byId])
   const customers = useCollection('customers')
   // Сервисы перевода (Alif, DC…): при оплате переводом кассир выбирает, через какой
   const payServices = useCollection('payServices')
@@ -456,6 +462,11 @@ export default function Pos() {
   // мешке (1.5.12) вес — отдельные килограммы: мешки в строке остаются как были
   const addWeight = useCallback(
     (p, grams) => {
+      // Сырьё (1.8.5) напрямую не продаётся
+      if (p.forSale === false) {
+        toast(`«${p.name}» ${t('— сырьё, не для продажи')}`, 'err')
+        return false
+      }
       const avail = availUnits(p)
       const ex = cartRef.current.find((i) => i.productId === p.id)
       const used = ex ? lineUnits(ex) : 0
@@ -471,7 +482,7 @@ export default function Pos() {
         return [
           ...c,
           {
-            productId: p.id, name: p.name, price: p.price, cost: p.cost,
+            productId: p.id, name: p.name, price: p.price, cost: isComposite(p) ? compositeCost(p, byId) : p.cost,
             // Своя цена за 1 кг у товара в мешке (1.5.12): отдельные килограммы — по ней
             piecePrice: p.piecePrice ?? null,
             unitsPerPack: uppOf(p), unit: p.unit, stock: p.stock, looseUnits: p.looseUnits,
@@ -483,12 +494,17 @@ export default function Pos() {
       probito.current = p.id
       return true
     },
-    [toast, setCart, t],
+    [toast, setCart, t, availUnits, byId],
   )
 
   // Возвращает true, если товар реально добавлен в корзину (false — нет на складе / лимит)
   const addProduct = useCallback(
     (p) => {
+      // Сырьё (1.8.5) напрямую не продаётся — только через составной товар
+      if (p.forSale === false) {
+        toast(`«${p.name}» ${t('— сырьё, не для продажи')}`, 'err')
+        return false
+      }
       // Весовой без мешка добавляется килограммом. Весовой в мешке (1.5.12) — как штучный:
       // мешком, а если целого мешка нет — килограммом
       if (vesOnly(p)) return addWeight(p, KG)
@@ -498,6 +514,11 @@ export default function Pos() {
       const skolko = (n) => (isVesovoy(p) ? `${kgText(n)} ${t(edinica(p))}` : `${n} ${t('шт')}`)
       const avail = availUnits(p)
       if (avail <= 0) {
+        // Составной товар (1.8.5): закончилось не сам товар, а сырьё для его сборки
+        if (isComposite(p)) {
+          toast(`«${p.name}»: ${t('не хватает сырья для сборки')}`, 'err')
+          return false
+        }
         // Годного не осталось. Разделяем два случая: товара нет вовсе и товар есть,
         // но весь просрочен — действия у кассира разные
         const allExpired = stockUnits(p) > 0
@@ -541,7 +562,7 @@ export default function Pos() {
         return [
           ...c,
           {
-            productId: p.id, name: p.name, price: p.price, cost: p.cost,
+            productId: p.id, name: p.name, price: p.price, cost: isComposite(p) ? compositeCost(p, byId) : p.cost,
             // Своя цена штуки (1.5.11; у весового — за 1 кг): отдельные — по ней, упаковки —
             // по цене упаковки
             piecePrice: p.piecePrice ?? null,
@@ -556,7 +577,7 @@ export default function Pos() {
       probito.current = p.id
       return true
     },
-    [toast, products, setCart, t, addWeight],
+    [toast, products, setCart, t, addWeight, availUnits, byId],
   )
 
   const handleUnknown = useCallback((barcode) => {
@@ -612,7 +633,8 @@ export default function Pos() {
     if (cat !== VSE && !cats.includes(cat)) setCat(VSE)
   }, [cats, cat])
 
-  const sorted = useMemo(() => [...products].sort((a, b) => poAlfavitu(a.name, b.name)), [products])
+  // Сырьё (1.8.5) в кассе не показываем и не ищем: его не продают напрямую
+  const sorted = useMemo(() => products.filter((p) => p.forSale !== false).sort((a, b) => poAlfavitu(a.name, b.name)), [products])
   const ishi = useCallback(
     (text, c) => {
       const q = String(text || '').trim().toLowerCase()
@@ -1614,6 +1636,7 @@ export default function Pos() {
             <KassaCatalog
               onFoto={setFoto}
               rows={shown}
+              byId={byId}
               total={found.rows.length}
               hi={hi}
               showHi={dq.trim() !== ''}

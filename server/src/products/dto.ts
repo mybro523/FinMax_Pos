@@ -25,6 +25,11 @@ export class CreateProductDto {
   @IsOptional() @IsArray() @IsString({ each: true }) analogIds?: string[] // аналоги (id товаров)
   // Тип товара названием (медицинский, продукты…). Пусто — не выбран
   @IsOptional() @IsString() @MaxLength(40) type?: string
+  // Сырьё/полуфабрикат (1.8.5): false — товар не для прямой продажи, в кассе его нет
+  @IsOptional() @IsBoolean() forSale?: boolean
+  // Состав товара (1.8.5): [{ ingredientId, units }] — из каких товаров он собирается.
+  // Содержимое строк сервер нормализует сам (common/recipe.ts), поэтому глубоко не валидируем
+  @IsOptional() @IsArray() recipe?: any[]
   // Окно знает упаковку дробного товара (мешок 50 кг, 1.5.12). Прежние окна её не знали и у
   // весового товара всегда присылали «1 кг в упаковке» и остаток килограммами — по такой
   // правке сервер сохраняет мешок, а остаток пересчитывает (products.service, productData)
@@ -52,6 +57,10 @@ export class UpdateProductDto {
   @IsOptional() @IsString() expiryDate?: string
   @IsOptional() @IsArray() @IsString({ each: true }) analogIds?: string[]
   @IsOptional() @IsString() @MaxLength(40) type?: string
+  // Сырьё/полуфабрикат (1.8.5): false — товар не для прямой продажи, в кассе его нет
+  @IsOptional() @IsBoolean() forSale?: boolean
+  // Состав товара (1.8.5): [{ ingredientId, units }]. Нормализуется на сервере (common/recipe.ts)
+  @IsOptional() @IsArray() recipe?: any[]
   // Окно знает упаковку дробного товара (мешок 50 кг, 1.5.12). Прежние окна её не знали и у
   // весового товара всегда присылали «1 кг в упаковке» и остаток килограммами — по такой
   // правке сервер сохраняет мешок, а остаток пересчитывает (products.service, productData)

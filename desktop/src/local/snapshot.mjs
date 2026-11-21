@@ -83,6 +83,7 @@ function applyProducts(db, products, batches, full, now) {
   if (full) {
     q(db, 'DELETE FROM products').run()
     q(db, 'DELETE FROM batches').run()
+    q(db, 'DELETE FROM recipe').run()
   }
 
   // Карточки. Закупочная цена и срок «с учётом сделанного здесь» пока ставятся
@@ -90,15 +91,18 @@ function applyProducts(db, products, batches, full, now) {
   const upsertProduct = q(
     db,
     `INSERT INTO products
-       (id, ord, name, barcode, category, type, priceC, pieceC, minStock, unit, unitsPerPack, dosage, image, analogIds, createdAt, sCostC, costC, sExpiry, expiryDate)
-     VALUES (@id, @ord, @name, @barcode, @category, @type, @priceC, @pieceC, @minStock, @unit, @upp, @dosage, @image, @analogIds, @createdAt, @costC, @costC, @expiry, @expiry)
+       (id, ord, name, barcode, category, type, priceC, pieceC, minStock, unit, unitsPerPack, dosage, image, analogIds, forSale, createdAt, sCostC, costC, sExpiry, expiryDate)
+     VALUES (@id, @ord, @name, @barcode, @category, @type, @priceC, @pieceC, @minStock, @unit, @upp, @dosage, @image, @analogIds, @forSale, @createdAt, @costC, @costC, @expiry, @expiry)
      ON CONFLICT(id) DO UPDATE SET
        name = excluded.name, barcode = excluded.barcode, category = excluded.category, type = excluded.type, priceC = excluded.priceC, pieceC = excluded.pieceC,
        minStock = excluded.minStock, unit = excluded.unit, unitsPerPack = excluded.unitsPerPack, dosage = excluded.dosage,
        image = excluded.image,
-       analogIds = excluded.analogIds, createdAt = excluded.createdAt, sCostC = excluded.sCostC, costC = excluded.costC,
+       analogIds = excluded.analogIds, forSale = excluded.forSale, createdAt = excluded.createdAt, sCostC = excluded.sCostC, costC = excluded.costC,
        sExpiry = excluded.sExpiry, expiryDate = excluded.expiryDate`,
   )
+  // Состав (1.8.5): заменяем состав каждого пришедшего товара целиком
+  const dropRecipe = q(db, 'DELETE FROM recipe WHERE productId = ?')
+  const addRecipe = q(db, 'INSERT OR REPLACE INTO recipe (productId, ingredientId, units, ord) VALUES (?, ?, ?, ?)')
   const nameOf = q(db, 'SELECT name FROM products WHERE id = ?')
   let reorder = full
   products.upsert.forEach((p, n) => {
@@ -120,15 +124,25 @@ function applyProducts(db, products, batches, full, now) {
       dosage: String(p.dosage ?? ''),
       image: String(p.image ?? ''),
       analogIds: JSON.stringify(Array.isArray(p.analogIds) ? p.analogIds : []),
+      // Сырьё (1.8.5): сервер прежней версии поля не шлёт — товар для продажи
+      forSale: p.forSale === false ? 0 : 1,
       createdAt: isoOrNull(p.createdAt) || new Date(now).toISOString(),
       costC: toCents(p.cost),
       expiry: isoOrNull(p.expiryDate),
+    })
+    dropRecipe.run(p.id)
+    const recipe = Array.isArray(p.recipe) ? p.recipe : []
+    recipe.forEach((r, i) => {
+      const ingredientId = String(r?.ingredientId || '')
+      const units = wholeNonNeg(r?.units)
+      if (ingredientId && units > 0) addRecipe.run(p.id, ingredientId, units, i)
     })
   })
   for (const id of products.remove) {
     q(db, 'DELETE FROM products WHERE id = ?').run(id)
     q(db, 'DELETE FROM batches WHERE productId = ?').run(id)
     q(db, 'DELETE FROM sklad_batches WHERE productId = ?').run(id)
+    q(db, 'DELETE FROM recipe WHERE productId = ?').run(id)
   }
 
   for (const b of batches.upsert) {

@@ -9,6 +9,7 @@ import { setExpenseCash, setSupplierCash } from '../shifts/totals'
 import { lockShift, SHIFT_CLOSED } from '../shifts/till'
 import { hasPerm } from '../auth/permissions'
 import { createProductIn, setCardExpiry } from '../products/products.service'
+import { normalizeRecipe, saveRecipe } from '../common/recipe'
 import { categoryInUse } from '../categories/categories.service'
 import { typeInUse } from '../producttypes/product-types.service'
 import { lockSupplier, removePaymentIn, SUPPLIER_HAS_DEBT, SUPPLIER_HAS_PAYMENTS } from '../suppliers/suppliers.service'
@@ -260,11 +261,15 @@ async function productCreate(tx: Tx, p: ReturnType<typeof parseProductCreate>, c
     dosage: p.dosage,
     analogIds: analogsVia(ctx, p.analogIds, p.id),
     image: p.image,
+    // Сырьё/полуфабрикат (1.8.5): не для прямой продажи
+    forSale: p.forSale === false ? false : true,
     stock: Math.floor(units / upp),
     looseUnits: units % upp,
     expiryDate: p.expiryDate,
     createdAt: p.createdAt,
   })
+  // Состав (1.8.5): завели составной товар на кассе — сохраняем его рецепт
+  if (p.recipe !== undefined) await saveRecipe(tx, p.id, normalizeRecipe(p.recipe))
   // Цена товара действует с той минуты, когда его завели на кассе: по ней там и продавали
   await backdatePrice(tx, p.id, p.createdAt)
   if (clash) {
@@ -349,6 +354,8 @@ async function productUpdate(tx: Tx, p: ReturnType<typeof parseProductUpdate>, c
   }
   await stamp(tx, 'Product', pid, alreadySame(p.set, product as any, out), p.at)
   await conflict(tx, ctx, kit, 'Product', { id: pid, name: product.name, productId: pid }, p.at, p.set, product, out)
+  // Состав (1.8.5): прислали — заменяем целиком (forSale едет полем карточки, выше с остальными)
+  if (p.recipe !== undefined) await saveRecipe(tx, pid, normalizeRecipe(p.recipe))
   if (taken) {
     await kit.flag(tx, ctx, { id: pid, date: p.at }, {
       kind: 'barcode',

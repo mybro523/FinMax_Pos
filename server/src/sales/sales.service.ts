@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service'
 import { grossOf, ownPiece } from '../common/piece'
 import { D } from '../common/money'
 import { consumeUnits, lockProducts } from '../common/stock'
+import { loadRecipes } from '../common/recipe'
 import { TX } from '../common/tx'
 import { periodFilter, PeriodQuery, MAX_ROWS } from '../common/period'
 import { CheckoutDto } from './dto'
@@ -65,13 +66,19 @@ export class SalesService {
     return this.prisma.$transaction(async (tx) => {
       const ids = [...new Set(lines.map((l) => l.productId))]
 
+      // Состав (1.8.5): у составного товара своего остатка нет — при продаже списываются его
+      // ингредиенты. Поэтому и ингредиенты нужно заблокировать и прочитать вместе с товарами
+      const recipes = await loadRecipes(tx, ids)
+      const ingredientIds = [...new Set([...recipes.values()].flat().map((r) => r.ingredientId))]
+      const allIds = [...new Set([...ids, ...ingredientIds])]
+
       // Блокируем строки товаров (единый порядок по id) — защита от гонок/перепродажи.
       // Замок общий со всеми, кто двигает остаток (см. lockProducts): он не заставляет
       // ждать тех, кто на товар только ссылается. С прежним «полным» замком продажа и
       // создание листа пересчёта по тем же товарам могли запереть друг друга
-      await lockProducts(tx, ids)
+      await lockProducts(tx, allIds)
 
-      const products = await tx.product.findMany({ where: { id: { in: ids } } })
+      const products = await tx.product.findMany({ where: { id: { in: allIds } } })
       const byId = new Map(products.map((p) => [p.id, p]))
       for (const l of lines) {
         if (!byId.has(l.productId)) throw new BadRequestException('Товар не найден')
@@ -89,12 +96,23 @@ export class SalesService {
       // штуки, если её задали, иначе цена упаковки / штук в упаковке (common/piece.ts)
       let total = D(0)
       let cost = D(0)
+      // Себестоимость ОДНОЙ штуки составного товара — сумма стоимости его ингредиентов
+      // (цена ингредиента за штуку × сколько его в составе). У обычного товара — как прежде
+      const comp = (pid: string) => recipes.get(pid)
+      const compositeUnitCost = (recipe: { ingredientId: string; units: number }[]) =>
+        recipe.reduce((s, r) => {
+          const ing = byId.get(r.ingredientId)
+          if (!ing) return s
+          return s.plus(D(ing.cost).dividedBy(Math.max(1, ing.unitsPerPack || 1)).times(r.units))
+        }, D(0))
+
       const saleItems = lines.map((l) => {
         const p = byId.get(l.productId)!
         const upp = Math.max(1, p.unitsPerPack || 1)
         const units = l.qty * upp + l.pieces
         const own = ownPiece(p)
-        const unitCost = D(p.cost).dividedBy(upp)
+        const recipe = comp(p.id)
+        const unitCost = recipe ? compositeUnitCost(recipe) : D(p.cost).dividedBy(upp)
         // Единица — обязательно: своя цена дробного товара — за килограмм (common/piece.ts)
         const gross = grossOf({ qty: l.qty, pieces: l.pieces, price: p.price, piecePrice: own, unitsPerPack: upp, unit: p.unit })
         const discount = Prisma.Decimal.min(Prisma.Decimal.max(0, D(l.discount)), gross)
@@ -111,7 +129,8 @@ export class SalesService {
           piecePrice: own,
           // И единица — снимком: по ней читается своя цена (у дробного она за килограмм)
           unit: p.unit,
-          cost: p.cost,
+          // Себестоимость за упаковку снимком: у составного — из ингредиентов, иначе из карточки
+          cost: recipe ? unitCost.times(upp).toDecimalPlaces(2) : p.cost,
           discount,
         }
       })
@@ -120,9 +139,22 @@ export class SalesService {
       // поэтому просрочка не залёживается, а кассиру ничего выбирать не нужно.
       // Просроченные партии продажа не трогает: раньше они уходили покупателю
       // первыми — именно у них срок ближе всех.
+      //
+      // У составного товара (1.8.5) своего остатка нет — вместо него списываются
+      // ингредиенты: сколько нужно на одну штуку × сколько штук продали.
+      const ingredientNeeds = new Map<string, number>()
       for (const [pid, unitsNeeded] of unitsById) {
+        const recipe = recipes.get(pid)
+        if (recipe) {
+          for (const r of recipe) ingredientNeeds.set(r.ingredientId, (ingredientNeeds.get(r.ingredientId) || 0) + r.units * unitsNeeded)
+          continue
+        }
         const p = byId.get(pid)!
         await consumeUnits(tx, pid, unitsNeeded, p.name, { skipExpired: true })
+      }
+      for (const [ingId, need] of ingredientNeeds) {
+        const ing = byId.get(ingId)
+        await consumeUnits(tx, ingId, need, ing?.name || 'ингредиент', { skipExpired: true })
       }
 
       // Долг клиента — атомарный инкремент на точной Decimal-колонке

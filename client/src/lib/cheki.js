@@ -13,7 +13,8 @@
 // Товар открытые чеки НЕ бронируют: пока чек лежит, другая касса может продать
 // последнюю пачку, а владелец — сменить цену. Поэтому чек перед показом и перед
 // оплатой сверяется с базой (osvezhit) и говорит, что изменилось.
-import { uppOf, lineUnits, lineGross, sellableUnits, fitLine, pricePerPiece, isVesovoy, edinica } from './units.js'
+import { uppOf, lineUnits, lineGross, fitLine, pricePerPiece, isVesovoy, edinica } from './units.js'
+import { isComposite, availUnitsOf, compositeCost } from './recipe.js'
 
 // Больше пяти одновременно отложенных чеков у прилавка не бывает, а без предела
 // вкладки молча копились бы неделями
@@ -131,6 +132,8 @@ export function osvezhit(cart, products, mapId = (id) => id) {
   const notes = []
   const next = []
   let changed = false
+  // Состав (1.8.5): у составного товара доступно = сколько можно собрать из ингредиентов
+  const byId = new Map(products.map((x) => [x.id, x]))
 
   for (const line of cart) {
     // Товар, заведённый минуту назад, успевает сменить временный номер на настоящий.
@@ -155,7 +158,7 @@ export function osvezhit(cart, products, mapId = (id) => id) {
     }
 
     const bylaPustaya = qty === 0 && pieces === 0
-    const avail = sellableUnits(p)
+    const avail = availUnitsOf(p, byId)
     const fit = fitLine({ qty, pieces, upp, avail })
     if (fit.capped) {
       // Строку, от которой ничего не осталось, убираем целиком. Пустую строку,
@@ -178,7 +181,8 @@ export function osvezhit(cart, products, mapId = (id) => id) {
       name: p.name,
       price: p.price,
       piecePrice: p.piecePrice ?? null,
-      cost: p.cost,
+      // Составной товар (1.8.5): себестоимость — из состава
+      cost: isComposite(p) ? compositeCost(p, byId) : p.cost,
       unitsPerPack: upp,
       unit: p.unit,
       stock: p.stock,

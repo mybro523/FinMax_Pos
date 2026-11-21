@@ -10,6 +10,7 @@ import { D, discountOf } from '../common/money'
 import { costInPack, weightedPackCost } from '../common/cost'
 import { applyOwnPiece, applyPackChanges } from '../arrivals/arrivals.service'
 import { addUnits, consumeUnitsTolerant, lockProducts, returnExpiry, shortageWorth, uppOf } from '../common/stock'
+import { loadRecipes } from '../common/recipe'
 import { Count, firstCountAfter, forgetShortageDoc, lockInventories, pruneCounted, rememberShortageDoc, shortageDocOf } from '../common/counted'
 import { TX, TX_LONG, TX_SNAPSHOT } from '../common/tx'
 import { setCashMoves, setExpenseCash, setSupplierCash, setSupplierRefund, shiftTotals } from '../shifts/totals'
@@ -765,8 +766,11 @@ export class SyncService {
     // Единица товара: какую прислала касса (по ней она прочла свою цену — у дробного за кг,
     // 1.5.12), прежние кассы не шлют — тогда из карточки
     const ids = [...new Set(p.items.map((l) => l.productId))]
-    await lockProducts(tx, ids)
-    const known = new Map((await tx.product.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, unit: true } })).map((x) => [x.id, x]))
+    // Состав (1.8.5): у составного товара списываются ингредиенты — их тоже под замок и в known
+    const recipes = await loadRecipes(tx, ids)
+    const ingredientIds = [...new Set([...recipes.values()].flat().map((r) => r.ingredientId))]
+    await lockProducts(tx, [...ids, ...ingredientIds])
+    const known = new Map((await tx.product.findMany({ where: { id: { in: [...new Set([...ids, ...ingredientIds])] } }, select: { id: true, name: true, unit: true } })).map((x) => [x.id, x]))
 
     // Суммы пересчитываем по позициям чека — той же формулой, что и при продаже
     // на сайте. Не сошлось с тем, что прислала касса, — чек испорчен или подделан
@@ -806,12 +810,19 @@ export class SyncService {
     const counted = await this.countsAfter(tx, ids, p.date)
 
     // Списываем годные партии с ближайшим сроком — сколько есть. Чего не хватило,
-    // записываем отдельно: товар уже отдан покупателю, и чек от этого не отменить
+    // записываем отдельно: товар уже отдан покупателю, и чек от этого не отменить.
+    // У составного товара (1.8.5) своего остатка нет — списываются его ингредиенты
+    const ingredientNeeds = new Map<string, number>()
     for (const [productId, units] of unitsById) {
       const product = known.get(productId)
       // Товар убрали из справочника, пока чек ждал отправки. Чек остаётся, списывать нечего
       if (!product) continue
       if (units > MAX_UNITS) throw new Reject('В чеке слишком большое количество')
+      const recipe = recipes.get(productId)
+      if (recipe) {
+        for (const r of recipe) ingredientNeeds.set(r.ingredientId, (ingredientNeeds.get(r.ingredientId) || 0) + r.units * units)
+        continue
+      }
       const count = counted.get(productId)
       if (count) {
         await this.absorb(tx, ctx, p, count, product, -units)
@@ -819,6 +830,13 @@ export class SyncService {
       }
       const { short } = await consumeUnitsTolerant(tx, productId, units, { skipExpired: true, atDate: p.date })
       if (short > 0) await this.flag(tx, ctx, p, { kind: 'sale', productId, name: product.name, units: short })
+    }
+    for (const [ingId, need] of ingredientNeeds) {
+      const ing = known.get(ingId)
+      if (!ing) continue
+      if (need > MAX_UNITS) throw new Reject('В чеке слишком большое количество')
+      const { short } = await consumeUnitsTolerant(tx, ingId, need, { skipExpired: true, atDate: p.date })
+      if (short > 0) await this.flag(tx, ctx, p, { kind: 'sale', productId: ingId, name: ing.name, units: short })
     }
 
     let customerId: string | null = null
@@ -1757,7 +1775,9 @@ export class SyncService {
     const inIds = (part: string[]) => ({ id: { in: part } })
 
     return {
-      products: await load('Product', (part) => tx.product.findMany({ where: inIds(part) })),
+      // Состав (1.8.5) едет с товаром: касса перечитывает товар при любой смене состава
+      // (триггер RecipeItem помечает сам товар изменённым) и списывает ингредиенты без связи
+      products: await load('Product', (part) => tx.product.findMany({ where: inIds(part), include: { recipe: { orderBy: { ord: 'asc' }, select: { ingredientId: true, units: true, ord: true } } } })),
       batches: await load('Batch', (part) => tx.batch.findMany({ where: inIds(part) })),
       categories: await load('Category', (part) => tx.category.findMany({ where: inIds(part) })),
       productTypes: await load('ProductType', (part) => tx.productType.findMany({ where: inIds(part) })),

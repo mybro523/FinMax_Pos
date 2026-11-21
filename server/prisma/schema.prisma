@@ -38,6 +38,9 @@ model Product {
   analogIds    String[]      @default([]) // id взаимозаменяемых товаров (аналоги)
   // Тип товара названием (медицинский, продукты…), как категория. Пусто — не выбран
   type         String        @default("")
+  // Сырьё / полуфабрикат (1.8.5): false — товар не для прямой продажи, в кассе его нет.
+  // Он участвует в приходе, остатках и в составе других товаров (мука, песок, цемент)
+  forSale      Boolean       @default(true)
   createdAt    DateTime      @default(now())
   saleItems    SaleItem[]
   arrivalItems ArrivalItem[]
@@ -48,6 +51,30 @@ model Product {
   inventoryItems InventoryItem[]
   stockEdits   StockEdit[]
   skladBatches SkladBatch[]
+  // Состав этого товара (из чего он собирается) и где он сам используется как ингредиент
+  recipe       RecipeItem[]  @relation("ProductRecipe")
+  usedIn       RecipeItem[]  @relation("Ingredient")
+}
+
+// ── Состав товара (рецепт), версия 1.8.5 ──
+// Составной товар (торт, кирпич, пицца) собирается из сырья — других товаров. При продаже
+// система списывает не остаток самого товара (его у составного нет), а ингредиенты по их
+// партиям (FEFO). Сколько составного можно продать — считается по тому, на сколько хватает
+// ингредиентов. Себестоимость составного = сумма стоимости его ингредиентов.
+//
+// units — сколько ШТУК ингредиента (у дробного — тысячных: граммов, миллилитров) нужно на
+// ОДНУ штуку составного товара: 200 г муки на 1 торт — это ингредиент-мука, units = 200.
+model RecipeItem {
+  id           String  @id @default(cuid())
+  productId    String // составной товар
+  product      Product @relation("ProductRecipe", fields: [productId], references: [id], onDelete: Cascade)
+  ingredientId String // товар-ингредиент (сырьё)
+  ingredient   Product @relation("Ingredient", fields: [ingredientId], references: [id], onDelete: Cascade)
+  units        Int // штук (тысячных) ингредиента на 1 штуку составного товара
+  ord          Int     @default(0)
+
+  @@index([productId])
+  @@index([ingredientId])
 }
 
 // ── Категория товара ──

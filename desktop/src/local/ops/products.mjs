@@ -12,9 +12,9 @@
 //   • остаток, вписанный в карточку, — это пересчёт одного товара на момент правки.
 // Поэтому касса присылает не только «что стало», но и «что было у неё» и «когда».
 import { bodyOf, checker, expiryOk, MAX_MONEY, MAX_UPP, unitsOk } from '../check.mjs'
-import { ApiError, bad, inTx, newId, notFound } from '../db.mjs'
+import { ApiError, bad, inTx, newId, notFound, q } from '../db.mjs'
 import { enqueue } from '../docs.mjs'
-import { productByBarcode, productView1 } from '../catalog.mjs'
+import { productByBarcode, productView1, recipeOf } from '../catalog.mjs'
 import { recordEdit } from '../edits.mjs'
 import { fromCents, toCents } from '../money.mjs'
 import { isDrob, opensPack, packFor, pieceCentsIn } from '../piece.mjs'
@@ -47,6 +47,8 @@ const FIELDS = {
   dosage: { col: 'dosage' },
   analogIds: { col: 'analogIds', toDb: (v) => JSON.stringify(v), fromRow: (r) => analogsOf(r.analogIds) },
   image: { col: 'image', fromRow: (r) => r.image || '' },
+  // Сырьё/полуфабрикат (1.8.5): да/нет — числом в базе, булевым в запросе
+  forSale: { col: 'forSale', toDb: (v) => (v ? 1 : 0), fromRow: (r) => r.forSale !== 0 },
 }
 function analogsOf(text) {
   try {
@@ -89,6 +91,20 @@ function readFields(raw) {
     if (!Array.isArray(dto.analogIds) || dto.analogIds.some((x) => typeof x !== 'string')) c.str(1, 'analogIds')
     else out.analogIds = dto.analogIds.slice(0, 500)
   }
+  // Сырьё (1.8.5): не для продажи
+  if (dto.forSale !== undefined) out.forSale = dto.forSale !== false
+  // Состав (1.8.5): [{ ingredientId, units }] — чистые строки, без повторов и нулей
+  let recipe
+  if (dto.recipe !== undefined) {
+    if (!Array.isArray(dto.recipe)) c.str(1, 'recipe')
+    else {
+      const seen = new Set()
+      recipe = dto.recipe
+        .slice(0, 200)
+        .map((r) => ({ ingredientId: String(r?.ingredientId || '').trim(), units: Math.max(0, Math.trunc(Number(r?.units) || 0)) }))
+        .filter((r) => r.ingredientId && r.units > 0 && !seen.has(r.ingredientId) && seen.add(r.ingredientId))
+    }
+  }
   c.done()
   if (out.name !== undefined) out.name = out.name.trim()
   if (out.barcode !== undefined) out.barcode = out.barcode.trim()
@@ -111,13 +127,25 @@ function readFields(raw) {
     if (expiry && !expiryDate) throw bad('Срок годности: неверная дата')
     expiryOk(expiryDate)
   }
-  return { fields: out, stock, looseUnits, expiryDate }
+  return { fields: out, stock, looseUnits, expiryDate, recipe }
+}
+
+// Поменялся ли состав: сравниваем как множество { ingredientId: units }
+function recipeChanged(before, after) {
+  if (!after) return false
+  if (before.length !== after.length) return true
+  const map = new Map(before.map((r) => [r.ingredientId, r.units]))
+  return after.some((r) => map.get(r.ingredientId) !== r.units)
+}
+function writeRecipe(db, productId, recipe) {
+  q(db, 'DELETE FROM recipe WHERE productId = ?').run(productId)
+  ;(recipe || []).forEach((r, i) => q(db, 'INSERT OR REPLACE INTO recipe (productId, ingredientId, units, ord) VALUES (?, ?, ?, ?)').run(productId, r.ingredientId, r.units, i))
 }
 
 // ── Завести товар ──
 export function createProduct(ctx, raw) {
   const { db, now } = ctx
-  const { fields: f, stock = 0, looseUnits = 0, expiryDate = null } = readFields(raw)
+  const { fields: f, stock = 0, looseUnits = 0, expiryDate = null, recipe } = readFields(raw)
   if (!f.name) throw bad('Укажите название товара')
   if (!f.barcode) throw bad('Укажите штрихкод')
   // Остаток — в штуках по упаковке из формы. Упаковка дробного товара — не меньше 1000
@@ -150,6 +178,8 @@ export function createProduct(ctx, raw) {
       dosage: f.dosage ?? '',
       analogIds: JSON.stringify(f.analogIds ?? []),
       image: f.image ?? '',
+      // Сырьё (1.8.5): по умолчанию товар для продажи
+      forSale: f.forSale === false ? 0 : 1,
       createdAt: at,
       sCostC: costC,
       costC,
@@ -157,6 +187,8 @@ export function createProduct(ctx, raw) {
       expiryDate: null,
     }
     recordEdit(db, { opId, tbl: 'products', rowId: id, action: 'put', data: { row }, now })
+    // Состав (1.8.5): храним локально сразу — отдельной таблицей (её сервер вернёт при обмене)
+    if (recipe && recipe.length) writeRecipe(db, id, recipe)
     reorderProducts(db)
     // Начальный остаток — партией, как у сервера: продажа берёт товар именно из партий
     if (units > 0) move(db, { opId, productId: id, kind: 'card', units, costC, expiryDate, note: 'Начальный остаток' }, { now })
@@ -180,6 +212,9 @@ export function createProduct(ctx, raw) {
           dosage: row.dosage,
           analogIds: f.analogIds ?? [],
           image: row.image,
+          // Сырьё/состав (1.8.5): сервер заведёт товар с теми же сырьём и составом
+          forSale: f.forSale !== false,
+          recipe: recipe ?? [],
           stock: Math.floor(units / upp),
           looseUnits: units % upp,
           expiryDate,
@@ -197,7 +232,7 @@ export function createProduct(ctx, raw) {
 // вместе с тем, что было в этих полях у кассы
 export function updateProduct(ctx, id, raw) {
   const { db, now } = ctx
-  const { fields: f, stock, looseUnits, expiryDate } = readFields(raw)
+  const { fields: f, stock, looseUnits, expiryDate, recipe } = readFields(raw)
   // Сменили мешок, а прежние цены были за прежнюю упаковку: карточка уже перевела свои цены,
   // цены партий переведёт сервер (products.service, repack)
   const repackAsked = bodyOf(raw)?.repack
@@ -207,6 +242,8 @@ export function updateProduct(ctx, id, raw) {
     const row = productById(db, id)
     if (!row) throw notFound('Товар не найден')
     const view = productView1(db, row, now)
+    // Состав (1.8.5): поменялся ли — решаем до сборки правки
+    const recipeChg = recipeChanged(recipeOf(db, id), recipe)
     const set = {}
     const base = {}
     for (const k of Object.keys(f)) {
@@ -266,7 +303,7 @@ export function updateProduct(ctx, id, raw) {
     // Срок годности: прислали другой день, чем у товара сейчас
     const expiryChanged = expiryDate !== undefined && String(expiryDate || '').slice(0, 10) !== String(view.expiryDate || '').slice(0, 10)
 
-    if (!Object.keys(set).length && target === null && !expiryChanged) return view
+    if (!Object.keys(set).length && target === null && !expiryChanged && !recipeChg) return view
     // Касса магазина без интернета (1.7.0): остаток — «столько на полке сейчас» — меняют на главном
     // компьютере: только у него все продажи всех касс
     if (target !== null && ctx.register) throw bad(REGISTER_STOCK)
@@ -295,6 +332,8 @@ export function updateProduct(ctx, id, raw) {
     // приходов, сделанных раньше правки (их средняя цена её не перекроет), и до сделанных позже
     if ('cost' in set) move(db, { opId, productId: id, kind: 'cost', units: 0, costC: toCents(set.cost) }, { now })
     if (expiryChanged) move(db, { opId, productId: id, kind: 'expiry', units: 0, expiryDate }, { now })
+    // Состав (1.8.5): храним локально сразу — сервер заменит его при обмене
+    if (recipeChg) writeRecipe(db, id, recipe)
 
     enqueue(db, {
       id: opId,
@@ -311,6 +350,8 @@ export function updateProduct(ctx, id, raw) {
         // своей цены и у товара с мешком (у прежних касс — нет, server/products, oldWindowPack)
         drobPack: true,
         ...(repack && 'unitsPerPack' in set ? { repack } : {}),
+        // Состав (1.8.5): прислали — сервер заменит целиком
+        ...(recipeChg ? { recipe } : {}),
       },
       now,
     })

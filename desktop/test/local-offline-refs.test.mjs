@@ -82,7 +82,7 @@ test('товар заводится без связи: карточка, ост�
   assert.equal(op.type, 'product.create')
   assert.deepEqual(op.payload.product, {
     id: p.id, name: 'Анальгин', barcode: '4600000000031', category: 'Таблетки', type: '', cost: 20, price: 30, piecePrice: null, minStock: 2, unit: 'уп', unitsPerPack: 10,
-    dosage: '', analogIds: [], image: '', stock: 3, looseUnits: 4, expiryDate: day('2027-05-31'), createdAt: new Date(NOW).toISOString(),
+    dosage: '', analogIds: [], image: '', forSale: true, recipe: [], stock: 3, looseUnits: 4, expiryDate: day('2027-05-31'), createdAt: new Date(NOW).toISOString(),
   })
   // Штрихкод занят — отказ тем же текстом, что у сервера
   refused(() => createProduct(ctx(db), { name: 'Дубль', barcode: '4600000000017' }), 409, BARCODE_TAKEN)

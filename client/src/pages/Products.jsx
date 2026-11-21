@@ -23,6 +23,7 @@ import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
 import { editPatch, stockAtOpen } from '../lib/productEdit'
 import { edinica, isVesovoy, stockUnits, stockValue } from '../lib/units'
+import { isComposite, compositeBuildable, recipeQtyText } from '../lib/recipe'
 
 // Печать этикеток нужна редко — грузим по требованию, чтобы не утяжелять страницу
 const LabelPrint = lazy(() => import('../components/LabelPrint'))
@@ -48,6 +49,8 @@ const useTelefon = () => useSyncExternalStore(sledUzko, uzko, () => false)
 
 export default function Products() {
   const products = useCollection('products')
+  // Для составных товаров «остаток» = сколько можно собрать из ингредиентов (1.8.5)
+  const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products])
   const t = useT()
   const toast = useToast()
   const dialog = useDialog()
@@ -189,6 +192,12 @@ export default function Products() {
       dosage: p.dosage || '',
       expiryDate: p.expiryDate ? String(p.expiryDate).slice(0, 10) : '',
       analogIds: Array.isArray(p.analogIds) ? p.analogIds : [],
+      // Сырьё/состав (1.8.5): форма держит строки состава с числом в единице ингредиента
+      forSale: p.forSale !== false,
+      recipe: (Array.isArray(p.recipe) ? p.recipe : []).map((r) => {
+        const ing = products.find((x) => x.id === r.ingredientId)
+        return { ingredientId: r.ingredientId, units: r.units, qty: recipeQtyText(ing, r.units) }
+      }),
       stockWas: stockAtOpen(p),
     })
   }
@@ -304,14 +313,18 @@ export default function Products() {
                     <td className="cell-main">
                       <span className="prod-name-cell">
                         {p.image && <img className="foto-mini" src={p.image} alt="" onClick={() => setFoto(p)} />}
-                        <span><b>{p.name}</b>{p.dosage ? <div className="tag-cat">{p.dosage}</div> : null}</span>
+                        <span><b>{p.name}</b>{p.dosage ? <div className="tag-cat">{p.dosage}</div> : null}{p.forSale === false ? <div className="tag-cat">{t('сырьё — не для продажи')}</div> : null}</span>
                       </span>
                     </td>
                     <td className="tag-cat" data-label={t('Штрихкод')}>{p.barcode}</td>
                     <td data-label={t('Категория')}>{p.category}{p.type ? <div className="tag-cat">{t(p.type)}</div> : null}</td>
                     <td className="num" data-label={t('Продажа')}><b>{money(p.price)}</b></td>
                     <td className="num" data-label={t('Остаток')}>
-                      <span className={'badge ' + (p.stock <= p.minStock ? 'low' : 'ok')}>{stockText(p, t)}</span>
+                      {isComposite(p) ? (
+                        <span className="badge ok" title={t('Собирается из состава — списывается сырьё')}>{t('собрать')} {compositeBuildable(p, byId)}</span>
+                      ) : (
+                        <span className={'badge ' + (p.stock <= p.minStock ? 'low' : 'ok')}>{stockText(p, t)}</span>
+                      )}
                     </td>
                     {/* Без срока — на телефоне строки «Годен до —» нет: карточка короче */}
                     {srokOn && <td data-label={t('Годен до')} className={e.has ? undefined : 'cell-hide'}>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useModul } from '../lib/useModul'
 import { LuCamera, LuWandSparkles, LuX } from 'react-icons/lu'
 import NumberInput from './NumberInput'
@@ -16,6 +16,7 @@ import { KG, gramsOfKg, isVesovoy, edinica, EDINICY, kgText } from '../lib/units
 import { repackAsk, repackNeeded, r2, vesUpp } from '../lib/vesUpak'
 import { priceFromMarkup, markupOf } from '../lib/pricing'
 import { isDesktop } from '../lib/desktop'
+import { isComposite, compositeCost, recipeBaseUnits, recipeQtyText, recipeUnitLabel } from '../lib/recipe'
 
 // Палец — основной указатель (телефон, планшет), и это не программа для Windows — как у
 // кнопки камеры (KameraKnopka)
@@ -61,6 +62,9 @@ export const emptyProduct = {
   unitsPerPack: '1', looseUnits: '0', dosage: '', expiryDate: '', analogIds: [], unit: '',
   // Сколько кг (л, м) в упаковке у дробного товара: мешок муки — 50 (1.5.12). Пусто — на вес
   vesUp: '',
+  // Сырьё/состав (1.8.5). forSale: товар для продажи; recipe — строки состава
+  // { ingredientId, units, qty } (units — базовые единицы, qty — число в поле формы)
+  forSale: true, recipe: [],
 }
 
 // Помощники мешка — в lib/vesUpak.js (проверяются без окна); карточка отдаёт их дальше
@@ -69,6 +73,12 @@ export { MAX_UPP, repackAsk, repackNeeded, vesUpp, vesUpText } from '../lib/vesU
 // Из формы — в то, что уходит на сервер. Одна воронка на все страницы: раньше
 // каждая приводила числа по-своему, и «пусто» превращалось то в 0, то в NaN.
 export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
+  // Состав (1.8.5): строки формы { ingredientId, units } → чистые строки для сервера.
+  // Сам товар ингредиентом быть не может; нулевые и пустые строки отбрасываем
+  const recipe = (Array.isArray(f.recipe) ? f.recipe : [])
+    .map((r) => ({ ingredientId: r.ingredientId, units: Math.max(0, Math.trunc(Number(r.units) || 0)) }))
+    .filter((r) => r.ingredientId && r.ingredientId !== f.id && r.units > 0)
+  const composite = recipe.length > 0
   const common = {
     name: (f.name || '').trim(),
     barcode: normalizeBarcode(f.barcode || ''),
@@ -81,6 +91,9 @@ export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
     dosage: (f.dosage || '').trim(),
     expiryDate: f.expiryDate || '', // пусто — сервер сохранит «без срока»
     analogIds: Array.isArray(f.analogIds) ? f.analogIds : [],
+    // Сырьё/состав (1.8.5): не для продажи и из чего собирается
+    forSale: f.forSale !== false,
+    recipe,
     // Окно знает упаковку дробного товара (1.5.12): правку мешка сервер примет. Прежние окна
     // этого не знали — их правка мешок у товара не снимает (server/products, oldWindowPack)
     drobPack: true,
@@ -103,6 +116,8 @@ export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
       // Мешок сменили: прежние цены переведены на новую упаковку (scale) или оставлены (keep) —
       // сервер так же поступит с ценами партий
       ...(repackAsk(f) && (f.repack === 'scale' || f.repack === 'keep') ? { repack: f.repack } : {}),
+      // У составного товара своего остатка нет — списывается состав
+      ...(composite ? { stock: 0, looseUnits: 0 } : {}),
     }
   }
   const unit = edinica({ unit: f.unit, unitsPerPack: f.unitsPerPack })
@@ -113,10 +128,10 @@ export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
   const piece = Number(String(f.piecePrice ?? '').replace(',', '.'))
   return {
     ...common,
-    stock: Number(f.stock) || 0,
+    stock: composite ? 0 : Number(f.stock) || 0,
     unit,
     unitsPerPack: upp,
-    looseUnits: upp > 1 ? Math.max(0, Number(f.looseUnits) || 0) : 0,
+    looseUnits: composite ? 0 : upp > 1 ? Math.max(0, Number(f.looseUnits) || 0) : 0,
     piecePrice: upp > 1 && Number.isFinite(piece) && piece > 0 ? Math.round(piece * 100) / 100 : null,
   }
 }
@@ -227,6 +242,30 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
     ? `= ${Math.floor(ostatokGr / vesUpp(value.vesUp))} ${t('уп')}${ostatokGr % vesUpp(value.vesUp) ? ` + ${kgText(ostatokGr % vesUpp(value.vesUp))} ${t(u)}` : ''}`
     : ''
   const unitKnown = EDINICY.some((x) => x.v === u)
+
+  // ── Состав (1.8.5) ──
+  // Строки состава формы: { ingredientId, units, qty }. units — базовые единицы (штуки или
+  // тысячные у дробного), qty — число в поле (в единице ингредиента). Касса/сайт по units
+  // считают, на сколько хватает ингредиентов. Ингредиентом может быть любой обычный товар,
+  // кроме самого этого товара и другого составного (вложенные составы не поддерживаются)
+  const recipe = Array.isArray(value.recipe) ? value.recipe : []
+  const prodById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products])
+  const recipeIds = new Set(recipe.map((r) => r.ingredientId))
+  const ingredientOptions = products.filter(
+    (p) => p.id !== value.id && !recipeIds.has(p.id) && !isComposite(p),
+  )
+  const addIngredient = (id) => {
+    if (!id || recipeIds.has(id)) return
+    set('recipe', [...recipe, { ingredientId: id, units: 0, qty: '' }])
+  }
+  const setIngredientQty = (id, qty) => {
+    const ing = prodById.get(id)
+    set('recipe', recipe.map((r) => (r.ingredientId === id ? { ...r, qty, units: recipeBaseUnits(ing, qty) } : r)))
+  }
+  const removeIngredient = (id) => set('recipe', recipe.filter((r) => r.ingredientId !== id))
+  const composite = recipe.some((r) => Number(r.units) > 0)
+  // Себестоимость по составу — подсказкой (сумма стоимости ингредиентов)
+  const recipeCost = composite ? compositeCost({ recipe: recipe.map((r) => ({ ingredientId: r.ingredientId, units: r.units })) }, prodById) : 0
 
   return (
     <>
@@ -506,6 +545,60 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Состав: из какого сырья собирается товар (1.8.5) ── */}
+      {!arrival && (
+        <div className="field" data-tour="pf.recipe">
+          <label>{t('Состав (из какого сырья собирается)')}</label>
+          <div className="tag-cat" style={{ marginTop: -2, marginBottom: 6 }}>
+            {t('Добавьте ингредиенты — при продаже они спишутся со склада автоматически.')} {t('Количество — на 1')} {t(u)}.
+          </div>
+          {recipe.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
+              {recipe.map((r) => {
+                const ing = prodById.get(r.ingredientId)
+                return (
+                  <div key={r.ingredientId} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{ing ? ing.name : t('удалённый товар')}</span>
+                    <div style={{ width: 104, flexShrink: 0 }}>
+                      <NumberInput integer={!isVesovoy(ing)} value={r.qty ?? recipeQtyText(ing, r.units)} onChange={(e) => setIngredientQty(r.ingredientId, e.target.value)} placeholder="0" />
+                    </div>
+                    <span className="tag-cat" style={{ width: 30, flexShrink: 0 }}>{t(recipeUnitLabel(ing))}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeIngredient(r.ingredientId)}
+                      aria-label={`${t('Убрать')}: ${ing ? ing.name : ''}`}
+                      style={{ background: 'none', border: 'none', color: 'var(--danger)', display: 'inline-flex', padding: 0, cursor: 'pointer', flexShrink: 0 }}
+                    >
+                      <LuX size={15} />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <select value="" onChange={(e) => { addIngredient(e.target.value); e.target.value = '' }}>
+            <option value="">{t('— добавить ингредиент —')}</option>
+            {ingredientOptions.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+          {composite && recipeCost > 0 && (
+            <div className="tag-cat" style={{ marginTop: 6 }}>{t('Себестоимость по составу')}: {money(recipeCost)} · {t('остаток не ведётся — списывается сырьё')}</div>
+          )}
+        </div>
+      )}
+
+      {/* ── Сырьё: не для прямой продажи (1.8.5) ── */}
+      {!arrival && (
+        <div className="field">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={value.forSale === false} onChange={(e) => set('forSale', !e.target.checked)} />
+            <span>{t('Сырьё — не для продажи (скрыть из кассы)')}</span>
+          </label>
+          <div className="tag-cat" style={{ marginTop: 4 }}>{t('Товар остаётся в приходе, остатках и в составе, но в кассе его нет.')}</div>
         </div>
       )}
     </>

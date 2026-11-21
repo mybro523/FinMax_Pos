@@ -569,9 +569,11 @@ function productFields(src: any) {
     if (!IMAGE.test(v)) throw new Reject('Фото: не тот вид')
     out.image = v
   }
+  // Сырьё/полуфабрикат (1.8.5): false — товар не для прямой продажи
+  if (has(src, 'forSale')) out.forSale = src.forSale !== false
   return out
 }
-export const PRODUCT_EDIT_FIELDS = ['name', 'barcode', 'category', 'type', 'cost', 'price', 'piecePrice', 'minStock', 'unit', 'unitsPerPack', 'dosage', 'analogIds', 'image']
+export const PRODUCT_EDIT_FIELDS = ['name', 'barcode', 'category', 'type', 'cost', 'price', 'piecePrice', 'minStock', 'unit', 'unitsPerPack', 'dosage', 'analogIds', 'image', 'forSale']
 
 export function parseProductCreate(p: any, now?: number) {
   const x = obj(obj(p, 'товар').product, 'товар')
@@ -597,6 +599,9 @@ export function parseProductCreate(p: any, now?: number) {
     dosage: (f.dosage as string) ?? '',
     analogIds: (f.analogIds as string[]) ?? [],
     image: (f.image as string) ?? '',
+    // Сырьё/состав (1.8.5). forSale: по умолчанию true; recipe — сырой список, нормализует edits.ts
+    forSale: x.forSale === false ? false : true,
+    recipe: Array.isArray(x.recipe) ? x.recipe : undefined,
     stock,
     looseUnits,
     expiryDate: dateOrNull(x.expiryDate, 'срок годности'),
@@ -627,6 +632,8 @@ export function parseProductUpdate(p: any, now?: number) {
     drobPack: root.drobPack === true,
     // Сменили упаковку дробного товара, а прежние цены были за прежнюю: цены партий — тоже
     repack: root.repack === 'scale' ? ('scale' as const) : root.repack === 'keep' ? ('keep' as const) : null,
+    // Состав (1.8.5): прислали — меняем; нет поля — не трогаем. forSale едет полем карточки (set)
+    recipe: Array.isArray(root.recipe) ? root.recipe : undefined,
   }
 }
 

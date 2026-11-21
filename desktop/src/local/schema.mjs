@@ -476,6 +476,24 @@ export const PHARMACY_SCHEMA = [
   `
   UPDATE products SET unit = 'шт' WHERE (unit = 'уп' OR trim(unit) = '') AND unitsPerPack <= 1;
   `,
+  // ── Состав товара (сырьё), версия 1.8.5 ──
+  // recipe — из каких ингредиентов собирается составной товар: units — сколько штук (у дробного
+  // ингредиента — тысячных) нужно на 1 штуку составного. При продаже составного списываются
+  // ингредиенты (ops/sale.mjs), своего остатка у него нет. forSale = 0 — сырьё: в кассе товара
+  // нет, но он участвует в приходе, остатках и в составе. И состав, и forSale приходят с сервера
+  // (snapshot.mjs); отметки обмена сбрасываются — один раз касса получит всё заново
+  `
+  ALTER TABLE products ADD COLUMN forSale INTEGER NOT NULL DEFAULT 1;
+  CREATE TABLE recipe (
+    productId TEXT NOT NULL,
+    ingredientId TEXT NOT NULL,
+    units INTEGER NOT NULL,
+    ord INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (productId, ingredientId)
+  );
+  CREATE INDEX recipe_product ON recipe(productId);
+  DELETE FROM meta WHERE key IN ('cursor', 'wcursor');
+  `,
 ]
 
 // ── Общая база программы ──
