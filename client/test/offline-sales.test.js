@@ -92,6 +92,21 @@ const P1 = { id: 'p1', name: 'Анальгин', price: 12.5, cost: 8, stock: 10
 const P2 = { id: 'p2', name: 'Мука', price: 190, cost: 150, stock: 3, looseUnits: 0, unitsPerPack: 50000, unit: 'кг', piecePrice: 4 }
 const P3 = { id: 'p3', name: 'Хлеб', price: 3, cost: 2, stock: 40, looseUnits: 0, unitsPerPack: 1, unit: 'шт' }
 
+// Состав товара (1.8.5): торт собирается из муки (кг, 0.2 = 200 г), яиц (10 шт) и молока
+// (л, 1 = 1000 мл). Своего остатка у торта нет — при продаже уходят ингредиенты.
+// Остатки: мука 10 кг → собрать 50, яйца 100 → собрать 10, молоко 20 л → собрать 20 ⇒ 10.
+const FLOUR = { id: 'ing_flour', name: 'Мука-сырьё', price: 15, cost: 10, stock: 10, looseUnits: 0, unitsPerPack: 1000, unit: 'кг' }
+const EGGS = { id: 'ing_eggs', name: 'Яйца', price: 1.5, cost: 1.2, stock: 100, looseUnits: 0, unitsPerPack: 1, unit: 'шт' }
+const MILK = { id: 'ing_milk', name: 'Молоко', price: 12, cost: 10, stock: 20, looseUnits: 0, unitsPerPack: 1000, unit: 'л' }
+const CAKE = {
+  id: 'cake', name: 'Торт', price: 200, cost: 0, stock: 0, looseUnits: 0, unitsPerPack: 1, unit: 'шт',
+  recipe: [
+    { ingredientId: 'ing_flour', units: 200 },
+    { ingredientId: 'ing_eggs', units: 10 },
+    { ingredientId: 'ing_milk', units: 1000 },
+  ],
+}
+
 async function fresh({ user = KASSIR } = {}) {
   login(user)
   online = true
@@ -110,6 +125,13 @@ async function fresh({ user = KASSIR } = {}) {
 const stockOf = (id) => {
   const p = db.get('products').find((x) => x.id === id)
   return p.stock * Math.max(1, p.unitsPerPack) + (p.looseUnits || 0)
+}
+
+// Магазин с составным товаром и его ингредиентами
+async function freshComposite() {
+  await fresh()
+  server.products = [FLOUR, EGGS, MILK, CAKE].map((p) => ({ ...p }))
+  await fetchKey('products')
 }
 
 test('чек без связи: суммы как у сервера (скидки, штуки, весовой в мешке, своя цена штуки)', () => {
@@ -387,6 +409,48 @@ test('перезагрузка страницы: очередь из храни�
   await fetchKey('products')
   assert.equal(stockOf('p1'), 88, 'не вычтено второй раз')
   assert.equal(db.get('sales').filter((x) => x.id === s.id || x.clientId === s.clientId).length, 1)
+})
+
+test('составной товар без связи: списываются ингредиенты, а не сам торт', async () => {
+  await freshComposite()
+  online = false
+  assert.equal(stockOf('ing_flour'), 10000)
+  assert.equal(stockOf('ing_eggs'), 100)
+  assert.equal(stockOf('ing_milk'), 20000)
+  assert.equal(stockOf('cake'), 0)
+  const { sale, synced } = ops.checkout({
+    items: [{ productId: 'cake', name: 'Торт', qty: 2, pieces: 0, price: 200, cost: 0, unitsPerPack: 1, unit: 'шт', discount: 0 }],
+    payment: 'cash',
+  })
+  const stored = await synced
+  assert.equal(stored._offline, true)
+  assert.equal(offlineSnapshot().pending, 1)
+  // 2 торта: мука −400 г, яйца −20, молоко −2000 мл; остаток самого торта не трогаем
+  assert.equal(stockOf('ing_flour'), 10000 - 400)
+  assert.equal(stockOf('ing_eggs'), 100 - 20)
+  assert.equal(stockOf('ing_milk'), 20000 - 2000)
+  assert.equal(stockOf('cake'), 0, 'у составного своего остатка нет')
+  // Опрос сервера (старые данные) не стирает наложение очереди
+  await fetchKey('products')
+  assert.equal(stockOf('ing_eggs'), 80)
+  assert.equal(stockOf('cake'), 0)
+  assert.equal(db.get('sales').filter((s) => s.id === sale.id || s.clientId === sale.id).length, 1)
+})
+
+test('составной товар: не хватает ингредиента — продажа не проходит, остатки целы', async () => {
+  await freshComposite()
+  // 11 тортов: муки и молока хватает, а яиц (100) только на 10 — упираемся в яйца
+  assert.throws(
+    () =>
+      ops.checkout({
+        items: [{ productId: 'cake', name: 'Торт', qty: 11, pieces: 0, price: 200, cost: 0, unitsPerPack: 1, unit: 'шт' }],
+        payment: 'cash',
+      }),
+    /Яйца/,
+  )
+  assert.equal(stockOf('ing_eggs'), 100, 'ничего не списано')
+  assert.equal(stockOf('ing_flour'), 10000)
+  assert.equal(offlineSnapshot().pending, 0)
 })
 
 test('запись в очередь: вид продажи в списках', () => {

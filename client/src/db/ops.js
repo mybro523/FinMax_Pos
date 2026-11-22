@@ -10,6 +10,7 @@ import { db, setCollection, refresh, uid, beginMutate, endMutate, realId } from 
 import { normalizeScan, canonBarcode } from '../lib/scan.js'
 import { serverNow } from '../lib/time.js'
 import { uppOf, unitCost, sellableUnits, expiredUnits, stockUnits, splitUnits, lineGross, ownPiecePrice, isVesovoy, kgText, edinica, isDivisible, KG } from '../lib/units.js'
+import { isComposite } from '../lib/recipe.js'
 import { buildOfflineSale, enqueueSale, isNetworkFailure, markOffline, offlineEnabled, offlineNow, saleView } from '../lib/offlineSales.js'
 
 // Короткие перебои связи (Wi-Fi моргнул) не должны беспокоить кассира: тихо пробуем ещё раз.
@@ -66,15 +67,36 @@ export function checkout({ items, payment, payVia, customer }) {
   if (customer?.id) customer = { ...customer, id: realId(customer.id) }
 
   const products = db.get('products')
-  // Проверка остатков В ШТУКАХ, и только ГОДНЫХ: просроченные партии лежат на складе,
-  // но продаже недоступны — сервер их не отдаст. Ловим это здесь, до печати чека,
-  // иначе покупатель уже ушёл бы с чеком, а продажа не записалась.
+
+  // Сколько ШТУК каждого товара реально уходит со склада. У составного товара (1.8.5)
+  // своего остатка нет — вместо него списываются ингредиенты по составу (столько на одну
+  // штуку × сколько штук продаём). Обычный товар списывает сам себя. По этой же карте
+  // идёт и проверка остатка, и само списание — чтобы торт не упирался в свой нулевой
+  // остаток, а честно расходовал муку, яйца и молоко.
+  const needByProduct = {}
   for (const it of items) {
     const p = products.find((x) => x.id === it.productId)
     if (!p) throw new Error('Товар не найден: ' + it.name)
-    const upp = uppOf(it)
-    const need = (Number(it.qty) || 0) * upp + (Number(it.pieces) || 0)
-    if (need <= 0) throw new Error(`Укажите количество: ${it.name}`)
+    const units = (Number(it.qty) || 0) * uppOf(it) + (Number(it.pieces) || 0)
+    if (units <= 0) throw new Error(`Укажите количество: ${it.name}`)
+    if (isComposite(p)) {
+      for (const line of p.recipe) {
+        const per = Math.max(0, Math.trunc(Number(line.units) || 0))
+        if (per > 0) needByProduct[line.ingredientId] = (needByProduct[line.ingredientId] || 0) + per * units
+      }
+    } else {
+      needByProduct[p.id] = (needByProduct[p.id] || 0) + units
+    }
+  }
+
+  // Проверка остатков В ШТУКАХ, и только ГОДНЫХ: просроченные партии лежат на складе,
+  // но продаже недоступны — сервер их не отдаст. Ловим это здесь, до печати чека,
+  // иначе покупатель уже ушёл бы с чеком, а продажа не записалась. У составного товара
+  // проверяем остаток его ингредиентов — «не хватает молока» вернее, чем «нет торта».
+  for (const pid of Object.keys(needByProduct)) {
+    const p = products.find((x) => x.id === pid)
+    if (!p) throw new Error('Товар не найден')
+    const need = needByProduct[pid]
     const avail = sellableUnits(p)
     if (need > avail) {
       const bad = expiredUnits(p)
@@ -124,11 +146,8 @@ export function checkout({ items, payment, payVia, customer }) {
     customer: payment === 'debt' && customer ? { id: customer.id, name: customer.name } : null,
   }
 
-  // Сколько ШТУК списываем по каждому товару (суммарно)
-  const needByProduct = {}
-  saleItems.forEach((i) => {
-    needByProduct[i.productId] = (needByProduct[i.productId] || 0) + i.qty * i.unitsPerPack + i.pieces
-  })
+  // needByProduct уже посчитан выше (с разложением составного на ингредиенты) —
+  // по нему и списываем склад.
 
   // Оптимистично: списываем остатки (пачки + вскрытая), добавляем продажу, наращиваем долг
   setCollection('products', prevP.map((p) => {

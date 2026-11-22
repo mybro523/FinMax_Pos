@@ -21,6 +21,7 @@ import { useSyncExternalStore } from 'react'
 import { api } from '../db/api.js'
 import { bridge } from './desktop.js'
 import { lineGross, stockUnits, splitUnits } from './units.js'
+import { isComposite } from './recipe.js'
 
 const OFF = !!bridge
 // Ключ очереди и ключ кэша — по коду магазина: на одном компьютере бывают разные
@@ -207,12 +208,25 @@ export function saleView(rec) {
   }
 }
 
-function effects(items) {
+// products — список товаров, чтобы у составного (1.8.5) списать не его самого (своего
+// остатка нет), а ингредиенты по составу. Нужен только при наложении на остатки.
+function effects(items, products) {
   const units = new Map()
   const debt = new Map()
+  const byId = Array.isArray(products) ? new Map(products.map((p) => [p.id, p])) : null
+  const add = (id, n) => units.set(id, (units.get(id) || 0) + n)
   for (const r of items) {
     const s = r.payload.sale
-    for (const it of s.items) units.set(it.productId, (units.get(it.productId) || 0) + unitsOf(it))
+    for (const it of s.items) {
+      const sold = unitsOf(it)
+      const p = byId ? byId.get(it.productId) : null
+      if (p && isComposite(p)) {
+        for (const line of p.recipe) {
+          const per = Math.max(0, Math.trunc(Number(line.units) || 0))
+          if (per > 0) add(line.ingredientId, per * sold)
+        }
+      } else add(it.productId, sold)
+    }
     if (s.payment === 'debt' && s.customerId) debt.set(s.customerId, (debt.get(s.customerId) || 0) + Number(s.total || 0))
   }
   return { units, debt }
@@ -232,7 +246,8 @@ const kop = (x) => Math.round(x * 100) / 100
 
 function shift(key, arr, items, sign) {
   if (!Array.isArray(arr) || !items.length) return arr
-  const { units, debt } = effects(items)
+  // При наложении на остатки arr — это список товаров: по нему разворачиваем состав
+  const { units, debt } = effects(items, key === 'products' ? arr : null)
   if (key === 'products') {
     if (!units.size) return arr
     return arr.map((p) => {
