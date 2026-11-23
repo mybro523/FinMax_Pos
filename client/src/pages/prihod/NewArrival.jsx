@@ -95,6 +95,11 @@ export default function NewArrival({ products, suppliers, onSaved }) {
   const novUnit = form.novUnit || 'шт'
   const novUpp = novUnit === 'шт' ? 1 : packFromField(form.pack, isVesovoy({ unit: novUnit }))
   const nov = !!form.nov && !editing && !chosen
+  // «Сырьё — не для продажи» (1.8.8): у нового товара флаг в форме, у существующего
+  // (выбранного или правимой строки) — читаем из карточки и переключаем сразу
+  const rawProd = chosen || (editing ? products.find((p) => p.id === editing.productId) || null : null)
+  const isRaw = nov ? !!form.novRaw : rawProd ? rawProd.forSale === false : false
+  const canRaw = nov ? can('products.create') : !!rawProd && can('products.edit')
   const novLine = nov
     ? {
         ...lineFromProduct({ id: null, name: String(form.q || '').trim(), barcode: String(form.code || '').trim(), category: form.novCat || '', unit: novUnit, unitsPerPack: novUpp }),
@@ -163,6 +168,16 @@ export default function NewArrival({ products, suppliers, onSaved }) {
     if (!code) return toast(tr('Не удалось сгенерировать код'), 'err')
     startNew({ code, quiet: true })
     toast(tr('Штрихкод сгенерирован — распечатайте и наклейте на упаковку'))
+  }
+
+  // Пометить товар «сырьём» (не для продажи). Новый — флаг в форме (встанет при заведении).
+  // Существующий — обновляем карточку сразу (как правка в «Товарах»), не ждём «Оприходовать»
+  function toggleRaw(checked) {
+    if (nov) return setForm({ novRaw: checked })
+    if (!rawProd) return
+    db.update('products', rawProd.id, { forSale: !checked })
+      .then(() => toast(checked ? `«${rawProd.name}» ${tr('помечен как сырьё — скрыт из кассы')}` : `«${rawProd.name}» ${tr('снова в продаже')}`))
+      .catch((e) => toast(tr(e.message), 'err'))
   }
 
   // Числа формы: штрихкод в количестве или цене — не принимаем, возвращаем курсор сканеру
@@ -330,6 +345,8 @@ export default function NewArrival({ products, suppliers, onSaved }) {
       minStock: '5',
       // Состав: productPayload сам сделает товар составным и обнулит остаток
       recipe,
+      // Сырьё — не для продажи (1.8.8): скрыт из кассы
+      forSale: form.novRaw ? false : true,
     }
     setSavingNew(true)
     try {
@@ -763,6 +780,15 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                 </div>
               </div>
             </div>
+
+            {/* Сырьё — не для продажи (1.8.8): новый товар создаётся с флагом; существующий
+                помечается сразу. Скрывает товар из кассы (ингредиенты состава) */}
+            {(nov || rawProd) && canRaw && (
+              <label className="prh-raw" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 10 }}>
+                <input type="checkbox" checked={isRaw} onChange={(e) => toggleRaw(e.target.checked)} style={{ width: 16, height: 16 }} />
+                <span>{t('Сырьё — не для продажи (скрыть из кассы)')}</span>
+              </label>
+            )}
 
             {/* Состав нового товара (1.8.7): задашь состав — товар составной, остаток ему
                 не начисляется (списывается сырьё при продаже) */}

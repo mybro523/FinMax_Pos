@@ -48,6 +48,8 @@ export const blankForm = () => ({
   // Состав нового товара (1.8.7): строки { ingredientId, units, qty }. Задан — товар
   // составной, остаток ему не начисляется (у составного своего остатка нет)
   recipe: [],
+  // Новый товар — сырьё (не для продажи, скрыт из кассы). 1.8.8
+  novRaw: false,
 })
 
 const blankPay = (sourceId = '') => ({ method: '', paid: '', fromCash: false, sourceId })
