@@ -201,8 +201,10 @@ export default function ProductPick({
           placeholder={t('Сканируйте код')}
         />
         {!readOnly && <KameraKnopka onCode={kameraCode} testid={kameraTestid} />}
-        {/* Новый товар без штрихкода на упаковке — сгенерировать внутренний код (1.8.7) */}
-        {onGenerateCode && nov && !readOnly && (
+        {/* Новый товар без штрихкода на упаковке — сгенерировать внутренний код (1.8.7).
+            Видна всегда в форме добавления (как в карточке); прячется только у выбранного
+            товара из базы и при правке строки */}
+        {onGenerateCode && !readOnly && !chosen && (
           <button
             type="button"
             className="btn ghost"
