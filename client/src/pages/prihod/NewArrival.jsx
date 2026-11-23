@@ -793,7 +793,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
             {/* Состав нового товара (1.8.7): задашь состав — товар составной, остаток ему
                 не начисляется (списывается сырьё при продаже) */}
             {nov && (
-              <div className="prh-nov-recipe" style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
+              <div className="prh-nov-recipe" style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
                 <RecipeEditor
                   value={form.recipe || []}
                   onChange={(r) => setForm({ recipe: r })}
