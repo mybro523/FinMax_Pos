@@ -63,6 +63,9 @@ export default function Products() {
   const srokOn = useModul('expiry')
   const [q, setQ] = useState('')
   const [cat, setCat] = useState('Все')
+  // Сырьё отдельно от обычных товаров (1.8.7): 'sale' — для продажи (по умолчанию, сырьё
+  // скрыто), 'raw' — только сырьё («не для продажи»), 'all' — всё вместе
+  const [scope, setScope] = useState('sale')
   const [edit, setEdit] = useState(null) // объект формы или null
   const [labelFor, setLabelFor] = useState(null) // товар, для которого печатаем этикетки
   // Отмеченные галочками — для ценников сразу на несколько товаров (1.7.8)
@@ -124,11 +127,13 @@ export default function Products() {
   // Поиск — по названию или штрихкоду, в том числе сканером (и маркировкой DataMatrix)
   const z = useMemo(() => poiskZapros(q), [q])
   const filtered = products.filter((p) => {
+    // Сырьё («не для продажи») и обычные товары — на разных вкладках (1.8.7)
+    const okScope = scope === 'all' || (scope === 'raw' ? p.forSale === false : p.forSale !== false)
     const okCat = cat === 'Все' || p.category === cat
     const okQ = tovarPodhodit(z, p.name, p.barcode)
-    return okCat && okQ
+    return okScope && okCat && okQ
   })
-  const pg = usePagination(filtered, 10, q + '|' + cat)
+  const pg = usePagination(filtered, 10, q + '|' + cat + '|' + scope)
 
   async function save() {
     const f = edit
@@ -260,6 +265,23 @@ export default function Products() {
             <input className="tovar-poisk" data-tour="prod.search" placeholder={telefon ? t('Название или штрихкод…') : t('Поиск по названию или штрихкоду…')} value={q} onChange={(e) => setQ(e.target.value)} />
             <KameraKnopka onCode={setQ} testid="kamera-tovary" />
           </div>
+        </div>
+        {/* Сырьё — отдельной вкладкой (1.8.7): по умолчанию «Товары» (сырьё скрыто),
+            «Сырьё» — только «не для продажи», «Все» — вместе */}
+        <div className="prod-scope" role="tablist" style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+          {[['sale', t('Товары')], ['raw', t('Сырьё')], ['all', t('Все')]].map(([v, label]) => (
+            <button
+              key={v}
+              type="button"
+              role="tab"
+              aria-selected={scope === v}
+              className={'chip ' + (scope === v ? 'active' : '')}
+              data-testid={'prod-scope-' + v}
+              onClick={() => setScope(v)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
         {/* Категорий бывает много: на телефоне — два ряда и «Ещё» (ChipsMore), в прилипшей
             полосе — один ряд и «Ещё» справа (m-tovary.css) */}

@@ -45,6 +45,9 @@ export const blankForm = () => ({
   // По умолчанию — штуки (17.11.2026, просьба владельца)
   novUnit: 'шт',
   novCat: '',
+  // Состав нового товара (1.8.7): строки { ingredientId, units, qty }. Задан — товар
+  // составной, остаток ему не начисляется (у составного своего остатка нет)
+  recipe: [],
 })
 
 const blankPay = (sourceId = '') => ({ method: '', paid: '', fromCash: false, sourceId })

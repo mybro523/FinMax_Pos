@@ -7,6 +7,7 @@ import { useToast, useDialog } from '../../components/ui'
 import { useTelefon } from '../../components/StickyBar'
 import NumberInput from '../../components/NumberInput'
 import { productPayload, emptyProduct } from '../../components/ProductForm'
+import RecipeEditor from '../../components/RecipeEditor'
 import { useCashSources, sourceName } from '../../components/SupplierMoney'
 import { db, money, stockText } from '../../db/store'
 import { receiveArrival } from '../../db/ops'
@@ -18,7 +19,7 @@ import { normalizeScan, canonBarcode } from '../../lib/scan'
 import { beepOk, beepError } from '../../lib/sound'
 import { isVesovoy, EDINICY, uppOf, gramsOfKg } from '../../lib/units'
 import { AddCategoryBtn } from '../../components/CategorySelect'
-import { generateEan13 } from '../../lib/barcode'
+import { generateEan13, isInternalBarcode } from '../../lib/barcode'
 import { useCategories, categoryOptions, categoryNames } from '../../lib/categories'
 import { priceFromMarkup, markupOf } from '../../lib/pricing'
 import { retyped } from '../../lib/pick'
@@ -127,7 +128,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
     }
     const disc = st.discAll ? form.disc : ''
     const l = lineFromProduct(p, { disc })
-    setForm({ productId: p.id, code: p.barcode || '', q: p.name, qty: l.qty, pieces: '', base: l.base, disc, price: l.price, price0: l.price0, piece: l.piece, piece0: l.piece0, mk: null, expiryDate: '', editKey: '', nov: false, pack: null, qtyTouched: false, packScale: null })
+    setForm({ productId: p.id, code: p.barcode || '', q: p.name, qty: l.qty, pieces: '', base: l.base, disc, price: l.price, price0: l.price0, piece: l.piece, piece0: l.piece0, mk: null, expiryDate: '', editKey: '', nov: false, pack: null, qtyTouched: false, packScale: null, recipe: [] })
     beepOk()
     setFocusQty((n) => n + 1)
   }
@@ -153,6 +154,15 @@ export default function NewArrival({ products, suppliers, onSaved }) {
   function clearForm() {
     setPrihod((x) => ({ form: { ...blankForm(), disc: x.discAll ? x.form.disc : '' } }))
     focusScan()
+  }
+
+  // Сгенерировать внутренний штрихкод новому товару (1.8.7): как в карточке товара —
+  // внутренний EAN-13, его печатают этикеткой. Форма при этом становится «новым товаром»
+  function genCode() {
+    const code = generateEan13(products.map((p) => p.barcode))
+    if (!code) return toast(tr('Не удалось сгенерировать код'), 'err')
+    startNew({ code, quiet: true })
+    toast(tr('Штрихкод сгенерирован — распечатайте и наклейте на упаковку'))
   }
 
   // Числа формы: штрихкод в количестве или цене — не принимаем, возвращаем курсор сканеру
@@ -291,8 +301,15 @@ export default function NewArrival({ products, suppliers, onSaved }) {
       toast(tr('Впишите название нового товара'), 'err')
       return nameRef.current?.focus()
     }
-    const problem = lineProblem(draft)
-    if (problem) return toast(`«${name}»: ${tr(problem)}`, 'err')
+    // Состав (1.8.7): задан состав — товар составной. Своего остатка у него нет,
+    // поэтому количество/цену поставщика не проверяем и в накладную его не ставим —
+    // при продаже списывается сырьё по составу
+    const recipe = (Array.isArray(form.recipe) ? form.recipe : []).filter((r) => Number(r.units) > 0)
+    const composite = recipe.length > 0
+    if (!composite) {
+      const problem = lineProblem(draft)
+      if (problem) return toast(`«${name}»: ${tr(problem)}`, 'err')
+    }
     const barcode = normalizeScan(String(form.code || '').trim()) || generateEan13(products.map((p) => p.barcode))
     if (!barcode) return toast(tr('Не удалось сгенерировать код'), 'err')
     const dup = products.find((p) => p.barcode && canonBarcode(p.barcode) === canonBarcode(barcode))
@@ -311,10 +328,19 @@ export default function NewArrival({ products, suppliers, onSaved }) {
       piecePrice: String(form.piece ?? ''),
       expiryDate: form.expiryDate || '',
       minStock: '5',
+      // Состав: productPayload сам сделает товар составным и обнулит остаток
+      recipe,
     }
     setSavingNew(true)
     try {
       const created = await db.push('products', { ...productPayload(f), stock: 0, looseUnits: 0 })
+      if (composite) {
+        // Составной товар остатка не ведёт — строкой в приход не ставим
+        setPrihod((x) => ({ form: { ...blankForm(), disc: x.discAll ? x.form.disc : '' } }))
+        beepOk()
+        toast(`«${created.name}» ${tr('заведён как составной — остаток не ведётся, списывается сырьё')}`)
+        return focusScan()
+      }
       const l = {
         ...lineFromProduct(created, { disc: form.disc }),
         qty: form.qty,
@@ -517,7 +543,12 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                   onUnknownName={(name) => (can('products.create') ? startNew({ q: name }) : toast(tr('Товар не найден'), 'err'))}
                   // Ушли из поля с кодом или названием, которого в базе нет, — сразу «новый товар»
                   onLeaveUnknown={(v) => can('products.create') && startNew({ ...v, quiet: true })}
+                  // Новый товар без штрихкода — кнопка-палочка генерирует внутренний код (1.8.7)
+                  onGenerateCode={can('products.create') ? genCode : undefined}
                 />
+                {nov && isInternalBarcode(form.code) && (
+                  <div className="tag-cat" style={{ marginTop: -2, marginBottom: 6 }}>{t('Внутренний код магазина — распечатайте этикетку')}</div>
+                )}
                 <div className="prh-f" data-tour="af.qty">
                   <label className={draft && lineUnits(draft) <= 0 ? 'req' : ''}>{t('Количество')}<span className="prh-star" aria-hidden="true">*</span></label>
                   <div className="prh-ctl prh-qty">
@@ -732,6 +763,20 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                 </div>
               </div>
             </div>
+
+            {/* Состав нового товара (1.8.7): задашь состав — товар составной, остаток ему
+                не начисляется (списывается сырьё при продаже) */}
+            {nov && (
+              <div className="prh-nov-recipe" style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
+                <RecipeEditor
+                  value={form.recipe || []}
+                  onChange={(r) => setForm({ recipe: r })}
+                  products={products}
+                  selfId={null}
+                  unit={novUnit}
+                />
+              </div>
+            )}
 
             {/* Подсказки про USB-сканер и про «строку из таблицы, Enter» — для компьютера: на
                 телефоне нет ни таблицы, ни Enter. Там остаётся только та, что про новый товар */}

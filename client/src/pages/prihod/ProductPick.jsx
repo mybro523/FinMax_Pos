@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { LuCircleCheck } from 'react-icons/lu'
+import { LuCircleCheck, LuWandSparkles } from 'react-icons/lu'
 import { stockText } from '../../db/store'
 import { useT } from '../../lib/i18n'
 import { normalizeScan } from '../../lib/scan'
@@ -53,6 +53,8 @@ export default function ProductPick({
   onUnknownName,
   onLeaveUnknown,
   onEnterChosen,
+  // Генерация внутреннего штрихкода (приход, новый товар): кнопка-палочка в поле кода
+  onGenerateCode,
   codeRef,
   readOnly = false,
   autoFocus = true,
@@ -199,6 +201,20 @@ export default function ProductPick({
           placeholder={t('Сканируйте код')}
         />
         {!readOnly && <KameraKnopka onCode={kameraCode} testid={kameraTestid} />}
+        {/* Новый товар без штрихкода на упаковке — сгенерировать внутренний код (1.8.7) */}
+        {onGenerateCode && nov && !readOnly && (
+          <button
+            type="button"
+            className="btn ghost"
+            style={{ flexShrink: 0 }}
+            onClick={onGenerateCode}
+            title={t('Сгенерировать штрихкод, если его нет на упаковке')}
+            aria-label={t('Сгенерировать штрихкод, если его нет на упаковке')}
+            data-testid="prh-gen-code"
+          >
+            <LuWandSparkles size={16} />
+          </button>
+        )}
         </div>
       </div>
       <div className="prh-f prh-f-name" data-tour={nameTour}>
