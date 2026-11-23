@@ -100,6 +100,9 @@ export default function NewArrival({ products, suppliers, onSaved }) {
   const rawProd = chosen || (editing ? products.find((p) => p.id === editing.productId) || null : null)
   const isRaw = nov ? !!form.novRaw : rawProd ? rawProd.forSale === false : false
   const canRaw = nov ? can('products.create') : !!rawProd && can('products.edit')
+  // Новый товар с составом — составной (1.8.10): своего остатка/закупки у него нет,
+  // поэтому поля про количество, цену поставщика, скидку, срок и упаковку не нужны
+  const novComposite = nov && (Array.isArray(form.recipe) ? form.recipe : []).some((r) => Number(r.units) > 0)
   const novLine = nov
     ? {
         ...lineFromProduct({ id: null, name: String(form.q || '').trim(), barcode: String(form.code || '').trim(), category: form.novCat || '', unit: novUnit, unitsPerPack: novUpp }),
@@ -566,6 +569,8 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                 {nov && isInternalBarcode(form.code) && (
                   <div className="tag-cat" style={{ marginTop: -2, marginBottom: 6 }}>{t('Внутренний код магазина — распечатайте этикетку')}</div>
                 )}
+                {/* У составного товара (1.8.10) остатка/закупки нет — эти поля не показываем */}
+                {!novComposite && (<>
                 <div className="prh-f" data-tour="af.qty">
                   <label className={draft && lineUnits(draft) <= 0 ? 'req' : ''}>{t('Количество')}<span className="prh-star" aria-hidden="true">*</span></label>
                   <div className="prh-ctl prh-qty">
@@ -618,11 +623,14 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                     <span className="prh-note">{srokOn ? <>{t('Текущий остаток')}: </> : null}<b>{chosen || editing ? stockText(products.find((p) => p.id === draft.productId) || {}) : '—'}</b></span>
                   </div>
                 </div>
+                </>)}
               </div>
 
               <div className="prh-av-col">
                 {/* У товара из базы упаковка и категория — из карточки, менять их здесь нельзя;
                     у нового товара — задаются тут же */}
+                {/* У составного товара упаковка/остаток не нужны (1.8.10) */}
+                {!novComposite && (
                 <div className="prh-f" data-tour="af.pack">
                   <label htmlFor={nov ? 'prh-nov-upp' : 'prh-pack'}>{t('Кол-во в упаковке')}</label>
                   <div className="prh-ctl">
@@ -683,6 +691,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                     )}
                   </div>
                 </div>
+                )}
                 {/* Упаковку сменили у товара с ценами: за что были прежние цены (1.5.12) */}
                 {draft && packAsk(draft) && (() => {
                   const ask = packAsk(draft)
@@ -749,7 +758,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                     {draft && !nov && num(form.price) !== form.price0 && <span className="prh-was">{t('Было')}: {money(form.price0)}</span>}
                   </div>
                 </div>
-                {draft?.div && (
+                {!novComposite && draft?.div && (
                   <div className="prh-f prh-f-info" data-tour="af.piece">
                     <label>{draft.ves ? `${t('Цена за 1')} ${t(draft.unit)}` : t('Цена за 1 шт')}</label>
                     {/* Слева — по расчёту (цена / штук в упаковке), справа — своя (1.5.11):
@@ -774,10 +783,12 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                     )}
                   </div>
                 )}
-                <div className="prh-f prh-f-info">
-                  <label>{t('Сумма строки')}</label>
-                  <b className="prh-val">{draft ? money(lineTotal(draft)) : '—'}</b>
-                </div>
+                {!novComposite && (
+                  <div className="prh-f prh-f-info">
+                    <label>{t('Сумма строки')}</label>
+                    <b className="prh-val">{draft ? money(lineTotal(draft)) : '—'}</b>
+                  </div>
+                )}
               </div>
             </div>
 
