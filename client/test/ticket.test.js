@@ -134,6 +134,18 @@ test('Z-отчёт: те же строки, что на экране; выруч
   assert.equal(spent.totals[at + 1].label, 'Ожидалось в кассе')
 })
 
+test('Z-отчёт: кассир не видит прибыль (hideProfit), остальные строки на месте', () => {
+  setLang('ru')
+  const totals = { gross: 1300, refunds: 0, netSales: 1300, netProfit: 400 }
+  const kassir = shiftTicket(shift, totals, { ...opts, hideProfit: true })
+  assert.ok(!kassir.totals.some((r) => r.label === 'Прибыль'), 'строки «Прибыль» у кассира нет')
+  // Выручка и остальное — на месте
+  assert.ok(kassir.totals.some((r) => r.label === 'Выручка'), 'выручка остаётся')
+  // По умолчанию (владельцу) прибыль показывается
+  const vladelec = shiftTicket(shift, totals, opts)
+  assert.ok(vladelec.totals.some((r) => r.label === 'Прибыль'), 'владельцу прибыль видна')
+})
+
 test('на таджикском чек печатается таджикскими словами', () => {
   setLang('tg')
   try {

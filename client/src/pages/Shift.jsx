@@ -51,6 +51,9 @@ export default function Shift() {
   const phone = useTelefon()
   // Смены других кассиров и чужие внесения — по праву, а не по должности
   const isFounder = can('shift.others')
+  // Прибыль — финансовый показатель: кассир её не видит (ни в смене, ни в Z-отчёте).
+  // Показываем только тем, кому открыты финансы — панель или отчёты (1.8.13)
+  const seeProfit = can('dashboard.view') || can('reports.view')
   const current = shifts.find((s) => !s.closedAt)
   const history = shifts.filter((s) => s.closedAt)
   // Закрыть можно свою смену; чужую — только по праву (владелец может всегда)
@@ -417,7 +420,7 @@ export default function Shift() {
                   <span style={{ color: 'var(--danger)' }}>−{money(live.expenseCash)}</span>
                 </div>
               )}
-              {live.refundTotal > 0 && (
+              {seeProfit && live.refundTotal > 0 && (
                 <div className="total-row">
                   <span>{t('Прибыль за смену')}</span>
                   <span style={{ color: 'var(--green)' }}>{money(live.netProfit)}</span>
@@ -548,7 +551,7 @@ export default function Shift() {
         <Pagination {...pg} />
       </div>
 
-      {view && <ZReport shift={view} onClose={() => setView(null)} />}
+      {view && <ZReport shift={view} onClose={() => setView(null)} seeProfit={seeProfit} />}
       {okno && okno.kind === 'expected' && live && current && okno.shift.id === current.id && (
         <OzhidaetsyaOkno shift={current} live={live} onClose={() => setOkno(null)} />
       )}
@@ -561,7 +564,7 @@ export default function Shift() {
 
 // Z-отчёт собирается в общий вид чека (lib/ticket.js): экран, лента и PDF
 // печатают одно и то же. Зелёная или красная пометка — только на экране
-function ZReport({ shift, onClose }) {
+function ZReport({ shift, onClose, seeProfit = false }) {
   const auth = useAuth()
   const toast = useToast()
   // Отмены чеков этой смены — из журнала возвратов устройства
@@ -578,6 +581,8 @@ function ZReport({ shift, onClose }) {
     pharmacy: auth?.pharmacy?.name,
     rekvizity: getRekvizity(auth?.pharmacy?.code),
     otmeny: otmenySmeny(returns.filter((r) => r.shiftId === shift.id)),
+    // Кассир не видит прибыль — ни на экране, ни на ленте Z-отчёта (1.8.13)
+    hideProfit: !seeProfit,
   })
   return (
     // z-okno — правила для телефона (styles/m-smena.css)

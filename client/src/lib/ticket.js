@@ -175,7 +175,7 @@ export function debtTicket(customer, h, { t, money, when, day = when, pharmacy =
 // totals — чистые числа смены (shiftTotals из lib/finance): выручка и прибыль за
 // вычетом возвратов. otmeny — { count, total }: сколько чеков отменили кнопкой «Отмена»
 // в кассе (они среди возвратов, но владелец видит их отдельной строкой)
-export function shiftTicket(shift, totals, { t, money, when, pharmacy = '', rekvizity = null, otmeny = null }) {
+export function shiftTicket(shift, totals, { t, money, when, pharmacy = '', rekvizity = null, otmeny = null, hideProfit = false }) {
   const rows = [
     { label: t('Чеков'), value: String(shift.count ?? 0) },
     { label: t('Наличными'), value: money(shift.salesCash) },
@@ -197,7 +197,8 @@ export function shiftTicket(shift, totals, { t, money, when, pharmacy = '', rekv
     if (otmeny?.total > 0) rows.push({ label: `  ${t('в т.ч. отмены чеков')} (${otmeny.count})`, value: '−' + money(otmeny.total) })
   }
   rows.push({ label: t('Выручка'), value: money(totals.netSales), big: true })
-  rows.push({ label: t('Прибыль'), value: money(totals.netProfit) })
+  // Прибыль — только тем, кому открыты финансы: кассир её не видит (1.8.13)
+  if (!hideProfit) rows.push({ label: t('Прибыль'), value: money(totals.netProfit) })
   rows.push({ label: t('Касса на старте'), value: money(shift.openingCash) })
   if ((shift.cashIn || 0) > 0) rows.push({ label: t('Внесено в кассу'), value: '+' + money(shift.cashIn) })
   // Возврат товара поставщику «в кассу»: поставщик отдал деньги, их положили в ящик
