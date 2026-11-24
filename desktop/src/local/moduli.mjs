@@ -38,6 +38,11 @@ export const MODULES = [
   { key: 'expenses', label: 'Расходы', routes: ['/expenses'], perms: ['expenses.view', 'expenses.create', 'expenses.edit', 'settings.expenseCategories'] },
   { key: 'opu', label: 'Отчёт ОПУ', routes: ['/reports'], perms: ['reports.view', 'reports.export'] },
   { key: 'obuchenie', label: 'Обучение', routes: ['/obuchenie'], perms: [] },
+  // Сырьё и состав (1.8.11): не раздел меню, а встроенные элементы — вкладка «Сырьё» в
+  // «Товарах», редактор состава и галочка «Сырьё — не для продажи» в карточке и приходе.
+  // routes/perms пусты: модуль только прячет эти элементы на фронте (moduleOn), а продажа
+  // составных товаров остаётся data-driven и от модуля не зависит.
+  { key: 'raw', label: 'Сырьё и состав', routes: [], perms: [] },
 ]
 
 export const MODULE_KEYS = MODULES.map((m) => m.key)

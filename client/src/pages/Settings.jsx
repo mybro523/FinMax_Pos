@@ -122,6 +122,8 @@ export default function Settings() {
   const LAST_BACKUP = 'apteka_last_backup_' + (user?.pharmacy?.code || 'net')
   const [backing, setBacking] = useState(false)
   const [restoring, setRestoring] = useState(false)
+  // «Начать с чистого листа» (1.8.11) — только владельцу
+  const [wiping, setWiping] = useState(false)
   const [lastBackup, setLastBackup] = useState(() => {
     try { return localStorage.getItem(LAST_BACKUP) || '' } catch { return '' }
   })
@@ -463,6 +465,26 @@ export default function Settings() {
               </p>
             </div>
           )}
+
+          {/* Опасная зона (1.8.11): владелец стирает тестовые данные перед передачей
+              магазина клиенту. Только для founder — у кассира кнопки нет вовсе. На
+              программе без интернета (standalone) своя база — очистку там пока не даём */}
+          {active === 'kopiya' && user?.role === 'founder' && !(isDesktop && user?.standalone) && (
+            <div className="panel mt" style={{ maxWidth: 640, borderColor: 'var(--danger, #e5484d)' }}>
+              <h2><span className="h2-title"><span className="ic"><LuTriangleAlert size={17} /></span>{t('Опасная зона')}</span></h2>
+              <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.7, marginBottom: 12 }}>
+                {t('Начать с чистого листа: удалить все данные магазина (товары, остатки, продажи, приходы, поставщиков, клиентов и долги, расходы и доходы, смены, склад, справочники). Сотрудники, их роли и настройки магазина останутся. Пригодится, когда магазин настроили на тестовых данных и передают клиенту.')}
+              </p>
+              <div className="note info" style={{ marginBottom: 12 }}>
+                {t('Сначала скачайте резервную копию выше — отменить очистку будет нельзя.')}
+              </div>
+              <div className="set-btns" style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                <button className="btn danger" data-testid="wipe-open" onClick={() => setWiping(true)}>
+                  <span className="ic"><LuTrash2 size={16} /></span> {t('Начать с чистого листа')}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {uzko && dlinno && (
@@ -473,6 +495,7 @@ export default function Settings() {
       </div>
 
       {restoring && <RestoreBox onClose={() => setRestoring(false)} />}
+      {wiping && <WipeBox onClose={() => setWiping(false)} />}
     </Layout>
   )
 }
@@ -589,6 +612,75 @@ function RestoreBox({ onClose }) {
         <button className="btn ghost" onClick={onClose} disabled={busy}>{t('Отмена')}</button>
         <button className="btn danger" onClick={run} disabled={!ready}>
           {busy ? t('Восстанавливаем…') : t('Восстановить')}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── Начать с чистого листа (1.8.11) ──
+// После настройки на тестовых данных владелец одним действием стирает всё, оставляя
+// сотрудников и настройки, чтобы клиент начал с пустой системы. Порядок, как у
+// восстановления: предупреждение, подтверждающее слово, и только потом запрос на сервер.
+// Сервер стирает данные в схеме магазина (POST /reset/data), а здесь после этого
+// чистим кэш устройства и перезагружаемся — чинить каждый открытый экран ненадёжно.
+const WIPE_WORD = 'ОЧИСТИТЬ'
+
+function WipeBox({ onClose }) {
+  const t = useT()
+  const toast = useToast()
+  const [word, setWord] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function run() {
+    if (word.trim().toUpperCase() !== WIPE_WORD || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await api.post('/reset/data', { confirm: WIPE_WORD }, { timeout: LONG_TIMEOUT_MS })
+      // На устройстве остался кэш с данными, которых больше нет — стираем и перезагружаемся
+      resetStore()
+      toast(t('Данные магазина очищены — система как новая'))
+      setTimeout(() => window.location.reload(), 700)
+    } catch (err) {
+      setError(err.message)
+      setBusy(false)
+    }
+  }
+
+  const ready = word.trim().toUpperCase() === WIPE_WORD && !busy
+
+  return (
+    <Modal title={t('Начать с чистого листа')} onClose={busy ? undefined : onClose} className="set-restore">
+      <div className="note err" style={{ display: 'flex', gap: 9, marginBottom: 14 }}>
+        <LuTriangleAlert size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+        <span>{t('Будут удалены все данные магазина: товары, остатки, продажи, приходы, поставщики, клиенты и долги, расходы и доходы, смены, склад и справочники. Сотрудники, их роли и настройки магазина останутся. Отменить это нельзя.')}</span>
+      </div>
+
+      {error && <div className="note err" style={{ marginBottom: 14 }}>{error}</div>}
+
+      <div className="field">
+        <label htmlFor="wipe-word">{t('Для подтверждения наберите слово')}: {WIPE_WORD}</label>
+        <input
+          id="wipe-word"
+          data-testid="wipe-word"
+          value={word}
+          onChange={(e) => setWord(e.target.value)}
+          placeholder={WIPE_WORD}
+          autoComplete="off"
+          disabled={busy}
+        />
+      </div>
+
+      <p style={{ fontSize: 12.5, color: 'var(--muted-2)', lineHeight: 1.6, marginBottom: 14 }}>
+        {t('Если вы ещё не скачали резервную копию — закройте это окно и сделайте её: восстановить данные после очистки будет неоткуда.')}
+      </p>
+
+      <div className="modal-actions">
+        <button className="btn ghost" onClick={onClose} disabled={busy}>{t('Отмена')}</button>
+        <button className="btn danger" data-testid="wipe-run" onClick={run} disabled={!ready}>
+          {busy ? t('Очищаем…') : t('Очистить всё')}
         </button>
       </div>
     </Modal>

@@ -29,6 +29,7 @@ import { SuppliersModule } from './suppliers/suppliers.module'
 import { PayServicesModule } from './payservices/pay-services.module'
 import { ProductTypesModule } from './producttypes/product-types.module'
 import { ShopModule } from './shop/shop.module'
+import { ResetModule } from './reset/reset.module'
 import { ChangeEventsInterceptor } from './events/change-events.interceptor'
 import { FreshnessInterceptor } from './events/freshness.interceptor'
 import { AuthGuard } from './auth/auth.guard'
@@ -71,6 +72,8 @@ import { AppController } from './app.controller'
     // Обмен с кассами, которые работают без интернета (программа для Windows)
     SyncModule,
     SeedModule,
+    // «Начать с чистого листа» (1.8.11): владелец стирает данные, оставляя сотрудников
+    ResetModule,
   ],
   controllers: [AppController],
   providers: [

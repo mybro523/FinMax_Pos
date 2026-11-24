@@ -141,6 +141,8 @@ export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
 export default function ProductForm({ value, onChange, autoFocus = 'barcode', arrival = false }) {
   // Модуль «Срок годности» выключен у магазина — поля срока в карточке нет
   const srokOn = useModul('expiry')
+  // Модуль «Сырьё и состав» (1.8.11) выключен — нет ни редактора состава, ни галочки «Сырьё»
+  const rawOn = useModul('raw')
   const dialog = useDialog()
   const fotoRef = useRef(null)
   const t = useT()
@@ -524,13 +526,13 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
         </div>
       )}
 
-      {/* ── Состав: из какого сырья собирается товар (1.8.5) ── */}
-      {!arrival && (
+      {/* ── Состав: из какого сырья собирается товар (1.8.5); модуль «Сырьё и состав» (1.8.11) ── */}
+      {!arrival && rawOn && (
         <RecipeEditor value={value.recipe} onChange={(r) => set('recipe', r)} products={products} selfId={value.id} unit={u} />
       )}
 
-      {/* ── Сырьё: не для прямой продажи (1.8.5) ── */}
-      {!arrival && (
+      {/* ── Сырьё: не для прямой продажи (1.8.5); модуль «Сырьё и состав» (1.8.11) ── */}
+      {!arrival && rawOn && (
         <div className="field">
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
             <input type="checkbox" checked={value.forSale === false} onChange={(e) => set('forSale', !e.target.checked)} />

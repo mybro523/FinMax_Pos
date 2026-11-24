@@ -53,6 +53,8 @@ export default function NewArrival({ products, suppliers, onSaved }) {
   const can = useCan()
   // Модуль «Срок годности» выключен у магазина — поля срока в приходе нет
   const srokOn = useModul('expiry')
+  // Модуль «Сырьё и состав» (1.8.11) выключен — ни галочки «Сырьё», ни редактора состава
+  const rawOn = useModul('raw')
   const toast = useToast()
   const dialog = useDialog()
   const telefon = useTelefon()
@@ -102,7 +104,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
   const canRaw = nov ? can('products.create') : !!rawProd && can('products.edit')
   // Новый товар с составом — составной (1.8.10): своего остатка/закупки у него нет,
   // поэтому поля про количество, цену поставщика, скидку, срок и упаковку не нужны
-  const novComposite = nov && (Array.isArray(form.recipe) ? form.recipe : []).some((r) => Number(r.units) > 0)
+  const novComposite = nov && rawOn && (Array.isArray(form.recipe) ? form.recipe : []).some((r) => Number(r.units) > 0)
   const novLine = nov
     ? {
         ...lineFromProduct({ id: null, name: String(form.q || '').trim(), barcode: String(form.code || '').trim(), category: form.novCat || '', unit: novUnit, unitsPerPack: novUpp }),
@@ -322,7 +324,8 @@ export default function NewArrival({ products, suppliers, onSaved }) {
     // Состав (1.8.7): задан состав — товар составной. Своего остатка у него нет,
     // поэтому количество/цену поставщика не проверяем и в накладную его не ставим —
     // при продаже списывается сырьё по составу
-    const recipe = (Array.isArray(form.recipe) ? form.recipe : []).filter((r) => Number(r.units) > 0)
+    // Модуль «Сырьё и состав» выключен (1.8.11) — состав не учитываем, товар обычный
+    const recipe = rawOn ? (Array.isArray(form.recipe) ? form.recipe : []).filter((r) => Number(r.units) > 0) : []
     const composite = recipe.length > 0
     if (!composite) {
       const problem = lineProblem(draft)
@@ -348,8 +351,8 @@ export default function NewArrival({ products, suppliers, onSaved }) {
       minStock: '5',
       // Состав: productPayload сам сделает товар составным и обнулит остаток
       recipe,
-      // Сырьё — не для продажи (1.8.8): скрыт из кассы
-      forSale: form.novRaw ? false : true,
+      // Сырьё — не для продажи (1.8.8): скрыт из кассы (только при включённом модуле)
+      forSale: rawOn && form.novRaw ? false : true,
     }
     setSavingNew(true)
     try {
@@ -794,7 +797,7 @@ export default function NewArrival({ products, suppliers, onSaved }) {
 
             {/* Сырьё — не для продажи (1.8.8): новый товар создаётся с флагом; существующий
                 помечается сразу. Скрывает товар из кассы (ингредиенты состава) */}
-            {(nov || rawProd) && canRaw && (
+            {rawOn && (nov || rawProd) && canRaw && (
               <label className="prh-raw" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 10 }}>
                 <input type="checkbox" checked={isRaw} onChange={(e) => toggleRaw(e.target.checked)} style={{ width: 16, height: 16 }} />
                 <span>{t('Сырьё — не для продажи (скрыть из кассы)')}</span>
@@ -802,8 +805,8 @@ export default function NewArrival({ products, suppliers, onSaved }) {
             )}
 
             {/* Состав нового товара (1.8.7): задашь состав — товар составной, остаток ему
-                не начисляется (списывается сырьё при продаже) */}
-            {nov && (
+                не начисляется (списывается сырьё при продаже). Модуль «Сырьё и состав» (1.8.11) */}
+            {nov && rawOn && (
               <div className="prh-nov-recipe" style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
                 <RecipeEditor
                   value={form.recipe || []}

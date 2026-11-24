@@ -61,6 +61,9 @@ export default function Products() {
   const can = useCan()
   // Модуль «Срок годности» выключен у магазина — столбца «Годен до» нет ни в таблице, ни в выгрузке
   const srokOn = useModul('expiry')
+  // Модуль «Сырьё и состав» (1.8.11): выключен — вкладок «Сырьё»/«Все» нет, показываем
+  // только товары для продажи (как было до появления сырья)
+  const rawOn = useModul('raw')
   const [q, setQ] = useState('')
   const [cat, setCat] = useState('Все')
   // Сырьё отдельно от обычных товаров (1.8.7): 'sale' — для продажи (по умолчанию, сырьё
@@ -126,14 +129,16 @@ export default function Products() {
 
   // Поиск — по названию или штрихкоду, в том числе сканером (и маркировкой DataMatrix)
   const z = useMemo(() => poiskZapros(q), [q])
+  // Модуль сырья выключен — вкладки не показываем, остаёмся на «Товары» (для продажи)
+  const scopeEff = rawOn ? scope : 'sale'
   const filtered = products.filter((p) => {
     // Сырьё («не для продажи») и обычные товары — на разных вкладках (1.8.7)
-    const okScope = scope === 'all' || (scope === 'raw' ? p.forSale === false : p.forSale !== false)
+    const okScope = scopeEff === 'all' || (scopeEff === 'raw' ? p.forSale === false : p.forSale !== false)
     const okCat = cat === 'Все' || p.category === cat
     const okQ = tovarPodhodit(z, p.name, p.barcode)
     return okScope && okCat && okQ
   })
-  const pg = usePagination(filtered, 10, q + '|' + cat + '|' + scope)
+  const pg = usePagination(filtered, 10, q + '|' + cat + '|' + scopeEff)
 
   async function save() {
     const f = edit
@@ -267,7 +272,9 @@ export default function Products() {
           </div>
         </div>
         {/* Сырьё — отдельной вкладкой (1.8.7): по умолчанию «Товары» (сырьё скрыто),
-            «Сырьё» — только «не для продажи», «Все» — вместе */}
+            «Сырьё» — только «не для продажи», «Все» — вместе. Модуль «Сырьё и состав»
+            выключен (1.8.11) — вкладок нет вовсе */}
+        {rawOn && (
         <div className="prod-scope" role="tablist" style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
           {[['sale', t('Товары')], ['raw', t('Сырьё')], ['all', t('Все')]].map(([v, label]) => (
             <button
@@ -283,6 +290,7 @@ export default function Products() {
             </button>
           ))}
         </div>
+        )}
         {/* Категорий бывает много: на телефоне — два ряда и «Ещё» (ChipsMore), в прилипшей
             полосе — один ряд и «Ещё» справа (m-tovary.css) */}
         <ChipsMore key={chipsKey} className="prod-chips" data-tour="prod.chips">
