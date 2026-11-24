@@ -13,6 +13,7 @@ import { useT } from '../lib/i18n'
 import KameraKnopka from '../components/KameraKnopka'
 import { skachatXlsx } from '../lib/excel'
 import { prodazhiPoTovaram, vseProdazhi, spisokChekov, chekPodhodit, chekVida, VIDY_CHEKOV } from '../lib/otchety'
+import { periodFinance } from '../lib/finance'
 import { poiskZapros, tovarPodhodit, shtrihkodyPoId } from '../lib/poisk'
 import { otmenennyeCheki } from '../lib/otmena'
 import { ChekOkno } from '../components/Cheki'
@@ -78,6 +79,16 @@ export default function SalesReport() {
     () => (cashier ? prodazhiPoTovaram({ sales: salesZhivye.filter((s) => (s.user?.name || '') === cashier), products, from: range.from, to: range.to, t }) : poTov),
     [cashier, salesZhivye, products, range, t, poTov],
   )
+  // Итог с учётом возвратов — тем же расчётом, что и «Панель управления» (lib/finance.js),
+  // чтобы цифры сходились один в один. По товарам таблица остаётся валовой (сколько продано),
+  // а здесь — сколько осталось денег и прибыли после возвратов. Списания к продажам не
+  // относятся, поэтому их не передаём: они отдельной строкой в Панели/ОПУ. Карточки сверху —
+  // всегда по всем кассирам, поэтому и возвраты берём по всему магазину за период.
+  // ВАЖНО: передаём ВСЕ продажи (не salesZhivye). Отмена чека хранится возвратом (lib/otmena.js),
+  // и periodFinance гасит отменённый чек этим же возвратом — как на Панели. Если убрать
+  // отменённые заранее, их возврат вычелся бы второй раз, и итог разошёлся бы с Панелью.
+  const finSales = useMemo(() => sales.filter((s) => s && s.date && Array.isArray(s.items)), [sales])
+  const fin = useMemo(() => periodFinance({ sales: finSales, returns, from: range.from, to: range.to }), [finSales, returns, range])
   // «Чеки» — все чеки периода, и отменённые тоже (с отметкой, без итогов)
   const cheki = useMemo(() => spisokChekov({ sales, returns, from: range.from, to: range.to }), [sales, returns, range])
   const kody = useMemo(() => shtrihkodyPoId(products), [products])
@@ -138,6 +149,14 @@ export default function SalesReport() {
   // ── Excel и печать: активная вкладка, с учётом фильтров ──
   // Выбран кассир — он виден и в подзаголовке листа: иначе цифры выглядели бы общими
   const podzag = periodText(period, t) + (cashier ? ` · ${t('Кассир')}: ${cashier}` : '') + (tab === 'cheki' && vid ? ` · ${t(vidLabel)}` : '')
+  // В Excel и печать «По товарам» добавляем строку возвратов и чистый итог — только когда
+  // выгрузка по всему магазину (без фильтра по кассиру/поиску/категории): иначе строки
+  // отфильтрованы, а возвраты — по всему магазину, и итог бы не сошёлся с ними
+  const vozvratDoc =
+    tab === 'products' && fin.refunds > 0 && !cashier && !q.trim() && !cat
+      ? ` · ${t('Возвраты')}: −${money(fin.refunds)} · ${t('Выручка с учётом возвратов')}: ${money(fin.revenue)} · ${t('Прибыль с учётом возвратов')}: ${money(fin.profit)}`
+      : ''
+  const podzagDoc = podzag + vozvratDoc
   const ex =
     tab === 'cheki'
       ? {
@@ -197,11 +216,11 @@ export default function SalesReport() {
           itogi: { date: t('Итого'), discount: vseItogo.discount, sum: vseItogo.sum },
         }
   const exportExcel = () =>
-    skachatXlsx({ fayl: ex.fayl, zagolovok: `${getUser()?.pharmacy?.name || ''} — ${ex.title}`, podzag, cols: ex.cols, rows: ex.rows, itogi: ex.itogi })
+    skachatXlsx({ fayl: ex.fayl, zagolovok: `${getUser()?.pharmacy?.name || ''} — ${ex.title}`, podzag: podzagDoc, cols: ex.cols, rows: ex.rows, itogi: ex.itogi })
 
   return (
     <Layout title={t('Отчёт продажи')} subtitle={podzag} actions={<ExportPechat onExcel={exportExcel} />}>
-      <PrintSheet zagolovok={ex.title} podzag={podzag} cols={ex.cols} rows={ex.rows} itogi={ex.itogi} />
+      <PrintSheet zagolovok={ex.title} podzag={podzagDoc} cols={ex.cols} rows={ex.rows} itogi={ex.itogi} />
 
       <div className="chips" data-tour="sr.tabs" style={{ marginBottom: 14 }}>
         <button className={'chip ' + (tab === 'products' ? 'active' : '')} data-tour="sr.tab-products" onClick={() => setTab('products')}>{t('По товарам')}</button>
@@ -217,6 +236,21 @@ export default function SalesReport() {
         <Metric label={t('Прибыль')} value={money(poTov.itogo.profit)} Icon={LuTrendingUp} good sub={t('по товарам')} onClick={() => setKartochka('profit')} title={t('Подробнее')} testid="card-sr-profit" />
         <Metric testid="card-sr-cheki" label={t('Чеков')} value={vse.itogo.cheki} sub={`${poTov.itogo.positions} ${t('наименований')}`} Icon={LuReceipt} onClick={() => setTab('cheki')} title={t('Показать чеки')} />
       </div>
+
+      {/* Возвраты за период (12.11.2026): карточки выше — валовый оборот (сколько продано,
+          возвраты не вычтены). Эта строка приводит итог к «деньгам по факту» — как в Панели
+          управления, тем же расчётом. Показываем, только когда возвраты были */}
+      {fin.refunds > 0 && (
+        <div className="note info" data-testid="sr-vozvraty" style={{ margin: '0 0 12px', display: 'flex', flexWrap: 'wrap', gap: '4px 18px', alignItems: 'baseline' }}>
+          <span>{t('Возвраты')}: <b style={{ color: 'var(--danger)' }}>−{money(fin.refunds)}</b>{fin.refundCount ? <span className="tag-cat"> · {fin.refundCount}</span> : null}</span>
+          <span>{t('Выручка с учётом возвратов')}: <b>{money(fin.revenue)}</b></span>
+          <span>{t('Прибыль с учётом возвратов')}: <b style={{ color: fin.profit < 0 ? 'var(--danger)' : 'var(--green)' }}>{money(fin.profit)}</b></span>
+          <span className="tag-cat">{t('как в Панели управления')}</span>
+        </div>
+      )}
+      {tab === 'products' && fin.refunds > 0 && (
+        <div className="tag-cat" style={{ margin: '-6px 0 12px' }}>{t('В таблице по строкам — сколько продано (валовый оборот); возвраты вычтены только в итоге выше.')}</div>
+      )}
 
       <div className="panel" data-tour="sr.table" style={{ padding: 0 }}>
         <StickyBar panel pad="16px 16px 14px">
