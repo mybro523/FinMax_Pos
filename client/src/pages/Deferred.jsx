@@ -8,6 +8,7 @@ import { useCollection, db, money, realId } from '../db/store'
 import { fmtDateTime } from '../lib/time'
 import { normalizeScan } from '../lib/scan'
 import { useT, translate as tr } from '../lib/i18n'
+import { useModul } from '../lib/useModul'
 import KameraKnopka from '../components/KameraKnopka'
 import { useCan } from '../db/auth'
 import { useCategories, categoryNames } from '../lib/categories'
@@ -39,8 +40,15 @@ export default function Deferred() {
   // список и возврат живут здесь, а не в кассе. Хранятся на устройстве, поэтому читаем из
   // localStorage, а не из общего кэша сервера.
   const phCode = getUser()?.pharmacy?.code || ''
+  // «Отложенные товары» — свой модуль (otlozhTovary, 1.8.20): владелец включает/выключает
+  // вкладку (и значок/F7 в кассе) отдельным тумблером. Выключен — показываем только штрихкоды.
+  const otlozhTovaryOn = useModul('otlozhTovary')
   const [vid, setVid] = useState('codes') // 'codes' | 'tovary'
   const [otlozh, setOtlozh] = useState(() => chitatOtlozh(phCode))
+  // Модуль выключили, пока были на вкладке товаров — возвращаемся к штрихкодам
+  useEffect(() => {
+    if (!otlozhTovaryOn && vid === 'tovary') setVid('codes')
+  }, [otlozhTovaryOn, vid])
   // Открыли вкладку товаров — перечитываем: могли отложить на кассе в этой же вкладке
   useEffect(() => {
     if (vid === 'tovary') setOtlozh(chitatOtlozh(phCode))
@@ -142,15 +150,18 @@ export default function Deferred() {
     >
       <PrintSheet zagolovok={t('Отложенные штрихкоды')} podzag={exPodzag} cols={exCols} rows={exRows} />
 
-      {/* Переключатель: отложенные штрихкоды (на оформление) или отложенные товары (вернуть в чек) */}
-      <div className="chips" style={{ marginBottom: 12 }}>
-        <button className={'chip ' + (vid === 'codes' ? 'active' : '')} data-testid="def-tab-codes" onClick={() => setVid('codes')}>
-          <LuClock size={13} style={{ verticalAlign: '-2px' }} /> {t('Отложенные штрихкоды')}
-        </button>
-        <button className={'chip ' + (vid === 'tovary' ? 'active' : '')} data-testid="def-tab-tovary" onClick={() => setVid('tovary')}>
-          <LuBookmark size={13} style={{ verticalAlign: '-2px' }} /> {t('Отложенные товары')}{otlozh.length ? <span className="prh-badge" style={{ marginLeft: 6 }}>{otlozh.length}</span> : null}
-        </button>
-      </div>
+      {/* Переключатель показываем только с модулем «Отложенные товары»: без него вкладка
+          товаров недоступна, остаётся один раздел штрихкодов — переключать нечего */}
+      {otlozhTovaryOn && (
+        <div className="chips" style={{ marginBottom: 12 }}>
+          <button className={'chip ' + (vid === 'codes' ? 'active' : '')} data-testid="def-tab-codes" onClick={() => setVid('codes')}>
+            <LuClock size={13} style={{ verticalAlign: '-2px' }} /> {t('Отложенные штрихкоды')}
+          </button>
+          <button className={'chip ' + (vid === 'tovary' ? 'active' : '')} data-testid="def-tab-tovary" onClick={() => setVid('tovary')}>
+            <LuBookmark size={13} style={{ verticalAlign: '-2px' }} /> {t('Отложенные товары')}{otlozh.length ? <span className="prh-badge" style={{ marginLeft: 6 }}>{otlozh.length}</span> : null}
+          </button>
+        </div>
+      )}
 
       {vid === 'tovary' ? (
         <OtlozhennyeTovary list={otlozh} onVernut={vernutTovar} onUbrat={ubratTovar} t={t} />

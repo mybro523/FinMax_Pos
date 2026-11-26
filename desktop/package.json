@@ -1,7 +1,7 @@
 {
   "name": "finmax-pos-desktop",
   "productName": "FinMax POS",
-  "version": "1.8.19",
+  "version": "1.8.20",
   "description": "FinMax POS — касса и склад торговли. Программа для Windows",
   "private": true,
   "author": "FinMax",
