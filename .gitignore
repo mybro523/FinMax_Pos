@@ -12,3 +12,6 @@ client/pokaz*.mjs
 /*.png
 client/*.mjs
 !client/playwright.config.mjs
+
+.vercel
+.env*

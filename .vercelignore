@@ -1,0 +1,9 @@
+# Vercel разворачивает только сайт из client/ (у проекта fin-max-pos Root Directory = client).
+# Остальное монорепо для сборки сайта не нужно. Главное — не заливать гигантские
+# установщики desktop/release* (≈15 ГБ): `vercel --prod` из корня гита грузит весь
+# репозиторий и не читает вложенные .gitignore (только этот файл и корневой .gitignore).
+desktop
+server
+e2e
+deploy
+*.stackdump

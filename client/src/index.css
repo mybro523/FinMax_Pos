@@ -954,8 +954,11 @@ input::placeholder { color: var(--muted-2); }
   @supports (max-height: 92dvh) { .modal { max-height: calc(var(--vh, 1dvh) * 92); } }
   .modal .row { flex-direction: column; gap: 0; }
   .toolbar .search { max-width: 100%; }
-  .chips { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; }
-  .chip { flex-shrink: 0; }
+  /* Ряды кнопок (.chips) на телефоне переносятся в несколько рядов, а не листаются вбок:
+     правила ниже, в блоке «@media screen and (max-width: 600px)». Прежнее nowrap-правило
+     убрано (1.8.19): оно всё равно перебивалось переносом, но при сбое порядка правил
+     (устаревший билд, иной порядок) «выстреливало» наложением чипсов друг на друга.
+     Теперь запасной вариант — базовый .chips { flex-wrap: wrap } (перенос), а не nowrap. */
   /* На телефоне четыре кнопки оплаты в ряд не помещаются — две на две */
   .pay-methods { grid-template-columns: repeat(2, 1fr); }
 }
@@ -2949,8 +2952,10 @@ tr.inv-last > td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
   .table-cards-wrap .table-cards tbody tr:has(td.empty) { background: none; border: none; }
 
   /* ── Ряды кнопок и вкладки — в несколько рядов, вбок не листаются ── */
-  .chips { flex-wrap: wrap; overflow-x: visible; padding-bottom: 0; }
-  .chip { flex-shrink: 1; min-height: 38px; }
+  /* max-width: 100% — страховка: ряд и кнопка не могут стать шире родителя, даже если
+     перенос по какой-то причине не сработает, ряд не вылезет за край и не обрежется (1.8.19) */
+  .chips { flex-wrap: wrap; overflow-x: visible; padding-bottom: 0; max-width: 100%; }
+  .chip { flex-shrink: 1; min-height: 38px; max-width: 100%; }
   /* Значок в кнопке — в строку со словом (общее svg { display: block } ставило его над словом) */
   .chip > svg { display: inline-block; vertical-align: -2px; }
   /* Длинный ряд (категории) — два ряда и «Ещё»; выбранная кнопка в свёрнутом ряду — первой */
@@ -3088,6 +3093,10 @@ tr.inv-last > td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
     margin-bottom: calc(6px + 93px);
   }
   .prod-stick.is-stuck:has(> .chips-more-btn[aria-expanded='false']) > .toolbar { grid-column: 1 / -1; }
+  /* Ряд «Товары · Сырьё · Все» (модуль «Сырьё», pages/Products.jsx) — тоже во всю ширину
+     грида, своей строкой. Иначе этот 4-й ребёнок занимал бы ячейку грида, чипсы уезжали в
+     колонку «Ещё» (auto) и ряд ломался — наложение/обрезка на телефоне (1.8.19) */
+  .prod-stick.is-stuck:has(> .chips-more-btn[aria-expanded='false']) > .prod-scope { grid-column: 1 / -1; }
   .prod-stick.is-stuck:has(> .chips-more-btn[aria-expanded='false']) > .chips-more { max-height: 40px; }
   .prod-stick.is-stuck:has(> .chips-more-btn[aria-expanded='false']) > .chips-more-btn { margin-top: 0; }
   /* Выбранная категория в свёрнутом ряду — первой (index.css) и видна всегда: длинное название
