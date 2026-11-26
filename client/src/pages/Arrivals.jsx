@@ -21,7 +21,7 @@ import { skachatXlsx } from '../lib/excel'
 import { qtyText as unitsText } from '../lib/otchety'
 import { pct } from '../lib/prihod'
 import { useDolgiPostavshikam } from './SupplierDebts'
-import { usePrihod, setPrihod } from './prihod/store'
+import { usePrihod, setPrihod, blankForm } from './prihod/store'
 import SupplierColumn from './prihod/SupplierColumn'
 import { SupplierPick } from './prihod/SupplierPick'
 import NewArrival from './prihod/NewArrival'
@@ -93,14 +93,21 @@ export default function Arrivals() {
   const skladBatches = useCollectionIf('skladBatches', skladMove)
   const skladRows = useMemo(() => (skladMove ? skladPoTovaram(skladBatches, products) : []), [skladMove, skladBatches, products])
   const svoySklad = skladMove && !!st.svoySklad
-  // «Склад → Приход на склад» открывает новое поступление с «Куда: Склад» (?kuda=sklad)
+  // «Склад → Приход на склад» открывает новое поступление с «Куда: Склад» (?kuda=sklad);
+  // «Товары → Добавить товар» (1.8.17) — сразу форму нового товара (?nov=1)
   const location = useLocation()
   const navigate = useNavigate()
   useEffect(() => {
-    const kuda = new URLSearchParams(location.search).get('kuda')
-    if (kuda !== 'sklad') return
-    if (can('arrivals.create')) setPrihod({ tab: 'new', kuda: 'sklad', svoySklad: false })
-    navigate('/arrivals', { replace: true })
+    const params = new URLSearchParams(location.search)
+    if (params.get('kuda') === 'sklad') {
+      if (can('arrivals.create')) setPrihod({ tab: 'new', kuda: 'sklad', svoySklad: false })
+      navigate('/arrivals', { replace: true })
+      return
+    }
+    if (params.get('nov') === '1') {
+      if (can('products.create')) setPrihod({ tab: 'new', sub: 'add', svoySklad: false, form: { ...blankForm(), nov: true } })
+      navigate('/arrivals', { replace: true })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search])
 

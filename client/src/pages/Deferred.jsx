@@ -1,9 +1,10 @@
-import { useState } from 'react'
-import { LuClock, LuPackagePlus, LuTrash2 } from 'react-icons/lu'
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { LuClock, LuPackagePlus, LuTrash2, LuBookmark } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
-import { useCollection, db, money } from '../db/store'
+import { useCollection, db, money, realId } from '../db/store'
 import { fmtDateTime } from '../lib/time'
 import { normalizeScan } from '../lib/scan'
 import { useT, translate as tr } from '../lib/i18n'
@@ -16,18 +17,59 @@ import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
 import { getUser } from '../db/auth'
 import { useTelefon } from '../components/StickyBar'
+import { chitatOtlozh, pisatOtlozh, klyuchOtlozh, razobratOtlozh, vernutVChek } from '../lib/otlozhennye'
+import { lineUnits, lineNet, unitsText } from '../lib/units'
 
 export default function Deferred() {
   const deferred = useCollection('deferred')
+  const products = useCollection('products')
   const toast = useToast()
   const dialog = useDialog()
   const t = useT()
+  const nav = useNavigate()
   const [edit, setEdit] = useState(null) // {id, barcode} отложенного, который заводим
   // Карточку заводит владелец: он задаёт цену продажи и закупочную. Кассир
   // складывает сюда незнакомые штрихкоды с кассы и видит, что ещё не оформлено.
   const can = useCan()
   const isFounder = can('products.create')
   const pg = usePagination(deferred, 10)
+
+  // ── Переключатель: штрихкоды / товары (1.8.17) ──
+  // «Отложенные товары» (lib/otlozhennye.js) — товары, отложенные на кассе (значок/F7). Их
+  // список и возврат живут здесь, а не в кассе. Хранятся на устройстве, поэтому читаем из
+  // localStorage, а не из общего кэша сервера.
+  const phCode = getUser()?.pharmacy?.code || ''
+  const [vid, setVid] = useState('codes') // 'codes' | 'tovary'
+  const [otlozh, setOtlozh] = useState(() => chitatOtlozh(phCode))
+  // Открыли вкладку товаров — перечитываем: могли отложить на кассе в этой же вкладке
+  useEffect(() => {
+    if (vid === 'tovary') setOtlozh(chitatOtlozh(phCode))
+  }, [vid, phCode])
+  // Другая вкладка браузера отложила/вернула товар — обновляемся
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === klyuchOtlozh(phCode)) setOtlozh(razobratOtlozh(e.newValue))
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [phCode])
+
+  function ubratTovar(id) {
+    const next = otlozh.filter((x) => x.id !== id)
+    setOtlozh(next)
+    pisatOtlozh(phCode, next)
+  }
+  // Вернуть товар в активный чек кассы и перейти на кассу (сверка цены/остатка — в helper)
+  function vernutTovar(item) {
+    const r = vernutVChek(phCode, item, products, realId)
+    if (!r.ok) {
+      toast(`«${item.name}» — ${r.why === 'gone' ? t('товар удалён из базы') : t('закончился на складе')}`, 'err')
+      return
+    }
+    ubratTovar(item.id)
+    toast(`«${r.name}» ${t('возвращён в чек')}`)
+    nav('/pos')
+  }
   // Подсветка тура («Завести товар», «Удалить») на телефоне — только у первой карточки:
   // общая рамка вокруг кнопок всех карточек шла полосой через весь список
   const phone = useTelefon()
@@ -95,11 +137,24 @@ export default function Deferred() {
   return (
     <Layout
       title={t('Отложенные штрихкоды')}
-      note={`${deferred.length} ${t('ожидают оформления')}`}
-      actions={<ExportPechat onExcel={exportExcel} />}
+      note={vid === 'codes' ? `${deferred.length} ${t('ожидают оформления')}` : `${otlozh.length} ${t('отложено')}`}
+      actions={vid === 'codes' ? <ExportPechat onExcel={exportExcel} /> : null}
     >
       <PrintSheet zagolovok={t('Отложенные штрихкоды')} podzag={exPodzag} cols={exCols} rows={exRows} />
-      {deferred.length === 0 ? (
+
+      {/* Переключатель: отложенные штрихкоды (на оформление) или отложенные товары (вернуть в чек) */}
+      <div className="chips" style={{ marginBottom: 12 }}>
+        <button className={'chip ' + (vid === 'codes' ? 'active' : '')} data-testid="def-tab-codes" onClick={() => setVid('codes')}>
+          <LuClock size={13} style={{ verticalAlign: '-2px' }} /> {t('Отложенные штрихкоды')}
+        </button>
+        <button className={'chip ' + (vid === 'tovary' ? 'active' : '')} data-testid="def-tab-tovary" onClick={() => setVid('tovary')}>
+          <LuBookmark size={13} style={{ verticalAlign: '-2px' }} /> {t('Отложенные товары')}{otlozh.length ? <span className="prh-badge" style={{ marginLeft: 6 }}>{otlozh.length}</span> : null}
+        </button>
+      </div>
+
+      {vid === 'tovary' ? (
+        <OtlozhennyeTovary list={otlozh} onVernut={vernutTovar} onUbrat={ubratTovar} t={t} />
+      ) : deferred.length === 0 ? (
         <div className="panel" data-tour="def.list">
           <div className="empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
             <LuClock size={34} style={{ color: 'var(--muted-2)' }} />
@@ -140,6 +195,47 @@ export default function Deferred() {
 
       {edit && <ProductForm barcode={edit.barcode} onSave={saveProduct} onClose={() => setEdit(null)} />}
     </Layout>
+  )
+}
+
+// ── Отложенные товары (1.8.17) ──
+// Товары, отложенные на кассе (значок/F7). По каждому — «Вернуть в чек» (кладёт в активный
+// чек кассы и переходит на кассу) или «Убрать». Количество и сумма — снимок на момент, когда
+// отложили; при возврате строка сверяется с базой (vernutVChek).
+function OtlozhennyeTovary({ list, onVernut, onUbrat, t }) {
+  if (!list.length) {
+    return (
+      <div className="panel">
+        <div className="empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+          <LuBookmark size={34} style={{ color: 'var(--muted-2)' }} />
+          {t('Отложенных товаров нет. На кассе отложите товар значком-закладкой или клавишей F7 — он попадёт сюда.')}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="panel" style={{ padding: 0 }}>
+      <div className="table-cards-wrap">
+        <table className="table-cards" data-testid="def-tovary-list">
+          <thead>
+            <tr><th>{t('Товар')}</th><th className="num">{t('Количество')}</th><th className="num">{t('Сумма')}</th><th></th></tr>
+          </thead>
+          <tbody>
+            {list.map((it) => (
+              <tr key={it.id} data-testid="def-tovary-row">
+                <td className="cell-main"><b>{it.name}</b></td>
+                <td className="num" data-label={t('Количество')}>{unitsText(lineUnits(it), it, t)}</td>
+                <td className="num" data-label={t('Сумма')}><b>{money(lineNet(it))}</b></td>
+                <td className="num cell-actions" style={{ whiteSpace: 'nowrap' }}>
+                  <button className="btn sm" data-testid="def-tovary-vernut" onClick={() => onVernut(it)}>{t('Вернуть в чек')}</button>{' '}
+                  <button className="btn ghost sm icon" data-testid="def-tovary-ubrat" onClick={() => onUbrat(it.id)} title={t('Убрать')} aria-label={t('Убрать')}><LuTrash2 size={15} /></button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
 }
 

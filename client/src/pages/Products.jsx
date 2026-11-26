@@ -13,11 +13,12 @@ import { fmtDate } from '../lib/time'
 import { useT } from '../lib/i18n'
 import KameraKnopka from '../components/KameraKnopka'
 import { poiskZapros, tovarPodhodit } from '../lib/poisk'
+import { useNavigate } from 'react-router-dom'
 import { getUser, useCan } from '../db/auth'
 import { useModul } from '../lib/useModul'
 import { useCategories, categoryNames } from '../lib/categories'
 import { sellsBelowCost } from '../lib/pricing'
-import ProductForm, { emptyProduct, productPayload, vesUpText, repackNeeded } from '../components/ProductForm'
+import ProductForm, { productPayload, vesUpText, repackNeeded } from '../components/ProductForm'
 import Lightbox from '../components/Lightbox'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import { skachatXlsx } from '../lib/excel'
@@ -29,10 +30,9 @@ import { isComposite, compositeBuildable, recipeQtyText } from '../lib/recipe'
 const LabelPrint = lazy(() => import('../components/LabelPrint'))
 const CennikiModal = lazy(() => import('../components/Cenniki'))
 
-// Поля карточки живут в общем компоненте: ту же форму показывает касса, когда
-// сканер поймал незнакомый штрихкод. Раньше это были два разных куска кода, и они
-// разъехались — в «Товары» поля добавляли, в кассу забывали.
-const empty = emptyProduct
+// Поля карточки живут в общем компоненте (ProductForm): ту же форму показывает касса,
+// когда сканер поймал незнакомый штрихкод. «Добавить товар» заводит товар через приход
+// (1.8.17), а здесь форма остаётся для правки существующих товаров.
 
 const EXP_COLOR = { expired: 'var(--danger)', soon: 'var(--warn)', ok: 'var(--muted)' }
 
@@ -59,6 +59,7 @@ export default function Products() {
   // Сервер такие запросы всё равно отклонит — кнопки убраны, чтобы кассир не упирался
   // в отказ там, где кнопка выглядит рабочей.
   const can = useCan()
+  const nav = useNavigate()
   // Модуль «Срок годности» выключен у магазина — столбца «Годен до» нет ни в таблице, ни в выгрузке
   const srokOn = useModul('expiry')
   // Модуль «Сырьё и состав» (1.8.11): выключен — вкладок «Сырьё»/«Все» нет, показываем
@@ -258,7 +259,9 @@ export default function Products() {
             <span className="ic"><LuReceiptText size={16} /></span> {t('Ценники')} ({sel.size})
           </button>
         )}
-        {can('products.create') && <button className="btn" data-tour="prod.add" onClick={() => setEdit({ ...empty })}><span className="ic"><LuPlus size={16} /></span> {t('Добавить товар')}</button>}
+        {/* Добавить товар (1.8.17): ведёт в «Приход товара → Новое поступление» с формой
+            нового товара — товар заводится приходом (с количеством и полной карточкой) */}
+        {can('products.create') && <button className="btn" data-tour="prod.add" onClick={() => nav('/arrivals?nov=1')}><span className="ic"><LuPlus size={16} /></span> {t('Добавить товар')}</button>}
       </>}
     >
       <PrintSheet zagolovok={t('Товары')} podzag={exPodzag} cols={exCols} rows={exRows} />

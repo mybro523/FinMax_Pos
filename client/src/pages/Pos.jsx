@@ -17,7 +17,7 @@ import { useDesktopStatus } from '../db/desktopStatus'
 import { soloMessage } from '../lib/aktivaciya'
 import { isVesovoy, kgText, KG, gramsOfKg, edinica, isKg,
   uppOf, isDivisible as isDiv, lineUnits, lineGross, lineNet, pricePerPiece,
-  expiredUnits, hasExpired, stockUnits, unitsText,
+  expiredUnits, hasExpired, stockUnits,
   fitLine, pieceUnits, packPieces, packLabel,
 } from '../lib/units'
 
@@ -30,7 +30,8 @@ import {
   MAX_CHEKOV, klyuch, chitat, pisat, razobrat, novyChek, svobodnyNomer, posleProdazhi,
   osvezhit, sdacha, kupyury, pohozheNaKod, estBukva, raspredelit,
 } from '../lib/cheki'
-import { MAX_OTLOZH, klyuchOtlozh, chitatOtlozh, pisatOtlozh, razobratOtlozh, otlozhitItem } from '../lib/otlozhennye'
+import { MAX_OTLOZH, chitatOtlozh, pisatOtlozh, otlozhitItem } from '../lib/otlozhennye'
+import { useModul } from '../lib/useModul'
 import { findByBarcode, checkout, returnGoods, openShift as openShiftOp } from '../db/ops'
 import { cancelQueued } from '../lib/offlineSales'
 import { otmenaVozvrat } from '../lib/otmena'
@@ -191,26 +192,12 @@ export default function Pos() {
     return () => window.removeEventListener('storage', onStorage)
   }, [phCode])
 
-  // ── Отложенные товары (1.8.15) ──
-  // Отдельный от открытых чеков список: отложенный ТОВАР не продаётся и не списывается,
-  // пока его не вернут. Хранится на устройстве так же, как чеки (lib/otlozhennye.js):
-  // помним, чьего магазина список, чтобы при смене магазина не записать чужой под новый ключ
-  const [otlozh, setOtlozh] = useState(() => ({ code: phCode, list: chitatOtlozh(phCode) }))
-  const [otlozhOpen, setOtlozhOpen] = useState(false)
-  useEffect(() => {
-    pisatOtlozh(otlozh.code, otlozh.list)
-  }, [otlozh])
-  useEffect(() => {
-    if (otlozh.code !== phCode) setOtlozh({ code: phCode, list: chitatOtlozh(phCode) })
-  }, [phCode, otlozh.code])
-  useEffect(() => {
-    const onStorage = (e) => {
-      if (e.key !== klyuchOtlozh(phCode) || !e.newValue) return
-      setOtlozh({ code: phCode, list: razobratOtlozh(e.newValue) })
-    }
-    window.addEventListener('storage', onStorage)
-    return () => window.removeEventListener('storage', onStorage)
-  }, [phCode])
+  // ── Отложенные товары (1.8.15; перенос 1.8.17) ──
+  // Отложенный ТОВАР уходит из корзины в отдельный список на устройстве (lib/otlozhennye.js)
+  // и не продаётся, пока его не вернут. Сам список показывается и возвращается в разделе
+  // «Отложенные штрихкоды», поэтому откладывать (значок/F7) даём только там, где этот раздел
+  // есть: модуль включён и есть право его смотреть — иначе товар некуда будет вернуть.
+  const otlozhOn = useModul('deferred') && can('deferred.view')
 
   const chek = cheki.list.find((c) => c.id === cheki.active) || cheki.list[0]
   const { cart, payment, customerId, received, payVia } = chek
@@ -1000,54 +987,26 @@ export default function Pos() {
   const podpisKolva = (i) => (packLabel(i) === 'уп' ? t('Упаковок') : `${t('Кол-во')}, ${t(packLabel(i))}`)
   const remove = (id) => setCart((c) => c.filter((i) => i.productId !== id))
 
-  // ── Отложить товар (1.8.15) ──
-  // Строка уходит из корзины в список «Отложенные товары»: не продаётся и не списывается,
-  // пока её не вернут. Список — на этом устройстве, переживает чек, смену и перезагрузку.
+  // ── Отложить товар (1.8.15; перенос 1.8.17) ──
+  // Строка уходит из корзины в список «Отложенные товары» на устройстве (lib/otlozhennye.js):
+  // не продаётся и не списывается, пока её не вернут. Сам список и возврат — в разделе
+  // «Отложенные штрихкоды». Пишем прямо в хранилище: держать список в состоянии кассы теперь
+  // незачем, касса его не показывает.
   function otlozhitTovar(line) {
-    if (!line) return
-    if (otlozh.list.length >= MAX_OTLOZH) {
+    if (!line || !otlozhOn) return
+    const list = chitatOtlozh(phCode)
+    if (list.length >= MAX_OTLOZH) {
       toast(`${t('Отложено товаров')}: ${MAX_OTLOZH}. ${t('Верните или уберите из списка')}`, 'err')
       return
     }
-    setOtlozh((s) => ({ ...s, list: [otlozhitItem(line), ...s.list] }))
+    pisatOtlozh(phCode, [otlozhitItem(line), ...list])
     remove(line.productId)
     beepOk()
     toast(`«${line.name}» ${t('отложен')}`)
     vernutKursor()
   }
-  const otlozhitSel = () => sel && otlozhitTovar(sel)
-  const ubratOtlozh = (id) => setOtlozh((s) => ({ ...s, list: s.list.filter((x) => x.id !== id) }))
+  const otlozhitSel = () => otlozhOn && sel && otlozhitTovar(sel)
 
-  // Вернуть отложенный товар в текущий чек. Сверяем с базой (цена/остаток могли
-  // измениться, товар — исчезнуть или кончиться). Уже есть в чеке — складываем количество,
-  // но не больше, чем на складе.
-  function vernutTovar(item) {
-    const r = osvezhit([item], products, realId)
-    const fresh = r.cart[0]
-    if (!fresh) {
-      const why = r.notes[0]?.kind
-      toast(`«${item.name}» — ${why === 'gone' ? t('товар удалён из базы') : t('закончился на складе')}`, 'err')
-      return // оставляем в списке: кассир сам решит, убрать его или нет
-    }
-    const line = { ...fresh } // в строку чека id/время из списка отложенных не несём
-    delete line.id
-    delete line.at
-    setCart((c) => {
-      const ex = c.find((x) => x.productId === line.productId)
-      if (!ex) return [...c, line]
-      const live = products.find((p) => p.id === line.productId)
-      const upp = uppOf(ex)
-      const avail = live ? availUnits(live) : lineUnits(ex)
-      const units = lineUnits(ex) + lineUnits(line)
-      const fit = fitLine({ qty: Math.floor(units / upp), pieces: units % upp, upp, avail })
-      const merged = { ...ex, qty: fit.qty, pieces: fit.pieces }
-      return c.map((x) => (x.productId === line.productId ? { ...merged, discount: Math.min(ex.discount || 0, lineGross(merged)) } : x))
-    })
-    ubratOtlozh(item.id)
-    if (r.notes.some((n) => n.kind === 'price' || n.kind === 'stock' || n.kind === 'piece')) pokazatIzm(chek.id, r.notes)
-    beepOk()
-    toast(`«${fresh.name}» ${t('возвращён в чек')}`)
-  }
   // «Очистить корзину» — покупатель передумал. Сам чек остаётся открытым, пустым
   const ochistit = () => {
     patch({ cart: [], received: '', discValue: '' })
@@ -1739,12 +1698,6 @@ export default function Pos() {
             <button className="btn ghost sm chek-new" onClick={novyyChek} title={t('Отложить этот чек и открыть новый')}>
               <span className="ic"><LuPlus size={15} /></span> {t('Отложить чек')} <kbd className="kbd">F8</kbd>
             </button>
-            {/* Отложенные товары (1.8.15): появляется, когда хоть один товар отложен */}
-            {otlozh.list.length > 0 && (
-              <button className="btn ghost sm chek-new" data-testid="pos-otlozh-open" onClick={() => setOtlozhOpen(true)} title={t('Отложенные товары')}>
-                <span className="ic"><LuBookmark size={15} /></span> {t('Отложенные товары')} <span className="chek-count">{otlozh.list.length}</span>
-              </button>
-            )}
           </div>
 
           {izm && izm.id === chek.id && (
@@ -1907,10 +1860,14 @@ export default function Pos() {
                           <b>{money(lineNet(i))}</b>
                         </td>
                         <td className="num kt-del">
-                          {/* Отложить товар (1.8.15): уходит в список «Отложенные товары», не продаётся */}
-                          <button className="btn ghost sm icon" data-testid="pos-otlozhit" onClick={(e) => { e.stopPropagation(); otlozhitTovar(i) }} aria-label={t('Отложить товар')} title={t('Отложить товар')}>
-                            <LuBookmark size={15} />
-                          </button>
+                          {/* Отложить товар (1.8.15): уходит в список «Отложенные товары» (раздел
+                              «Отложенные штрихкоды»), не продаётся. Показываем, только если этот
+                              раздел у магазина есть — иначе товар некуда вернуть (1.8.17) */}
+                          {otlozhOn && (
+                            <button className="btn ghost sm icon" data-testid="pos-otlozhit" onClick={(e) => { e.stopPropagation(); otlozhitTovar(i) }} aria-label={t('Отложить товар')} title={t('Отложить товар')}>
+                              <LuBookmark size={15} />
+                            </button>
+                          )}
                           <button className="btn ghost sm icon" data-tour="pos.remove" onClick={() => remove(i.productId)} aria-label={t('Убрать из чека')} title={t('Убрать из чека')}>
                             <LuTrash2 size={15} />
                           </button>
@@ -1930,7 +1887,7 @@ export default function Pos() {
               <span><kbd className="kbd">F2</kbd> {t('скидка')}</span>
               <span><kbd className="kbd">F3</kbd> {t('скидка на чек')}</span>
               <span><kbd className="kbd">F4</kbd> {t('штуки')}, {t('кг')}</span>
-              <span><kbd className="kbd">F7</kbd> {t('отложить товар')}</span>
+              {otlozhOn && <span><kbd className="kbd">F7</kbd> {t('отложить товар')}</span>}
             </div>
           </div>
 
@@ -2197,14 +2154,6 @@ export default function Pos() {
         </Modal>
       )}
       {receipt && <Receipt sale={receipt} onClose={zakrytOknoCheka} onCancel={can('returns.create') ? otmenitProdazhu : null} />}
-      {otlozhOpen && (
-        <OtlozhennyeOkno
-          list={otlozh.list}
-          onVernut={vernutTovar}
-          onUbrat={ubratOtlozh}
-          onClose={() => setOtlozhOpen(false)}
-        />
-      )}
       {/* Продажа не записалась. Окно — после чека, чтобы лечь поверх него: кассир
           должен увидеть отказ, а не закрыть его вместе с чеком одним Escape.
           Закрыть окно любым способом — значит вернуть товары в корзину, как в нём
@@ -2301,47 +2250,6 @@ function SummaItogo({ text }) {
 function SummaPolosa({ text }) {
   const i = text.lastIndexOf(' ')
   return <b>{i > 0 ? <>{text.slice(0, i)} <em className="kmb-cur">{text.slice(i + 1)}</em></> : text}</b>
-}
-
-// ── Отложенные товары (1.8.15) ──
-// Список отложенных позиций: по каждой — «Вернуть в чек» или «Убрать». Количество и сумма —
-// снимок на момент, когда отложили; при возврате строка сверяется с базой (см. vernutTovar).
-function OtlozhennyeOkno({ list, onVernut, onUbrat, onClose }) {
-  const t = useT()
-  // Список опустел (всё вернули или убрали) — закрываем окно само
-  useEffect(() => {
-    if (list.length === 0) onClose()
-  }, [list.length, onClose])
-  return (
-    <Modal className="pos-otlozh" title={<><span className="ic"><LuBookmark size={18} /></span>{t('Отложенные товары')}</>} onClose={onClose}>
-      <div className="tag-cat" style={{ marginBottom: 8 }}>{t('Отложенные товары не продаются и не списываются, пока их не вернут в чек.')}</div>
-      {list.length === 0 ? (
-        <div className="empty">{t('Отложенных товаров нет')}</div>
-      ) : (
-        <div className="okno-list" style={{ maxHeight: '56vh', overflow: 'auto' }}>
-          <table className="table-cards" data-testid="pos-otlozh-list">
-            <tbody>
-              {list.map((it) => (
-                <tr key={it.id} data-testid="pos-otlozh-row">
-                  <td className="cell-main">
-                    <b>{it.name}</b>
-                    <div className="tag-cat">{unitsText(lineUnits(it), it, t)} · {money(lineNet(it))}</div>
-                  </td>
-                  <td className="num" style={{ whiteSpace: 'nowrap' }}>
-                    <button className="btn sm" data-testid="pos-otlozh-vernut" onClick={() => onVernut(it)}>{t('Вернуть в чек')}</button>
-                    <button className="btn ghost sm icon" data-testid="pos-otlozh-ubrat" onClick={() => onUbrat(it.id)} aria-label={t('Убрать')} title={t('Убрать')} style={{ marginLeft: 6 }}>
-                      <LuTrash2 size={15} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      <div className="modal-actions"><button className="btn" onClick={onClose}>{t('Закрыть')}</button></div>
-    </Modal>
-  )
 }
 
 // ── Незнакомый штрихкод у кассира ──

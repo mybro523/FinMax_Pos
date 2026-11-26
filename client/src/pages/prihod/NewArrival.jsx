@@ -8,6 +8,7 @@ import { useTelefon } from '../../components/StickyBar'
 import NumberInput from '../../components/NumberInput'
 import { productPayload, emptyProduct } from '../../components/ProductForm'
 import RecipeEditor from '../../components/RecipeEditor'
+import ProductExtras from '../../components/ProductExtras'
 import { useCashSources, sourceName } from '../../components/SupplierMoney'
 import { db, money, stockText } from '../../db/store'
 import { receiveArrival } from '../../db/ops'
@@ -348,7 +349,13 @@ export default function NewArrival({ products, suppliers, onSaved }) {
       price: String(form.price ?? ''),
       piecePrice: String(form.piece ?? ''),
       expiryDate: form.expiryDate || '',
-      minStock: '5',
+      // Мин. остаток из полной карточки (1.8.17); не задали — прежние 5 по умолчанию
+      minStock: String(form.novMinStock ?? '').trim() !== '' ? String(form.novMinStock) : '5',
+      // Полная карточка товара прямо в приходе (1.8.17): вид, дозировка, фото, аналоги
+      type: form.novType || '',
+      dosage: form.novDosage || '',
+      image: form.novImage || '',
+      analogIds: Array.isArray(form.novAnalogs) ? form.novAnalogs : [],
       // Состав: productPayload сам сделает товар составным и обнулит остаток
       recipe,
       // Сырьё — не для продажи (1.8.8): скрыт из кассы (только при включённом модуле)
@@ -794,6 +801,27 @@ export default function NewArrival({ products, suppliers, onSaved }) {
                 )}
               </div>
             </div>
+
+            {/* Полная карточка нового товара прямо в приходе (1.8.17): те же поля, что в
+                «Товарах» — вид, дозировка, мин. остаток, фото, аналоги. Хранятся в nov*-полях
+                черновика, в карточку уходят при «Завести и добавить» (productPayload) */}
+            {nov && (
+              <div className="prh-nov-extras" style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+                <ProductExtras
+                  value={{
+                    type: form.novType || '',
+                    dosage: form.novDosage || '',
+                    minStock: form.novMinStock ?? '',
+                    image: form.novImage || '',
+                    analogIds: Array.isArray(form.novAnalogs) ? form.novAnalogs : [],
+                  }}
+                  set={(k, v) => setForm({ [{ type: 'novType', dosage: 'novDosage', minStock: 'novMinStock', image: 'novImage', analogIds: 'novAnalogs' }[k]]: v })}
+                  products={products}
+                  unit={novUnit}
+                  selfId={null}
+                />
+              </div>
+            )}
 
             {/* Сырьё — не для продажи (1.8.8): новый товар создаётся с флагом; существующий
                 помечается сразу. Скрывает товар из кассы (ингредиенты состава) */}

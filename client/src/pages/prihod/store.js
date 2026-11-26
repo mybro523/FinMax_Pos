@@ -50,6 +50,13 @@ export const blankForm = () => ({
   recipe: [],
   // Новый товар — сырьё (не для продажи, скрыт из кассы). 1.8.8
   novRaw: false,
+  // Полная карточка нового товара прямо в приходе (1.8.17): те же поля, что в «Товарах» —
+  // вид (тип), дозировка, мин. остаток, фото, аналоги
+  novType: '',
+  novDosage: '',
+  novMinStock: '',
+  novImage: '',
+  novAnalogs: [],
 })
 
 const blankPay = (sourceId = '') => ({ method: '', paid: '', fromCash: false, sourceId })

@@ -8,8 +8,8 @@
 // Запуск: npm test (в папке client)
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { razobratOtlozh, otlozhitItem, chitatOtlozh, pisatOtlozh, klyuchOtlozh, MAX_OTLOZH } from '../src/lib/otlozhennye.js'
-import { osvezhit } from '../src/lib/cheki.js'
+import { razobratOtlozh, otlozhitItem, chitatOtlozh, pisatOtlozh, klyuchOtlozh, MAX_OTLOZH, vernutVChek } from '../src/lib/otlozhennye.js'
+import { osvezhit, klyuch } from '../src/lib/cheki.js'
 
 const line = (over = {}) => ({ productId: 'p1', name: 'Спирт', price: 60, cost: 40, unitsPerPack: 1, unit: 'шт', stock: 100, looseUnits: 0, qty: 4, pieces: 0, discount: 0, ...over })
 const prod = (over = {}) => ({ id: 'p1', name: 'Спирт', price: 60, cost: 40, unitsPerPack: 1, unit: 'шт', stock: 100, looseUnits: 0, ...over })
@@ -82,4 +82,40 @@ test('возврат сверяется с базой: исчез, кончил�
   const low = osvezhit([it], [prod({ stock: 2 })])
   assert.equal(low.cart[0].qty, 2)
   assert.ok(low.notes.some((n) => n.kind === 'stock'))
+})
+
+test('вернуть в чек: кладёт товар в активный чек кассы, объединяет и не возвращает исчезнувший', () => {
+  const store = {}
+  globalThis.localStorage = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = String(v) },
+    removeItem: (k) => { delete store[k] },
+  }
+  try {
+    const item = otlozhitItem(line({ qty: 4 }))
+
+    // Пустой чек на устройстве — товар ложится в активный чек
+    const ok = vernutVChek('shop1', item, [prod()])
+    assert.equal(ok.ok, true)
+    let ch = JSON.parse(store[klyuch('shop1')])
+    let active = ch.list.find((c) => c.id === ch.active)
+    assert.equal(active.cart.length, 1)
+    assert.equal(active.cart[0].productId, 'p1')
+    assert.equal(active.cart[0].qty, 4)
+    // id/время из списка отложенных в строку чека не несём
+    assert.ok(!('id' in active.cart[0]) && !('at' in active.cart[0]))
+
+    // Тот же товар уже в чеке — количество складывается (4 + 3 = 7)
+    vernutVChek('shop1', otlozhitItem(line({ qty: 3 })), [prod()])
+    ch = JSON.parse(store[klyuch('shop1')])
+    active = ch.list.find((c) => c.id === ch.active)
+    assert.equal(active.cart.length, 1, 'не вторая строка того же товара')
+    assert.equal(active.cart[0].qty, 7)
+
+    // Товар удалён из базы — не возвращается
+    const gone = vernutVChek('shop1', otlozhitItem(line({ productId: 'nope', name: 'Нет' })), [prod()])
+    assert.equal(gone.ok, false)
+  } finally {
+    delete globalThis.localStorage
+  }
 })

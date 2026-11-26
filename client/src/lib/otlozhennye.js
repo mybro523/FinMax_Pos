@@ -11,7 +11,9 @@
 // Пункт списка — снимок строки корзины (чтобы вернуть ровно то, что набрали) плюс id и
 // время. При возврате строка сверяется с базой (osvezhit в lib/cheki.js): пока товар
 // лежал, цена и остаток могли измениться.
-import { uppOf, edinica } from './units.js'
+import { uppOf, edinica, lineUnits, fitLine } from './units.js'
+import { availUnitsOf } from './recipe.js'
+import { chitat, pisat, osvezhit } from './cheki.js'
 
 export const MAX_OTLOZH = 100
 
@@ -74,4 +76,34 @@ export function pisatOtlozh(code, list) {
   } catch {
     /* приватный режим или хранилище переполнено — список остаётся в памяти страницы */
   }
+}
+
+// ── Вернуть отложенный товар в активный чек кассы (1.8.17) ──
+// Со страницы «Отложенные штрихкоды» нет доступа к состоянию кассы, поэтому кладём товар
+// прямо в хранилище открытых чеков (lib/cheki.js), в активный чек. Товар сверяется с базой
+// (osvezhit): пока лежал, цена и остаток могли измениться, а сам он — исчезнуть или кончиться.
+// Уже есть в чеке — складываем количество, но не больше остатка. Возвращает
+// { ok, name?, notes?, why? }. Из самого списка отложенных пункт убирает вызвавший.
+export function vernutVChek(code, item, products, mapId = (id) => id) {
+  const r = osvezhit([item], products || [], mapId)
+  const fresh = r.cart[0]
+  if (!fresh) return { ok: false, why: r.notes[0]?.kind || 'out' }
+  const line = { ...fresh }
+  delete line.id
+  delete line.at
+  const st = chitat(code)
+  const byId = new Map((products || []).map((p) => [p.id, p]))
+  const list = st.list.map((c) => {
+    if (c.id !== st.active) return c
+    const ex = c.cart.find((x) => x.productId === line.productId)
+    if (!ex) return { ...c, cart: [...c.cart, line] }
+    // Товар уже в активном чеке — объединяем количество с учётом остатка
+    const upp = uppOf(ex)
+    const avail = availUnitsOf(byId.get(line.productId) || {}, byId)
+    const units = lineUnits(ex) + lineUnits(line)
+    const fit = fitLine({ qty: Math.floor(units / upp), pieces: units % upp, upp, avail })
+    return { ...c, cart: c.cart.map((x) => (x.productId === line.productId ? { ...ex, qty: fit.qty, pieces: fit.pieces } : x)) }
+  })
+  pisat(code, { list, active: st.active })
+  return { ok: true, name: fresh.name, notes: r.notes }
 }
