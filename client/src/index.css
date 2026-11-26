@@ -394,12 +394,22 @@ tbody tr:hover { background: var(--hover); }
 /* Поле только для показа (диалог «Закрытие смены»: сумма по факту не меняется, 17.11.2026) */
 .modal .field input[readonly] { background: var(--track); color: var(--text); cursor: not-allowed; font-weight: 700; }
 .modal .field input[readonly]:focus { box-shadow: none; border-color: var(--border); }
-input, select {
+/* Текстовым полям — рамка и ширина во всю строку; флажки и радио из этого правила
+   исключены (1.8.16), иначе они растягивались бы в длинный прямоугольник, как галочка
+   «Без цены» в печати этикеток. Раньше это лечили у каждого флажка поштучно. */
+input:not([type="checkbox"]):not([type="radio"]), select {
   border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
   padding: 10px 12px; font-size: 14px; background: var(--input-bg); width: 100%;
   outline: none; transition: border 0.13s, box-shadow 0.13s; color: var(--text);
 }
 input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+/* Флажки и радио — компактный квадрат с акцентным цветом. :where() — нулевая
+   специфичность: свой размер флажка (.perm, .prh-check, .restore-row …) по-прежнему
+   перебивает это, поэтому существующие флажки не меняются. */
+:where(input[type="checkbox"], input[type="radio"]) {
+  width: 16px; height: 16px; flex: none; margin: 0;
+  accent-color: var(--accent); cursor: pointer;
+}
 input::placeholder { color: var(--muted-2); }
 
 /* Поле пароля с «глазком» */
