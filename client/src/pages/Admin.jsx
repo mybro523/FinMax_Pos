@@ -962,6 +962,27 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
     }
   }
 
+  // ── Сброс пароля владельца (1.8.14) ──
+  // Клиент забыл пароль, а посмотреть прежний негде. Владелец сервиса задаёт новый пароль
+  // основному владельцу магазина; старый пароль и открытые сессии после этого перестают
+  // работать. Пароль показываем как есть (его тут же пересылают клиенту).
+  async function resetOwner() {
+    const r = await dialog.prompt({
+      title: t('Сброс пароля владельца'),
+      message: `${ph.name}: ${t('старый пароль владельца перестанет работать, а открытые сессии закроются. Логин остаётся прежним.')}`,
+      fields: [{ name: 'password', label: t('Новый пароль'), type: 'text', placeholder: t('минимум 6 символов') }],
+      danger: true,
+      confirmText: t('Сбросить пароль'),
+    })
+    if (!r) return
+    const password = (r.password || '').trim()
+    if (password.length < 6) return toast(t('Пароль — минимум 6 символов'), 'err')
+    await act(async () => {
+      const res = await api.post(`/admin/pharmacies/${id}/reset-owner`, { password })
+      toast(`${t('Пароль владельца изменён')}${res?.ownerLogin ? ` · ${t('Логин')}: ${res.ownerLogin}` : ''}`)
+    })
+  }
+
   async function removeIt() {
     const r = await dialog.prompt({
       title: t('Удалить магазин?'),
@@ -1038,6 +1059,9 @@ function PharmacyCard({ id, row, beat, live, onClose, onChanged, toast, dialog, 
         </button>
         <button className="btn ghost" onClick={markCalled} disabled={busy}>
           <span className="ic"><LuPhone size={16} /></span> {t('Отметить звонок')}
+        </button>
+        <button className="btn ghost" onClick={resetOwner} disabled={busy} data-testid="card-reset-owner">
+          <span className="ic"><LuKeyRound size={16} /></span> {t('Сброс пароля владельца')}
         </button>
         <button className="btn ghost" onClick={enter} disabled={busy || ph.blocked}>
           <span className="ic"><LuLogIn size={16} /></span> {t('Войти под владельцем')}

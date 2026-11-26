@@ -1,18 +1,21 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LuWarehouse, LuPackagePlus, LuStore, LuPencil, LuBoxes, LuWallet, LuBanknote, LuSearch, LuHistory } from 'react-icons/lu'
+import { LuWarehouse, LuPackagePlus, LuStore, LuPencil, LuBoxes, LuWallet, LuBanknote, LuSearch, LuHistory, LuPlus } from 'react-icons/lu'
 import Layout from '../components/Layout'
 import Metric from '../components/Metric'
 import StickyBar from '../components/StickyBar'
-import { Modal, useToast } from '../components/ui'
+import { Modal, useToast, useDialog } from '../components/ui'
 import { Pagination, usePagination } from '../components/Pagination'
 import ExportPechat, { PrintSheet } from '../components/ExportPechat'
 import NumberInput from '../components/NumberInput'
 import { PerenosForm, QtyFields, unitsFrom, partsFrom } from '../components/SkladPerenos'
-import { useCollection, useCollectionIf, money, stockText } from '../db/store'
+import ProductForm, { emptyProduct, productPayload, repackNeeded } from '../components/ProductForm'
+import { useCollection, useCollectionIf, money, stockText, db } from '../db/store'
 import { useCan, getUser } from '../db/auth'
 import { useModul } from '../lib/useModul'
 import { skladEdit } from '../db/ops'
+import { normalizeScan, canonBarcode } from '../lib/scan'
+import { sellsBelowCost } from '../lib/pricing'
 import { useT } from '../lib/i18n'
 import KameraKnopka from '../components/KameraKnopka'
 import { skladPoTovaram, skladItogo, skladUnitsOf } from '../lib/sklad'
@@ -115,6 +118,11 @@ export default function Sklad() {
               (m-tovary.css) «Экспорт» и «Печать» — значками в строке названия, а эти три —
               ровной сеткой: «Приход» и «Поправить» рядом, «В магазин» во всю ширину */}
           <span className="sklad-acts" style={{ display: 'contents' }}>
+            {can('products.create') && (
+              <button type="button" className="btn ghost" data-testid="sklad-add-tovar" onClick={() => setOkno({ kind: 'add' })}>
+                <span className="ic"><LuPlus size={16} /></span> {t('Добавить товар')}
+              </button>
+            )}
             {can('arrivals.create') && (
               <button type="button" className="btn ghost" data-tour="sklad.prihod" data-testid="sklad-prihod" onClick={() => nav('/arrivals?kuda=sklad')}>
                 <span className="ic"><LuPackagePlus size={16} /></span> {t('Приход на склад')}
@@ -242,12 +250,70 @@ export default function Sklad() {
           <PerenosForm rows={rows} compact onDone={() => setOkno(null)} onCancel={() => setOkno(null)} />
         </Modal>
       )}
+      {okno?.kind === 'add' && <DobavitTovarOkno products={products} onClose={() => setOkno(null)} />}
       {okno?.kind === 'edit' && (
         <EditOkno products={products} batches={batches} productId={okno.productId} onClose={() => setOkno(null)} />
       )}
       {okno?.kind === 'card' && <CardOkno what={okno.what} rows={rows} itogo={itogo} onClose={() => setOkno(null)} />}
       {okno?.kind === 'doc' && <DocOkno doc={okno.doc} title={KIND[okno.doc.kind]} productById={productById} onClose={() => setOkno(null)} />}
     </Layout>
+  )
+}
+
+// ── Добавить товар на склад (1.8.14) ──
+// Та же форма товара, что в «Товарах», но заведённое количество ложится НА СКЛАД, а не
+// в магазин: карточка создаётся с нулём в магазине, затем остаток переносится на склад
+// (skladEdit). Дальше нужное переносят в магазин кнопкой «В магазин».
+function DobavitTovarOkno({ products, onClose }) {
+  const t = useT()
+  const toast = useToast()
+  const dialog = useDialog()
+  const [form, setForm] = useState(() => ({ ...emptyProduct }))
+  const [busy, setBusy] = useState(false)
+
+  async function save() {
+    const f = form
+    if (!f.name || !f.barcode) return toast(t('Укажите название и штрихкод'), 'err')
+    if (repackNeeded(f)) return toast(t('Укажите, за что были прежние цены: за прежнюю упаковку или уже за новую'), 'err')
+    const data = productPayload(f, { normalizeBarcode: normalizeScan })
+    const dup = products.find((p) => canonBarcode(p.barcode) === canonBarcode(data.barcode))
+    if (dup) return toast(t('Такой штрихкод уже есть') + ': ' + dup.name, 'err')
+    if (sellsBelowCost(data.cost, data.price)) {
+      const ok = await dialog.confirm({
+        title: t('Цена продажи ниже закупочной'),
+        message: `${t('Закупили по')} ${money(data.cost)}, ${t('продаёте по')} ${money(data.price)}. ${t('Каждая продажа принесёт убыток. Сохранить всё равно?')}`,
+        danger: true,
+        confirmText: t('Сохранить'),
+      })
+      if (!ok) return
+    }
+    // Количество со склада: упаковки × штук в упаковке + вскрытые штуки
+    const wareUnits = (Number(data.stock) || 0) * Math.max(1, Number(data.unitsPerPack) || 1) + (Number(data.looseUnits) || 0)
+    setBusy(true)
+    try {
+      // Карточку заводим с нулём в магазине — товар живёт на складе
+      const created = await db.push('products', { ...data, stock: 0, looseUnits: 0 })
+      if (wareUnits > 0) {
+        await skladEdit({ productId: created.id, units: wareUnits, cost: data.cost, expiryDate: f.expiryDate || undefined })
+      }
+      toast(wareUnits > 0 ? `«${created.name}» ${t('заведён и добавлен на склад')}` : `«${created.name}» ${t('заведён')}`)
+      onClose()
+    } catch (e) {
+      toast(t(e?.message || 'Не получилось. Повторите.'), 'err')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title={<><span className="ic"><LuPlus size={18} /></span>{t('Новый товар на склад')}</>} onClose={onClose}>
+      <ProductForm value={form} onChange={setForm} stockLabel="На складе" />
+      <div className="tag-cat" style={{ margin: '8px 0 2px' }}>{t('Количество попадёт на склад. В магазин перенесёте кнопкой «В магазин».')}</div>
+      <div className="modal-actions">
+        <button className="btn ghost" onClick={onClose} disabled={busy}>{t('Отмена')}</button>
+        <button className="btn" data-testid="sklad-add-save" disabled={busy} onClick={save}>{busy ? t('Сохранение…') : t('Завести товар')}</button>
+      </div>
+    </Modal>
   )
 }
 

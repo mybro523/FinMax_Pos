@@ -35,6 +35,11 @@ export class ImportProductsDto {
   @IsArray() @ArrayMaxSize(50000) products: any[]
 }
 
+// Сброс пароля владельца магазина из панели (1.8.14): владелец сервиса задаёт новый пароль
+export class ResetOwnerDto {
+  @IsString() @MinLength(6) password: string
+}
+
 export class ExtendPharmacyDto {
   // Больше пяти лет вперёд — это уже опечатка, а не оплата
   @IsOptional() @IsInt() @Min(1) @Max(60) months?: number

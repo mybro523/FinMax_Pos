@@ -13,6 +13,7 @@ import { addMonths, extendFrom, offlineDaysOf } from './subscription'
 import { TX } from '../common/tx'
 import { PrismaService } from '../prisma/prisma.service'
 import { AuthService } from '../auth/auth.service'
+import { passwordProblem } from '../auth/password'
 import { EventsGateway } from '../events/events.gateway'
 import { AccountCache } from './account-cache.service'
 import { SubscriptionWatchService } from './subscription-watch.service'
@@ -444,6 +445,32 @@ export class PharmaciesService {
     await this.log_(byAccountId, ph, 'impersonate', `вход под владельцем «${owner.login}» на ${hours} ч.`)
     this.log.warn(`Вход под владельцем магазина «${ph.code}»: ${by?.login || 'неизвестно кто'}`)
     return { token, pharmacy: { code: ph.code, name: ph.name }, owner: owner.login, until: new Date(Date.now() + hours * 3600_000).toISOString() }
+  }
+
+  // ── Сброс пароля владельца (1.8.14) ──
+  // Владелец сервиса задаёт новый пароль основному (первому) владельцу магазина: клиент
+  // забыл пароль, а посмотреть прежний негде — в базе только отпечаток. Старый пароль и
+  // открытые сессии владельца после этого гаснут (passwordChangedAt + обрыв соединений).
+  async resetOwnerPassword(id: string, password: string, byAccountId?: string) {
+    const problem = passwordProblem(password)
+    if (problem) throw new BadRequestException(problem)
+    const ph = await this.admin.pharmacy.findUnique({ where: { id } })
+    if (!ph) throw new NotFoundException('Магазин не найден')
+    const owner = await this.admin.account.findFirst({
+      where: { pharmacyId: id, role: 'founder', active: true },
+      orderBy: { createdAt: 'asc' },
+    })
+    if (!owner) throw new BadRequestException('У магазина нет действующего владельца')
+    await this.admin.account.update({
+      where: { id: owner.id },
+      data: { passwordHash: await AuthService.hashPassword(password), passwordChangedAt: new Date() },
+    })
+    // Старые токены и открытые соединения владельца больше не действуют
+    this.events.dropUser(owner.id, 'пароль сброшен из панели')
+    this.accounts.drop(owner.id)
+    await this.log_(byAccountId, ph, 'reset-password', `сброшен пароль владельца «${owner.login}»`)
+    this.log.warn(`Пароль владельца магазина «${ph.code}» сброшен из панели (учётка «${owner.login}»)`)
+    return { ownerLogin: owner.login }
   }
 
   // Журнал действий по всему сервису — что и с каким магазином делали

@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestj
 import { PharmaciesService } from './pharmacies.service'
 import { SummaryService } from './summary.service'
 import { CurrentUser, Roles, ServiceWide } from '../auth/decorators'
-import { CreatePharmacyDto, ExtendPharmacyDto, ImportProductsDto, UpdatePharmacyDto } from './dto'
+import { CreatePharmacyDto, ExtendPharmacyDto, ImportProductsDto, ResetOwnerDto, UpdatePharmacyDto } from './dto'
 
 // ── Панель управления ──
 // Разделы владельца сервиса: список магазинов-клиентов и заведение новых. Продление,
@@ -75,6 +75,12 @@ export class AdminController {
   @Post(':id/enter')
   enter(@Param('id') id: string, @CurrentUser() u: any) {
     return this.pharmacies.enter(id, u?.sub)
+  }
+
+  // Сброс пароля владельца магазина (1.8.14): задаём новый пароль основному владельцу
+  @Post(':id/reset-owner')
+  resetOwner(@Param('id') id: string, @Body() dto: ResetOwnerDto, @CurrentUser() u: any) {
+    return this.pharmacies.resetOwnerPassword(id, dto.password, u?.sub)
   }
 
   @Get(':id/payments')

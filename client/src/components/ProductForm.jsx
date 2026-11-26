@@ -138,7 +138,9 @@ export function productPayload(f, { normalizeBarcode = (v) => v } = {}) {
 
 // arrival — форма открыта из прихода: «Остаток» здесь становится количеством в строке
 // прихода (товар считается один раз), а «Вскрыто (штук)» не спрашивается
-export default function ProductForm({ value, onChange, autoFocus = 'barcode', arrival = false }) {
+// stockLabel — подпись поля остатка: со «Склада» это «На складе» (1.8.14), чтобы было
+// видно, что число ложится на склад, а не в магазин
+export default function ProductForm({ value, onChange, autoFocus = 'barcode', arrival = false, stockLabel = 'Остаток' }) {
   // Модуль «Срок годности» выключен у магазина — поля срока в карточке нет
   const srokOn = useModul('expiry')
   // Модуль «Сырьё и состав» (1.8.11) выключен — нет ни редактора состава, ни галочки «Сырьё»
@@ -396,7 +398,7 @@ export default function ProductForm({ value, onChange, autoFocus = 'barcode', ar
         {/* В приходе «Остаток» — это сколько пришло: число уходит в строку прихода, а
             товар заводится с нулём, иначе он посчитался бы дважды */}
         <div className="field" style={{ flex: 1 }} data-tour="pf.stock">
-          <label>{t('Остаток')} ({t(u)})</label>
+          <label>{t(stockLabel)} ({t(u)})</label>
           <NumberInput integer={!drob} value={value.stock} onChange={(e) => set('stock', e.target.value)} placeholder={drob ? '12.5' : ''} />
           {/* Подсказка под полем, а не в подписи: поля «Остаток» и «Мин. остаток» на одной линии */}
           {arrival ? <span className="pf-hint">{t('встанет в строку прихода')}</span> : ostatokUp && <span className="pf-hint">{ostatokUp}</span>}
