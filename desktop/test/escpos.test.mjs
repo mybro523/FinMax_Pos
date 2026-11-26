@@ -92,6 +92,8 @@ test('команды принтера: сброс, без китайского �
   assert.deepEqual([...escpos({ codepage: 'koi8' }).init().bytes()], [0x1b, 0x40, 0x1c, 0x2e, 0x1b, 0x74, 17])
   assert.deepEqual([...escpos().align('center').bytes()], [0x1b, 0x61, 1])
   assert.deepEqual([...escpos().bold(true).bold(false).bytes()], [0x1b, 0x45, 1, 0x1b, 0x45, 0])
+  // Двойной прострел (ESC G) — темнее и чётче
+  assert.deepEqual([...escpos().doubleStrike(true).doubleStrike(false).bytes()], [0x1b, 0x47, 1, 0x1b, 0x47, 0])
   // Крупно — вдвое выше И вдвое шире (GS ! 0x11): одна двойная высота (0x01) вытягивала буквы
   assert.deepEqual([...escpos().big(true).bytes()], [0x1d, 0x21, 0x11])
   assert.deepEqual([...escpos().big(false).bytes()], [0x1d, 0x21, 0x00])
@@ -120,6 +122,8 @@ test('чек на ленте 58 мм: всё на своих местах и н�
   const bytes = renderTicket(TICKET, { width: 32, codepage: 'cp866' })
   // Начинается со сброса, выключения китайского режима и выбора таблицы, заканчивается подачей и отрезом
   assert.deepEqual([...bytes.subarray(0, 7)], [0x1b, 0x40, 0x1c, 0x2e, 0x1b, 0x74, 17])
+  // Сразу после сброса — двойной прострел (ESC G 1): весь чек печатается темнее и чётче
+  assert.deepEqual([...bytes.subarray(7, 10)], [0x1b, 0x47, 1])
   assert.deepEqual([...bytes.subarray(-7)], [0x1b, 0x64, 3, 0x1d, 0x56, 0x42, 0x00])
   const lines = text866(bytes).split('\n')
   assert.ok(lines.every((l) => l.length <= 32), 'строка вылезла за ленту: ' + lines.find((l) => l.length > 32))
@@ -229,8 +233,8 @@ test('чек из мусора не роняет печать: лишнее от
   assert.equal(huge.head.length, 400)
   assert.equal(huge.head[0].length, 200)
   assert.deepEqual(huge.rows, [{ name: '', sub: '', value: '' }, { name: '', sub: '', value: '' }, { name: '12', sub: '', value: '' }])
-  // Пустой чек — всё равно корректное задание: сброс, подача, отрез
-  assert.deepEqual([...renderTicket(null)], [0x1b, 0x40, 0x1c, 0x2e, 0x1b, 0x74, 17, 0x1b, 0x61, 0, 0x1b, 0x64, 3, 0x1d, 0x56, 0x42, 0x00])
+  // Пустой чек — всё равно корректное задание: сброс, двойной прострел, подача, отрез
+  assert.deepEqual([...renderTicket(null)], [0x1b, 0x40, 0x1c, 0x2e, 0x1b, 0x74, 17, 0x1b, 0x47, 1, 0x1b, 0x61, 0, 0x1b, 0x64, 3, 0x1d, 0x56, 0x42, 0x00])
 })
 test('внизу чека — название магазина жирным; эмблемы программы на ленте нет', () => {
   const lines = layoutTicket(TICKET, { width: 32 })
