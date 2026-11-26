@@ -102,8 +102,9 @@ export function stickerFrom({ name = '', price = '', code = '' }, size, dpi = 20
 }
 
 // Наклейка товара: название с дозировкой, штрихкод и цена. Цена 0 — не печатается
-export function stickerOf(product, size, dpi = 203, shift = {}) {
-  const price = Number(product?.price) > 0 ? money(product.price) : ''
+export function stickerOf(product, size, dpi = 203, shift = {}, noPrice = false) {
+  // «Без цены» (1.8.15): цену не подставляем — место на наклейке отдаётся штрихкоду
+  const price = !noPrice && Number(product?.price) > 0 ? money(product.price) : ''
   return stickerFrom({ name: nakleykaName(product), price, code: product?.barcode }, size, dpi, shift)
 }
 

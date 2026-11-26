@@ -32,6 +32,24 @@ function savedVid() {
   }
 }
 
+// «Без цены» (1.8.15): печатать наклейку/лист A4 без цены. Запоминается на компьютере,
+// как размер и поворот — магазин, который так печатает, выбирает это один раз
+const NOPRICE_KEY = 'apteka_etiketki_bez_ceny'
+function savedNoPrice() {
+  try {
+    return localStorage.getItem(NOPRICE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+function saveNoPrice(v) {
+  try {
+    localStorage.setItem(NOPRICE_KEY, v ? '1' : '0')
+  } catch {
+    /* не запомнилось — не страшно */
+  }
+}
+
 // Этикетка листа A4: 42 мм шириной, полоски — под обычный принтер (600 точек на дюйм)
 function a4Label(product) {
   const model = barcodeModel(product.barcode)
@@ -73,6 +91,12 @@ export default function LabelPrint({ product, onClose }) {
   const [rotSite, setRotSite] = useState(savedRot)
   const [copies, setCopies] = useState('1')
   const [a4count, setA4count] = useState('12')
+  // «Без цены» (1.8.15): наклейка и лист A4 печатаются без цены (запоминается)
+  const [noPrice, setNoPrice] = useState(savedNoPrice)
+  const chooseNoPrice = (v) => {
+    setNoPrice(v)
+    saveNoPrice(v)
+  }
   // Ценник как в 1С (1.7.8): размер и сколько
   const [razmerCn, setRazmerCn] = useRazmerCennika()
   const [cnCount, setCnCount] = useState('1')
@@ -99,7 +123,7 @@ export default function LabelPrint({ product, onClose }) {
   // Ценник на принтере этикеток (1.7.12) — тот же размер, поворот и сдвиг, что у наклеек
   const nkCn = { ready, cfg, printer, size: useSize, rot, dx: printer ? cfg.dx : 0, dy: printer ? cfg.dy : 0 }
   const cnNk = formatOf(razmerCn).kuda === 'nk'
-  const data = useMemo(() => stickerOf(product, useSize, dpi, shift), [product, useSize.w, useSize.h, dpi, shift.dx, shift.dy, shift.rot]) // eslint-disable-line react-hooks/exhaustive-deps
+  const data = useMemo(() => stickerOf(product, useSize, dpi, shift, noPrice), [product, useSize.w, useSize.h, dpi, shift.dx, shift.dy, shift.rot, noPrice]) // eslint-disable-line react-hooks/exhaustive-deps
   const n = copiesOf(copies)
   // Сотня наклеек в печатном слое перерисовывается не на каждую набранную цифру
   const nLater = useDeferredValue(n)
@@ -166,7 +190,7 @@ export default function LabelPrint({ product, onClose }) {
       <div className="label-name">{product.name}</div>
       {product.dosage ? <div className="label-dose">{product.dosage}</div> : null}
       <div className="label-bc" dangerouslySetInnerHTML={{ __html: a4svg }} />
-      <div className="label-price">{money(product.price)}</div>
+      {!noPrice && <div className="label-price">{money(product.price)}</div>}
     </div>
   )
   const sheet = <div className="label-sheet a4">{Array.from({ length: a4n }, (_, i) => label(i))}</div>
@@ -228,6 +252,11 @@ export default function LabelPrint({ product, onClose }) {
               <label htmlFor="lp-copies">{t('Сколько наклеек')}</label>
               <NumberInput id="lp-copies" integer value={copies} onChange={(e) => setCopies(e.target.value)} data-testid="lp-copies" />
             </div>
+            {/* Без цены (1.8.15): печатать наклейку без цены — место отдаётся штрихкоду */}
+            <label className="lp-noprice" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <input type="checkbox" checked={noPrice} onChange={(e) => chooseNoPrice(e.target.checked)} data-testid="lp-noprice" />
+              <span>{t('Без цены')}</span>
+            </label>
           </div>
           {!problem && <NakleykaPreview data={data} />}
         </div>
@@ -237,6 +266,11 @@ export default function LabelPrint({ product, onClose }) {
             <label>{t('Сколько этикеток')}</label>
             <NumberInput integer value={a4count} onChange={(e) => setA4count(e.target.value)} />
           </div>
+          {/* Без цены (1.8.15): та же галочка, что у наклеек — общий выбор */}
+          <label className="lp-noprice" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 12 }}>
+            <input type="checkbox" checked={noPrice} onChange={(e) => chooseNoPrice(e.target.checked)} data-testid="lp-noprice-a4" />
+            <span>{t('Без цены')}</span>
+          </label>
           <div className="note info" style={{ marginBottom: 12 }}>{t('Печать на обычном принтере: лист с этикетками, разрежьте по рамкам.')}</div>
           {!problem && <A4Obrazec count={a4n} label={label} />}
         </>
