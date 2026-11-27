@@ -1727,6 +1727,11 @@ input.pn-count { width: 84px; text-align: right; }
   .pd-sticker { page: sticker; }
   /* Чек на листе — узкой колонкой по центру, как бумажный, без тени и рамки экрана */
   .pd-ticket .ticket { max-width: 80mm; border: none; border-radius: 0; box-shadow: none; padding: 0; }
+  /* Принтер (особенно термо) серый печатает бледно: на бумаге второстепенный серый чека
+     (количество×цена, шапка, подвал, адрес сайта) делаем тёмным — чек выходит чётким
+     целиком. На экране серый остаётся, это оформление предпросмотра (1.8.24) */
+  .pd-ticket .ticket { --tk-muted: var(--tk-text); }
+  .pd-ticket .ticket .tk-site { color: var(--tk-text); }
   .print-doc .label-sheet { padding: 0; border-radius: 0; }
   /* Наклейки: каждая — своя страница размера наклейки, после последней пустой нет */
   .pd-sticker > .nk { break-after: page; page-break-after: always; }
