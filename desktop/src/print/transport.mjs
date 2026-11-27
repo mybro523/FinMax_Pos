@@ -153,11 +153,17 @@ export async function sendWindows({ run, fs, tmpFile, printer, bytes }) {
 // ── Настройки печати этого компьютера ──
 // mode: system — обычное окно печати Windows (как на сайте); network — чековый
 // принтер по сети; windows — чековый принтер, заведённый в Windows.
-export const PRINT_DEFAULTS = { mode: 'system', host: '', port: 9100, name: '', width: 32, codepage: 'cp866', cut: true, drawer: false, auto: false }
+//
+// По умолчанию (1.8.23) — чековый принтер по USB (windows) и авто-печать после продажи:
+// чек уходит ТЕКСТОМ (ESC/POS), а не картинкой окна печати, — тёмным и чётким. Принтер
+// не выбран явно — печатаем на принтер Windows «по умолчанию» (main.mjs, defaultPrinterName).
+// Кому нужен обычный принтер — переключают режим в настройках; их выбор уже сохранён и
+// этот дефолт на них не влияет.
+export const PRINT_DEFAULTS = { mode: 'windows', host: '', port: 9100, name: '', width: 32, codepage: 'cp866', cut: true, drawer: false, auto: true }
 
 export function sanitizePrint(raw) {
   const v = raw && typeof raw === 'object' ? raw : {}
-  const mode = ['system', 'network', 'windows'].includes(v.mode) ? v.mode : 'system'
+  const mode = ['system', 'network', 'windows'].includes(v.mode) ? v.mode : 'windows'
   return {
     mode,
     host: checkHost(v.host),
@@ -167,8 +173,9 @@ export function sanitizePrint(raw) {
     codepage: v.codepage === 'cp1251' ? 'cp1251' : 'cp866',
     cut: v.cut !== false,
     drawer: v.drawer === true,
-    // Печатать чек сразу после продажи, не дожидаясь нажатия «Печать»
-    auto: v.auto === true,
+    // Печатать чек сразу после продажи, не дожидаясь нажатия «Печать». По умолчанию — да;
+    // кто явно выключил (сохранено false) — остаётся выключенным
+    auto: v.auto !== false,
     // Эмблемы FinMax на чеке больше нет (с 1.5.2): прежняя отметка в файле настроек
     // просто не читается
   }

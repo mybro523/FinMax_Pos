@@ -63,8 +63,8 @@ test('настройка запоминается в файле настроек
   s.set({ labels: { printer: 'XP-365B', w: 30, h: 20, dx: 0.5 } })
   const again = createSettings({ file: 'settings.json', fs }).get()
   assert.deepEqual(again.labels, { printer: 'XP-365B', w: 30, h: 20, dpi: 203, dx: 0.5, dy: 0, flip: false, rot: 0 })
-  // Остальные настройки не тронуты
-  assert.equal(again.print.mode, 'system')
+  // Остальные настройки не тронуты (печать — по умолчанию чековая, 1.8.23)
+  assert.equal(again.print.mode, 'windows')
 })
 
 // ── Поворот на бумаге (1.7.3) ──

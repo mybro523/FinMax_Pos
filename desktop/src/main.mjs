@@ -971,11 +971,12 @@ async function start() {
       const bytes = renderTicket(ticket, { ...cfg, logo: tapeLogo(cfg.width)?.mono })
       if (cfg.mode === 'network') await sendNetwork({ net: nodeNet, host: cfg.host, port: cfg.port, bytes })
       else {
+        // Принтер не выбран — печатаем на принтер Windows «по умолчанию» (на кассе это чековый)
         await sendWindows({
           run: (script, env) => runPowerShell({ spawn, script, env }),
           fs,
           tmpFile: join(userData, `print-${process.pid}-${++printSeq}.bin`),
-          printer: cfg.name,
+          printer: cfg.name || (await defaultPrinterName()),
           bytes,
         })
       }
@@ -991,6 +992,18 @@ async function start() {
       return (await win.webContents.getPrintersAsync()).map((p) => p.name).filter(Boolean)
     } catch {
       return []
+    }
+  }
+  // Принтер Windows «по умолчанию» — когда чековый принтер не выбран явно (по умолчанию печать
+  // чековая, 1.8.23). На кассе «по умолчанию» обычно и есть чековый. Виртуальные (PDF/XPS/Факс)
+  // пропускаем: слать на них «сырой» ESC/POS бессмысленно — тогда пусто, и окно попросит выбрать.
+  const VIRTUAL_PRINTER = /pdf|xps|onenote|fax|document writer|print to/i
+  const defaultPrinterName = async () => {
+    try {
+      const def = (await win.webContents.getPrintersAsync()).find((p) => p.isDefault && p.name && !VIRTUAL_PRINTER.test(p.name))
+      return def?.name || ''
+    } catch {
+      return ''
     }
   }
   ipcMain.handle('print:config', async (event) => (trusted(event) && gateway.activeRole() ? { ...settings.get().print, printers: await printerNames() } : null))
