@@ -40,8 +40,9 @@ import {
   modulesOffOf,
   permissionsOf,
 } from './local/accounts.mjs'
-import { cleanModulesOff } from './local/moduli.mjs'
+import { cleanModulesOff, moduleOn } from './local/moduli.mjs'
 import { matchFallback, matchLocal, pendingInPeriod } from './local/api.mjs'
+import { fiscalCloseShift, fiscalOpenShift, fiscalSell } from './local/fiskal/sell.mjs'
 import { confirmLicence, hasLicence, licenceOf, licenceTerms, sealStatus, sealTerms, touchLicence } from './local/licence.mjs'
 import { ApiError, getMeta, inTx, newId, openDb, q, setMeta } from './local/db.mjs'
 import { getDoc, putDoc } from './local/docs.mjs'
@@ -256,6 +257,10 @@ function findForRejected(db, kind, id) {
 // только то, что безвредно в имени файла
 const fileSafe = (code) => String(code).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80) || 'apteka'
 
+// Какие запросы проводятся через фискальный принтер (local/fiskal/sell.mjs), если включён
+// модуль магазина и настроено устройство этой кассы. Остальное — как обычно.
+const FISCAL_ROUTES = { '/sales': fiscalSell, '/shifts/open': fiscalOpenShift, '/shifts/close': fiscalCloseShift }
+
 export function createGateway({
   apiUrl,
   // Основной или запасной адрес сервера (apibase.mjs, с 1.6.5). Нет — запросы идут на apiUrl.
@@ -291,6 +296,9 @@ export function createGateway({
   // Кассы по сети без интернета (1.7.0): порт, на котором главный слушает поиск (udpPort) —
   // проверки запускают программы на своих портах; обычно — порт по умолчанию (lan.mjs)
   lanPorts = {},
+  // Фискальный принтер этой кассы (local/fiskal/client.mjs). Нет — продажа и смена идут
+  // как обычно, без фискализации
+  fiskal = null,
 }) {
   const deviceId = deviceIdOf(core)
   // Обмен называет серверу ключ кассы: под её номером сервер слушает только того,
@@ -3882,22 +3890,27 @@ export function createGateway({
       body = { ...rest, passwordSealed: sealed }
     }
 
+    const ctx = {
+      db: ph.db,
+      now: clock.now(),
+      // Права — из учётной записи: в документы попадают только номер и имя. Модули магазина
+      // (1.8.1) — тоже: право выключенного модуля не действует и у владельца
+      user: { ...docUser(ph, acc), permissions: permissionsOf(acc), modulesOff: modulesOffOf(acc) },
+      deviceId,
+      query: found.query,
+      params: found.params,
+      body,
+      standalone: standaloneShop,
+      // Касса магазина без интернета (1.7.0): остаток пересчётом меняют на главном
+      register: standaloneShop && isRegister(),
+    }
     let data
     try {
-      data = found.handler({
-        db: ph.db,
-        now: clock.now(),
-        // Права — из учётной записи: в документы попадают только номер и имя. Модули магазина
-        // (1.8.1) — тоже: право выключенного модуля не действует и у владельца
-        user: { ...docUser(ph, acc), permissions: permissionsOf(acc), modulesOff: modulesOffOf(acc) },
-        deviceId,
-        query: found.query,
-        params: found.params,
-        body,
-        standalone: standaloneShop,
-        // Касса магазина без интернета (1.7.0): остаток пересчётом меняют на главном
-        register: standaloneShop && isRegister(),
-      })
+      // Фискальный принтер (1.8.21): продажу и смену проводим через устройство — только когда
+      // включён модуль магазина «Фискальный принтер» и настроено устройство этой кассы.
+      // Иначе (нет модуля, нет устройства, другой запрос) — обычный обработчик, как прежде.
+      const fiscal = fiskal && req.method === 'POST' && fiskal.enabled() && moduleOn(ctx.user, 'fiskal') ? FISCAL_ROUTES[route] : null
+      data = fiscal ? await fiscal(ctx, fiskal, { log }) : found.handler(ctx)
     } catch (e) {
       if (e instanceof ApiError) return refuse(e.status, e.messages || e.message)
       log.error(`локальный запрос ${req.method} ${req.path.split('?')[0]} не выполнен`, e)

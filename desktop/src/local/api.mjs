@@ -15,8 +15,8 @@
 import { hasPerm } from './accounts.mjs'
 import { cleanModulesOff } from './moduli.mjs'
 import { categoriesList, productTypesList, customersList, deferredList, productByBarcode, productsList, productView1 } from './catalog.mjs'
-import { bad, forbidden, notFound, q } from './db.mjs'
-import { listDocs, listShifts, liveDoc, myOpenShift, WINDOW_DAYS } from './docs.mjs'
+import { forbidden, notFound, q } from './db.mjs'
+import { listDocs, listShifts, liveDoc, WINDOW_DAYS } from './docs.mjs'
 import { createArrival } from './ops/arrival.mjs'
 import { createCustomer, payDebt } from './ops/customer.mjs'
 import { addDeferred, removeDeferred } from './ops/deferred.mjs'
@@ -27,7 +27,7 @@ import { createCashMove } from './ops/cash.mjs'
 import { suppliersDebts, payServicesList, suppliersList } from './suppliers.mjs'
 import { createReturn } from './ops/return.mjs'
 import { createSupplierReturn } from './ops/supplierreturn.mjs'
-import { checkout, NO_SHIFT_SALE } from './ops/sale.mjs'
+import { assertSaleAllowed, checkout } from './ops/sale.mjs'
 import { closeShift, openShift, shiftView } from './ops/shift.mjs'
 import { createWriteOff } from './ops/writeoff.mjs'
 import { createProduct, deleteProduct, updateProduct } from './ops/products.mjs'
@@ -117,13 +117,11 @@ const modul = (keys, handler) => (ctx) => {
   return handler(ctx)
 }
 // Скидка, продажа в долг и приход в долг — отдельные права.
-// Без открытой смены на этой кассе продажа не проводится: чек обязан войти в её отчёт
+// Без открытой смены на этой кассе продажа не проводится: чек обязан войти в её отчёт.
+// Те же проверки — у фискальной продажи (local/fiskal/sell.mjs), поэтому вынесены в общий
+// assertSaleAllowed
 const canSell = (ctx) => {
-  if (!myOpenShift(ctx.db, ctx.deviceId)) throw bad(NO_SHIFT_SALE)
-  if (ctx.body?.payment === 'debt' && !hasPerm(ctx.user, 'pos.debt')) throw forbidden('Нет права продавать в долг')
-  if ((Array.isArray(ctx.body?.items) ? ctx.body.items : []).some((i) => Number(i?.discount) > 0) && !hasPerm(ctx.user, 'pos.discount')) {
-    throw forbidden('Нет права давать скидку')
-  }
+  assertSaleAllowed(ctx)
   return checkout(ctx, ctx.body)
 }
 // Правка и удаление документа: на кассе он есть — правим здесь; давний (журналы кассы

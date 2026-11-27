@@ -42,7 +42,7 @@ test('порядок модулей закреплён: номер — бит в
   assert.deepEqual(M.MODULE_KEYS, [
     'dashboard', 'debts', 'discounts', 'deferred', 'salesReport', 'sklad', 'returns', 'writeoffs',
     'expiry', 'inventory', 'orders', 'supplierReport', 'incomes', 'expenses', 'opu', 'obuchenie', 'raw',
-    'otlozhTovary',
+    'otlozhTovary', 'fiskal',
   ])
   assert.ok(M.MODULES.length <= 24, 'в коде под маску 24 бита')
 })

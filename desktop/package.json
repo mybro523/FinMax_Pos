@@ -1,7 +1,7 @@
 {
   "name": "finmax-pos-desktop",
   "productName": "FinMax POS",
-  "version": "1.8.20",
+  "version": "1.8.21",
   "description": "FinMax POS — касса и склад торговли. Программа для Windows",
   "private": true,
   "author": "FinMax",
@@ -19,6 +19,7 @@
     "test:app": "playwright test",
     "test:parity": "node --test test-live/parity.live.mjs",
     "test:sync": "node --test test-live/sync.live.mjs",
+    "fiskal:emu": "node scripts/fiskal-emulator.mjs",
     "electron:publish": "node scripts/build.mjs --publish",
     "test:update": "node scripts/check-update.mjs",
     "test:release": "node scripts/check-release.mjs"

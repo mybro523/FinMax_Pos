@@ -126,6 +126,13 @@ contextBridge.exposeInMainWorld('apteka', {
     page: (req) => ipcRenderer.invoke('print:page', req),
     pdf: (req) => ipcRenderer.invoke('print:pdf', req),
   },
+  // Фискальный принтер Fiscat (1.8.21): настройки устройства этого компьютера и проверка связи.
+  // Сама фискализация продажи и смены идёт в основной части программы, окну её видеть не нужно
+  fiskal: {
+    config: () => ipcRenderer.invoke('fiskal:config'),
+    setConfig: (cfg) => ipcRenderer.invoke('fiskal:setConfig', cfg),
+    test: () => ipcRenderer.invoke('fiskal:test'),
+  },
   // Принтер этикеток: настройка этого компьютера (принтер, размер наклейки, сдвиг) и печать
   // наклеек из печатного слоя окна страницами размера наклейки — сразу, без экрана печати
   labels: {

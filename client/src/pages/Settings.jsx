@@ -19,6 +19,7 @@ import { useT, useLang, setLang, LANGS } from '../lib/i18n'
 import { useTheme, setTheme } from '../lib/theme'
 import DevicesPanel from '../components/DevicesPanel'
 import PrintPanel from '../components/PrintPanel'
+import FiskalPanel from '../components/FiskalPanel'
 import LabelPrinterPanel from '../components/LabelPrinterPanel'
 import CustomerScreenPanel from '../components/CustomerScreenPanel'
 import PokupatelPanel from '../components/PokupatelPanel'
@@ -112,6 +113,8 @@ export default function Settings() {
   const [pw, setPw] = useState({ oldPassword: '', newPassword: '', confirm: '' })
   const [saving, setSaving] = useState(false)
   const can = useCan()
+  // Фискальный принтер (1.8.21) — свой модуль: панель настроек видна, только когда он включён
+  const fiskalOn = useModul('fiskal')
 
   // ── Резервная копия ──
   // Файл со всеми данными магазина скачивается на компьютер владельца. Дата последней
@@ -382,6 +385,8 @@ export default function Settings() {
               )}
               {/* Чековый принтер настраивается на каждом компьютере отдельно — только в программе */}
               {isDesktop && <PrintPanel />}
+              {/* Фискальный принтер Fiscat (1.8.21) — у каждой кассы своё устройство; только когда модуль включён */}
+              {isDesktop && fiskalOn && <FiskalPanel />}
               {/* Принтер этикеток — тоже у каждого компьютера свой */}
               {isDesktop && <LabelPrinterPanel />}
               {/* Экран покупателя — второй экран моноблока, тоже настройка этого компьютера */}

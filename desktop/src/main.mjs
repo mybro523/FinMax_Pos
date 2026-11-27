@@ -47,6 +47,8 @@ import { labelPage, labelPrintOptions, labelSize, rotationOf } from './print/lab
 import { createTabloWriter, PORTS_SCRIPT, portsFrom, sanitizeTablo, tabloBytesIn } from './tablo.mjs'
 import { runPowerShell } from './print/powershell.mjs'
 import { checkHost, sendNetwork, sendWindows } from './print/transport.mjs'
+import { createFiskal } from './local/fiskal/client.mjs'
+import { fiscalHuman } from './local/fiskal/messages.mjs'
 import { isAppUrl, registerAppProtocol, registerScheme, SCREEN_URL, START_URL } from './protocol.mjs'
 import { createRealtime } from './realtime.mjs'
 import { createSessionStore } from './session.mjs'
@@ -293,6 +295,11 @@ async function start() {
   // На старом движке (Windows 7 и 8) net.fetch нет — тот же запрос через net.request
   const fetchImpl = createFetch({ net, https: nodeHttps, http: nodeHttp, log })
 
+  // ── Фискальный принтер Fiscat (1.8.21) ──
+  // Устройство — в сети магазина, по http на своём порту. Ходим к нему тем же fetchImpl
+  // (checkHost пускает только приватные адреса), настройки берём из файла этого компьютера.
+  const fiskal = createFiskal({ fetchImpl, checkHost, config: () => settings.get().fiskal, log })
+
   // ── Основной или запасной адрес сервера (1.6.5) ──
   // Оба адреса спрашиваются сразу при запуске, в фоне: к входу кассира адрес уже выбран.
   // Сервер молчит по обоим — касса узнаёт об этом сразу и работает сама, без 10–15 секунд
@@ -385,6 +392,8 @@ async function start() {
     offlineOnly: OFFLINE_ONLY,
     // Касса ищет главного компьютера на этом порту (при запуске из исходников проверка задаёт свой)
     lanPorts: { udpPort: (DEV && Number(process.env.FINMAX_LAN_UDP)) || undefined },
+    // Фискальный принтер этой кассы: продажу и смену проводим через него, когда включён модуль
+    fiskal,
   })
   log.info(`касса ${gateway.deviceId}`)
   if (!licenceKey) log.warn('ключа кодов активации нет — программа без интернета не активируется')
@@ -991,6 +1000,21 @@ async function start() {
     // окно скажет человеку, что не так, а печать продолжит работать как работала
     if (cfg?.mode === 'network' && String(cfg.host ?? '').trim() && !checkHost(cfg.host)) return { refused: 'host' }
     return settings.set({ print: cfg }).print
+  })
+  // ── Фискальный принтер Fiscat (1.8.21) ──
+  // Настройки устройства — тому же, кому доступны настройки печати (он ставит и чековый, и
+  // фискальный принтер). Адрес не из сети магазина не запоминаем — окно скажет, что не так.
+  ipcMain.handle('fiskal:config', (event) => (trusted(event) && gateway.activeRole() ? settings.get().fiskal : null))
+  ipcMain.handle('fiskal:setConfig', (event, cfg) => {
+    if (!trusted(event) || !allowed('settings.print')) return null
+    if (String(cfg?.host ?? '').trim() && !checkHost(cfg.host)) return { refused: 'host' }
+    return settings.set({ fiskal: cfg }).fiskal
+  })
+  // Проверка связи из настроек: состояние устройства (без печати). Возвращает понятный текст
+  ipcMain.handle('fiskal:test', async (event) => {
+    if (!trusted(event) || !allowed('settings.print')) return null
+    const r = await fiskal.status()
+    return { ok: !!r.ok, data: r.ok ? r.data : null, message: fiscalHuman(r) }
   })
   ipcMain.handle('print:ticket', (event, ticket) => (trusted(event) && gateway.activeRole() ? printTicket(ticket) : { ok: false, mode: 'system' }))
   // Пробный чек — как настоящий: название магазина на полосе и жирным внизу
