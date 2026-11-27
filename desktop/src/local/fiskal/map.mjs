@@ -106,12 +106,12 @@ function productLine(line, cfg) {
 // попадает — он не фискализируется (решение владельца). Сумма обеих частей равна итогу.
 const CASH = new Set(['cash'])
 
-// ── Чек прихода: продажа этой кассы → тело POST /api/formReceipt ──
-// input: { totalC (дирамы, деньги по чеку), payment, lines: [{ name, qty, pieces, sumC }] }.
-// sumC — чистая сумма строки в дирамах (брутто минус скидка). Итог берём из продажи
-// (деньги уже взяты), строки подгоняем под него. Возвращает тело запроса либо null,
-// когда фискализировать нечего (итог 0 — всё по скидке): такую продажу чеком не бьём.
-export function saleReceipt(input, cfg, { externalId, shouldPrintSlip = true } = {}) {
+// ── Чек операции: приход (продажа) или возврат прихода (возврат) → тело POST /api/formReceipt ──
+// input: { totalC (дирамы, деньги по чеку), payment (способ оплаты/возврата), lines:
+// [{ name, qty, pieces, sumC }] }. sumC — чистая сумма строки в дирамах. Итог берём из
+// операции (деньги уже взяты/отданы), суммы строк подгоняем под него. Тело приход и возврат
+// отличается только operationType. Возвращает null, когда бить нечего (итог 0 / нет строк).
+export function operationReceipt(input, cfg, { externalId, operationType = 'INCOME', shouldPrintSlip = true } = {}) {
   const totalC = int(input?.totalC)
   if (totalC <= 0) return null
   const kept = (Array.isArray(input?.lines) ? input.lines : []).filter((l) => int(l?.sumC) > 0)
@@ -123,7 +123,7 @@ export function saleReceipt(input, cfg, { externalId, shouldPrintSlip = true } =
     formCode: 'RECEIPT',
     externalId: fitExternalId(externalId),
     shouldPrintSlip,
-    operationType: 'INCOME',
+    operationType,
     taxType: cfg.taxType,
     products,
     receiptSum: totalC,
@@ -132,6 +132,17 @@ export function saleReceipt(input, cfg, { externalId, shouldPrintSlip = true } =
     taxes: { vats: [{ vatCode: cfg.vatCode, vatSum: vatInclusive(totalC, cfg.vatCode) }] },
   }
 }
+// Чек прихода (продажа) и чек возврата прихода (возврат) — одно тело, разный operationType
+export const saleReceipt = (input, cfg, opts = {}) => operationReceipt(input, cfg, { ...opts, operationType: 'INCOME' })
+export const returnReceipt = (input, cfg, opts = {}) => operationReceipt(input, cfg, { ...opts, operationType: 'REVERT_INCOME' })
+
+// ── Внесение и изъятие наличных, промежуточный отчёт ──
+// Суммы — в дирамах целыми, всегда больше нуля (проверяет вызывающий код).
+export const addCashReq = (amountC, { shouldPrintSlip = true } = {}) => ({ formCode: 'ADD_CASH', shouldPrintSlip, addAmount: int(amountC) })
+export const removeCashReq = (amountC, { shouldPrintSlip = true } = {}) => ({ formCode: 'REMOVE_CASH', shouldPrintSlip, removeAmount: int(amountC) })
+// X-отчёт: промежуточный, смену НЕ закрывает (в отличие от closeShift). printZeroData=false —
+// печатать только счётчики, по которым были операции
+export const xReportReq = ({ shouldPrintSlip = true, printZeroData = false } = {}) => ({ formCode: 'GET_X_REPORT', shouldPrintSlip, printZeroData })
 
 // ── Смена ──
 export const openShiftReq = ({ cashier, externalId, shouldPrintSlip = true } = {}) => ({

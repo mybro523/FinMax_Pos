@@ -42,7 +42,9 @@ import {
 } from './local/accounts.mjs'
 import { cleanModulesOff, moduleOn } from './local/moduli.mjs'
 import { matchFallback, matchLocal, pendingInPeriod } from './local/api.mjs'
-import { fiscalCloseShift, fiscalOpenShift, fiscalSell } from './local/fiskal/sell.mjs'
+import { fiscalCashMove, fiscalCloseShift, fiscalOpenShift, fiscalReturn, fiscalSell } from './local/fiskal/sell.mjs'
+import { xReportReq } from './local/fiskal/map.mjs'
+import { fiscalHuman } from './local/fiskal/messages.mjs'
 import { confirmLicence, hasLicence, licenceOf, licenceTerms, sealStatus, sealTerms, touchLicence } from './local/licence.mjs'
 import { ApiError, getMeta, inTx, newId, openDb, q, setMeta } from './local/db.mjs'
 import { getDoc, putDoc } from './local/docs.mjs'
@@ -259,7 +261,13 @@ const fileSafe = (code) => String(code).replace(/[^A-Za-z0-9_-]/g, '_').slice(0,
 
 // Какие запросы проводятся через фискальный принтер (local/fiskal/sell.mjs), если включён
 // модуль магазина и настроено устройство этой кассы. Остальное — как обычно.
-const FISCAL_ROUTES = { '/sales': fiscalSell, '/shifts/open': fiscalOpenShift, '/shifts/close': fiscalCloseShift }
+const FISCAL_ROUTES = {
+  '/sales': fiscalSell,
+  '/returns': fiscalReturn,
+  '/shifts/cash': fiscalCashMove,
+  '/shifts/open': fiscalOpenShift,
+  '/shifts/close': fiscalCloseShift,
+}
 
 export function createGateway({
   apiUrl,
@@ -4054,6 +4062,18 @@ export function createGateway({
   return {
     request,
     deviceId,
+    // Промежуточный отчёт (X) на фискальном устройстве: печатает текущие итоги смены, смену НЕ
+    // закрывает. Доступен, когда включён модуль «Фискальный принтер» и настроено устройство, а
+    // у вошедшего есть право видеть смену. Возвращает { ok, message } — текст переводит окно.
+    async fiskalXReport() {
+      const acc = activeAccount()
+      if (!acc || !hasPerm(acc, 'shift.view')) return { ok: false, error: 'rights' }
+      // Модули магазина у учётной записи — через modulesOffOf (как в local()); fiskal в списке
+      // выключенных → модуль выключен
+      if (!fiskal || modulesOffOf(acc).includes('fiskal')) return { ok: false, error: 'off' }
+      const r = await fiskal.send('getXReport', xReportReq())
+      return { ok: !!r.ok, message: fiscalHuman(r) }
+    },
     // Магазин без интернета: что показать до входа и что сделать (main.mjs, окно входа)
     standalone: soloApi,
 

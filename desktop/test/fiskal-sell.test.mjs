@@ -15,16 +15,18 @@ import { createGateway } from '../src/gateway.mjs'
 import { NOW, product } from '../test-support/pharmacy.mjs'
 import { API, fakeSeal, fakeServer, manualTimers, memorySession } from '../test-support/server.mjs'
 
-// Поддельный фискальный принтер: помнит, что ему посылали, и отвечает по сценарию
-function fakeFiskal({ enabled = true, receipt = null } = {}) {
+// Поддельный фискальный принтер: помнит, что ему посылали, и отвечает по сценарию.
+// receipt — отказ на formReceipt; fail — отказ на конкретный метод { endpoint: результат }.
+function fakeFiskal({ enabled = true, receipt = null, fail = {} } = {}) {
   const calls = []
+  const byEndpoint = { ...(receipt ? { formReceipt: receipt } : {}), ...fail }
   return {
     calls,
     enabled: () => enabled,
     config: () => ({ taxType: 'GENERAL', vatCode: 'STANDARD', commodity: 'GOODS' }),
     send: async (endpoint, payload) => {
       calls.push({ endpoint, payload })
-      if (endpoint === 'formReceipt' && receipt) return receipt
+      if (byEndpoint[endpoint]) return byEndpoint[endpoint]
       return { ok: true, data: { fdNumber: calls.length, fpd: 'FPD' }, fd: { fdNumber: calls.length, fpd: 'FPD' } }
     },
     status: async () => ({ ok: true, data: { shiftStatus: true } }),
@@ -180,4 +182,98 @@ test('устройство отказало (нет бумаги) → прода
   assert.equal(sale.status, 409)
   assert.match(sale.data.message, /бумага/i)
   assert.equal(await stockOf(t, 'nur'), 5)
+})
+
+// ── Фаза 2: возвраты ──
+test('возврат фискализируется как REVERT_INCOME; товар на полке, возврат записан', async (tt) => {
+  const fk = fakeFiskal()
+  const t = shop({ fiskal: fk })
+  tt.after(() => t.gw.close())
+  await ready(t)
+  assert.equal((await t.req('POST', '/shifts/open', { openingCash: 0 })).status, 201)
+  const sale = await t.req('POST', '/sales', { payment: 'cash', items: [{ productId: 'nur', qty: 1 }] })
+  assert.equal(sale.status, 201)
+  const ret = await t.req('POST', '/returns', { saleId: sale.data.id, refund: 'cash', items: [{ productId: 'nur', units: 1 }] })
+  assert.equal(ret.status, 201)
+  const rcpt = fk.calls.filter((c) => c.endpoint === 'formReceipt')
+  assert.equal(rcpt.length, 2, 'приход (продажа) и возврат прихода')
+  assert.equal(rcpt[1].payload.operationType, 'REVERT_INCOME')
+  assert.equal(rcpt[1].payload.receiptSum, 15000)
+  assert.equal(rcpt[1].payload.receiptCash, 15000)
+  assert.equal((await t.req('GET', '/returns')).data.length, 1)
+  assert.equal(await stockOf(t, 'nur'), 5) // продали 1 (5→4), вернули на полку (4→5)
+})
+
+test('нет чека — нет возврата: устройство недоступно → 409, товар и возврат не тронуты', async (tt) => {
+  const fk = fakeFiskal({ fail: { formReceipt: { ok: false, net: 'unreachable' } } })
+  const t = shop({ fiskal: fk })
+  tt.after(() => t.gw.close())
+  await ready(t)
+  assert.equal((await t.req('POST', '/shifts/open', { openingCash: 0 })).status, 201)
+  const ret = await t.req('POST', '/returns', { refund: 'cash', items: [{ productId: 'nur', units: 1 }] })
+  assert.equal(ret.status, 409)
+  assert.equal((await t.req('GET', '/returns')).data.length, 0)
+  assert.equal(await stockOf(t, 'nur'), 5) // на полку не вернулся
+})
+
+test('возврат в долг не фискализируется', async (tt) => {
+  const fk = fakeFiskal()
+  const t = shop({ fiskal: fk })
+  tt.after(() => t.gw.close())
+  await ready(t)
+  assert.equal((await t.req('POST', '/shifts/open', { openingCash: 0 })).status, 201)
+  const cust = await t.req('POST', '/customers', { name: 'Иван Клиент' })
+  const sale = await t.req('POST', '/sales', { payment: 'debt', customerId: cust.data.id, items: [{ productId: 'nur', qty: 1 }] })
+  assert.equal(sale.status, 201)
+  const before = fk.calls.filter((c) => c.endpoint === 'formReceipt').length
+  const ret = await t.req('POST', '/returns', { saleId: sale.data.id, refund: 'debt', items: [{ productId: 'nur', units: 1 }] })
+  assert.equal(ret.status, 201)
+  assert.equal(fk.calls.filter((c) => c.endpoint === 'formReceipt').length, before, 'возврат в долг чек не шлёт')
+})
+
+// ── Фаза 2: внесение/изъятие ──
+test('внесение наличных фискализируется (addCash)', async (tt) => {
+  const fk = fakeFiskal()
+  const t = shop({ fiskal: fk })
+  tt.after(() => t.gw.close())
+  await ready(t)
+  assert.equal((await t.req('POST', '/shifts/open', { openingCash: 0 })).status, 201)
+  assert.equal((await t.req('POST', '/shifts/cash', { kind: 'in', amount: 100 })).status, 201)
+  const add = fk.calls.find((c) => c.endpoint === 'addCash')
+  assert.ok(add, 'addCash послан')
+  assert.equal(add.payload.addAmount, 10000) // 100 сомони = 10000 дирамов
+  assert.equal((await t.req('GET', '/cash-moves')).data.length, 1)
+})
+
+test('изъятие при сбое устройства — блок, запись не заводится', async (tt) => {
+  const fk = fakeFiskal({ fail: { removeCash: { ok: false, code: 'BALANCE_IS_NEGATIVE' } } })
+  const t = shop({ fiskal: fk })
+  tt.after(() => t.gw.close())
+  await ready(t)
+  assert.equal((await t.req('POST', '/shifts/open', { openingCash: 0 })).status, 201)
+  const r = await t.req('POST', '/shifts/cash', { kind: 'out', amount: 50 })
+  assert.equal(r.status, 409)
+  assert.match(r.data.message, /недостаточно наличных для изъятия/i)
+  assert.equal((await t.req('GET', '/cash-moves')).data.length, 0)
+})
+
+// ── Фаза 2: X-отчёт ──
+test('X-отчёт: шлюз зовёт getXReport на устройстве', async (tt) => {
+  const fk = fakeFiskal()
+  const t = shop({ fiskal: fk })
+  tt.after(() => t.gw.close())
+  await ready(t)
+  const r = await t.gw.fiskalXReport()
+  assert.equal(r.ok, true)
+  assert.ok(fk.calls.some((c) => c.endpoint === 'getXReport'))
+})
+
+test('X-отчёт: модуль выключен → устройство не трогаем', async (tt) => {
+  const fk = fakeFiskal()
+  const t = shop({ modulesOff: ['fiskal'], fiskal: fk })
+  tt.after(() => t.gw.close())
+  await ready(t)
+  const r = await t.gw.fiskalXReport()
+  assert.equal(r.ok, false)
+  assert.equal(fk.calls.length, 0)
 })

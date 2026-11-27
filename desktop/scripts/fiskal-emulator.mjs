@@ -46,6 +46,7 @@ const fpd = () =>
 const now = () => Math.floor(Date.now() / 1000)
 const C = { g: '\x1b[32m', r: '\x1b[31m', y: '\x1b[33m', d: '\x1b[2m', b: '\x1b[1m', x: '\x1b[0m' }
 const money = (c) => (Number(c) / 100).toFixed(2)
+const int = (v) => Math.trunc(Number(v) || 0)
 
 // Ответы
 const ok = (data = {}) => ({ http: 200, body: { rc: 'SUCCESS', data } })
@@ -139,23 +140,62 @@ function formReceipt(req) {
     return err('DUPLICATED_EXTERNAL_ID')
   }
   // Показать, что прислала программа
-  console.log(`${C.b}  ▸ ЧЕК ПРИХОДА${C.x}  ${req.operationType}  СНО:${req.taxType}`)
+  const isRevert = req.operationType === 'REVERT_INCOME'
+  const cash = int(req.receiptCash)
+  console.log(`${C.b}  ▸ ${isRevert ? 'ЧЕК ВОЗВРАТА' : 'ЧЕК ПРИХОДА'}${C.x}  ${req.operationType}  СНО:${req.taxType}`)
   for (const p of req.products || []) {
     console.log(`     ${p.quantity} × ${money(p.price)} = ${money(p.sum)}  ${C.d}${p.vatCode}${C.x}  ${p.name}`)
   }
-  console.log(`     ИТОГО ${C.b}${money(req.receiptSum)}${C.x}  (нал ${money(req.receiptCash || 0)} / безнал ${money(req.receiptNonCash || 0)})  НДС ${money(req.taxes?.vats?.[0]?.vatSum || 0)}`)
+  console.log(`     ИТОГО ${C.b}${money(req.receiptSum)}${C.x}  (нал ${money(cash)} / безнал ${money(req.receiptNonCash || 0)})  НДС ${money(req.taxes?.vats?.[0]?.vatSum || 0)}`)
 
   const problem = checkReceipt(req)
   if (problem) {
     console.log(`${C.r}  ✗ ЧЕК НЕ СОШЁЛСЯ → INVALID_DOC: ${problem}${C.x}`)
     return err('INVALID_DOC', problem)
   }
+  // Возврат наличными уменьшает ящик: нечем вернуть — отказ (как настоящий прибор)
+  if (isRevert && cash > st.cashInDrawer) {
+    console.log(`${C.r}  ✗ возврат наличными ${money(cash)} > в ящике ${money(st.cashInDrawer)} → CASH_NOT_ENOUGH${C.x}`)
+    return err('CASH_NOT_ENOUGH')
+  }
   if (eid) st.seenExternalIds.add(eid)
   st.fdNumber += 1
   st.receiptNumber += 1
-  st.cashInDrawer += req.receiptCash || 0
-  console.log(`${C.g}  ✓ чек пробит${C.x}  ФД №${st.fdNumber}, чек №${st.receiptNumber} в смене`)
+  st.cashInDrawer += isRevert ? -cash : cash
+  console.log(`${C.g}  ✓ чек пробит${C.x}  ФД №${st.fdNumber}, чек №${st.receiptNumber} в смене  (в ящике ${money(st.cashInDrawer)})`)
   return ok({ fdNumber: st.fdNumber, fpd: fpd(), onlineStatus: true, shiftNumber: st.shiftNumber, receiptNumber: st.receiptNumber })
+}
+
+function addCash(req) {
+  const g = guard()
+  if (g) return g
+  const amount = int(req.addAmount)
+  if (amount <= 0) return err('VALUE_IS_NEGATIVE')
+  st.cashInDrawer += amount
+  console.log(`${C.g}  ▸ ВНЕСЕНИЕ${C.x}  +${money(amount)}  (в ящике ${money(st.cashInDrawer)})`)
+  return ok({})
+}
+
+function removeCash(req) {
+  const g = guard()
+  if (g) return g
+  const amount = int(req.removeAmount)
+  if (amount <= 0) return err('VALUE_IS_NEGATIVE')
+  if (amount > st.cashInDrawer) {
+    console.log(`${C.r}  ✗ изъятие ${money(amount)} > в ящике ${money(st.cashInDrawer)} → BALANCE_IS_NEGATIVE${C.x}`)
+    return err('BALANCE_IS_NEGATIVE')
+  }
+  st.cashInDrawer -= amount
+  console.log(`${C.y}  ▸ ИЗЪЯТИЕ${C.x}  −${money(amount)}  (в ящике ${money(st.cashInDrawer)})`)
+  return ok({})
+}
+
+function getXReport() {
+  const g = guard()
+  if (g) return g
+  if (!st.shiftOpen) return err('SHIFT_MUST_BE_OPENED')
+  console.log(`${C.b}  ▸ X-ОТЧЁТ${C.x}  смена №${st.shiftNumber}, чеков в смене ${st.receiptNumber}, в ящике ${money(st.cashInDrawer)}`)
+  return ok({ shiftNumber: st.shiftNumber, totalReceiptCount: st.receiptNumber, totalCash: st.cashInDrawer })
 }
 
 const HANDLERS = {
@@ -163,9 +203,10 @@ const HANDLERS = {
   openShift,
   closeShift,
   formReceipt,
-  // На всякий случай — методы, которых нет в v1 программы, но прибор их знает
+  addCash,
+  removeCash,
+  getXReport,
   openDrawer: () => ok({}),
-  getXReport: () => (guard() || ok({ data: {} })),
 }
 
 const server = http.createServer((request, response) => {

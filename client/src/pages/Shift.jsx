@@ -26,6 +26,8 @@ import { getRekvizity } from '../lib/rekvizity'
 import { canCloseShift, shiftOpenerName } from '../lib/shiftOwner'
 import { ChekiOkno, RasshifrovkaOkno } from '../components/Cheki'
 import { useTelefon } from '../components/StickyBar'
+import { isDesktop, bridge } from '../lib/desktop'
+import { useModul } from '../lib/useModul'
 
 // Сумма без слова валюты — числом так же, как его пишет money() («1 234,5»)
 const SUMMA_NF = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })
@@ -47,6 +49,9 @@ export default function Shift() {
 
   const user = useAuth()
   const can = useCan()
+  // Фискальный принтер (1.8.22): промежуточный отчёт (X) печатается на устройстве — только в
+  // программе и когда включён модуль. Z-отчёт — это закрытие смены (кнопка ниже)
+  const fiskalOn = useModul('fiskal')
   // Телефон (окно до 600 px): у карточки истории смен — своя кнопка «Чеки» (ниже)
   const phone = useTelefon()
   // Смены других кассиров и чужие внесения — по праву, а не по должности
@@ -174,6 +179,17 @@ export default function Shift() {
       toast(t('Операция отменена'))
     } catch (e) {
       toast(t(e.message), 'err')
+    }
+  }
+
+  // Промежуточный отчёт (X): печатается на фискальном устройстве, смену не закрывает
+  async function doXReport() {
+    try {
+      const r = await bridge.fiskal.xReport()
+      if (r?.ok) toast(t('X-отчёт отправлен на печать'))
+      else toast(t(r?.message || 'Фискальный принтер не ответил. Повторите попытку.'), 'err')
+    } catch {
+      toast(t('Не получилось. Повторите.'), 'err')
     }
   }
 
@@ -316,6 +332,9 @@ export default function Shift() {
                 <button className="btn ghost" data-tour="shift.cash-in" onClick={() => doCash('in')}><span className="ic"><LuArrowDownToLine size={16} /></span> {t('Внести')}</button>
                 <button className="btn ghost" data-tour="shift.cash-out" onClick={() => doCash('out')}><span className="ic"><LuArrowUpFromLine size={16} /></span> {t('Изъять')}</button>
               </>
+            )}
+            {isDesktop && fiskalOn && (
+              <button className="btn ghost" data-testid="shift-xreport" onClick={doXReport}><span className="ic"><LuReceipt size={16} /></span> {t('X-отчёт')}</button>
             )}
             {mayClose && (
               <button className="btn danger" data-tour="shift.close" onClick={doClose}><span className="ic"><LuClock size={16} /></span> {t('Закрыть смену')}</button>

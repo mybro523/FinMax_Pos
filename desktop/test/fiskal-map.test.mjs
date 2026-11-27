@@ -4,6 +4,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  addCashReq,
   closeShiftReq,
   fitCashier,
   fitExternalId,
@@ -11,9 +12,12 @@ import {
   openShiftReq,
   parseReply,
   reconcile,
+  removeCashReq,
+  returnReceipt,
   saleReceipt,
   statusReq,
   vatInclusive,
+  xReportReq,
 } from '../src/local/fiskal/map.mjs'
 
 const CFG = { taxType: 'GENERAL', vatCode: 'STANDARD', commodity: 'GOODS' }
@@ -144,6 +148,27 @@ test('нечего бить: итог 0 (всё по скидке) или нет
   )
   assert.equal(r.products.length, 1)
   assert.equal(r.products[0].name, 'B')
+})
+
+test('чек возврата: REVERT_INCOME, то же тело, разбивка по способу возврата', () => {
+  const r = returnReceipt({ totalC: 500, payment: 'cash', lines: [{ name: 'Хлеб', qty: 0, pieces: 5, sumC: 500 }] }, CFG, { externalId: 'ret-1' })
+  assert.equal(r.formCode, 'RECEIPT')
+  assert.equal(r.operationType, 'REVERT_INCOME')
+  assert.equal(r.receiptSum, 500)
+  assert.equal(r.receiptCash, 500)
+  // 5 штук по 100
+  assert.equal(r.products[0].quantity, 5)
+  assert.equal(r.products[0].price, 100)
+  assert.equal(r.products[0].sum, 500)
+  assert.equal(r.products.reduce((s, p) => s + p.sum, 0), r.receiptSum)
+  // Возврат картой → безнал
+  assert.equal(returnReceipt({ totalC: 500, payment: 'card', lines: [{ name: 'Х', qty: 0, pieces: 1, sumC: 500 }] }, CFG, {}).receiptNonCash, 500)
+})
+
+test('внесение/изъятие/X-отчёт: тела запросов', () => {
+  assert.deepEqual(addCashReq(10000), { formCode: 'ADD_CASH', shouldPrintSlip: true, addAmount: 10000 })
+  assert.deepEqual(removeCashReq(5000), { formCode: 'REMOVE_CASH', shouldPrintSlip: true, removeAmount: 5000 })
+  assert.deepEqual(xReportReq(), { formCode: 'GET_X_REPORT', shouldPrintSlip: true, printZeroData: false })
 })
 
 test('смена и статус: тело запросов', () => {

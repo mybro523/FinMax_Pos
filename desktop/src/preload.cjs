@@ -132,6 +132,8 @@ contextBridge.exposeInMainWorld('apteka', {
     config: () => ipcRenderer.invoke('fiskal:config'),
     setConfig: (cfg) => ipcRenderer.invoke('fiskal:setConfig', cfg),
     test: () => ipcRenderer.invoke('fiskal:test'),
+    // Промежуточный отчёт (X) — печать текущих итогов смены на устройстве
+    xReport: () => ipcRenderer.invoke('fiskal:xReport'),
   },
   // Принтер этикеток: настройка этого компьютера (принтер, размер наклейки, сдвиг) и печать
   // наклеек из печатного слоя окна страницами размера наклейки — сразу, без экрана печати

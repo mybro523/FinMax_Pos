@@ -12,9 +12,11 @@
 import { hasPerm } from '../accounts.mjs'
 import { ApiError, bad, forbidden, newId } from '../db.mjs'
 import { myOpenShift } from '../docs.mjs'
+import { commitCashMove, planCashMove } from '../ops/cash.mjs'
+import { commitReturn, planReturn } from '../ops/return.mjs'
 import { assertSaleAllowed, commitSale, planSale } from '../ops/sale.mjs'
 import { closeShift, mayCloseShift, NOT_YOUR_SHIFT, openShift } from '../ops/shift.mjs'
-import { closeShiftReq, openShiftReq, saleReceipt } from './map.mjs'
+import { addCashReq, closeShiftReq, openShiftReq, removeCashReq, returnReceipt, saleReceipt } from './map.mjs'
 import { fiscalHuman } from './messages.mjs'
 
 const RIGHTS = 'Недостаточно прав'
@@ -24,6 +26,18 @@ const fiscalError = (r) => new ApiError(409, fiscalHuman(r))
 // Повторная регистрация того же externalId — для устройства «уже пробит»: значит фискализация
 // на деле прошла (мы просто не узнали об этом в прошлый раз). Считаем успехом.
 const okOrDuplicate = (r) => r.ok || r.code === 'DUPLICATED_EXTERNAL_ID'
+
+// Операция на устройстве с авто-переоткрытием смены: если смена кассы открыта, а на устройстве
+// нет (включили фискализацию при открытой смене или прибор перезагрузили) — открываем смену
+// устройства и повторяем. Иначе касса застряла бы «нельзя» до закрытия смены.
+async function sendWithShift(ctx, fiskal, endpoint, payload) {
+  let r = await fiskal.send(endpoint, payload)
+  if (!r.ok && r.code === 'SHIFT_MUST_BE_OPENED') {
+    const opened = await fiskal.send('openShift', openShiftReq({ cashier: ctx.user.name, externalId: newId() }))
+    if (opened.ok || opened.code === 'SHIFT_MUST_BE_CLOSED') r = await fiskal.send(endpoint, payload)
+  }
+  return r
+}
 
 // ── Продажа с фискализацией ──
 export async function fiscalSell(ctx, fiskal, { log } = {}) {
@@ -39,14 +53,7 @@ export async function fiscalSell(ctx, fiskal, { log } = {}) {
   const payload = ctx.body.payment === 'debt' ? null : saleReceipt(plan.fiscal, fiskal.config(), { externalId: plan.saleId })
   if (!payload) return commitSale(ctx, plan)
 
-  let r = await fiskal.send('formReceipt', payload)
-  // Смена кассы открыта, а на устройстве — нет (фискализацию включили при уже открытой смене,
-  // или устройство перезагрузилось). Откроем смену на устройстве и повторим чек один раз —
-  // иначе касса застряла бы «нельзя продавать» до закрытия смены кассы.
-  if (!r.ok && r.code === 'SHIFT_MUST_BE_OPENED') {
-    const opened = await fiskal.send('openShift', openShiftReq({ cashier: ctx.user.name, externalId: newId() }))
-    if (opened.ok || opened.code === 'SHIFT_MUST_BE_CLOSED') r = await fiskal.send('formReceipt', payload)
-  }
+  const r = await sendWithShift(ctx, fiskal, 'formReceipt', payload)
   if (!okOrDuplicate(r)) throw fiscalError(r)
 
   // Чек пробит на устройстве — записываем продажу. Если запись сорвётся здесь (крайне редко:
@@ -56,6 +63,45 @@ export async function fiscalSell(ctx, fiskal, { log } = {}) {
     return commitSale(ctx, plan)
   } catch (e) {
     log?.error?.('продажа не записана ПОСЛЕ успешной фискализации — фискальный чек «висит», нужен чек коррекции', e)
+    throw e
+  }
+}
+
+// ── Возврат с фискализацией (чек возврата прихода, REVERT_INCOME) ──
+export async function fiscalReturn(ctx, fiskal, { log } = {}) {
+  if (!hasPerm(ctx.user, 'returns.create')) throw forbidden(RIGHTS)
+  const plan = planReturn(ctx, ctx.body)
+  if (plan.already) return plan.already
+
+  // Возврат в долг не фискализируем (уменьшает долг клиента, деньги не двигаются); нулевой — нечем
+  const payload = plan.refund === 'debt' ? null : returnReceipt(plan.fiscal, fiskal.config(), { externalId: plan.returnId })
+  if (!payload) return commitReturn(ctx, plan)
+
+  const r = await sendWithShift(ctx, fiskal, 'formReceipt', payload)
+  if (!okOrDuplicate(r)) throw fiscalError(r)
+  try {
+    return commitReturn(ctx, plan)
+  } catch (e) {
+    log?.error?.('возврат не записан ПОСЛЕ успешной фискализации — фискальный чек «висит», нужен чек коррекции', e)
+    throw e
+  }
+}
+
+// ── Внесение/изъятие наличных с фискализацией (addCash / removeCash) ──
+export async function fiscalCashMove(ctx, fiskal, { log } = {}) {
+  if (!hasPerm(ctx.user, 'shift.cash')) throw forbidden(RIGHTS)
+  const plan = planCashMove(ctx, ctx.body)
+  if (plan.already) return plan.already
+
+  const endpoint = plan.kind === 'in' ? 'addCash' : 'removeCash'
+  const payload = plan.kind === 'in' ? addCashReq(plan.amountC) : removeCashReq(plan.amountC)
+  // У внесения/изъятия нет externalId — повтор считать «уже проведённым» нельзя, поэтому ok по месту
+  const r = await sendWithShift(ctx, fiskal, endpoint, payload)
+  if (!r.ok) throw fiscalError(r)
+  try {
+    return commitCashMove(ctx, plan)
+  } catch (e) {
+    log?.error?.('движение наличных не записано ПОСЛЕ успешной фискализации на устройстве', e)
     throw e
   }
 }

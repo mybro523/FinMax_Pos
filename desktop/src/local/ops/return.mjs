@@ -4,6 +4,11 @@
 // по чеку; по каждой позиции кассир указывает, вернуть товар в продажу или сразу
 // списать. Деньги возвращаются тем же способом, каким платили: наличные и карта —
 // из кассы, долг — уменьшением долга клиента.
+//
+// Как и продажа, возврат разделён на planReturn (считает, не пишет) и commitReturn
+// (пишет уже посчитанное). Между ними фискальный модуль (local/fiskal/sell.mjs) пробивает
+// чек возврата (REVERT_INCOME) на устройстве — не прошло, возврат не записывается. Без
+// фискального модуля оба шага идут подряд, как и прежде — createReturn.
 import { customerRow, debtMove } from '../catalog.mjs'
 import { bodyOf, checker, enteredExpiry, packOk, sumOk } from '../check.mjs'
 import { bad, inTx, newId } from '../db.mjs'
@@ -15,7 +20,11 @@ import { uppOf, wholeNonNeg } from '../units.mjs'
 
 export const REJECTED_SALE = 'Этот чек сервер не принял — возврат по нему оформить нельзя. Чек есть у владельца в списке «Не принято сервером».'
 
-export function createReturn(ctx, raw) {
+// ── Шаг 1: посчитать возврат, ничего не записывая ──
+// Бросает те же отказы, что и возврат целиком. Возвращает план для записи и «фискальную»
+// выжимку (итог и строки в дирамах) для local/fiskal/map.mjs. Повтор уже записанного
+// возврата (clientId найден) — { already: тело }.
+export function planReturn(ctx, raw) {
   const { db, now } = ctx
   const dto = bodyOf(raw)
   const c = checker()
@@ -38,134 +47,140 @@ export function createReturn(ctx, raw) {
 
   if (clientId) {
     const already = docByClientId(db, 'return', clientId)
-    if (already) return already.body
+    if (already) return { already: already.body }
   }
 
+  const saleDoc = saleId ? getDoc(db, 'sale', saleId) : null
+  const sale = saleDoc?.body ?? null
+  if (saleId && !sale) throw bad('Чек не найден')
+  // Чек, который сервер отверг, там не существует: возврат по нему он отверг бы тоже
+  if (saleDoc?.sync === 'rejected') throw bad(REJECTED_SALE)
+
+  // Сколько уже возвращали по этому чеку — нельзя вернуть больше, чем покупали
+  const returnedBefore = new Map()
+  for (const r of saleId ? returnsOfSale(db, saleId) : []) {
+    for (const ri of r.items || []) {
+      if (!ri.productId) continue
+      returnedBefore.set(ri.productId, (returnedBefore.get(ri.productId) || 0) + ri.units)
+    }
+  }
+
+  const returnId = newId()
+  const opId = newId()
+  let total = D(0)
+  const returnItems = []
+  const fiscalLines = []
+  const restocks = []
+  const toWriteOff = []
+
+  for (const it of items) {
+    const product = productById(db, it.productId)
+    if (!product) throw bad('Товар не найден')
+    const units = wholeNonNeg(it.units)
+    if (units <= 0) continue
+
+    const line = sale?.items.find((si) => si.productId === it.productId)
+    if (sale && !line) throw bad(`«${product.name}» нет в этом чеке`)
+    const restock = it.restock !== false
+    // Срок годности возвращённого: вписанный кассиром, иначе самый ранний из тех, с какими
+    // товар продавался в день покупки. У одного возврата каждый товар в позициях один раз,
+    // поэтому возврат на полку одной позиции не влияет на срок другой — считать до записи можно.
+    const expiry = it.expiry ?? returnExpiry(db, product.id, sale ? sale.date : now, product.expiryDate)
+
+    if (line) {
+      const lineUpp = Math.max(1, line.unitsPerPack || 1)
+      const sold = line.qty * lineUpp + line.pieces
+      const already = returnedBefore.get(it.productId) || 0
+      if (already + units > sold) {
+        const ed = line.unit || product.unit
+        const skolko = (n) => (isDrob(ed) ? `${n / KG}` : `${n}`)
+        throw bad(`По «${product.name}» уже возвращено ${skolko(already)} из ${skolko(sold)} ${isDrob(ed) ? String(ed).trim() : 'шт'}`)
+      }
+    }
+
+    // Деньги возвращаются пропорционально тому, сколько реально заплатили за штуку
+    const upp = line ? Math.max(1, line.unitsPerPack || 1) : uppOf(product)
+    packOk(upp, product.name)
+    const price = line ? D(line.price) : fromCentsD(product.priceC)
+    const cost = line ? D(line.cost) : fromCentsD(product.costC)
+    const soldUnits = line ? line.qty * upp + line.pieces : units
+    const unit = line?.unit || product.unit
+    const gross = line ? grossOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, unit }) : price.dividedBy(upp).times(soldUnits)
+    const paid = line ? gross.minus(D(line.discount)) : gross
+    const amount = line
+      ? refundOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, unit, discount: line.discount }, units, returnedBefore.get(it.productId) || 0)
+      : (soldUnits > 0 ? paid.dividedBy(soldUnits) : D(0)).times(units)
+    total = total.plus(amount)
+
+    returnItems.push({
+      id: newId(),
+      returnId,
+      productId: product.id,
+      name: product.name,
+      units,
+      unitsPerPack: upp,
+      unit: product?.unit || '',
+      price: fromCents(toCents(price)),
+      cost: fromCents(toCents(cost)),
+      amount: fromCents(toCents(amount)),
+      restock,
+      ...(restock && it.expiry ? { expiryDate: it.expiry } : {}),
+    })
+    // Фискальная строка возврата: товар возвращается поштучно (units), сумма — чистые деньги
+    fiscalLines.push({ name: product.name, qty: 0, pieces: units, sumC: toCents(amount) })
+
+    if (restock) {
+      restocks.push({ productId: product.id, units, costC: toCents(cost), expiryDate: expiry })
+    } else {
+      toWriteOff.push({ productId: product.id, name: product.name, units, cost, expiryDate: expiry, upp })
+    }
+  }
+
+  if (!returnItems.length) throw bad('Укажите количество для возврата')
+  sumOk(total)
+  const totalC = toCents(total)
+  const refund = refundAsked || sale?.payment || 'cash'
+  const refundVia = refund === 'transfer' ? (refundViaAsked || '').trim().slice(0, 40) || sale?.payVia || null : null
+
+  return {
+    returnId,
+    opId,
+    clientId: clientId ?? null,
+    saleId: saleId ?? null,
+    note: note || '',
+    refund,
+    refundVia,
+    customerId: sale?.customerId ?? null,
+    total: fromCents(totalC),
+    returnItems,
+    restocks,
+    toWriteOff,
+    // Выжимка для фискального чека возврата (REVERT_INCOME). Долг не фискализируем.
+    fiscal: { totalC, payment: refund, lines: fiscalLines },
+  }
+}
+
+// ── Шаг 2: записать посчитанный возврат ──
+export function commitReturn(ctx, plan) {
+  const { db, now } = ctx
   return inTx(db, () => {
-    const saleDoc = saleId ? getDoc(db, 'sale', saleId) : null
-    const sale = saleDoc?.body ?? null
-    if (saleId && !sale) throw bad('Чек не найден')
-    // Чек, который сервер отверг, там не существует: возврат по нему он отверг бы тоже,
-    // а товар к тому времени уже вернулся бы на полку
-    if (saleDoc?.sync === 'rejected') throw bad(REJECTED_SALE)
-
-    // Сколько уже возвращали по этому чеку — нельзя вернуть больше, чем покупали
-    const returnedBefore = new Map()
-    for (const r of saleId ? returnsOfSale(db, saleId) : []) {
-      for (const ri of r.items || []) {
-        if (!ri.productId) continue
-        returnedBefore.set(ri.productId, (returnedBefore.get(ri.productId) || 0) + ri.units)
-      }
+    // Повтор мог записаться между планом и фиксацией (например, пока шла фискализация)
+    if (plan.clientId) {
+      const already = docByClientId(db, 'return', plan.clientId)
+      if (already) return already.body
     }
+    const { returnId, opId } = plan
+    const total = D(plan.total)
 
-    const returnId = newId()
-    const opId = newId()
-    let total = D(0)
-    const returnItems = []
-    const toWriteOff = []
-
-    for (const it of items) {
-      // Карточку читаем заново на каждой позиции: предыдущая позиция того же
-      // товара могла вернуть штуки на полку и изменить ближайший срок
-      const product = productById(db, it.productId)
-      if (!product) throw bad('Товар не найден')
-      const units = wholeNonNeg(it.units)
-      if (units <= 0) continue
-
-      const line = sale?.items.find((si) => si.productId === it.productId)
-      if (sale && !line) throw bad(`«${product.name}» нет в этом чеке`)
-      const restock = it.restock !== false
-      // Срок годности возвращённого: вписанный кассиром с упаковки, а если он его не
-      // вписал — самый ранний из тех, с какими товар продавался в день покупки
-      const expiry = it.expiry ?? returnExpiry(db, product.id, sale ? sale.date : now, product.expiryDate)
-
-      if (line) {
-        const lineUpp = Math.max(1, line.unitsPerPack || 1)
-        const sold = line.qty * lineUpp + line.pieces
-        const already = returnedBefore.get(it.productId) || 0
-        if (already + units > sold) {
-          // Дробному — в его единице, как у сервера
-          const ed = line.unit || product.unit
-          const skolko = (n) => (isDrob(ed) ? `${n / KG}` : `${n}`)
-          throw bad(`По «${product.name}» уже возвращено ${skolko(already)} из ${skolko(sold)} ${isDrob(ed) ? String(ed).trim() : 'шт'}`)
-        }
-      }
-
-      // Деньги возвращаются пропорционально тому, сколько реально заплатили за
-      // штуку (с учётом скидки на позицию) — иначе при скидке касса не сошлась бы
-      const upp = line ? Math.max(1, line.unitsPerPack || 1) : uppOf(product)
-      packOk(upp, product.name)
-      const price = line ? D(line.price) : fromCentsD(product.priceC)
-      const cost = line ? D(line.cost) : fromCentsD(product.costC)
-      const soldUnits = line ? line.qty * upp + line.pieces : units
-      // Единица строки — снимком чека; у строк прежних версий снимка нет — из карточки.
-      // Своя цена дробного товара — за килограмм (1.5.12): без единицы её не прочесть
-      const unit = line?.unit || product.unit
-      // Упаковки — по цене упаковки, штуки — по цене штуки из чека (своя, если была)
-      const gross = line ? grossOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, unit }) : price.dividedBy(upp).times(soldUnits)
-      const paid = line ? gross.minus(D(line.discount)) : gross
-      // По чеку — сначала отдельные штуки по своей цене штуки, сверх них — штуки из
-      // упаковок; без своей цены — как всегда, поровну на штуку (local/piece.mjs)
-      const amount = line
-        ? refundOf({ qty: line.qty, pieces: line.pieces, price: line.price, piecePrice: line.piecePrice, unitsPerPack: upp, unit, discount: line.discount }, units, returnedBefore.get(it.productId) || 0)
-        : (soldUnits > 0 ? paid.dividedBy(soldUnits) : D(0)).times(units)
-      total = total.plus(amount)
-
-      returnItems.push({
-        id: newId(),
-        returnId,
-        productId: product.id,
-        name: product.name,
-        units,
-        unitsPerPack: upp,
-        unit: product?.unit || '',
-        price: fromCents(toCents(price)),
-        cost: fromCents(toCents(cost)),
-        amount: fromCents(toCents(amount)),
-        restock,
-        // Вписанный срок уходит на сервер вместе с возвратом. Не вписан — поля нет, и
-        // срок сервер поставит сам: он знает больше партий, чем касса
-        ...(restock && it.expiry ? { expiryDate: it.expiry } : {}),
-      })
-
-      if (restock) {
-        // Обратно в продажу — партией со своим сроком
-        move(
-          db,
-          {
-            opId,
-            productId: product.id,
-            kind: 'return',
-            units,
-            costC: toCents(cost),
-            expiryDate: expiry,
-            arrivalId: null,
-            note: 'Возврат от покупателя',
-          },
-          { now },
-        )
-      } else {
-        toWriteOff.push({ productId: product.id, name: product.name, units, cost, expiryDate: expiry, upp })
-      }
+    // Возврат в продажу — партией со своим сроком
+    for (const r of plan.restocks) {
+      move(db, { opId, productId: r.productId, kind: 'return', units: r.units, costC: r.costC, expiryDate: r.expiryDate, arrivalId: null, note: 'Возврат от покупателя' }, { now })
     }
-
-    if (!returnItems.length) throw bad('Укажите количество для возврата')
-    sumOk(total)
-    // Сумма возврата — до дирама, как суммы чеков и долг клиента: продажа прибавила к
-    // долгу округлённую сумму (треть упаковки по 100 — 33,33), и точная 33,333… не должна
-    // оказаться «больше долга» — иначе продажу в долг нельзя вернуть целиком
-    total = fromCentsD(toCents(total))
-
-    const shift = myOpenShift(db, ctx.deviceId)
-    const refund = refundAsked || sale?.payment || 'cash'
-    // Деньги вернули переводом: сервис — названный кассиром, иначе тот, каким платили
-    const refundVia = refund === 'transfer' ? (refundViaAsked || '').trim().slice(0, 40) || sale?.payVia || null : null
 
     // Возврат «в долг» уменьшает долг клиента, а не выдаёт наличные. Списать больше
-    // текущего долга нельзя: клиент ушёл бы в минус. Так бывает, когда долг уже
-    // погасили, а товар принесли позже — тогда деньги отдают из кассы.
-    if (refund === 'debt') {
-      const customerId = sale?.customerId
+    // текущего долга нельзя. Долг читаем в транзакции — он мог измениться.
+    if (plan.refund === 'debt') {
+      const customerId = plan.customerId
       if (!customerId) throw bad('Возврат в долг возможен только по чеку, оформленному на клиента')
       const customer = customerRow(db, customerId)
       const debt = fromCentsD(customer?.debtC ?? 0)
@@ -173,21 +188,17 @@ export function createReturn(ctx, raw) {
         throw bad(`Долг клиента ${fixed2(debt)} меньше суммы возврата ${fixed2(total)} — верните деньги наличными или картой`)
       }
       if (!customer) throw bad('Долг клиента изменился, обновите данные и повторите')
-      // Новый долг = (долг − возврат), округлённый до дирама: вычитается точная
-      // сумма, а не округлённая, — так считает база сервера
       debtMove(db, { opId, customerId, deltaC: toCents(debt.minus(total)) - customer.debtC, kind: 'return' }, now)
     }
 
     const date = new Date(now).toISOString()
     const user = { id: ctx.user.id, name: ctx.user.name }
 
-    // Позиции, которые в продажу не вернулись, сразу оформляются списанием —
-    // для учёта убытка. Со склада при этом ничего не уходит: товар уже был продан
+    // Позиции, не вернувшиеся в продажу, сразу оформляются списанием — для учёта убытка
     let writeOff = null
-    if (toWriteOff.length) {
+    if (plan.toWriteOff.length) {
       const writeOffId = newId()
-      // Убыток = себестоимость штуки (цена упаковки / штук в упаковке) × число штук
-      const totalCost = toWriteOff.reduce((s, w) => s.plus(D(w.cost).dividedBy(Math.max(1, w.upp)).times(w.units)), D(0))
+      const totalCost = plan.toWriteOff.reduce((s, w) => s.plus(D(w.cost).dividedBy(Math.max(1, w.upp)).times(w.units)), D(0))
       writeOff = {
         id: writeOffId,
         date,
@@ -196,7 +207,7 @@ export function createReturn(ctx, raw) {
         note: 'Возврат покупателя без возврата в продажу',
         totalCost: fromCents(toCents(totalCost)),
         source: 'return',
-        items: toWriteOff.map((w) => ({
+        items: plan.toWriteOff.map((w) => ({
           id: newId(),
           writeOffId,
           productId: w.productId,
@@ -210,18 +221,19 @@ export function createReturn(ctx, raw) {
       putDoc(db, 'writeoff', writeOff, { sync: 'pending', deviceId: ctx.deviceId })
     }
 
+    const shift = myOpenShift(db, ctx.deviceId)
     const body = {
       id: returnId,
-      clientId: clientId ?? null,
+      clientId: plan.clientId,
       date,
-      saleId: saleId ?? null,
+      saleId: plan.saleId,
       userId: ctx.user.id,
       shiftId: shift?.id ?? null,
-      refund,
-      refundVia,
+      refund: plan.refund,
+      refundVia: plan.refundVia,
       total: fromCents(toCents(total)),
-      note: note || '',
-      items: returnItems,
+      note: plan.note,
+      items: plan.returnItems,
       user,
     }
     putDoc(db, 'return', body, { sync: 'pending', deviceId: ctx.deviceId })
@@ -234,4 +246,11 @@ export function createReturn(ctx, raw) {
     })
     return body
   })
+}
+
+// Обычный возврат (без фискализации): посчитать и сразу записать — как было до разделения.
+export function createReturn(ctx, raw) {
+  const plan = planReturn(ctx, raw)
+  if (plan.already) return plan.already
+  return commitReturn(ctx, plan)
 }

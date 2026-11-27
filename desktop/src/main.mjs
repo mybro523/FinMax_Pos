@@ -1016,6 +1016,9 @@ async function start() {
     const r = await fiskal.status()
     return { ok: !!r.ok, data: r.ok ? r.data : null, message: fiscalHuman(r) }
   })
+  // Промежуточный отчёт (X): печать текущих итогов смены на устройстве, смену не закрывает.
+  // Право (видеть смену) и состояние модуля проверяет шлюз (gateway.fiskalXReport)
+  ipcMain.handle('fiskal:xReport', (event) => (trusted(event) && gateway.activeRole() ? gateway.fiskalXReport() : null))
   ipcMain.handle('print:ticket', (event, ticket) => (trusted(event) && gateway.activeRole() ? printTicket(ticket) : { ok: false, mode: 'system' }))
   // Пробный чек — как настоящий: название магазина на полосе и жирным внизу
   ipcMain.handle('print:test', (event) => {
